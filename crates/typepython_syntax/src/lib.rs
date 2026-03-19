@@ -82,6 +82,7 @@ pub enum SyntaxStatement {
 pub struct TypeAliasStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub value: String,
     pub line: usize,
 }
 
@@ -255,6 +256,7 @@ fn parse_typealias(
     Some(SyntaxStatement::TypeAlias(TypeAliasStatement {
         name,
         type_params,
+        value: tail.trim().to_owned(),
         line: line_number,
     }))
 }
@@ -625,6 +627,7 @@ mod tests {
                         name: String::from("T"),
                         bound: None,
                     }],
+                    value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -677,6 +680,7 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Hashable")),
                     }],
+                    value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {

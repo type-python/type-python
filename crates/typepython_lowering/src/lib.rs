@@ -62,11 +62,27 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             _ => None,
         })
         .collect();
+    let type_aliases: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::TypeAlias(statement) if statement.type_params.is_empty() => {
+                Some((statement.line, statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
+    if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing import TypeAlias"));
+    }
+
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
-        if unsafe_lines.contains(&line_number) {
+        if let Some(statement) = type_aliases.get(&line_number) {
+            lowered_lines.push(rewrite_typealias_line(line, statement));
+        } else if unsafe_lines.contains(&line_number) {
             lowered_lines.push(rewrite_unsafe_line(line));
         } else {
             lowered_lines.push(line.to_owned());
@@ -86,16 +102,37 @@ fn rewrite_unsafe_line(line: &str) -> String {
     format!("{indentation}if True:")
 }
 
+fn rewrite_typealias_line(
+    line: &str,
+    statement: &typepython_syntax::TypeAliasStatement,
+) -> String {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    format!(
+        "{indentation}{}: TypeAlias = {}",
+        statement.name, statement.value
+    )
+}
+
+fn has_typealias_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import TypeAlias"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeAlias"))
+    })
+}
+
 fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
 
     for statement in &tree.statements {
         match statement {
             SyntaxStatement::Unsafe(_) => {}
+            SyntaxStatement::TypeAlias(statement) if statement.type_params.is_empty() => {}
             SyntaxStatement::TypeAlias(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
-                "typealias",
+                "generic typealias",
             )),
             SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
@@ -186,6 +223,7 @@ mod tests {
                 SyntaxStatement::TypeAlias(TypeAliasStatement {
                     name: String::from("UserId"),
                     type_params: Vec::new(),
+                    value: String::from("int"),
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -200,7 +238,54 @@ mod tests {
         let rendered = lowered.diagnostics.as_text();
         assert!(lowered.diagnostics.has_errors());
         assert!(rendered.contains("TPY2002"));
-        assert!(rendered.contains("`typealias`"));
         assert!(rendered.contains("`interface`"));
+    }
+
+    #[test]
+    fn lower_rewrites_non_generic_typealias_with_import() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("typealias.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("typealias UserId = int\n"),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("UserId"),
+                type_params: Vec::new(),
+                value: String::from("int"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(lowered.module.python_source, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
+    }
+
+    #[test]
+    fn lower_still_blocks_generic_typealias() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("generic-typealias.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("typealias Pair[T] = tuple[T, T]\n"),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("Pair"),
+                type_params: vec![typepython_syntax::TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                }],
+                value: String::from("tuple[T, T]"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let rendered = lowered.diagnostics.as_text();
+        assert!(lowered.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2002"));
+        assert!(rendered.contains("`generic typealias`"));
     }
 }
