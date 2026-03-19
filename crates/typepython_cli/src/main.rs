@@ -18,7 +18,7 @@ use typepython_config::{ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
-use typepython_incremental::snapshot;
+use typepython_incremental::{IncrementalState, snapshot};
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
 use typepython_syntax::{SourceFile, SourceKind, parse};
 
@@ -106,6 +106,7 @@ struct MigrateArgs {
 struct PipelineSnapshot {
     lowered_modules: Vec<LoweredModule>,
     emit_plan: Vec<EmitArtifact>,
+    incremental: IncrementalState,
     tracked_modules: usize,
     discovered_sources: usize,
     diagnostics: DiagnosticReport,
@@ -251,6 +252,15 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
             runtime_summary.stub_files_written,
             runtime_summary.py_typed_written
         ));
+        let snapshot_path = write_incremental_snapshot(
+            &config.resolve_relative_path(&config.config.project.cache_dir),
+            &snapshot.incremental,
+        )?;
+        notes.push(format!(
+            "cached {} module fingerprint(s) at {}",
+            snapshot.incremental.fingerprints.len(),
+            snapshot_path.display()
+        ));
     }
 
     let summary = CommandSummary {
@@ -388,6 +398,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: discovery.sources.len(),
             diagnostics: discovery.diagnostics,
@@ -408,6 +419,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
             diagnostics: parse_diagnostics,
@@ -420,6 +432,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
             diagnostics: lowering_diagnostics,
@@ -432,11 +445,13 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let checking = check(&graph);
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
+    let tracked_modules = incremental.fingerprints.len();
 
     Ok(PipelineSnapshot {
         lowered_modules,
         emit_plan,
-        tracked_modules: incremental.fingerprints.len(),
+        incremental,
+        tracked_modules,
         discovered_sources: source_paths.len(),
         diagnostics: checking.diagnostics,
     })
@@ -504,6 +519,19 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
     }
 
     diagnostics
+}
+
+fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> Result<PathBuf> {
+    fs::create_dir_all(cache_dir)
+        .with_context(|| format!("unable to create cache directory {}", cache_dir.display()))?;
+    let snapshot_path = cache_dir.join("snapshot.json");
+    let payload = serde_json::to_string_pretty(&serde_json::json!({
+        "fingerprints": snapshot.fingerprints,
+    }))
+    .context("unable to serialize incremental snapshot")?;
+    fs::write(&snapshot_path, payload)
+        .with_context(|| format!("unable to write {}", snapshot_path.display()))?;
+    Ok(snapshot_path)
 }
 
 fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {
@@ -736,7 +764,9 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_diagnostics, collect_source_paths, verify_build_artifacts};
+    use super::{
+        build_diagnostics, collect_source_paths, verify_build_artifacts, write_incremental_snapshot,
+    };
     use std::{
         env, fs,
         path::{Path, PathBuf},
@@ -745,6 +775,7 @@ mod tests {
     use typepython_config::load;
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::EmitArtifact;
+    use typepython_incremental::IncrementalState;
 
     #[test]
     fn collect_source_paths_skips_implicit_namespace_packages() {
@@ -939,6 +970,31 @@ mod tests {
 
         assert!(rendered.contains("TPY4004"));
         assert!(rendered.contains("TPY5002"));
+    }
+
+    #[test]
+    fn write_incremental_snapshot_persists_fingerprint_json() {
+        let project_dir = temp_project_dir("write_incremental_snapshot_persists_fingerprint_json");
+        let result = (|| {
+            let snapshot_path = write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState {
+                    fingerprints: std::collections::BTreeMap::from([
+                        (String::from("pkg.a"), 10),
+                        (String::from("pkg.b"), 20),
+                    ]),
+                },
+            )
+            .unwrap();
+
+            (snapshot_path, fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).unwrap())
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let (snapshot_path, rendered) = result;
+        assert!(snapshot_path.ends_with("snapshot.json"));
+        assert!(rendered.contains("pkg.a"));
+        assert!(rendered.contains("pkg.b"));
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
