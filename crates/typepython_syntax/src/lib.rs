@@ -334,6 +334,32 @@ fn refresh_custom_statements_from_ast(
             }
             SyntaxStatement::OverloadDef(existing) => {
                 if let Some(ast_statement) = ast_function_def_for_line(normalized, suite, existing.line) {
+                    if !is_stub_like_function_body(&ast_statement.body) {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                "TPY2001",
+                                format!(
+                                    "overload declaration `{}` body must not contain executable statements",
+                                    existing.name
+                                ),
+                            )
+                            .with_span(Span::new(
+                                path.display().to_string(),
+                                offset_to_line_column(
+                                    normalized,
+                                    ast_statement.range.start().to_usize(),
+                                )
+                                .0,
+                                1,
+                                offset_to_line_column(
+                                    normalized,
+                                    ast_statement.range.end().to_usize(),
+                                )
+                                .0,
+                                1,
+                            )),
+                        );
+                    }
                     if let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
@@ -358,13 +384,16 @@ fn is_valid_interface_body_statement(statement: &Stmt) -> bool {
         Stmt::Expr(expr) => {
             matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_))
         }
-        Stmt::FunctionDef(function) => function
-            .body
-            .iter()
-            .all(|body_statement| matches!(body_statement, Stmt::Pass(_))
-                || matches!(body_statement, Stmt::Expr(expr) if matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)))),
+        Stmt::FunctionDef(function) => is_stub_like_function_body(&function.body),
         _ => false,
     }
+}
+
+fn is_stub_like_function_body(body: &[Stmt]) -> bool {
+    body.iter().all(|statement| {
+        matches!(statement, Stmt::Pass(_))
+            || matches!(statement, Stmt::Expr(expr) if matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)))
+    })
 }
 
 fn ast_class_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtClassDef> {
@@ -1472,6 +1501,20 @@ mod tests {
                 line: 1,
             })]
         );
+    }
+
+    #[test]
+    fn parse_rejects_executable_overload_bodies() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("bad-overload.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("overload def parse(x: str) -> int:\n    return 1\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2001"));
+        assert!(rendered.contains("body must not contain executable statements"));
     }
 
     #[test]
