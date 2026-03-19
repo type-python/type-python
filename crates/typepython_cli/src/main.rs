@@ -448,7 +448,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
-    let bindings: Vec<_> = lowered_modules.iter().map(bind).collect();
+    let bindings: Vec<_> = syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
     let checking = check(&graph);
     let emit_plan = plan_emits(config, &lowered_modules);

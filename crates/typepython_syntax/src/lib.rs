@@ -146,20 +146,35 @@ pub fn parse(source: SourceFile) -> SyntaxTree {
 }
 
 fn parse_python_source(source: SourceFile) -> SyntaxTree {
+    let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
 
-    if let Err(error) = parse_module(&source.text) {
-        diagnostics.push(
-            Diagnostic::error("TPY2001", format!("Python syntax error: {}", error.error))
-                .with_span(parse_error_span(&source.path, &source.text, error.location.start().to_usize(), error.location.end().to_usize())),
-        );
+    match parse_module(&source.text) {
+        Ok(parsed) => {
+            statements.extend(extract_ast_backed_statements(
+                &source.path,
+                &source.text,
+                &source.text,
+                parsed.suite(),
+                &[],
+                &mut diagnostics,
+            ));
+            statements.sort_by_key(statement_line);
+        }
+        Err(error) => {
+            diagnostics.push(
+                Diagnostic::error("TPY2001", format!("Python syntax error: {}", error.error))
+                    .with_span(parse_error_span(
+                        &source.path,
+                        &source.text,
+                        error.location.start().to_usize(),
+                        error.location.end().to_usize(),
+                    )),
+            );
+        }
     }
 
-    SyntaxTree {
-        source,
-        statements: Vec::new(),
-        diagnostics,
-    }
+    SyntaxTree { source, statements, diagnostics }
 }
 
 fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
@@ -1253,7 +1268,14 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("unsafe"),
+                type_params: Vec::new(),
+                line: 1,
+            })]
+        );
     }
 
     #[test]
