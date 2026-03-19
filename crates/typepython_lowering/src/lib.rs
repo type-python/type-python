@@ -82,6 +82,16 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             _ => None,
         })
         .collect();
+    let data_classes: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::DataClass(statement) if is_lowerable_named_block(statement) => {
+                Some((statement.line, statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
@@ -90,6 +100,9 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
     if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import Protocol"));
     }
+    if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
+        lowered_lines.push(String::from("from dataclasses import dataclass"));
+    }
 
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
@@ -97,6 +110,8 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             lowered_lines.push(rewrite_typealias_line(line, statement));
         } else if let Some(statement) = interfaces.get(&line_number) {
             lowered_lines.push(rewrite_interface_line(line, statement));
+        } else if let Some(statement) = data_classes.get(&line_number) {
+            lowered_lines.extend(rewrite_data_class_lines(line, statement));
         } else if unsafe_lines.contains(&line_number) {
             lowered_lines.push(rewrite_unsafe_line(line));
         } else {
@@ -151,6 +166,24 @@ fn rewrite_interface_line(
     format!("{indentation}class {}{}:", statement.name, bases)
 }
 
+fn rewrite_data_class_lines(
+    line: &str,
+    statement: &typepython_syntax::NamedBlockStatement,
+) -> [String; 2] {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    let bases = if statement.header_suffix.is_empty() {
+        String::new()
+    } else {
+        statement.header_suffix.clone()
+    };
+
+    [
+        format!("{indentation}@dataclass"),
+        format!("{indentation}class {}{}:", statement.name, bases),
+    ]
+}
+
 fn append_protocol_base(header_suffix: &str) -> String {
     let trimmed = header_suffix.trim();
     if trimmed == "()" {
@@ -173,7 +206,19 @@ fn has_protocol_import(source: &str) -> bool {
     })
 }
 
+fn has_dataclass_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from dataclasses import dataclass"
+            || (trimmed.starts_with("from dataclasses import ") && trimmed.contains("dataclass"))
+    })
+}
+
 fn is_lowerable_interface(statement: &typepython_syntax::NamedBlockStatement) -> bool {
+    is_lowerable_named_block(statement)
+}
+
+fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) -> bool {
     statement.type_params.is_empty()
         && (statement.header_suffix.is_empty()
             || (statement.header_suffix.starts_with('(')
@@ -198,6 +243,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "interface",
             )),
+            SyntaxStatement::DataClass(statement) if is_lowerable_named_block(statement) => {}
             SyntaxStatement::DataClass(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
@@ -276,7 +322,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("unsupported.tpy"),
                 kind: SourceKind::TypePython,
-                text: String::from("interface Service[T]:\ndata class User:\n"),
+                text: String::from("interface Service[T]:\ndata class User[T]:\n"),
             },
             statements: vec![
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -290,7 +336,10 @@ mod tests {
                 }),
                 SyntaxStatement::DataClass(NamedBlockStatement {
                     name: String::from("User"),
-                    type_params: Vec::new(),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
                     header_suffix: String::new(),
                     line: 2,
                 }),
@@ -373,6 +422,55 @@ mod tests {
         assert_eq!(
             lowered.module.python_source,
             "from typing import Protocol\nclass SupportsClose(Closable, Protocol):\n    def close(self): ...\n"
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_non_generic_data_class_with_dataclass_import() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("data-class.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("data class Point:\n    x: float\n    y: float\n"),
+            },
+            statements: vec![SyntaxStatement::DataClass(NamedBlockStatement {
+                name: String::from("Point"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from dataclasses import dataclass\n@dataclass\nclass Point:\n    x: float\n    y: float\n"
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_data_class_with_existing_bases() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("data-class-bases.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("data class Point(Base):\n    x: float\n"),
+            },
+            statements: vec![SyntaxStatement::DataClass(NamedBlockStatement {
+                name: String::from("Point"),
+                type_params: Vec::new(),
+                header_suffix: String::from("(Base)"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from dataclasses import dataclass\n@dataclass\nclass Point(Base):\n    x: float\n"
         );
     }
 
