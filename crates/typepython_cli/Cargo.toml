@@ -1,0 +1,34 @@
+[package]
+name = "typepython-cli"
+description = "CLI entrypoint for the TypePython Rust workspace"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "typepython"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+typepython-binding = { path = "../typepython_binding" }
+typepython-checking = { path = "../typepython_checking" }
+typepython-config = { path = "../typepython_config" }
+typepython-diagnostics = { path = "../typepython_diagnostics" }
+typepython-emit = { path = "../typepython_emit" }
+typepython-graph = { path = "../typepython_graph" }
+typepython-incremental = { path = "../typepython_incremental" }
+typepython-lowering = { path = "../typepython_lowering" }
+typepython-lsp = { path = "../typepython_lsp" }
+typepython-syntax = { path = "../typepython_syntax" }
+
+[lints]
+workspace = true

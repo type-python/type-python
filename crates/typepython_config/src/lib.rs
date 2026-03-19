@@ -1,0 +1,582 @@
+//! Project discovery and configuration loading for TypePython.
+
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Display},
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+const NULL_SENTINEL: &str = "__TYPEPYTHON_NULL__";
+
+/// Resolved TypePython configuration source.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSource {
+    /// Loaded from `typepython.toml`.
+    TypePythonToml,
+    /// Loaded from `[tool.typepython]` in `pyproject.toml`.
+    PyProject,
+}
+
+impl Display for ConfigSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TypePythonToml => "typepython.toml",
+            Self::PyProject => "pyproject.toml:[tool.typepython]",
+        })
+    }
+}
+
+/// Loaded project configuration together with its discovery context.
+#[derive(Debug, Clone)]
+pub struct ConfigHandle {
+    /// Directory that owns the discovered config file.
+    pub config_dir: PathBuf,
+    /// Path to the discovered config file.
+    pub config_path: PathBuf,
+    /// Source kind of the discovered config.
+    pub source: ConfigSource,
+    /// Effective configuration after defaults and profile expansion.
+    pub config: Config,
+}
+
+impl ConfigHandle {
+    /// Resolves a project-relative path against the discovered config directory.
+    #[must_use]
+    pub fn resolve_relative_path(&self, relative: &str) -> PathBuf {
+        self.config_dir.join(relative)
+    }
+}
+
+/// Errors produced while discovering or loading TypePython config.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// No TypePython project could be found.
+    #[error("unable to find `typepython.toml` or `[tool.typepython]` starting from {0}")]
+    NotFound(PathBuf),
+    /// Underlying filesystem error while reading config.
+    #[error("unable to read configuration from {path}: {source}")]
+    Io {
+        /// Path that failed to load.
+        path: PathBuf,
+        /// Original IO error.
+        #[source]
+        source: io::Error,
+    },
+    /// TOML parse failure.
+    #[error("unable to parse configuration from {path}: {source}")]
+    Parse {
+        /// Path that failed to parse.
+        path: PathBuf,
+        /// Original TOML error.
+        #[source]
+        source: toml::de::Error,
+    },
+}
+
+/// Effective TypePython configuration.
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    /// Project filesystem settings.
+    pub project: ProjectConfig,
+    /// Import resolution settings.
+    pub resolution: ResolutionConfig,
+    /// Emit settings.
+    pub emit: EmitConfig,
+    /// Typing settings.
+    pub typing: TypingConfig,
+    /// Watch settings.
+    pub watch: WatchConfig,
+}
+
+/// Project-level settings.
+#[derive(Debug, Clone)]
+pub struct ProjectConfig {
+    /// Source roots.
+    pub src: Vec<String>,
+    /// Include globs.
+    pub include: Vec<String>,
+    /// Exclude globs.
+    pub exclude: Vec<String>,
+    /// Logical root for output projection.
+    pub root_dir: String,
+    /// Output directory.
+    pub out_dir: String,
+    /// Cache directory.
+    pub cache_dir: String,
+    /// Target Python version.
+    pub target_python: String,
+}
+
+impl Default for ProjectConfig {
+    fn default() -> Self {
+        Self {
+            src: vec![String::from("src")],
+            include: vec![
+                String::from("src/**/*.tpy"),
+                String::from("src/**/*.py"),
+                String::from("src/**/*.pyi"),
+            ],
+            exclude: vec![
+                String::from(".typepython/**"),
+                String::from("dist/**"),
+                String::from(".venv/**"),
+                String::from("venv/**"),
+            ],
+            root_dir: String::from("src"),
+            out_dir: String::from(".typepython/build"),
+            cache_dir: String::from(".typepython/cache"),
+            target_python: String::from("3.10"),
+        }
+    }
+}
+
+/// Import resolution settings.
+#[derive(Debug, Clone)]
+pub struct ResolutionConfig {
+    /// Base URL for non-relative resolution.
+    pub base_url: String,
+    /// Extra type roots.
+    pub type_roots: Vec<String>,
+    /// Configured Python executable.
+    pub python_executable: Option<String>,
+    /// Static alias map.
+    pub paths: BTreeMap<String, Vec<String>>,
+}
+
+impl Default for ResolutionConfig {
+    fn default() -> Self {
+        Self {
+            base_url: String::from("."),
+            type_roots: Vec::new(),
+            python_executable: None,
+            paths: BTreeMap::new(),
+        }
+    }
+}
+
+/// Emit settings.
+#[derive(Debug, Clone)]
+pub struct EmitConfig {
+    /// Emit `.pyi` files.
+    pub emit_pyi: bool,
+    /// Emit `.pyc` files.
+    pub emit_pyc: bool,
+    /// Emit `py.typed`.
+    pub write_py_typed: bool,
+    /// Preserve comments when possible.
+    pub preserve_comments: bool,
+    /// Stop emit on fatal diagnostics.
+    pub no_emit_on_error: bool,
+    /// Emit runtime validators.
+    pub runtime_validators: bool,
+}
+
+impl Default for EmitConfig {
+    fn default() -> Self {
+        Self {
+            emit_pyi: true,
+            emit_pyc: false,
+            write_py_typed: true,
+            preserve_comments: true,
+            no_emit_on_error: true,
+            runtime_validators: false,
+        }
+    }
+}
+
+/// Import typing fallback.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImportFallback {
+    /// Treat untyped imports as `unknown`.
+    Unknown,
+    /// Treat untyped imports as `dynamic`.
+    Dynamic,
+}
+
+/// Diagnostic severity policy in config.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiagnosticLevel {
+    /// Ignore the diagnostic.
+    Ignore,
+    /// Emit a warning.
+    Warning,
+    /// Emit an error.
+    Error,
+}
+
+/// Reserved typing profile names.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TypingProfile {
+    /// Library-oriented profile.
+    Library,
+    /// Application-oriented profile.
+    Application,
+    /// Migration-oriented profile.
+    Migration,
+}
+
+/// Typing settings.
+#[derive(Debug, Clone)]
+pub struct TypingConfig {
+    /// Selected profile, if any.
+    pub profile: Option<TypingProfile>,
+    /// Master strictness switch.
+    pub strict: bool,
+    /// Enforce strict nullability.
+    pub strict_nulls: bool,
+    /// Fallback behavior for untyped imports.
+    pub imports: ImportFallback,
+    /// Disallow implicit dynamic fallback.
+    pub no_implicit_dynamic: bool,
+    /// Warn on unsafe boundaries.
+    pub warn_unsafe: bool,
+    /// Enable sealed exhaustiveness.
+    pub enable_sealed_exhaustiveness: bool,
+    /// Severity for deprecated symbol reporting.
+    pub report_deprecated: DiagnosticLevel,
+    /// Require explicit override annotations.
+    pub require_explicit_overrides: bool,
+    /// Require known public surface types.
+    pub require_known_public_types: bool,
+    /// Enable pass-through inference.
+    pub infer_passthrough: bool,
+}
+
+impl Default for TypingConfig {
+    fn default() -> Self {
+        Self {
+            profile: None,
+            strict: true,
+            strict_nulls: true,
+            imports: ImportFallback::Unknown,
+            no_implicit_dynamic: true,
+            warn_unsafe: true,
+            enable_sealed_exhaustiveness: true,
+            report_deprecated: DiagnosticLevel::Warning,
+            require_explicit_overrides: false,
+            require_known_public_types: false,
+            infer_passthrough: false,
+        }
+    }
+}
+
+/// Watch settings.
+#[derive(Debug, Clone)]
+pub struct WatchConfig {
+    /// Debounce delay in milliseconds.
+    pub debounce_ms: u64,
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self { debounce_ms: 80 }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    project: Option<RawProjectConfig>,
+    resolution: Option<RawResolutionConfig>,
+    emit: Option<RawEmitConfig>,
+    typing: Option<RawTypingConfig>,
+    watch: Option<RawWatchConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProjectConfig {
+    src: Option<Vec<String>>,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    root_dir: Option<String>,
+    out_dir: Option<String>,
+    cache_dir: Option<String>,
+    target_python: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawResolutionConfig {
+    base_url: Option<String>,
+    type_roots: Option<Vec<String>>,
+    python_executable: Option<String>,
+    #[serde(default)]
+    paths: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEmitConfig {
+    emit_pyi: Option<bool>,
+    emit_pyc: Option<bool>,
+    write_py_typed: Option<bool>,
+    preserve_comments: Option<bool>,
+    no_emit_on_error: Option<bool>,
+    runtime_validators: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTypingConfig {
+    profile: Option<TypingProfile>,
+    strict: Option<bool>,
+    strict_nulls: Option<bool>,
+    imports: Option<ImportFallback>,
+    no_implicit_dynamic: Option<bool>,
+    warn_unsafe: Option<bool>,
+    enable_sealed_exhaustiveness: Option<bool>,
+    report_deprecated: Option<DiagnosticLevel>,
+    require_explicit_overrides: Option<bool>,
+    require_known_public_types: Option<bool>,
+    infer_passthrough: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWatchConfig {
+    debounce_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPyProject {
+    tool: Option<RawPyProjectTool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPyProjectTool {
+    typepython: Option<RawConfig>,
+}
+
+impl Config {
+    fn from_raw(raw: RawConfig) -> Self {
+        let mut config = Self::default();
+
+        if let Some(project) = raw.project {
+            if let Some(src) = project.src {
+                config.project.src = src;
+            }
+            if let Some(include) = project.include {
+                config.project.include = include;
+            }
+            if let Some(exclude) = project.exclude {
+                config.project.exclude = exclude;
+            }
+            if let Some(root_dir) = project.root_dir {
+                config.project.root_dir = root_dir;
+            }
+            if let Some(out_dir) = project.out_dir {
+                config.project.out_dir = out_dir;
+            }
+            if let Some(cache_dir) = project.cache_dir {
+                config.project.cache_dir = cache_dir;
+            }
+            if let Some(target_python) = project.target_python {
+                config.project.target_python = target_python;
+            }
+        }
+
+        if let Some(resolution) = raw.resolution {
+            if let Some(base_url) = resolution.base_url {
+                config.resolution.base_url = base_url;
+            }
+            if let Some(type_roots) = resolution.type_roots {
+                config.resolution.type_roots = type_roots;
+            }
+            if let Some(python_executable) = resolution.python_executable {
+                config.resolution.python_executable =
+                    if python_executable == NULL_SENTINEL { None } else { Some(python_executable) };
+            }
+            if !resolution.paths.is_empty() {
+                config.resolution.paths = resolution.paths;
+            }
+        }
+
+        if let Some(emit) = raw.emit {
+            if let Some(emit_pyi) = emit.emit_pyi {
+                config.emit.emit_pyi = emit_pyi;
+            }
+            if let Some(emit_pyc) = emit.emit_pyc {
+                config.emit.emit_pyc = emit_pyc;
+            }
+            if let Some(write_py_typed) = emit.write_py_typed {
+                config.emit.write_py_typed = write_py_typed;
+            }
+            if let Some(preserve_comments) = emit.preserve_comments {
+                config.emit.preserve_comments = preserve_comments;
+            }
+            if let Some(no_emit_on_error) = emit.no_emit_on_error {
+                config.emit.no_emit_on_error = no_emit_on_error;
+            }
+            if let Some(runtime_validators) = emit.runtime_validators {
+                config.emit.runtime_validators = runtime_validators;
+            }
+        }
+
+        config.typing = TypingConfig::from_raw(raw.typing.unwrap_or_default());
+
+        if let Some(watch) = raw.watch {
+            if let Some(debounce_ms) = watch.debounce_ms {
+                config.watch.debounce_ms = debounce_ms;
+            }
+        }
+
+        config
+    }
+}
+
+impl TypingConfig {
+    fn from_raw(raw: RawTypingConfig) -> Self {
+        let mut config = match raw.profile {
+            Some(TypingProfile::Library) => Self {
+                profile: Some(TypingProfile::Library),
+                strict: true,
+                strict_nulls: true,
+                imports: ImportFallback::Unknown,
+                no_implicit_dynamic: true,
+                warn_unsafe: true,
+                enable_sealed_exhaustiveness: true,
+                report_deprecated: DiagnosticLevel::Warning,
+                require_explicit_overrides: false,
+                require_known_public_types: true,
+                infer_passthrough: false,
+            },
+            Some(TypingProfile::Application) => {
+                Self { profile: Some(TypingProfile::Application), ..Self::default() }
+            }
+            Some(TypingProfile::Migration) => Self {
+                profile: Some(TypingProfile::Migration),
+                strict: false,
+                strict_nulls: true,
+                imports: ImportFallback::Dynamic,
+                no_implicit_dynamic: false,
+                warn_unsafe: true,
+                enable_sealed_exhaustiveness: true,
+                report_deprecated: DiagnosticLevel::Ignore,
+                require_explicit_overrides: false,
+                require_known_public_types: false,
+                infer_passthrough: false,
+            },
+            None => Self::default(),
+        };
+
+        if let Some(strict) = raw.strict {
+            config.strict = strict;
+        }
+        if let Some(strict_nulls) = raw.strict_nulls {
+            config.strict_nulls = strict_nulls;
+        }
+        if let Some(imports) = raw.imports {
+            config.imports = imports;
+        }
+        if let Some(no_implicit_dynamic) = raw.no_implicit_dynamic {
+            config.no_implicit_dynamic = no_implicit_dynamic;
+        }
+        if let Some(warn_unsafe) = raw.warn_unsafe {
+            config.warn_unsafe = warn_unsafe;
+        }
+        if let Some(enable_sealed_exhaustiveness) = raw.enable_sealed_exhaustiveness {
+            config.enable_sealed_exhaustiveness = enable_sealed_exhaustiveness;
+        }
+        if let Some(report_deprecated) = raw.report_deprecated {
+            config.report_deprecated = report_deprecated;
+        }
+        if let Some(require_explicit_overrides) = raw.require_explicit_overrides {
+            config.require_explicit_overrides = require_explicit_overrides;
+        }
+        if let Some(require_known_public_types) = raw.require_known_public_types {
+            config.require_known_public_types = require_known_public_types;
+        }
+        if let Some(infer_passthrough) = raw.infer_passthrough {
+            config.infer_passthrough = infer_passthrough;
+        }
+
+        config
+    }
+}
+
+/// Discovers and loads TypePython configuration by searching upwards from a
+/// starting directory.
+pub fn load(start_dir: impl AsRef<Path>) -> Result<ConfigHandle, ConfigError> {
+    let start_dir = start_dir.as_ref();
+
+    for directory in start_dir.ancestors() {
+        let typepython_path = directory.join("typepython.toml");
+        if typepython_path.is_file() {
+            let config = load_typepython_toml(&typepython_path)?;
+            return Ok(ConfigHandle {
+                config_dir: directory.to_path_buf(),
+                config_path: typepython_path,
+                source: ConfigSource::TypePythonToml,
+                config,
+            });
+        }
+
+        let pyproject_path = directory.join("pyproject.toml");
+        if pyproject_path.is_file() {
+            if let Some(config) = load_pyproject_toml(&pyproject_path)? {
+                return Ok(ConfigHandle {
+                    config_dir: directory.to_path_buf(),
+                    config_path: pyproject_path,
+                    source: ConfigSource::PyProject,
+                    config,
+                });
+            }
+        }
+    }
+
+    Err(ConfigError::NotFound(start_dir.to_path_buf()))
+}
+
+fn load_typepython_toml(path: &Path) -> Result<Config, ConfigError> {
+    let raw = read_toml::<RawConfig>(path)?;
+    Ok(Config::from_raw(raw))
+}
+
+fn load_pyproject_toml(path: &Path) -> Result<Option<Config>, ConfigError> {
+    let raw = read_toml::<RawPyProject>(path)?;
+    let maybe_config = raw.tool.and_then(|tool| tool.typepython);
+    Ok(maybe_config.map(Config::from_raw))
+}
+
+fn read_toml<T>(path: &Path) -> Result<T, ConfigError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let content = fs::read_to_string(path)
+        .map_err(|source| ConfigError::Io { path: path.to_path_buf(), source })?;
+    let normalized = normalize_spec_toml(&content);
+
+    toml::from_str(&normalized)
+        .map_err(|source| ConfigError::Parse { path: path.to_path_buf(), source })
+}
+
+fn normalize_spec_toml(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("python_executable")
+            && trimmed.split_once('=').is_some_and(|(_, value)| value.trim().starts_with("null"))
+        {
+            let indentation = line.len() - line.trim_start().len();
+            normalized.push_str(&" ".repeat(indentation));
+            normalized.push_str("python_executable = \"");
+            normalized.push_str(NULL_SENTINEL);
+            normalized.push('"');
+        } else {
+            normalized.push_str(line);
+        }
+        normalized.push('\n');
+    }
+
+    normalized
+}

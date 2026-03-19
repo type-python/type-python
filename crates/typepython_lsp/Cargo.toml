@@ -1,0 +1,15 @@
+[package]
+name = "typepython-lsp"
+description = "Language-server boundary for TypePython"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

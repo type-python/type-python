@@ -1,0 +1,15 @@
+[package]
+name = "typepython-diagnostics"
+description = "Shared diagnostics model for TypePython"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true

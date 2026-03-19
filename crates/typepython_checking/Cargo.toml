@@ -1,0 +1,16 @@
+[package]
+name = "typepython-checking"
+description = "Type checking boundary for TypePython"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+typepython-diagnostics = { path = "../typepython_diagnostics" }
+typepython-graph = { path = "../typepython_graph" }
+
+[lints]
+workspace = true
