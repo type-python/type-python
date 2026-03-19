@@ -497,6 +497,27 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                     format!("missing runtime artifact `{}`", runtime_path.display()),
                 ));
             }
+            if config.config.emit.emit_pyc {
+                let bytecode_path = match bytecode_path_for(runtime_path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "unable to determine bytecode path for `{}`: {error}",
+                                runtime_path.display()
+                            ),
+                        ));
+                        continue;
+                    }
+                };
+                if !bytecode_path.exists() {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!("missing bytecode artifact `{}`", bytecode_path.display()),
+                    ));
+                }
+            }
             if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
                 if let Some(parent) = runtime_path.parent() {
                     package_roots.insert(parent.to_path_buf());
@@ -1006,12 +1027,14 @@ mod tests {
     fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
         let project_dir = temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
         let diagnostics = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/helpers.pyi"), "def helper() -> int: ...\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -1033,6 +1056,33 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_bytecode_when_enabled() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_bytecode_when_enabled");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing bytecode artifact"));
     }
 
     #[test]
