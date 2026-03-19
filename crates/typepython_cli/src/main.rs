@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{Command as ProcessCommand, ExitCode},
 };
 
 use anyhow::{Context, Result};
@@ -252,6 +252,10 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
             runtime_summary.stub_files_written,
             runtime_summary.py_typed_written
         ));
+        if config.config.emit.emit_pyc {
+            let compiled_pyc = compile_runtime_bytecode(&config, &snapshot.emit_plan)?;
+            notes.push(format!("compiled {} runtime artifact(s) to bytecode", compiled_pyc));
+        }
         let snapshot_path = write_incremental_snapshot(
             &config.resolve_relative_path(&config.config.project.cache_dir),
             &snapshot.incremental,
@@ -538,6 +542,73 @@ fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> 
     Ok(snapshot_path)
 }
 
+fn compile_runtime_bytecode(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> Result<usize> {
+    let interpreter = resolve_python_executable(config);
+    let mut compiled = 0usize;
+
+    for artifact in artifacts {
+        let Some(runtime_path) = &artifact.runtime_path else {
+            continue;
+        };
+        let bytecode_path = bytecode_path_for(runtime_path)?;
+        if let Some(parent) = bytecode_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("unable to create bytecode directory {}", parent.display())
+            })?;
+        }
+        let status = ProcessCommand::new(&interpreter)
+            .args([
+                "-c",
+                "import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",
+            ])
+            .arg(runtime_path)
+            .arg(&bytecode_path)
+            .status()
+            .with_context(|| {
+                format!(
+                    "unable to run Python bytecode compiler `{}` for {}",
+                    interpreter.display(),
+                    runtime_path.display()
+                )
+            })?;
+        if !status.success() {
+            anyhow::bail!(
+                "Python bytecode compiler `{}` failed for {} with status {}",
+                interpreter.display(),
+                runtime_path.display(),
+                status
+            );
+        }
+        compiled += 1;
+    }
+
+    Ok(compiled)
+}
+
+fn bytecode_path_for(runtime_path: &Path) -> Result<PathBuf> {
+    let parent = runtime_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("runtime artifact {} has no parent directory", runtime_path.display())
+    })?;
+    let stem = runtime_path.file_stem().and_then(|stem| stem.to_str()).ok_or_else(|| {
+        anyhow::anyhow!("runtime artifact {} has no valid file stem", runtime_path.display())
+    })?;
+    Ok(parent.join("__pycache__").join(format!("{stem}.pyc")))
+}
+
+fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
+    match config.config.resolution.python_executable.as_deref() {
+        Some(executable) => {
+            let path = Path::new(executable);
+            if path.is_absolute() || !executable.contains(std::path::MAIN_SEPARATOR) {
+                path.to_path_buf()
+            } else {
+                config.config_dir.join(path)
+            }
+        }
+        None => PathBuf::from("python3"),
+    }
+}
+
 fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {
     let start = match project {
         Some(path) if path.is_file() => {
@@ -769,14 +840,18 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_diagnostics, collect_source_paths, should_emit_build_outputs,
+        build_diagnostics, collect_source_paths, compile_runtime_bytecode,
+        should_emit_build_outputs,
         verify_build_artifacts, write_incremental_snapshot,
     };
     use std::{
         env, fs,
+        path::MAIN_SEPARATOR,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use typepython_config::load;
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::EmitArtifact;
@@ -1016,6 +1091,57 @@ mod tests {
         assert!(snapshot_path.ends_with("snapshot.json"));
         assert!(rendered.contains("pkg.a"));
         assert!(rendered.contains("pkg.b"));
+    }
+
+    #[test]
+    fn compile_runtime_bytecode_uses_configured_python_executable() {
+        let project_dir = temp_project_dir("compile_runtime_bytecode_uses_configured_python_executable");
+        let result = (|| {
+            fs::create_dir_all(project_dir.join("bin")).unwrap();
+            fs::create_dir_all(project_dir.join("out/app")).unwrap();
+            let log_path = project_dir.join("compiler.log");
+            let fake_python = project_dir.join("bin/fake-python.sh");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"bin{}fake-python.sh\"\n\n[emit]\nemit_pyc = true\n",
+                    MAIN_SEPARATOR
+                ),
+            )
+            .unwrap();
+            fs::write(
+                &fake_python,
+                format!(
+                    "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q 'version_info'; then\n  printf '3.10\\n'\n  exit 0\nfi\nprintf '%s\\n' \"$*\" >> \"{}\"\nexit 0\n",
+                    log_path.display()
+                ),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                let mut permissions = fs::metadata(&fake_python).unwrap().permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(&fake_python, permissions).unwrap();
+            }
+            let config = load(&project_dir).unwrap();
+            let artifacts = vec![EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("out/app/__init__.py")),
+                stub_path: None,
+            }];
+            fs::write(project_dir.join("out/app/__init__.py"), "pass\n").unwrap();
+
+            let compiled = compile_runtime_bytecode(&config, &artifacts).unwrap();
+            let log = fs::read_to_string(&log_path).unwrap();
+            (compiled, log)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let (compiled, log) = result;
+        assert_eq!(compiled, 1);
+        assert!(log.contains("py_compile.compile"));
+        assert!(log.contains("__init__.py"));
+        assert!(log.contains("__pycache__"));
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
