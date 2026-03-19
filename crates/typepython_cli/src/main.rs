@@ -19,7 +19,7 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::plan_emits;
 use typepython_graph::build;
 use typepython_incremental::snapshot;
-use typepython_lowering::{LoweredModule, lower};
+use typepython_lowering::{LoweredModule, LoweringResult, lower};
 use typepython_syntax::{SourceFile, SourceKind, parse};
 
 const CONFIG_TEMPLATE: &str =
@@ -363,7 +363,19 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
-    let lowered_modules: Vec<_> = syntax_trees.iter().map(lower).collect();
+    let lowering_results: Vec<_> = syntax_trees.iter().map(lower).collect();
+    let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
+    if lowering_diagnostics.has_errors() {
+        return Ok(PipelineSnapshot {
+            lowered_modules: Vec::new(),
+            emit_plan_len: 0,
+            tracked_modules: 0,
+            discovered_sources: source_paths.len(),
+            diagnostics: lowering_diagnostics,
+        });
+    }
+
+    let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
     let bindings: Vec<_> = lowered_modules.iter().map(bind).collect();
     let graph = build(&bindings);
     let checking = check(&graph);
@@ -384,6 +396,16 @@ fn collect_parse_diagnostics(syntax_trees: &[typepython_syntax::SyntaxTree]) -> 
 
     for tree in syntax_trees {
         diagnostics.diagnostics.extend(tree.diagnostics.diagnostics.iter().cloned());
+    }
+
+    diagnostics
+}
+
+fn collect_lowering_diagnostics(lowering_results: &[LoweringResult]) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+
+    for result in lowering_results {
+        diagnostics.diagnostics.extend(result.diagnostics.diagnostics.iter().cloned());
     }
 
     diagnostics

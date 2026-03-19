@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
 
 /// A single source-map row.
@@ -26,19 +27,29 @@ pub struct LoweredModule {
     pub source_map: Vec<SourceMapEntry>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoweringResult {
+    pub module: LoweredModule,
+    pub diagnostics: DiagnosticReport,
+}
+
 /// Lowers a parsed module into its Python-facing form.
 #[must_use]
-pub fn lower(tree: &SyntaxTree) -> LoweredModule {
+pub fn lower(tree: &SyntaxTree) -> LoweringResult {
     let python_source = match tree.source.kind {
         SourceKind::TypePython => lower_typepython(tree),
         SourceKind::Python | SourceKind::Stub => tree.source.text.clone(),
     };
+    let diagnostics = collect_lowering_diagnostics(tree);
 
-    LoweredModule {
-        source_path: tree.source.path.clone(),
-        source_kind: tree.source.kind,
-        python_source,
-        source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+    LoweringResult {
+        module: LoweredModule {
+            source_path: tree.source.path.clone(),
+            source_kind: tree.source.kind,
+            python_source,
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        },
+        diagnostics,
     }
 }
 
@@ -75,12 +86,60 @@ fn rewrite_unsafe_line(line: &str) -> String {
     format!("{indentation}if True:")
 }
 
+fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+
+    for statement in &tree.statements {
+        match statement {
+            SyntaxStatement::Unsafe(_) => {}
+            SyntaxStatement::TypeAlias(statement) => diagnostics.push(lowering_error(
+                &tree.source.path,
+                statement.line,
+                "typealias",
+            )),
+            SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
+                &tree.source.path,
+                statement.line,
+                "interface",
+            )),
+            SyntaxStatement::DataClass(statement) => diagnostics.push(lowering_error(
+                &tree.source.path,
+                statement.line,
+                "data class",
+            )),
+            SyntaxStatement::SealedClass(statement) => diagnostics.push(lowering_error(
+                &tree.source.path,
+                statement.line,
+                "sealed class",
+            )),
+            SyntaxStatement::OverloadDef(statement) => diagnostics.push(lowering_error(
+                &tree.source.path,
+                statement.line,
+                "overload def",
+            )),
+        }
+    }
+
+    diagnostics
+}
+
+fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagnostic {
+    Diagnostic::error(
+        "TPY2002",
+        format!("TypePython-only syntax `{construct}` is recognized but not lowerable yet"),
+    )
+    .with_span(Span::new(path.display().to_string(), line, 1, line, 1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::lower;
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
-    use typepython_syntax::{SourceFile, SourceKind, SyntaxStatement, SyntaxTree, UnsafeStatement};
+    use typepython_syntax::{
+        NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
+        TypeAliasStatement, UnsafeStatement,
+    };
 
     #[test]
     fn lower_rewrites_top_level_unsafe_blocks() {
@@ -94,8 +153,9 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        println!("{}", lowered.python_source);
-        assert_eq!(lowered.python_source, "if True:\n    x = 1\n");
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(lowered.module.python_source, "if True:\n    x = 1\n");
     }
 
     #[test]
@@ -110,6 +170,37 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        assert_eq!(lowered.python_source, "def update():\n    if True:\n        x = 1\n");
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(lowered.module.python_source, "def update():\n    if True:\n        x = 1\n");
+    }
+
+    #[test]
+    fn lower_reports_unimplemented_typepython_constructs() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("typealias.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("typealias UserId = int\ninterface Service:\n"),
+            },
+            statements: vec![
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserId"),
+                    type_params: Vec::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::Interface(NamedBlockStatement {
+                    name: String::from("Service"),
+                    type_params: Vec::new(),
+                    line: 2,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let rendered = lowered.diagnostics.as_text();
+        assert!(lowered.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2002"));
+        assert!(rendered.contains("`typealias`"));
+        assert!(rendered.contains("`interface`"));
     }
 }
