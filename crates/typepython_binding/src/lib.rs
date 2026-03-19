@@ -37,35 +37,41 @@ pub fn bind(module: &LoweredModule) -> BindingTable {
             .python_source
             .lines()
             .scan(false, |previous_was_overload, line| {
-                let declaration = bind_top_level_declaration(line, *previous_was_overload);
+                let declarations = bind_top_level_declarations(line, *previous_was_overload);
                 *previous_was_overload = line.trim() == "@overload";
-                Some(declaration)
+                Some(declarations)
             })
             .flatten()
             .collect(),
     }
 }
 
-fn bind_top_level_declaration(line: &str, previous_was_overload: bool) -> Option<Declaration> {
+fn bind_top_level_declarations(line: &str, previous_was_overload: bool) -> Vec<Declaration> {
     if line.trim_start() != line {
-        return None;
+        return Vec::new();
     }
 
     if let Some(rest) = line.strip_prefix("class ") {
-        return extract_identifier(rest).map(|name| Declaration {
+        return extract_identifier(rest)
+            .map(|name| Declaration {
             name,
             kind: DeclarationKind::Class,
-        });
+        })
+            .into_iter()
+            .collect();
     }
     if let Some(rest) = line.strip_prefix("def ") {
-        return extract_identifier(rest).map(|name| Declaration {
+        return extract_identifier(rest)
+            .map(|name| Declaration {
             name,
             kind: if previous_was_overload {
                 DeclarationKind::Overload
             } else {
                 DeclarationKind::Function
             },
-        });
+        })
+            .into_iter()
+            .collect();
     }
     if let Some(rest) = line.strip_prefix("import ") {
         return bind_import_declaration(rest);
@@ -76,53 +82,71 @@ fn bind_top_level_declaration(line: &str, previous_was_overload: bool) -> Option
 
     if let Some((name, remainder)) = line.split_once(':') {
         if remainder.trim_start().starts_with("TypeAlias =") {
-            return extract_identifier(name).map(|name| Declaration {
+            return extract_identifier(name)
+                .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::TypeAlias,
-            });
+            })
+                .into_iter()
+                .collect();
         }
 
         if remainder.contains('=') || !remainder.trim().is_empty() {
-            return extract_identifier(name).map(|name| Declaration {
+            return extract_identifier(name)
+                .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::Value,
-            });
+            })
+                .into_iter()
+                .collect();
         }
     }
 
-    bind_assignment_declaration(line)
+    bind_assignment_declaration(line).into_iter().collect()
 }
 
-fn bind_import_declaration(rest: &str) -> Option<Declaration> {
-    let first_import = rest.split(',').next()?.trim();
-    if let Some((_, alias)) = first_import.split_once(" as ") {
-        return extract_identifier(alias).map(|name| Declaration {
-            name,
-            kind: DeclarationKind::Import,
-        });
-    }
+fn bind_import_declaration(rest: &str) -> Vec<Declaration> {
+    rest.split(',')
+        .filter_map(|item| {
+            let item = item.trim();
+            if let Some((_, alias)) = item.split_once(" as ") {
+                return extract_identifier(alias).map(|name| Declaration {
+                    name,
+                    kind: DeclarationKind::Import,
+                });
+            }
 
-    let root = first_import.split('.').next()?.trim();
-    extract_identifier(root).map(|name| Declaration {
-        name,
-        kind: DeclarationKind::Import,
-    })
+            let root = item.split('.').next()?.trim();
+            extract_identifier(root).map(|name| Declaration {
+                name,
+                kind: DeclarationKind::Import,
+            })
+        })
+        .collect()
 }
 
-fn bind_from_import_declaration(rest: &str) -> Option<Declaration> {
-    let (_, imports) = rest.split_once(" import ")?;
-    let first_import = imports.split(',').next()?.trim();
-    if let Some((_, alias)) = first_import.split_once(" as ") {
-        return extract_identifier(alias).map(|name| Declaration {
-            name,
-            kind: DeclarationKind::Import,
-        });
-    }
+fn bind_from_import_declaration(rest: &str) -> Vec<Declaration> {
+    let Some((_, imports)) = rest.split_once(" import ") else {
+        return Vec::new();
+    };
 
-    extract_identifier(first_import).map(|name| Declaration {
-        name,
-        kind: DeclarationKind::Import,
-    })
+    imports
+        .split(',')
+        .filter_map(|item| {
+            let item = item.trim();
+            if let Some((_, alias)) = item.split_once(" as ") {
+                return extract_identifier(alias).map(|name| Declaration {
+                    name,
+                    kind: DeclarationKind::Import,
+                });
+            }
+
+            extract_identifier(item).map(|name| Declaration {
+                name,
+                kind: DeclarationKind::Import,
+            })
+        })
+        .collect()
 }
 
 fn bind_assignment_declaration(line: &str) -> Option<Declaration> {
@@ -263,7 +287,7 @@ mod tests {
             source_path: PathBuf::from("src/app/helpers.py"),
             source_kind: SourceKind::Python,
             python_source: String::from(
-                "from pkg import foo as local_foo\nimport tools.helpers\nvalue: int = 1\ncount = 2\n",
+                "from pkg import foo as local_foo, bar\nimport tools.helpers, more.tools as alias\nvalue: int = 1\ncount = 2\n",
             ),
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
         });
@@ -276,7 +300,15 @@ mod tests {
                     kind: DeclarationKind::Import,
                 },
                 Declaration {
+                    name: String::from("bar"),
+                    kind: DeclarationKind::Import,
+                },
+                Declaration {
                     name: String::from("tools"),
+                    kind: DeclarationKind::Import,
+                },
+                Declaration {
+                    name: String::from("alias"),
                     kind: DeclarationKind::Import,
                 },
                 Declaration {
