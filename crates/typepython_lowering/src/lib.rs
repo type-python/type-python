@@ -102,6 +102,16 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             _ => None,
         })
         .collect();
+    let sealed_classes: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::SealedClass(statement) if is_lowerable_named_block(statement) => {
+                Some((statement.line, statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
@@ -127,6 +137,8 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             lowered_lines.extend(rewrite_data_class_lines(line, statement));
         } else if overloads.contains_key(&line_number) {
             lowered_lines.extend(rewrite_overload_lines(line));
+        } else if let Some(statement) = sealed_classes.get(&line_number) {
+            lowered_lines.push(rewrite_sealed_class_line(line, statement));
         } else if unsafe_lines.contains(&line_number) {
             lowered_lines.push(rewrite_unsafe_line(line));
         } else {
@@ -197,6 +209,21 @@ fn rewrite_data_class_lines(
         format!("{indentation}@dataclass"),
         format!("{indentation}class {}{}:", statement.name, bases),
     ]
+}
+
+fn rewrite_sealed_class_line(
+    line: &str,
+    statement: &typepython_syntax::NamedBlockStatement,
+) -> String {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    let bases = if statement.header_suffix.is_empty() {
+        String::new()
+    } else {
+        statement.header_suffix.clone()
+    };
+
+    format!("{indentation}class {}{}:  # tpy:sealed", statement.name, bases)
 }
 
 fn append_protocol_base(header_suffix: &str) -> String {
@@ -284,6 +311,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "data class",
             )),
+            SyntaxStatement::SealedClass(statement) if is_lowerable_named_block(statement) => {}
             SyntaxStatement::SealedClass(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
@@ -508,6 +536,49 @@ mod tests {
             lowered.module.python_source,
             "from dataclasses import dataclass\n@dataclass\nclass Point(Base):\n    x: float\n"
         );
+    }
+
+    #[test]
+    fn lower_rewrites_non_generic_sealed_class_with_marker() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("sealed-class.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("sealed class Expr:\n    ...\n"),
+            },
+            statements: vec![SyntaxStatement::SealedClass(NamedBlockStatement {
+                name: String::from("Expr"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(lowered.module.python_source, "class Expr:  # tpy:sealed\n    ...\n");
+    }
+
+    #[test]
+    fn lower_rewrites_sealed_class_with_existing_bases() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("sealed-class-bases.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("sealed class Expr(Base):\n    ...\n"),
+            },
+            statements: vec![SyntaxStatement::SealedClass(NamedBlockStatement {
+                name: String::from("Expr"),
+                type_params: Vec::new(),
+                header_suffix: String::from("(Base)"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(lowered.module.python_source, "class Expr(Base):  # tpy:sealed\n    ...\n");
     }
 
     #[test]
