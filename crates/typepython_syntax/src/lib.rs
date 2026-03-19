@@ -76,6 +76,8 @@ pub enum SyntaxStatement {
     DataClass(NamedBlockStatement),
     SealedClass(NamedBlockStatement),
     OverloadDef(FunctionStatement),
+    ClassDef(NamedBlockStatement),
+    FunctionDef(FunctionStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -157,6 +159,15 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
 
         if let Some(statement) = parse_extension_statement(&source.path, trimmed, line_number, &mut diagnostics) {
             statements.push(statement);
+        } else if line.trim_start() == line {
+            if let Some(statement) = parse_python_declaration_statement(
+                &source.path,
+                trimmed,
+                line_number,
+                &mut diagnostics,
+            ) {
+                statements.push(statement);
+            }
         }
     }
 
@@ -209,6 +220,8 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::DataClass(statement) => statement.line,
         SyntaxStatement::SealedClass(statement) => statement.line,
         SyntaxStatement::OverloadDef(statement) => statement.line,
+        SyntaxStatement::ClassDef(statement) => statement.line,
+        SyntaxStatement::FunctionDef(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -221,11 +234,12 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
         }
         SyntaxStatement::Interface(statement)
         | SyntaxStatement::DataClass(statement)
-        | SyntaxStatement::SealedClass(statement) => {
+        | SyntaxStatement::SealedClass(statement)
+        | SyntaxStatement::ClassDef(statement) => {
             let indentation = leading_indent(line);
             format!("{indentation}class {}{}:", statement.name, statement.header_suffix)
         }
-        SyntaxStatement::OverloadDef(_) => {
+        SyntaxStatement::OverloadDef(_) | SyntaxStatement::FunctionDef(_) => {
             let indentation = leading_indent(line);
             let trimmed = line.trim_start();
             let rest = trimmed.strip_prefix("overload ").unwrap_or(trimmed);
@@ -329,6 +343,38 @@ fn parse_extension_statement(
     }
     if trimmed_line.starts_with("unsafe") {
         return parse_unsafe(path, trimmed_line, line_number, diagnostics);
+    }
+
+    None
+}
+
+fn parse_python_declaration_statement(
+    path: &Path,
+    trimmed_line: &str,
+    line_number: usize,
+    diagnostics: &mut DiagnosticReport,
+) -> Option<SyntaxStatement> {
+    if let Some(rest) = trimmed_line.strip_prefix("class ") {
+        return parse_named_block(
+            path,
+            trimmed_line,
+            rest,
+            line_number,
+            diagnostics,
+            "class declaration",
+            SyntaxStatement::ClassDef,
+        );
+    }
+    if let Some(rest) = trimmed_line.strip_prefix("def ") {
+        return parse_function(
+            path,
+            trimmed_line,
+            rest,
+            line_number,
+            diagnostics,
+            "function declaration",
+            SyntaxStatement::FunctionDef,
+        );
     }
 
     None
@@ -450,12 +496,32 @@ fn parse_overload(
     line_number: usize,
     diagnostics: &mut DiagnosticReport,
 ) -> Option<SyntaxStatement> {
+    parse_function(
+        path,
+        line,
+        rest,
+        line_number,
+        diagnostics,
+        "overload declaration",
+        SyntaxStatement::OverloadDef,
+    )
+}
+
+fn parse_function(
+    path: &Path,
+    line: &str,
+    rest: &str,
+    line_number: usize,
+    diagnostics: &mut DiagnosticReport,
+    label: &str,
+    constructor: fn(FunctionStatement) -> SyntaxStatement,
+) -> Option<SyntaxStatement> {
     let Some((signature, _suite)) = split_top_level_once(rest.trim_end(), ':') else {
         diagnostics.push(parse_error(
             path,
             line_number,
             line,
-            "overload declaration must end with `:`",
+            format!("{label} must end with `:`"),
         ));
         return None;
     };
@@ -465,7 +531,7 @@ fn parse_overload(
             path,
             line_number,
             line,
-            "overload declaration must include a parameter list",
+            format!("{label} must include a parameter list"),
         ));
         return None;
     };
@@ -474,7 +540,7 @@ fn parse_overload(
             path,
             line_number,
             line,
-            "overload declaration must include a function name",
+            format!("{label} must include a function name"),
         ));
         return None;
     };
@@ -484,12 +550,12 @@ fn parse_overload(
         line,
         suffix,
         diagnostics,
-        "overload declaration",
+        label,
     ) else {
         return None;
     };
 
-    Some(SyntaxStatement::OverloadDef(FunctionStatement {
+    Some(constructor(FunctionStatement {
         name,
         type_params: parsed_type_params.type_params,
         line: line_number,
@@ -1050,5 +1116,27 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    header_suffix: String::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("first"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    line: 4,
+                }),
+            ]
+        );
     }
 }

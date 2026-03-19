@@ -350,6 +350,8 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "sealed class",
             )),
+            SyntaxStatement::ClassDef(_) => {}
+            SyntaxStatement::FunctionDef(_) => {}
             SyntaxStatement::OverloadDef(statement) if statement.type_params.is_empty() => {}
             SyntaxStatement::OverloadDef(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
