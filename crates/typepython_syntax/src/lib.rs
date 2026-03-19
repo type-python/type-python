@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use ruff_python_parser::parse_module;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 
 /// Supported input file kinds from the spec.
@@ -122,11 +123,24 @@ struct ParsedTypeParams<'source> {
 pub fn parse(source: SourceFile) -> SyntaxTree {
     match source.kind {
         SourceKind::TypePython => parse_typepython_source(source),
-        SourceKind::Python | SourceKind::Stub => SyntaxTree {
-            source,
-            statements: Vec::new(),
-            diagnostics: DiagnosticReport::default(),
-        },
+        SourceKind::Python | SourceKind::Stub => parse_python_source(source),
+    }
+}
+
+fn parse_python_source(source: SourceFile) -> SyntaxTree {
+    let mut diagnostics = DiagnosticReport::default();
+
+    if let Err(error) = parse_module(&source.text) {
+        diagnostics.push(
+            Diagnostic::error("TPY2001", format!("Python syntax error: {}", error.error))
+                .with_span(parse_error_span(&source.path, &source.text, error.location.start().to_usize(), error.location.end().to_usize())),
+        );
+    }
+
+    SyntaxTree {
+        source,
+        statements: Vec::new(),
+        diagnostics,
     }
 }
 
@@ -606,6 +620,34 @@ fn parse_error(
     ))
 }
 
+fn parse_error_span(path: &Path, source: &str, start: usize, end: usize) -> Span {
+    let start = start.min(source.len());
+    let end = end.max(start).min(source.len());
+    let (line, column) = offset_to_line_column(source, start);
+    let (end_line, end_column) = offset_to_line_column(source, end);
+
+    Span::new(path.display().to_string(), line, column, end_line, end_column)
+}
+
+fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1usize;
+    let mut column = 1usize;
+
+    for (index, character) in source.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if character == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+
+    (line, column)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -830,5 +872,30 @@ mod tests {
 
         assert!(tree.diagnostics.is_empty());
         assert!(tree.statements.is_empty());
+    }
+
+    #[test]
+    fn parse_reports_invalid_python_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("broken.py"),
+            kind: SourceKind::Python,
+            text: String::from("def broken(:\n    return 1\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2001"));
+        assert!(rendered.contains("Python syntax error"));
+    }
+
+    #[test]
+    fn parse_accepts_valid_stub_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.pyi"),
+            kind: SourceKind::Stub,
+            text: String::from("def helper() -> int: ...\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
     }
 }

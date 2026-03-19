@@ -9,6 +9,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+littrs-ruff-python-parser = "0.6.2"
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 
 [lints]
