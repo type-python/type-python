@@ -95,7 +95,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::Interface(statement) if is_lowerable_interface(statement) => {
+            SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {
                 Some((statement.line, statement))
             }
             _ => None,
@@ -147,16 +147,32 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             _ => None,
         })
         .collect();
-    let ordinary_type_params = collect_ordinary_type_params(&class_defs, &function_defs);
+    let runtime_type_params = collect_runtime_type_params(
+        &interfaces,
+        &data_classes,
+        &sealed_classes,
+        &class_defs,
+        &function_defs,
+    );
+    let generic_class_like_declarations = has_generic_class_like_declarations(
+        &interfaces,
+        &data_classes,
+        &sealed_classes,
+        &class_defs,
+    );
 
     let mut lowered_lines = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
-    if !ordinary_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
+    if !runtime_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import TypeVar"));
         lowered_line_number += 1;
     }
-    for (name, bound) in &ordinary_type_params {
+    if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing import Generic"));
+        lowered_line_number += 1;
+    }
+    for (name, bound) in &runtime_type_params {
         lowered_lines.push(rewrite_typevar_line(name, bound.as_deref()));
         lowered_line_number += 1;
     }
@@ -215,12 +231,36 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     LoweredText { python_source: lowered, source_map }
 }
 
-fn collect_ordinary_type_params(
+fn collect_runtime_type_params(
+    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
 ) -> std::collections::BTreeMap<String, Option<String>> {
     let mut type_params = std::collections::BTreeMap::new();
 
+    for statement in interfaces.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
+    for statement in data_classes.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
+    for statement in sealed_classes.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
     for statement in class_defs.values() {
         for type_param in &statement.type_params {
             type_params
@@ -237,6 +277,18 @@ fn collect_ordinary_type_params(
     }
 
     type_params
+}
+
+fn has_generic_class_like_declarations(
+    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+) -> bool {
+    interfaces.values().any(|statement| !statement.type_params.is_empty())
+        || data_classes.values().any(|statement| !statement.type_params.is_empty())
+        || sealed_classes.values().any(|statement| !statement.type_params.is_empty())
+        || class_defs.values().any(|statement| !statement.type_params.is_empty())
 }
 
 fn rewrite_unsafe_line(line: &str) -> String {
@@ -280,17 +332,25 @@ fn has_typevar_import(source: &str) -> bool {
     })
 }
 
+fn has_generic_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Generic"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Generic"))
+    })
+}
+
 fn rewrite_interface_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = if statement.header_suffix.is_empty() {
-        String::from("(Protocol)")
-    } else {
-        append_protocol_base(&statement.header_suffix)
-    };
+    let mut extras = vec![String::from("Protocol")];
+    if !statement.type_params.is_empty() {
+        extras.push(generic_base(statement));
+    }
+    let bases = append_bases(&statement.header_suffix, &extras);
     format!("{indentation}class {}{}:", statement.name, bases)
 }
 
@@ -300,11 +360,7 @@ fn rewrite_data_class_lines(
 ) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = if statement.header_suffix.is_empty() {
-        String::new()
-    } else {
-        statement.header_suffix.clone()
-    };
+    let bases = append_optional_generic_base(statement);
 
     [
         format!("{indentation}@dataclass"),
@@ -318,11 +374,7 @@ fn rewrite_sealed_class_line(
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = if statement.header_suffix.is_empty() {
-        String::new()
-    } else {
-        statement.header_suffix.clone()
-    };
+    let bases = append_optional_generic_base(statement);
 
     format!("{indentation}class {}{}:  # tpy:sealed", statement.name, bases)
 }
@@ -333,7 +385,8 @@ fn rewrite_class_def_line(
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    format!("{indentation}class {}{}:", statement.name, statement.header_suffix)
+    let bases = append_optional_generic_base(statement);
+    format!("{indentation}class {}{}:", statement.name, bases)
 }
 
 fn rewrite_function_def_line(line: &str) -> String {
@@ -388,18 +441,52 @@ fn split_bracketed(input: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn append_protocol_base(header_suffix: &str) -> String {
-    let trimmed = header_suffix.trim();
-    if trimmed == "()" {
-        return String::from("(Protocol)");
+fn append_optional_generic_base(statement: &typepython_syntax::NamedBlockStatement) -> String {
+    if statement.type_params.is_empty() {
+        if statement.header_suffix.is_empty() {
+            String::new()
+        } else {
+            statement.header_suffix.clone()
+        }
+    } else {
+        append_bases(&statement.header_suffix, &[generic_base(statement)])
+    }
+}
+
+fn append_bases(header_suffix: &str, extras: &[String]) -> String {
+    if extras.is_empty() {
+        return header_suffix.to_owned();
     }
 
-    let inner = trimmed.trim_start_matches('(').trim_end_matches(')').trim();
-    if inner.is_empty() {
-        String::from("(Protocol)")
+    let trimmed = header_suffix.trim();
+    let inner = if trimmed.is_empty() {
+        String::new()
     } else {
-        format!("({inner}, Protocol)")
+        trimmed
+            .trim_start_matches('(')
+            .trim_end_matches(')')
+            .trim()
+            .to_owned()
+    };
+
+    let mut parts = Vec::new();
+    if !inner.is_empty() {
+        parts.push(inner);
     }
+    parts.extend(extras.iter().cloned());
+    format!("({})", parts.join(", "))
+}
+
+fn generic_base(statement: &typepython_syntax::NamedBlockStatement) -> String {
+    format!(
+        "Generic[{}]",
+        statement
+            .type_params
+            .iter()
+            .map(|type_param| type_param.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn has_protocol_import(source: &str) -> bool {
@@ -438,15 +525,10 @@ fn has_overload_import(source: &str) -> bool {
     })
 }
 
-fn is_lowerable_interface(statement: &typepython_syntax::NamedBlockStatement) -> bool {
-    is_lowerable_named_block(statement)
-}
-
 fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) -> bool {
-    statement.type_params.is_empty()
-        && (statement.header_suffix.is_empty()
-            || (statement.header_suffix.starts_with('(')
-                && statement.header_suffix.ends_with(')')))
+    statement.header_suffix.is_empty()
+        || (statement.header_suffix.starts_with('(')
+            && statement.header_suffix.ends_with(')'))
 }
 
 fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
@@ -461,7 +543,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "generic typealias",
             )),
-            SyntaxStatement::Interface(statement) if is_lowerable_interface(statement) => {}
+            SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {}
             SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
@@ -563,25 +645,24 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("unsupported.tpy"),
                 kind: SourceKind::TypePython,
-                text: String::from("interface Service[T]:\ndata class User[T]:\n"),
+                text: String::from("typealias Pair[T] = tuple[T, T]\noverload def parse[T](x: T) -> T: ...\n"),
             },
             statements: vec![
-                SyntaxStatement::Interface(NamedBlockStatement {
-                    name: String::from("Service"),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("Pair"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         bound: None,
                     }],
-                    header_suffix: String::new(),
+                    value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
-                SyntaxStatement::DataClass(NamedBlockStatement {
-                    name: String::from("User"),
+                SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
+                    name: String::from("parse"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         bound: None,
                     }],
-                    header_suffix: String::new(),
                     line: 2,
                 }),
             ],
@@ -591,8 +672,8 @@ mod tests {
         let rendered = lowered.diagnostics.as_text();
         assert!(lowered.diagnostics.has_errors());
         assert!(rendered.contains("TPY2002"));
-        assert!(rendered.contains("`interface`"));
-        assert!(rendered.contains("`data class`"));
+        assert!(rendered.contains("`generic typealias`"));
+        assert!(rendered.contains("`generic overload def`"));
     }
 
     #[test]
@@ -667,6 +748,33 @@ mod tests {
     }
 
     #[test]
+    fn lower_rewrites_generic_interface_with_protocol_and_generic_base() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("generic-interface.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("interface SupportsClose[T]:\n    def close(self, value: T) -> T: ...\n"),
+            },
+            statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("SupportsClose"),
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                }],
+                header_suffix: String::new(),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\")\nfrom typing import Protocol\nclass SupportsClose(Protocol, Generic[T]):\n    def close(self, value: T) -> T: ...\n"
+        );
+    }
+
+    #[test]
     fn lower_rewrites_non_generic_data_class_with_dataclass_import() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
@@ -729,6 +837,44 @@ mod tests {
         assert_eq!(
             lowered.module.python_source,
             "from dataclasses import dataclass\n@dataclass\nclass Point(Base):\n    x: float\n"
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_generic_data_class_and_sealed_class_with_generic_base() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("generic-classlikes.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("data class Point[T]:\n    x: T\n\nsealed class Expr[T](Base):\n    ...\n"),
+            },
+            statements: vec![
+                SyntaxStatement::DataClass(NamedBlockStatement {
+                    name: String::from("Point"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    header_suffix: String::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::SealedClass(NamedBlockStatement {
+                    name: String::from("Expr"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    header_suffix: String::from("(Base)"),
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\")\nfrom dataclasses import dataclass\n@dataclass\nclass Point(Generic[T]):\n    x: T\n\nclass Expr(Base, Generic[T]):  # tpy:sealed\n    ...\n"
         );
     }
 
@@ -893,30 +1039,30 @@ mod tests {
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(
             lowered.module.python_source,
-            "from typing import TypeVar\nT = TypeVar(\"T\")\nclass Box(Base):\n    pass\n\ndef first(value: T) -> T:\n    return value\n"
+            "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\")\nclass Box(Base, Generic[T]):\n    pass\n\ndef first(value: T) -> T:\n    return value\n"
         );
         assert_eq!(
             lowered.module.source_map,
             vec![
                 SourceMapEntry {
                     original_line: 1,
-                    lowered_line: 3,
-                },
-                SourceMapEntry {
-                    original_line: 2,
                     lowered_line: 4,
                 },
                 SourceMapEntry {
-                    original_line: 3,
+                    original_line: 2,
                     lowered_line: 5,
                 },
                 SourceMapEntry {
-                    original_line: 4,
+                    original_line: 3,
                     lowered_line: 6,
                 },
                 SourceMapEntry {
-                    original_line: 5,
+                    original_line: 4,
                     lowered_line: 7,
+                },
+                SourceMapEntry {
+                    original_line: 5,
+                    lowered_line: 8,
                 },
             ]
         );
