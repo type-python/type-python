@@ -547,6 +547,16 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
         }
     }
 
+    let snapshot_path = config
+        .resolve_relative_path(&config.config.project.cache_dir)
+        .join("snapshot.json");
+    if !snapshot_path.exists() {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!("missing incremental snapshot `{}`", snapshot_path.display()),
+        ));
+    }
+
     diagnostics
 }
 
@@ -1029,12 +1039,14 @@ mod tests {
         let diagnostics = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/helpers.pyi"), "def helper() -> int: ...\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").unwrap();
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -1083,6 +1095,33 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("missing bytecode artifact"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_incremental_snapshot() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing incremental snapshot"));
     }
 
     #[test]
