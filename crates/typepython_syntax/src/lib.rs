@@ -160,7 +160,126 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
         }
     }
 
+    if !diagnostics.has_errors() {
+        let normalized = normalize_typepython_source(&source.text, &statements);
+        if let Err(error) = parse_module(&normalized) {
+            diagnostics.push(
+                Diagnostic::error("TPY2001", format!("TypePython syntax error: {}", error.error))
+                    .with_span(parse_error_span(
+                        &source.path,
+                        &source.text,
+                        error.location.start().to_usize(),
+                        error.location.end().to_usize(),
+                    )),
+            );
+        }
+    }
+
     SyntaxTree { source, statements, diagnostics }
+}
+
+fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> String {
+    let statement_lines: std::collections::BTreeMap<usize, &SyntaxStatement> = statements
+        .iter()
+        .map(|statement| (statement_line(statement), statement))
+        .collect();
+
+    let mut normalized_lines = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        let normalized = if let Some(statement) = statement_lines.get(&line_number) {
+            normalize_typepython_statement_line(line, statement)
+        } else {
+            normalize_generic_python_header_line(line)
+        };
+        normalized_lines.push(normalized);
+    }
+
+    let mut normalized = normalized_lines.join("\n");
+    if source.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+fn statement_line(statement: &SyntaxStatement) -> usize {
+    match statement {
+        SyntaxStatement::TypeAlias(statement) => statement.line,
+        SyntaxStatement::Interface(statement) => statement.line,
+        SyntaxStatement::DataClass(statement) => statement.line,
+        SyntaxStatement::SealedClass(statement) => statement.line,
+        SyntaxStatement::OverloadDef(statement) => statement.line,
+        SyntaxStatement::Unsafe(statement) => statement.line,
+    }
+}
+
+fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) -> String {
+    match statement {
+        SyntaxStatement::TypeAlias(statement) => {
+            let indentation = leading_indent(line);
+            format!("{indentation}{} = {}", statement.name, statement.value)
+        }
+        SyntaxStatement::Interface(statement)
+        | SyntaxStatement::DataClass(statement)
+        | SyntaxStatement::SealedClass(statement) => {
+            let indentation = leading_indent(line);
+            format!("{indentation}class {}{}:", statement.name, statement.header_suffix)
+        }
+        SyntaxStatement::OverloadDef(_) => {
+            let indentation = leading_indent(line);
+            let trimmed = line.trim_start();
+            let rest = trimmed.strip_prefix("overload ").unwrap_or(trimmed);
+            format!("{indentation}{}", strip_generic_type_params(rest))
+        }
+        SyntaxStatement::Unsafe(_) => {
+            let indentation = leading_indent(line);
+            format!("{indentation}if True:")
+        }
+    }
+}
+
+fn normalize_generic_python_header_line(line: &str) -> String {
+    let indentation = leading_indent(line);
+    let trimmed = line.trim_start();
+
+    if let Some(rest) = trimmed.strip_prefix("def ") {
+        return format!("{indentation}def {}", strip_generic_type_params(rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix("class ") {
+        return format!("{indentation}class {}", strip_generic_type_params(rest));
+    }
+
+    line.to_owned()
+}
+
+fn leading_indent(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
+}
+
+fn strip_generic_type_params(source: &str) -> String {
+    let mut bracket_index = None;
+    let mut paren_depth = 0usize;
+
+    for (index, character) in source.char_indices() {
+        match character {
+            '[' if paren_depth == 0 => {
+                bracket_index = Some(index);
+                break;
+            }
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    let Some(bracket_index) = bracket_index else {
+        return source.to_owned();
+    };
+    let (head, tail) = source.split_at(bracket_index);
+    let Some((_params, remainder)) = split_bracketed(tail) else {
+        return source.to_owned();
+    };
+    format!("{head}{remainder}")
 }
 
 fn parse_extension_statement(
@@ -664,10 +783,15 @@ mod tests {
             text: concat!(
                 "typealias Pair[T] = tuple[T, T]\n",
                 "interface Service:\n",
+                "    pass\n",
                 "data class Box:\n",
+                "    pass\n",
                 "sealed class Result:\n",
+                "    pass\n",
                 "overload def parse(value):\n",
-                "unsafe:\n"
+                "    ...\n",
+                "unsafe:\n",
+                "    pass\n"
             )
             .to_owned(),
         });
@@ -695,20 +819,20 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
-                    line: 3,
+                    line: 4,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
-                    line: 4,
+                    line: 6,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
-                    line: 5,
+                    line: 8,
                 }),
-                SyntaxStatement::Unsafe(UnsafeStatement { line: 6 }),
+                SyntaxStatement::Unsafe(UnsafeStatement { line: 10 }),
             ]
         );
     }
@@ -721,9 +845,13 @@ mod tests {
             text: concat!(
                 "typealias Pair[T: Hashable] = tuple[T, T]\n",
                 "interface Box[T]:\n",
+                "    pass\n",
                 "data class Node[T: Sequence[str]]:\n",
+                "    pass\n",
                 "sealed class Result[T]:\n",
-                "overload def first[T: Sequence[str]](value):\n"
+                "    pass\n",
+                "overload def first[T: Sequence[str]](value):\n",
+                "    ...\n"
             )
             .to_owned(),
         });
@@ -757,7 +885,7 @@ mod tests {
                         bound: Some(String::from("Sequence[str]")),
                     }],
                     header_suffix: String::new(),
-                    line: 3,
+                    line: 4,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
@@ -766,7 +894,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
-                    line: 4,
+                    line: 6,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("first"),
@@ -774,7 +902,7 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
-                    line: 5,
+                    line: 8,
                 }),
             ]
         );
@@ -828,7 +956,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("interface-bases.tpy"),
             kind: SourceKind::TypePython,
-            text: String::from("interface SupportsClose(Closable):\n"),
+            text: String::from("interface SupportsClose(Closable):\n    pass\n"),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -894,6 +1022,31 @@ mod tests {
             path: PathBuf::from("module.pyi"),
             kind: SourceKind::Stub,
             text: String::from("def helper() -> int: ...\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn parse_reports_invalid_typepython_body_syntax_after_normalization() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("broken.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("typealias UserId = int\ndef broken():\n    return )\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2001"));
+        assert!(rendered.contains("TypePython syntax error"));
+    }
+
+    #[test]
+    fn parse_accepts_generic_python_headers_in_typepython_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("class Box[T]:\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n"),
         });
 
         assert!(tree.diagnostics.is_empty());
