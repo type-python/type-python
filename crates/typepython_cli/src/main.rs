@@ -496,6 +496,8 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                     "TPY5003",
                     format!("missing runtime artifact `{}`", runtime_path.display()),
                 ));
+            } else if let Some(diagnostic) = verify_emitted_text_artifact(runtime_path) {
+                diagnostics.push(diagnostic);
             }
             if config.config.emit.emit_pyc {
                 let bytecode_path = match bytecode_path_for(runtime_path) {
@@ -531,6 +533,8 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                     "TPY5003",
                     format!("missing stub artifact `{}`", stub_path.display()),
                 ));
+            } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
+                diagnostics.push(diagnostic);
             }
         }
     }
@@ -558,6 +562,27 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
     }
 
     diagnostics
+}
+
+fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
+    let source = match SourceFile::from_path(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return Some(Diagnostic::error(
+                "TPY5003",
+                format!("unable to read emitted artifact `{}`: {error}", path.display()),
+            ))
+        }
+    };
+    let syntax = parse(source);
+    if syntax.diagnostics.has_errors() {
+        Some(Diagnostic::error(
+            "TPY5003",
+            format!("emitted artifact `{}` is not valid Python syntax", path.display()),
+        ))
+    } else {
+        None
+    }
 }
 
 fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> Result<PathBuf> {
@@ -1122,6 +1147,35 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("missing incremental snapshot"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_invalid_emitted_python_syntax() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("is not valid Python syntax"));
     }
 
     #[test]
