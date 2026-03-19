@@ -238,7 +238,7 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
     let snapshot = run_pipeline(&config)?;
     let diagnostics = build_diagnostics(&config, &snapshot.diagnostics);
     let mut notes = Vec::new();
-    if !diagnostics.has_errors() {
+    if should_emit_build_outputs(&config, &snapshot.diagnostics) {
         let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
             .with_context(|| {
                 format!(
@@ -276,6 +276,10 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
 
     print_summary(args.format, &summary, &diagnostics)?;
     Ok(exit_code(&diagnostics))
+}
+
+fn should_emit_build_outputs(config: &ConfigHandle, diagnostics: &DiagnosticReport) -> bool {
+    !diagnostics.has_errors() || !config.config.emit.no_emit_on_error
 }
 
 fn build_diagnostics(config: &ConfigHandle, diagnostics: &DiagnosticReport) -> DiagnosticReport {
@@ -765,7 +769,8 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_diagnostics, collect_source_paths, verify_build_artifacts, write_incremental_snapshot,
+        build_diagnostics, collect_source_paths, should_emit_build_outputs,
+        verify_build_artifacts, write_incremental_snapshot,
     };
     use std::{
         env, fs,
@@ -970,6 +975,22 @@ mod tests {
 
         assert!(rendered.contains("TPY4004"));
         assert!(rendered.contains("TPY5002"));
+    }
+
+    #[test]
+    fn should_emit_build_outputs_respects_no_emit_on_error() {
+        let project_dir = temp_project_dir("should_emit_build_outputs_respects_no_emit_on_error");
+        let result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n").unwrap();
+            let config = load(&project_dir).unwrap();
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+
+            should_emit_build_outputs(&config, &diagnostics)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(result);
     }
 
     #[test]
