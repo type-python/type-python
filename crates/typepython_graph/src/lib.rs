@@ -6,14 +6,14 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::BindingTable;
+use typepython_binding::{BindingTable, Declaration};
 
 /// Summary node for one module.
 #[derive(Debug, Clone)]
 pub struct ModuleNode {
     /// Module path on disk.
     pub module_path: PathBuf,
-    pub symbols: Vec<String>,
+    pub declarations: Vec<Declaration>,
     pub summary_fingerprint: u64,
 }
 
@@ -31,7 +31,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
         .iter()
         .map(|binding| ModuleNode {
             module_path: binding.module_path.clone(),
-            symbols: binding.symbols.clone(),
+            declarations: binding.declarations.clone(),
             summary_fingerprint: hash_summary(binding),
         })
         .collect();
@@ -42,7 +42,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
 fn hash_summary(binding: &BindingTable) -> u64 {
     let mut hasher = DefaultHasher::new();
     binding.module_path.hash(&mut hasher);
-    binding.symbols.hash(&mut hasher);
+    binding.declarations.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -50,27 +50,60 @@ fn hash_summary(binding: &BindingTable) -> u64 {
 mod tests {
     use super::build;
     use std::path::PathBuf;
-    use typepython_binding::BindingTable;
+    use typepython_binding::{BindingTable, Declaration, DeclarationKind};
 
     #[test]
     fn build_carries_bound_symbols_into_module_nodes() {
         let graph = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
-            symbols: vec![String::from("UserId"), String::from("User")],
+            declarations: vec![
+                Declaration {
+                    name: String::from("UserId"),
+                    kind: DeclarationKind::TypeAlias,
+                },
+                Declaration {
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                },
+            ],
         }]);
 
-        assert_eq!(graph.nodes[0].symbols, vec!["UserId", "User"]);
+        assert_eq!(
+            graph.nodes[0].declarations,
+            vec![
+                Declaration {
+                    name: String::from("UserId"),
+                    kind: DeclarationKind::TypeAlias,
+                },
+                Declaration {
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                },
+            ]
+        );
     }
 
     #[test]
     fn build_changes_fingerprint_when_symbols_change() {
         let first = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
-            symbols: vec![String::from("UserId")],
+            declarations: vec![Declaration {
+                name: String::from("UserId"),
+                kind: DeclarationKind::TypeAlias,
+            }],
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
-            symbols: vec![String::from("UserId"), String::from("User")],
+            declarations: vec![
+                Declaration {
+                    name: String::from("UserId"),
+                    kind: DeclarationKind::TypeAlias,
+                },
+                Declaration {
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                },
+            ],
         }]);
 
         println!(

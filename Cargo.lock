@@ -937,6 +937,7 @@ dependencies = [
 name = "typepython-checking"
 version = "0.1.0"
 dependencies = [
+ "typepython-binding",
  "typepython-diagnostics",
  "typepython-graph",
 ]

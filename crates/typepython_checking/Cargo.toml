@@ -9,6 +9,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+typepython-binding = { path = "../typepython_binding" }
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-graph = { path = "../typepython_graph" }
 

@@ -9,8 +9,21 @@ use typepython_lowering::LoweredModule;
 pub struct BindingTable {
     /// Module path for the symbol table.
     pub module_path: PathBuf,
-    /// Collected symbol names.
-    pub symbols: Vec<String>,
+    pub declarations: Vec<Declaration>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct Declaration {
+    pub name: String,
+    pub kind: DeclarationKind,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum DeclarationKind {
+    TypeAlias,
+    Class,
+    Function,
+    Overload,
 }
 
 /// Binds a lowered module into a symbol table.
@@ -18,24 +31,39 @@ pub struct BindingTable {
 pub fn bind(module: &LoweredModule) -> BindingTable {
     BindingTable {
         module_path: module.source_path.clone(),
-        symbols: module
+        declarations: module
             .python_source
             .lines()
-            .filter_map(bind_top_level_symbol)
+            .scan(false, |previous_was_overload, line| {
+                let declaration = bind_top_level_declaration(line, *previous_was_overload);
+                *previous_was_overload = line.trim() == "@overload";
+                Some(declaration)
+            })
+            .flatten()
             .collect(),
     }
 }
 
-fn bind_top_level_symbol(line: &str) -> Option<String> {
+fn bind_top_level_declaration(line: &str, previous_was_overload: bool) -> Option<Declaration> {
     if line.trim_start() != line {
         return None;
     }
 
     if let Some(rest) = line.strip_prefix("class ") {
-        return extract_identifier(rest);
+        return extract_identifier(rest).map(|name| Declaration {
+            name,
+            kind: DeclarationKind::Class,
+        });
     }
     if let Some(rest) = line.strip_prefix("def ") {
-        return extract_identifier(rest);
+        return extract_identifier(rest).map(|name| Declaration {
+            name,
+            kind: if previous_was_overload {
+                DeclarationKind::Overload
+            } else {
+                DeclarationKind::Function
+            },
+        });
     }
 
     let (name, remainder) = line.split_once(':')?;
@@ -43,7 +71,10 @@ fn bind_top_level_symbol(line: &str) -> Option<String> {
         return None;
     }
 
-    extract_identifier(name)
+    extract_identifier(name).map(|name| Declaration {
+        name,
+        kind: DeclarationKind::TypeAlias,
+    })
 }
 
 fn extract_identifier(source: &str) -> Option<String> {
@@ -71,7 +102,7 @@ fn is_valid_identifier(candidate: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::bind;
+    use super::{Declaration, DeclarationKind, bind};
     use std::path::PathBuf;
     use typepython_lowering::{LoweredModule, SourceMapEntry};
     use typepython_syntax::SourceKind;
@@ -87,8 +118,24 @@ mod tests {
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
         });
 
-        println!("{:?}", table.symbols);
-        assert_eq!(table.symbols, vec!["UserId", "User", "helper"]);
+        println!("{:?}", table.declarations);
+        assert_eq!(
+            table.declarations,
+            vec![
+                Declaration {
+                    name: String::from("UserId"),
+                    kind: DeclarationKind::TypeAlias,
+                },
+                Declaration {
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                },
+                Declaration {
+                    name: String::from("helper"),
+                    kind: DeclarationKind::Function,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -102,6 +149,38 @@ mod tests {
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
         });
 
-        assert_eq!(table.symbols, vec!["outer"]);
+        assert_eq!(
+            table.declarations,
+            vec![Declaration {
+                name: String::from("outer"),
+                kind: DeclarationKind::Function,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_marks_overload_definitions_separately() {
+        let table = bind(&LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import overload\n@overload\ndef parse(x: str) -> int: ...\ndef parse(x):\n    return 0\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        });
+
+        assert_eq!(
+            table.declarations,
+            vec![
+                Declaration {
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                },
+                Declaration {
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Function,
+                },
+            ]
+        );
     }
 }
