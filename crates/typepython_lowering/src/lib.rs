@@ -573,6 +573,8 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             )),
             SyntaxStatement::ClassDef(_) => {}
             SyntaxStatement::FunctionDef(_) => {}
+            SyntaxStatement::Import(_) => {}
+            SyntaxStatement::Value(_) => {}
             SyntaxStatement::OverloadDef(_) => {}
         }
     }

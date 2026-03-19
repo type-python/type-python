@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam};
 use ruff_python_parser::parse_module;
+use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 
 /// Supported input file kinds from the spec.
@@ -78,6 +80,8 @@ pub enum SyntaxStatement {
     OverloadDef(FunctionStatement),
     ClassDef(NamedBlockStatement),
     FunctionDef(FunctionStatement),
+    Import(ImportStatement),
+    Value(ValueStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -101,6 +105,18 @@ pub struct NamedBlockStatement {
 pub struct FunctionStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ImportStatement {
+    pub names: Vec<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ValueStatement {
+    pub names: Vec<String>,
     pub line: usize,
 }
 
@@ -159,30 +175,34 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
 
         if let Some(statement) = parse_extension_statement(&source.path, trimmed, line_number, &mut diagnostics) {
             statements.push(statement);
-        } else if line.trim_start() == line {
-            if let Some(statement) = parse_python_declaration_statement(
-                &source.path,
-                trimmed,
-                line_number,
-                &mut diagnostics,
-            ) {
-                statements.push(statement);
-            }
         }
     }
 
     if !diagnostics.has_errors() {
         let normalized = normalize_typepython_source(&source.text, &statements);
-        if let Err(error) = parse_module(&normalized) {
-            diagnostics.push(
-                Diagnostic::error("TPY2001", format!("TypePython syntax error: {}", error.error))
-                    .with_span(parse_error_span(
-                        &source.path,
-                        &source.text,
-                        error.location.start().to_usize(),
-                        error.location.end().to_usize(),
-                    )),
-            );
+        match parse_module(&normalized) {
+            Ok(parsed) => {
+                statements.extend(extract_ast_backed_statements(
+                    &source.path,
+                    &source.text,
+                    &normalized,
+                    parsed.suite(),
+                    &statements,
+                    &mut diagnostics,
+                ));
+                statements.sort_by_key(statement_line);
+            }
+            Err(error) => {
+                diagnostics.push(
+                    Diagnostic::error("TPY2001", format!("TypePython syntax error: {}", error.error))
+                        .with_span(parse_error_span(
+                            &source.path,
+                            &source.text,
+                            error.location.start().to_usize(),
+                            error.location.end().to_usize(),
+                        )),
+                );
+            }
         }
     }
 
@@ -222,6 +242,8 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::OverloadDef(statement) => statement.line,
         SyntaxStatement::ClassDef(statement) => statement.line,
         SyntaxStatement::FunctionDef(statement) => statement.line,
+        SyntaxStatement::Import(statement) => statement.line,
+        SyntaxStatement::Value(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -245,6 +267,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             let rest = trimmed.strip_prefix("overload ").unwrap_or(trimmed);
             format!("{indentation}{}", strip_generic_type_params(rest))
         }
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -253,16 +276,6 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
 }
 
 fn normalize_generic_python_header_line(line: &str) -> String {
-    let indentation = leading_indent(line);
-    let trimmed = line.trim_start();
-
-    if let Some(rest) = trimmed.strip_prefix("def ") {
-        return format!("{indentation}def {}", strip_generic_type_params(rest));
-    }
-    if let Some(rest) = trimmed.strip_prefix("class ") {
-        return format!("{indentation}class {}", strip_generic_type_params(rest));
-    }
-
     line.to_owned()
 }
 
@@ -294,6 +307,176 @@ fn strip_generic_type_params(source: &str) -> String {
         return source.to_owned();
     };
     format!("{head}{remainder}")
+}
+
+fn extract_ast_backed_statements(
+    path: &Path,
+    source: &str,
+    normalized: &str,
+    suite: &[Stmt],
+    existing: &[SyntaxStatement],
+    diagnostics: &mut DiagnosticReport,
+) -> Vec<SyntaxStatement> {
+    let existing_lines: std::collections::BTreeSet<_> = existing.iter().map(statement_line).collect();
+    let mut statements = Vec::new();
+
+    for stmt in suite {
+        let line = offset_to_line_column(normalized, stmt.range().start().to_usize()).0;
+        if existing_lines.contains(&line) {
+            continue;
+        }
+        if let Some(statement) = extract_ast_backed_statement(path, source, stmt, line, diagnostics) {
+            statements.push(statement);
+        }
+    }
+
+    statements
+}
+
+fn extract_ast_backed_statement(
+    path: &Path,
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+    diagnostics: &mut DiagnosticReport,
+) -> Option<SyntaxStatement> {
+    match stmt {
+        Stmt::ClassDef(stmt) => Some(SyntaxStatement::ClassDef(NamedBlockStatement {
+            name: stmt.name.as_str().to_owned(),
+            type_params: extract_ast_type_params(
+                path,
+                source,
+                stmt.type_params.as_deref(),
+                line,
+                "class declaration",
+                diagnostics,
+            )?,
+            header_suffix: stmt
+                .arguments
+                .as_ref()
+                .and_then(|arguments| slice_range(source, arguments.range()))
+                .map(str::to_owned)
+                .unwrap_or_default(),
+            line,
+        })),
+        Stmt::FunctionDef(stmt) => Some(SyntaxStatement::FunctionDef(FunctionStatement {
+            name: stmt.name.as_str().to_owned(),
+            type_params: extract_ast_type_params(
+                path,
+                source,
+                stmt.type_params.as_deref(),
+                line,
+                "function declaration",
+                diagnostics,
+            )?,
+            line,
+        })),
+        Stmt::Import(stmt) => {
+            let names = stmt
+                .names
+                .iter()
+                .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned())
+                .collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { names, line }))
+        }
+        Stmt::ImportFrom(stmt) => {
+            let names = stmt
+                .names
+                .iter()
+                .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned())
+                .collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { names, line }))
+        }
+        Stmt::Assign(stmt) => {
+            let names = stmt
+                .targets
+                .iter()
+                .flat_map(extract_assignment_names)
+                .collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement { names, line }))
+        }
+        Stmt::AnnAssign(stmt) => {
+            let names = extract_assignment_names(&stmt.target);
+            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement { names, line }))
+        }
+        _ => None,
+    }
+}
+
+fn extract_ast_type_params(
+    path: &Path,
+    source: &str,
+    type_params: Option<&ruff_python_ast::TypeParams>,
+    line: usize,
+    label: &str,
+    diagnostics: &mut DiagnosticReport,
+) -> Option<Vec<TypeParam>> {
+    let mut parsed = Vec::new();
+
+    for type_param in type_params.into_iter().flat_map(|type_params| type_params.iter()) {
+        match type_param {
+            AstTypeParam::TypeVar(type_var) => {
+                if type_var.default.is_some() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            "TPY4010",
+                            format!("{label} uses deferred-beyond-v1 type parameter defaults"),
+                        )
+                        .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                    );
+                    return None;
+                }
+                parsed.push(TypeParam {
+                    name: type_var.name.as_str().to_owned(),
+                    bound: type_var
+                        .bound
+                        .as_ref()
+                        .and_then(|bound| slice_range(source, bound.range()))
+                        .map(str::to_owned),
+                });
+            }
+            AstTypeParam::TypeVarTuple(_) | AstTypeParam::ParamSpec(_) => {
+                diagnostics.push(
+                    Diagnostic::error(
+                        "TPY4010",
+                        format!("{label} uses deferred-beyond-v1 type parameter syntax"),
+                    )
+                    .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                );
+                return None;
+            }
+        }
+    }
+
+    let mut seen = std::collections::BTreeSet::new();
+    for type_param in &parsed {
+        if !seen.insert(type_param.name.as_str()) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY4004",
+                    format!("{label} declares type parameter `{}` more than once", type_param.name),
+                )
+                .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+            );
+            return None;
+        }
+    }
+
+    Some(parsed)
+}
+
+fn extract_assignment_names(expr: &Expr) -> Vec<String> {
+    match expr {
+        Expr::Name(name) => vec![name.id.as_str().to_owned()],
+        Expr::Tuple(tuple) => tuple.elts.iter().flat_map(extract_assignment_names).collect(),
+        Expr::List(list) => list.elts.iter().flat_map(extract_assignment_names).collect(),
+        Expr::Starred(starred) => extract_assignment_names(&starred.value),
+        _ => Vec::new(),
+    }
+}
+
+fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
+    source.get(range.start().to_usize()..range.end().to_usize())
 }
 
 fn parse_extension_statement(
@@ -343,38 +526,6 @@ fn parse_extension_statement(
     }
     if trimmed_line.starts_with("unsafe") {
         return parse_unsafe(path, trimmed_line, line_number, diagnostics);
-    }
-
-    None
-}
-
-fn parse_python_declaration_statement(
-    path: &Path,
-    trimmed_line: &str,
-    line_number: usize,
-    diagnostics: &mut DiagnosticReport,
-) -> Option<SyntaxStatement> {
-    if let Some(rest) = trimmed_line.strip_prefix("class ") {
-        return parse_named_block(
-            path,
-            trimmed_line,
-            rest,
-            line_number,
-            diagnostics,
-            "class declaration",
-            SyntaxStatement::ClassDef,
-        );
-    }
-    if let Some(rest) = trimmed_line.strip_prefix("def ") {
-        return parse_function(
-            path,
-            trimmed_line,
-            rest,
-            line_number,
-            diagnostics,
-            "function declaration",
-            SyntaxStatement::FunctionDef,
-        );
     }
 
     None
@@ -859,8 +1010,8 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        FunctionStatement, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
-        TypeAliasStatement, TypeParam, UnsafeStatement, parse,
+        FunctionStatement, ImportStatement, NamedBlockStatement, SourceFile, SourceKind,
+        SyntaxStatement, TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
 
@@ -1171,6 +1322,41 @@ mod tests {
                         name: String::from("T"),
                         bound: None,
                     }],
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_imports_and_values_from_ast_body() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from(
+                "from pkg import foo, bar as baz\nimport tools.helpers, more.tools as alias\nvalue: int = 1\na = b = 2\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        println!("{:?}", tree.statements);
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("foo"), String::from("baz")],
+                    line: 1,
+                }),
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("tools.helpers"), String::from("alias")],
+                    line: 2,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("value")],
+                    line: 3,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("a"), String::from("b")],
                     line: 4,
                 }),
             ]
