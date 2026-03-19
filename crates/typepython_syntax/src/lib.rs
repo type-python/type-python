@@ -509,7 +509,21 @@ fn extract_ast_backed_statement(
             let names = stmt
                 .names
                 .iter()
-                .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned())
+                .map(|alias| {
+                    alias
+                        .asname
+                        .as_ref()
+                        .map(|identifier| identifier.as_str().to_owned())
+                        .unwrap_or_else(|| {
+                            alias
+                                .name
+                                .as_str()
+                                .split('.')
+                                .next()
+                                .unwrap_or(alias.name.as_str())
+                                .to_owned()
+                        })
+                })
                 .collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { names, line }))
         }
@@ -1489,7 +1503,7 @@ mod tests {
                     line: 1,
                 }),
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("tools.helpers"), String::from("alias")],
+                    names: vec![String::from("tools"), String::from("alias")],
                     line: 2,
                 }),
                 SyntaxStatement::Value(ValueStatement {
