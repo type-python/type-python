@@ -526,6 +526,7 @@ name = "typepython-binding"
 version = "0.1.0"
 dependencies = [
  "typepython-lowering",
+ "typepython-syntax",
 ]
 
 [[package]]
