@@ -20,6 +20,7 @@ pub struct EmitArtifact {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct RuntimeWriteSummary {
     pub runtime_files_written: usize,
+    pub stub_files_written: usize,
     pub py_typed_written: usize,
 }
 
@@ -64,26 +65,36 @@ pub fn write_runtime_outputs(
     let modules_by_source: BTreeMap<_, _> =
         modules.iter().map(|module| (module.source_path.as_path(), module)).collect();
     let mut runtime_files_written = 0usize;
+    let mut stub_files_written = 0usize;
     let mut package_roots = std::collections::BTreeSet::new();
 
     for artifact in artifacts {
-        let Some(runtime_path) = &artifact.runtime_path else {
-            continue;
-        };
         let Some(module) = modules_by_source.get(artifact.source_path.as_path()) else {
             continue;
         };
 
-        if let Some(parent) = runtime_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(runtime_path, &module.python_source)?;
-        if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+        if let Some(runtime_path) = &artifact.runtime_path {
             if let Some(parent) = runtime_path.parent() {
-                package_roots.insert(parent.to_path_buf());
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(runtime_path, &module.python_source)?;
+            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+                if let Some(parent) = runtime_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
+            }
+            runtime_files_written += 1;
+        }
+
+        if module.source_kind == SourceKind::Stub {
+            if let Some(stub_path) = &artifact.stub_path {
+                if let Some(parent) = stub_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(stub_path, &module.python_source)?;
+                stub_files_written += 1;
             }
         }
-        runtime_files_written += 1;
     }
 
     let mut py_typed_written = 0usize;
@@ -94,6 +105,7 @@ pub fn write_runtime_outputs(
 
     Ok(RuntimeWriteSummary {
         runtime_files_written,
+        stub_files_written,
         py_typed_written,
     })
 }
@@ -136,6 +148,12 @@ mod tests {
                     python_source: String::from("def helper():\n    return 1\n"),
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
+                LoweredModule {
+                    source_path: PathBuf::from("src/app/helpers.pyi"),
+                    source_kind: SourceKind::Stub,
+                    python_source: String::from("def helper() -> int: ...\n"),
+                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                },
             ];
             let artifacts = vec![
                 EmitArtifact {
@@ -148,27 +166,35 @@ mod tests {
                     runtime_path: Some(temp_dir.join("build/app/helpers.py")),
                     stub_path: None,
                 },
+                EmitArtifact {
+                    source_path: PathBuf::from("src/app/helpers.pyi"),
+                    runtime_path: None,
+                    stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
+                },
             ];
 
             let summary = write_runtime_outputs(&artifacts, &modules).unwrap();
             let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
             let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
+            let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi")).unwrap();
             let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
 
-            (summary, runtime_init, runtime_helpers, py_typed)
+            (summary, runtime_init, runtime_helpers, stub_helpers, py_typed)
         })();
         remove_temp_dir(&temp_dir);
 
-        let (summary, runtime_init, runtime_helpers, py_typed) = result;
+        let (summary, runtime_init, runtime_helpers, stub_helpers, py_typed) = result;
         assert_eq!(
             summary,
             RuntimeWriteSummary {
                 runtime_files_written: 2,
+                stub_files_written: 1,
                 py_typed_written: 1,
             }
         );
         assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
+        assert_eq!(stub_helpers, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");
     }
 
