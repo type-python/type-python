@@ -31,12 +31,24 @@ pub enum DeclarationKind {
 /// Binds a lowered module into a symbol table.
 #[must_use]
 pub fn bind(module: &LoweredModule) -> BindingTable {
+    let first_source_line = module
+        .source_map
+        .iter()
+        .map(|entry| entry.lowered_line)
+        .min()
+        .unwrap_or(1);
+
     BindingTable {
         module_path: module.source_path.clone(),
         declarations: module
             .python_source
             .lines()
-            .scan(false, |previous_was_overload, line| {
+            .enumerate()
+            .scan(false, |previous_was_overload, (index, line)| {
+                let line_number = index + 1;
+                if line_number < first_source_line {
+                    return Some(Vec::new());
+                }
                 let declarations = bind_top_level_declarations(line, *previous_was_overload);
                 *previous_was_overload = line.trim() == "@overload";
                 Some(declarations)
@@ -204,17 +216,26 @@ mod tests {
             python_source: String::from(
                 "from typing import TypeAlias\nUserId: TypeAlias = int\nclass User:\n    pass\ndef helper():\n    return 1\n",
             ),
-            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            source_map: vec![
+                SourceMapEntry {
+                    original_line: 1,
+                    lowered_line: 2,
+                },
+                SourceMapEntry {
+                    original_line: 2,
+                    lowered_line: 3,
+                },
+                SourceMapEntry {
+                    original_line: 3,
+                    lowered_line: 5,
+                },
+            ],
         });
 
         println!("{:?}", table.declarations);
         assert_eq!(
             table.declarations,
             vec![
-                Declaration {
-                    name: String::from("TypeAlias"),
-                    kind: DeclarationKind::Import,
-                },
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
@@ -259,16 +280,21 @@ mod tests {
             python_source: String::from(
                 "from typing import overload\n@overload\ndef parse(x: str) -> int: ...\ndef parse(x):\n    return 0\n",
             ),
-            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            source_map: vec![
+                SourceMapEntry {
+                    original_line: 1,
+                    lowered_line: 2,
+                },
+                SourceMapEntry {
+                    original_line: 2,
+                    lowered_line: 4,
+                },
+            ],
         });
 
         assert_eq!(
             table.declarations,
             vec![
-                Declaration {
-                    name: String::from("overload"),
-                    kind: DeclarationKind::Import,
-                },
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
@@ -278,6 +304,26 @@ mod tests {
                     kind: DeclarationKind::Function,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn bind_ignores_synthetic_prelude_imports_and_typevars() {
+        let table = bind(&LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import TypeVar\nfrom typing import TypeAlias\nT = TypeVar(\"T\")\nPair: TypeAlias = tuple[T, T]\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 4 }],
+        });
+
+        assert_eq!(
+            table.declarations,
+            vec![Declaration {
+                name: String::from("Pair"),
+                kind: DeclarationKind::TypeAlias,
+            }]
         );
     }
 
