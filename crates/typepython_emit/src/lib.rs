@@ -20,6 +20,7 @@ pub struct EmitArtifact {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct RuntimeWriteSummary {
     pub runtime_files_written: usize,
+    pub py_typed_written: usize,
 }
 
 /// Plans output paths for the provided modules.
@@ -63,6 +64,7 @@ pub fn write_runtime_outputs(
     let modules_by_source: BTreeMap<_, _> =
         modules.iter().map(|module| (module.source_path.as_path(), module)).collect();
     let mut runtime_files_written = 0usize;
+    let mut package_roots = std::collections::BTreeSet::new();
 
     for artifact in artifacts {
         let Some(runtime_path) = &artifact.runtime_path else {
@@ -76,10 +78,24 @@ pub fn write_runtime_outputs(
             fs::create_dir_all(parent)?;
         }
         fs::write(runtime_path, &module.python_source)?;
+        if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+            if let Some(parent) = runtime_path.parent() {
+                package_roots.insert(parent.to_path_buf());
+            }
+        }
         runtime_files_written += 1;
     }
 
-    Ok(RuntimeWriteSummary { runtime_files_written })
+    let mut py_typed_written = 0usize;
+    for package_root in package_roots {
+        fs::write(package_root.join("py.typed"), "")?;
+        py_typed_written += 1;
+    }
+
+    Ok(RuntimeWriteSummary {
+        runtime_files_written,
+        py_typed_written,
+    })
 }
 
 fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
@@ -137,15 +153,23 @@ mod tests {
             let summary = write_runtime_outputs(&artifacts, &modules).unwrap();
             let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
             let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
+            let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
 
-            (summary, runtime_init, runtime_helpers)
+            (summary, runtime_init, runtime_helpers, py_typed)
         })();
         remove_temp_dir(&temp_dir);
 
-        let (summary, runtime_init, runtime_helpers) = result;
-        assert_eq!(summary, RuntimeWriteSummary { runtime_files_written: 2 });
+        let (summary, runtime_init, runtime_helpers, py_typed) = result;
+        assert_eq!(
+            summary,
+            RuntimeWriteSummary {
+                runtime_files_written: 2,
+                py_typed_written: 1,
+            }
+        );
         assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
+        assert_eq!(py_typed, "");
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {

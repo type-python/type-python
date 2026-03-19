@@ -252,8 +252,9 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
                 )
             })?;
         notes.push(format!(
-            "wrote {} runtime artifact(s); `.pyi` emission for `.tpy` remains milestone work",
-            runtime_summary.runtime_files_written
+            "wrote {} runtime artifact(s), {} `py.typed` marker(s); `.pyi` emission for `.tpy` remains milestone work",
+            runtime_summary.runtime_files_written,
+            runtime_summary.py_typed_written
         ));
     }
 
