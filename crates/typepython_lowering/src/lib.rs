@@ -92,6 +92,16 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             _ => None,
         })
         .collect();
+    let overloads: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::OverloadDef(statement) if statement.type_params.is_empty() => {
+                Some((statement.line, statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
@@ -103,6 +113,9 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
     if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
         lowered_lines.push(String::from("from dataclasses import dataclass"));
     }
+    if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing import overload"));
+    }
 
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
@@ -112,6 +125,8 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             lowered_lines.push(rewrite_interface_line(line, statement));
         } else if let Some(statement) = data_classes.get(&line_number) {
             lowered_lines.extend(rewrite_data_class_lines(line, statement));
+        } else if overloads.contains_key(&line_number) {
+            lowered_lines.extend(rewrite_overload_lines(line));
         } else if unsafe_lines.contains(&line_number) {
             lowered_lines.push(rewrite_unsafe_line(line));
         } else {
@@ -214,6 +229,26 @@ fn has_dataclass_import(source: &str) -> bool {
     })
 }
 
+fn rewrite_overload_lines(line: &str) -> [String; 2] {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    let rewritten = line
+        .trim_start()
+        .strip_prefix("overload ")
+        .unwrap_or_else(|| line.trim_start())
+        .to_owned();
+
+    [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
+}
+
+fn has_overload_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import overload"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("overload"))
+    })
+}
+
 fn is_lowerable_interface(statement: &typepython_syntax::NamedBlockStatement) -> bool {
     is_lowerable_named_block(statement)
 }
@@ -254,10 +289,11 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "sealed class",
             )),
+            SyntaxStatement::OverloadDef(statement) if statement.type_params.is_empty() => {}
             SyntaxStatement::OverloadDef(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
-                "overload def",
+                "generic overload def",
             )),
         }
     }
@@ -475,6 +511,30 @@ mod tests {
     }
 
     #[test]
+    fn lower_rewrites_non_generic_overload_with_import() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("overload.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("overload def parse(x: str) -> int: ...\n"),
+            },
+            statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
+                name: String::from("parse"),
+                type_params: Vec::new(),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import overload\n@overload\ndef parse(x: str) -> int: ...\n"
+        );
+    }
+
+    #[test]
     fn lower_still_blocks_generic_typealias() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
@@ -498,5 +558,30 @@ mod tests {
         assert!(lowered.diagnostics.has_errors());
         assert!(rendered.contains("TPY2002"));
         assert!(rendered.contains("`generic typealias`"));
+    }
+
+    #[test]
+    fn lower_still_blocks_generic_overload_def() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("generic-overload.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("overload def parse[T](x: T) -> T: ...\n"),
+            },
+            statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
+                name: String::from("parse"),
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                }],
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let rendered = lowered.diagnostics.as_text();
+        assert!(lowered.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2002"));
+        assert!(rendered.contains("`generic overload def`"));
     }
 }

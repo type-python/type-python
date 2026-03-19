@@ -317,7 +317,7 @@ fn parse_overload(
     line_number: usize,
     diagnostics: &mut DiagnosticReport,
 ) -> Option<SyntaxStatement> {
-    if !line.ends_with(':') {
+    let Some((signature, _suite)) = split_top_level_once(rest.trim_end(), ':') else {
         diagnostics.push(parse_error(
             path,
             line_number,
@@ -325,10 +325,9 @@ fn parse_overload(
             "overload declaration must end with `:`",
         ));
         return None;
-    }
+    };
 
-    let rest = &rest[..rest.len().saturating_sub(1)].trim_end();
-    let Some((name_part, _)) = split_top_level_once(rest, '(') else {
+    let Some((name_part, _)) = split_top_level_once(signature.trim_end(), '(') else {
         diagnostics.push(parse_error(
             path,
             line_number,
@@ -797,6 +796,25 @@ mod tests {
                 name: String::from("SupportsClose"),
                 type_params: Vec::new(),
                 header_suffix: String::from("(Closable)"),
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_accepts_overload_simple_suite_form() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("overload-simple-suite.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("overload def parse(x: str) -> int: ...\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::OverloadDef(FunctionStatement {
+                name: String::from("parse"),
+                type_params: Vec::new(),
                 line: 1,
             })]
         );
