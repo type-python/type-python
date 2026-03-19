@@ -131,6 +131,22 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             _ => None,
         })
         .collect();
+    let class_defs: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::ClassDef(statement) => Some((statement.line, statement)),
+            _ => None,
+        })
+        .collect();
+    let function_defs: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::FunctionDef(statement) => Some((statement.line, statement)),
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
     let mut lowered_line_number = 1usize;
@@ -164,6 +180,10 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             rewrite_overload_lines(line).into_iter().collect()
         } else if let Some(statement) = sealed_classes.get(&line_number) {
             vec![rewrite_sealed_class_line(line, statement)]
+        } else if let Some(statement) = class_defs.get(&line_number) {
+            vec![rewrite_class_def_line(line, statement)]
+        } else if function_defs.contains_key(&line_number) {
+            vec![rewrite_function_def_line(line)]
         } else if unsafe_lines.contains(&line_number) {
             vec![rewrite_unsafe_line(line)]
         } else {
@@ -257,6 +277,67 @@ fn rewrite_sealed_class_line(
     };
 
     format!("{indentation}class {}{}:  # tpy:sealed", statement.name, bases)
+}
+
+fn rewrite_class_def_line(
+    line: &str,
+    statement: &typepython_syntax::NamedBlockStatement,
+) -> String {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    format!("{indentation}class {}{}:", statement.name, statement.header_suffix)
+}
+
+fn rewrite_function_def_line(line: &str) -> String {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    let trimmed = line.trim_start();
+    format!("{indentation}{}", strip_generic_type_params(trimmed))
+}
+
+fn strip_generic_type_params(source: &str) -> String {
+    let mut bracket_index = None;
+    let mut paren_depth = 0usize;
+
+    for (index, character) in source.char_indices() {
+        match character {
+            '[' if paren_depth == 0 => {
+                bracket_index = Some(index);
+                break;
+            }
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    let Some(bracket_index) = bracket_index else {
+        return source.to_owned();
+    };
+    let (head, tail) = source.split_at(bracket_index);
+    let Some((_params, remainder)) = split_bracketed(tail) else {
+        return source.to_owned();
+    };
+    format!("{head}{remainder}")
+}
+
+fn split_bracketed(input: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+
+    for (index, character) in input.char_indices() {
+        match character {
+            '[' => depth += 1,
+            ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some((&input[1..index], &input[index + 1..]));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn append_protocol_base(header_suffix: &str) -> String {
@@ -726,5 +807,70 @@ mod tests {
         assert!(lowered.diagnostics.has_errors());
         assert!(rendered.contains("TPY2002"));
         assert!(rendered.contains("`generic overload def`"));
+    }
+
+    #[test]
+    fn lower_rewrites_generic_ordinary_class_and_function_headers() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("ordinary-generics.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from(
+                    "class Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    header_suffix: String::from("(Base)"),
+                    line: 1,
+                }),
+                SyntaxStatement::FunctionDef(typepython_syntax::FunctionStatement {
+                    name: String::from("first"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "class Box(Base):\n    pass\n\ndef first(value: T) -> T:\n    return value\n"
+        );
+        assert_eq!(
+            lowered.module.source_map,
+            vec![
+                SourceMapEntry {
+                    original_line: 1,
+                    lowered_line: 1,
+                },
+                SourceMapEntry {
+                    original_line: 2,
+                    lowered_line: 2,
+                },
+                SourceMapEntry {
+                    original_line: 3,
+                    lowered_line: 3,
+                },
+                SourceMapEntry {
+                    original_line: 4,
+                    lowered_line: 4,
+                },
+                SourceMapEntry {
+                    original_line: 5,
+                    lowered_line: 5,
+                },
+            ]
+        );
     }
 }
