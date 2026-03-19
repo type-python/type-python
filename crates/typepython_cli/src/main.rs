@@ -245,7 +245,7 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
                 )
             })?;
         notes.push(format!(
-            "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s); `.pyi` emission for `.tpy` remains milestone work",
+            "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
             runtime_summary.runtime_files_written,
             runtime_summary.stub_files_written,
             runtime_summary.py_typed_written
@@ -324,7 +324,7 @@ fn run_verify(args: RunArgs) -> Result<ExitCode> {
         planned_artifacts: snapshot.emit_plan.len(),
         tracked_modules: snapshot.tracked_modules,
         notes: vec![String::from(
-            "verifies current runtime artifacts, copied stubs, and `py.typed`; `.pyi` generation for `.tpy` remains milestone work",
+            "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
         )],
     };
 
@@ -464,14 +464,12 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
             }
         }
 
-        if SourceKind::from_path(&artifact.source_path) == Some(SourceKind::Stub) {
-            if let Some(stub_path) = &artifact.stub_path {
-                if !stub_path.exists() {
-                    diagnostics.push(Diagnostic::error(
-                        "TPY5003",
-                        format!("missing stub artifact `{}`", stub_path.display()),
-                    ));
-                }
+        if let Some(stub_path) = &artifact.stub_path {
+            if !stub_path.exists() {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!("missing stub artifact `{}`", stub_path.display()),
+                ));
             }
         }
     }
@@ -882,6 +880,7 @@ mod tests {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/helpers.pyi"), "def helper() -> int: ...\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
             let config = load(&project_dir).unwrap();
