@@ -5,6 +5,7 @@ use std::{
     fmt::{self, Display},
     fs, io,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use serde::{Deserialize, Serialize};
@@ -59,7 +60,7 @@ pub enum ConfigError {
     #[error("unable to find `typepython.toml` or `[tool.typepython]` starting from {0}")]
     NotFound(PathBuf),
     /// Underlying filesystem error while reading config.
-    #[error("unable to read configuration from {path}: {source}")]
+    #[error("TPY1001: unable to read configuration from {path}: {source}")]
     Io {
         /// Path that failed to load.
         path: PathBuf,
@@ -68,7 +69,7 @@ pub enum ConfigError {
         source: io::Error,
     },
     /// TOML parse failure.
-    #[error("unable to parse configuration from {path}: {source}")]
+    #[error("TPY1001: unable to parse configuration from {path}: {source}")]
     Parse {
         /// Path that failed to parse.
         path: PathBuf,
@@ -76,6 +77,8 @@ pub enum ConfigError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("TPY1002: invalid configuration value in {path}: {message}")]
+    InvalidValue { path: PathBuf, message: String },
 }
 
 /// Effective TypePython configuration.
@@ -357,6 +360,21 @@ struct RawPyProjectTool {
 }
 
 impl Config {
+    fn validate(&self, config_path: &Path) -> Result<(), ConfigError> {
+        validate_target_python(config_path, &self.project.target_python)?;
+
+        if let Some(python_executable) = &self.resolution.python_executable {
+            validate_python_executable(
+                config_path,
+                config_path.parent().unwrap_or_else(|| Path::new(".")),
+                python_executable,
+                &self.project.target_python,
+            )?;
+        }
+
+        Ok(())
+    }
+
     fn from_raw(raw: RawConfig) -> Self {
         let mut config = Self::default();
 
@@ -538,13 +556,21 @@ pub fn load(start_dir: impl AsRef<Path>) -> Result<ConfigHandle, ConfigError> {
 
 fn load_typepython_toml(path: &Path) -> Result<Config, ConfigError> {
     let raw = read_toml::<RawConfig>(path)?;
-    Ok(Config::from_raw(raw))
+    let config = Config::from_raw(raw);
+    config.validate(path)?;
+    Ok(config)
 }
 
 fn load_pyproject_toml(path: &Path) -> Result<Option<Config>, ConfigError> {
     let raw = read_toml::<RawPyProject>(path)?;
     let maybe_config = raw.tool.and_then(|tool| tool.typepython);
-    Ok(maybe_config.map(Config::from_raw))
+    maybe_config
+        .map(|raw_config| {
+            let config = Config::from_raw(raw_config);
+            config.validate(path)?;
+            Ok(config)
+        })
+        .transpose()
 }
 
 fn read_toml<T>(path: &Path) -> Result<T, ConfigError>
@@ -579,4 +605,222 @@ fn normalize_spec_toml(content: &str) -> String {
     }
 
     normalized
+}
+
+fn validate_target_python(config_path: &Path, target_python: &str) -> Result<(), ConfigError> {
+    match target_python {
+        "3.10" | "3.11" | "3.12" => Ok(()),
+        _ => Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "project.target_python = `{target_python}` is unsupported; expected one of `3.10`, `3.11`, or `3.12`"
+            ),
+        }),
+    }
+}
+
+fn validate_python_executable(
+    config_path: &Path,
+    config_dir: &Path,
+    python_executable: &str,
+    target_python: &str,
+) -> Result<(), ConfigError> {
+    let executable_path = resolve_python_executable(config_dir, python_executable);
+    let output = Command::new(&executable_path)
+        .args([
+            "-c",
+            "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
+        ])
+        .output()
+        .map_err(|error| ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "resolution.python_executable = `{python_executable}` could not be executed: {error}"
+            ),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "resolution.python_executable = `{python_executable}` exited with status {} while probing its version{}",
+                output.status,
+                format_stderr_suffix(stderr.trim())
+            ),
+        });
+    }
+
+    let resolved_version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if resolved_version != target_python {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "resolution.python_executable = `{python_executable}` resolved to Python {resolved_version}, which is incompatible with project.target_python = `{target_python}`"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn resolve_python_executable(config_dir: &Path, python_executable: &str) -> PathBuf {
+    let executable = Path::new(python_executable);
+    if executable.is_absolute() || !python_executable.contains(std::path::MAIN_SEPARATOR) {
+        return executable.to_path_buf();
+    }
+
+    config_dir.join(executable)
+}
+
+fn format_stderr_suffix(stderr: &str) -> String {
+    if stderr.is_empty() { String::new() } else { format!(": {stderr}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConfigSource, load};
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn prefers_typepython_toml_over_pyproject() {
+        let project_dir = temp_project_dir("prefers_typepython_toml_over_pyproject");
+        let load_result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.11\"\n")
+                .unwrap();
+            fs::write(
+                project_dir.join("pyproject.toml"),
+                "[tool.typepython.project]\ntarget_python = \"3.12\"\n",
+            )
+            .unwrap();
+
+            load(&project_dir)
+        })();
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected config discovery to succeed");
+        assert_eq!(handle.source, ConfigSource::TypePythonToml);
+        assert_eq!(handle.config.project.target_python, "3.11");
+    }
+
+    #[test]
+    fn rejects_unsupported_target_python() {
+        let project_dir = temp_project_dir("rejects_unsupported_target_python");
+        let load_result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.9\"\n")
+                .unwrap();
+
+            load(&project_dir)
+        })();
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected invalid target_python to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("project.target_python = `3.9`"));
+    }
+
+    #[test]
+    fn rejects_python_executable_version_mismatch() {
+        let project_dir = temp_project_dir("rejects_python_executable_version_mismatch");
+        let load_result = (|| {
+            let executable = write_fake_python(&project_dir, "3.11");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    concat!(
+                        "[project]\n",
+                        "target_python = \"3.10\"\n\n",
+                        "[resolution]\n",
+                        "python_executable = \"{}\"\n"
+                    ),
+                    executable.display()
+                ),
+            )
+            .unwrap();
+
+            load(&project_dir)
+        })();
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected python_executable mismatch to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("resolved to Python 3.11"));
+        assert!(message.contains("project.target_python = `3.10`"));
+    }
+
+    #[test]
+    fn accepts_matching_python_executable_version() {
+        let project_dir = temp_project_dir("accepts_matching_python_executable_version");
+        let load_result = (|| {
+            let executable = write_fake_python(&project_dir, "3.11");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    concat!(
+                        "[project]\n",
+                        "target_python = \"3.11\"\n\n",
+                        "[resolution]\n",
+                        "python_executable = \"{}\"\n"
+                    ),
+                    executable.display()
+                ),
+            )
+            .unwrap();
+
+            load(&project_dir)
+        })();
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected matching python_executable to succeed");
+        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(
+            handle.config.resolution.python_executable.as_deref(),
+            Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
+        );
+    }
+
+    fn temp_project_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("typepython-config-{test_name}-{unique}"));
+        fs::create_dir_all(&directory).expect("temp project directory should be created");
+        directory
+    }
+
+    fn remove_temp_project_dir(path: &Path) {
+        if path.exists() {
+            fs::remove_dir_all(path).expect("temp project directory should be removed");
+        }
+    }
+
+    fn write_fake_python(project_dir: &Path, reported_version: &str) -> PathBuf {
+        let executable = project_dir.join("fake-python.sh");
+        fs::write(&executable, format!("#!/bin/sh\nprintf '%s\\n' '{reported_version}'\n"))
+            .expect("fake python executable should be written");
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(&executable)
+                .expect("fake python metadata should be readable")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&executable, permissions)
+                .expect("fake python executable should be chmodded");
+        }
+        executable
+    }
 }
