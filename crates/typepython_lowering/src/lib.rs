@@ -85,9 +85,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::TypeAlias(statement) if statement.type_params.is_empty() => {
-                Some((statement.line, statement))
-            }
+            SyntaxStatement::TypeAlias(statement) => Some((statement.line, statement)),
             _ => None,
         })
         .collect();
@@ -115,9 +113,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::OverloadDef(statement) if statement.type_params.is_empty() => {
-                Some((statement.line, statement))
-            }
+            SyntaxStatement::OverloadDef(statement) => Some((statement.line, statement)),
             _ => None,
         })
         .collect();
@@ -148,11 +144,13 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         })
         .collect();
     let runtime_type_params = collect_runtime_type_params(
+        &type_aliases,
         &interfaces,
         &data_classes,
         &sealed_classes,
         &class_defs,
         &function_defs,
+        &overloads,
     );
     let generic_class_like_declarations = has_generic_class_like_declarations(
         &interfaces,
@@ -232,14 +230,23 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
 }
 
 fn collect_runtime_type_params(
+    type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
 ) -> std::collections::BTreeMap<String, Option<String>> {
     let mut type_params = std::collections::BTreeMap::new();
 
+    for statement in type_aliases.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
     for statement in interfaces.values() {
         for type_param in &statement.type_params {
             type_params
@@ -269,6 +276,13 @@ fn collect_runtime_type_params(
         }
     }
     for statement in function_defs.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
+    for statement in overloads.values() {
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -513,6 +527,7 @@ fn rewrite_overload_lines(line: &str) -> [String; 2] {
         .strip_prefix("overload ")
         .unwrap_or_else(|| line.trim_start())
         .to_owned();
+    let rewritten = strip_generic_type_params(&rewritten);
 
     [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
 }
@@ -537,12 +552,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     for statement in &tree.statements {
         match statement {
             SyntaxStatement::Unsafe(_) => {}
-            SyntaxStatement::TypeAlias(statement) if statement.type_params.is_empty() => {}
-            SyntaxStatement::TypeAlias(statement) => diagnostics.push(lowering_error(
-                &tree.source.path,
-                statement.line,
-                "generic typealias",
-            )),
+            SyntaxStatement::TypeAlias(_) => {}
             SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {}
             SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
@@ -563,12 +573,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             )),
             SyntaxStatement::ClassDef(_) => {}
             SyntaxStatement::FunctionDef(_) => {}
-            SyntaxStatement::OverloadDef(statement) if statement.type_params.is_empty() => {}
-            SyntaxStatement::OverloadDef(statement) => diagnostics.push(lowering_error(
-                &tree.source.path,
-                statement.line,
-                "generic overload def",
-            )),
+            SyntaxStatement::OverloadDef(_) => {}
         }
     }
 
@@ -645,35 +650,13 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("unsupported.tpy"),
                 kind: SourceKind::TypePython,
-                text: String::from("typealias Pair[T] = tuple[T, T]\noverload def parse[T](x: T) -> T: ...\n"),
+                text: String::from("unknown feature\n"),
             },
-            statements: vec![
-                SyntaxStatement::TypeAlias(TypeAliasStatement {
-                    name: String::from("Pair"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
-                    value: String::from("tuple[T, T]"),
-                    line: 1,
-                }),
-                SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
-                    name: String::from("parse"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
-                    line: 2,
-                }),
-            ],
+            statements: vec![],
             diagnostics: DiagnosticReport::default(),
         });
 
-        let rendered = lowered.diagnostics.as_text();
-        assert!(lowered.diagnostics.has_errors());
-        assert!(rendered.contains("TPY2002"));
-        assert!(rendered.contains("`generic typealias`"));
-        assert!(rendered.contains("`generic overload def`"));
+        assert!(lowered.diagnostics.is_empty());
     }
 
     #[test]
@@ -972,10 +955,11 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        let rendered = lowered.diagnostics.as_text();
-        assert!(lowered.diagnostics.has_errors());
-        assert!(rendered.contains("TPY2002"));
-        assert!(rendered.contains("`generic typealias`"));
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nT = TypeVar(\"T\")\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
+        );
     }
 
     #[test]
@@ -997,10 +981,11 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        let rendered = lowered.diagnostics.as_text();
-        assert!(lowered.diagnostics.has_errors());
-        assert!(rendered.contains("TPY2002"));
-        assert!(rendered.contains("`generic overload def`"));
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nT = TypeVar(\"T\")\nfrom typing import overload\n@overload\ndef parse(x: T) -> T: ...\n"
+        );
     }
 
     #[test]
