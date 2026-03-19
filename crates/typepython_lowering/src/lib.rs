@@ -72,16 +72,31 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
             _ => None,
         })
         .collect();
+    let interfaces: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Interface(statement) if is_lowerable_interface(statement) => {
+                Some((statement.line, statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut lowered_lines = Vec::new();
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import TypeAlias"));
+    }
+    if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing import Protocol"));
     }
 
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
         if let Some(statement) = type_aliases.get(&line_number) {
             lowered_lines.push(rewrite_typealias_line(line, statement));
+        } else if let Some(statement) = interfaces.get(&line_number) {
+            lowered_lines.push(rewrite_interface_line(line, statement));
         } else if unsafe_lines.contains(&line_number) {
             lowered_lines.push(rewrite_unsafe_line(line));
         } else {
@@ -122,6 +137,49 @@ fn has_typealias_import(source: &str) -> bool {
     })
 }
 
+fn rewrite_interface_line(
+    line: &str,
+    statement: &typepython_syntax::NamedBlockStatement,
+) -> String {
+    let indentation_width = line.len() - line.trim_start().len();
+    let indentation = &line[..indentation_width];
+    let bases = if statement.header_suffix.is_empty() {
+        String::from("(Protocol)")
+    } else {
+        append_protocol_base(&statement.header_suffix)
+    };
+    format!("{indentation}class {}{}:", statement.name, bases)
+}
+
+fn append_protocol_base(header_suffix: &str) -> String {
+    let trimmed = header_suffix.trim();
+    if trimmed == "()" {
+        return String::from("(Protocol)");
+    }
+
+    let inner = trimmed.trim_start_matches('(').trim_end_matches(')').trim();
+    if inner.is_empty() {
+        String::from("(Protocol)")
+    } else {
+        format!("({inner}, Protocol)")
+    }
+}
+
+fn has_protocol_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Protocol"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Protocol"))
+    })
+}
+
+fn is_lowerable_interface(statement: &typepython_syntax::NamedBlockStatement) -> bool {
+    statement.type_params.is_empty()
+        && (statement.header_suffix.is_empty()
+            || (statement.header_suffix.starts_with('(')
+                && statement.header_suffix.ends_with(')')))
+}
+
 fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
 
@@ -134,6 +192,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 statement.line,
                 "generic typealias",
             )),
+            SyntaxStatement::Interface(statement) if is_lowerable_interface(statement) => {}
             SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
                 statement.line,
@@ -175,7 +234,7 @@ mod tests {
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
         NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-        TypeAliasStatement, UnsafeStatement,
+        TypeAliasStatement, TypeParam, UnsafeStatement,
     };
 
     #[test]
@@ -215,20 +274,24 @@ mod tests {
     fn lower_reports_unimplemented_typepython_constructs() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
-                path: PathBuf::from("typealias.tpy"),
+                path: PathBuf::from("unsupported.tpy"),
                 kind: SourceKind::TypePython,
-                text: String::from("typealias UserId = int\ninterface Service:\n"),
+                text: String::from("interface Service[T]:\ndata class User:\n"),
             },
             statements: vec![
-                SyntaxStatement::TypeAlias(TypeAliasStatement {
-                    name: String::from("UserId"),
-                    type_params: Vec::new(),
-                    value: String::from("int"),
-                    line: 1,
-                }),
                 SyntaxStatement::Interface(NamedBlockStatement {
                     name: String::from("Service"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                    }],
+                    header_suffix: String::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::DataClass(NamedBlockStatement {
+                    name: String::from("User"),
                     type_params: Vec::new(),
+                    header_suffix: String::new(),
                     line: 2,
                 }),
             ],
@@ -239,6 +302,7 @@ mod tests {
         assert!(lowered.diagnostics.has_errors());
         assert!(rendered.contains("TPY2002"));
         assert!(rendered.contains("`interface`"));
+        assert!(rendered.contains("`data class`"));
     }
 
     #[test]
@@ -264,6 +328,55 @@ mod tests {
     }
 
     #[test]
+    fn lower_rewrites_non_generic_interface_with_protocol_import() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("interface.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("interface SupportsClose:\n    def close(self): ...\n"),
+            },
+            statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("SupportsClose"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import Protocol\nclass SupportsClose(Protocol):\n    def close(self): ...\n"
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_interface_with_existing_bases() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("interface-bases.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::from("interface SupportsClose(Closable):\n    def close(self): ...\n"),
+            },
+            statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("SupportsClose"),
+                type_params: Vec::new(),
+                header_suffix: String::from("(Closable)"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import Protocol\nclass SupportsClose(Closable, Protocol):\n    def close(self): ...\n"
+        );
+    }
+
+    #[test]
     fn lower_still_blocks_generic_typealias() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
@@ -273,7 +386,7 @@ mod tests {
             },
             statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
                 name: String::from("Pair"),
-                type_params: vec![typepython_syntax::TypeParam {
+                type_params: vec![TypeParam {
                     name: String::from("T"),
                     bound: None,
                 }],

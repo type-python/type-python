@@ -90,6 +90,7 @@ pub struct TypeAliasStatement {
 pub struct NamedBlockStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub header_suffix: String,
     pub line: usize,
 }
 
@@ -109,6 +110,11 @@ pub struct UnsafeStatement {
 pub struct TypeParam {
     pub name: String,
     pub bound: Option<String>,
+}
+
+struct ParsedTypeParams<'source> {
+    type_params: Vec<TypeParam>,
+    remainder: &'source str,
 }
 
 /// Parses a source file into a syntax tree.
@@ -242,7 +248,7 @@ fn parse_typealias(
         ));
         return None;
     };
-    let Some(type_params) = parse_type_params(
+    let Some(parsed_type_params) = parse_type_params(
         path,
         line_number,
         line,
@@ -255,7 +261,7 @@ fn parse_typealias(
 
     Some(SyntaxStatement::TypeAlias(TypeAliasStatement {
         name,
-        type_params,
+        type_params: parsed_type_params.type_params,
         value: tail.trim().to_owned(),
         line: line_number,
     }))
@@ -290,14 +296,16 @@ fn parse_named_block(
         ));
         return None;
     };
-    let Some(type_params) = parse_type_params(path, line_number, line, suffix, diagnostics, label)
+    let Some(parsed_type_params) =
+        parse_type_params(path, line_number, line, suffix, diagnostics, label)
     else {
         return None;
     };
 
     Some(constructor(NamedBlockStatement {
         name,
-        type_params,
+        type_params: parsed_type_params.type_params,
+        header_suffix: parsed_type_params.remainder.trim().to_owned(),
         line: line_number,
     }))
 }
@@ -338,7 +346,7 @@ fn parse_overload(
         ));
         return None;
     };
-    let Some(type_params) = parse_type_params(
+    let Some(parsed_type_params) = parse_type_params(
         path,
         line_number,
         line,
@@ -351,7 +359,7 @@ fn parse_overload(
 
     Some(SyntaxStatement::OverloadDef(FunctionStatement {
         name,
-        type_params,
+        type_params: parsed_type_params.type_params,
         line: line_number,
     }))
 }
@@ -392,17 +400,20 @@ fn extract_decl_head(header: &str) -> Option<(String, &str)> {
     is_valid_identifier(candidate).then(|| (candidate.to_owned(), &header[end..]))
 }
 
-fn parse_type_params(
+fn parse_type_params<'source>(
     path: &Path,
     line_number: usize,
     line: &str,
-    suffix: &str,
+    suffix: &'source str,
     diagnostics: &mut DiagnosticReport,
     label: &str,
-) -> Option<Vec<TypeParam>> {
+) -> Option<ParsedTypeParams<'source>> {
     let suffix = suffix.trim_start();
     if suffix.is_empty() || !suffix.starts_with('[') {
-        return Some(Vec::new());
+        return Some(ParsedTypeParams {
+            type_params: Vec::new(),
+            remainder: suffix,
+        });
     }
 
     let Some((content, remainder)) = split_bracketed(suffix) else {
@@ -435,7 +446,10 @@ fn parse_type_params(
         }
     }
 
-    Some(type_params)
+    Some(ParsedTypeParams {
+        type_params,
+        remainder,
+    })
 }
 
 fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
@@ -633,16 +647,19 @@ mod tests {
                 SyntaxStatement::Interface(NamedBlockStatement {
                     name: String::from("Service"),
                     type_params: Vec::new(),
+                    header_suffix: String::new(),
                     line: 2,
                 }),
                 SyntaxStatement::DataClass(NamedBlockStatement {
                     name: String::from("Box"),
                     type_params: Vec::new(),
+                    header_suffix: String::new(),
                     line: 3,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
                     type_params: Vec::new(),
+                    header_suffix: String::new(),
                     line: 4,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -689,6 +706,7 @@ mod tests {
                         name: String::from("T"),
                         bound: None,
                     }],
+                    header_suffix: String::new(),
                     line: 2,
                 }),
                 SyntaxStatement::DataClass(NamedBlockStatement {
@@ -697,6 +715,7 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
+                    header_suffix: String::new(),
                     line: 3,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
@@ -705,6 +724,7 @@ mod tests {
                         name: String::from("T"),
                         bound: None,
                     }],
+                    header_suffix: String::new(),
                     line: 4,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -760,6 +780,26 @@ mod tests {
         assert!(rendered.contains("type parameter defaults are deferred beyond v1"));
         assert!(rendered.contains("type parameter bound must not be empty"));
         assert!(rendered.contains("type parameter constraint lists are deferred beyond v1"));
+    }
+
+    #[test]
+    fn parse_captures_interface_base_list_suffix() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("interface-bases.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("interface SupportsClose(Closable):\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("SupportsClose"),
+                type_params: Vec::new(),
+                header_suffix: String::from("(Closable)"),
+                line: 1,
+            })]
+        );
     }
 
     #[test]
