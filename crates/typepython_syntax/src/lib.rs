@@ -644,6 +644,29 @@ fn parse_type_params<'source>(
         }
     }
 
+    let mut seen = std::collections::BTreeSet::new();
+    for type_param in &type_params {
+        if !seen.insert(type_param.name.as_str()) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY4004",
+                    format!(
+                        "{label} declares type parameter `{}` more than once",
+                        type_param.name
+                    ),
+                )
+                .with_span(Span::new(
+                    path.display().to_string(),
+                    line_number,
+                    1,
+                    line_number,
+                    line.chars().count().max(1),
+                )),
+            );
+            return None;
+        }
+    }
+
     Some(ParsedTypeParams {
         type_params,
         remainder,
@@ -1015,6 +1038,20 @@ mod tests {
         assert!(rendered.contains("type parameter defaults are deferred beyond v1"));
         assert!(rendered.contains("type parameter bound must not be empty"));
         assert!(rendered.contains("type parameter constraint lists are deferred beyond v1"));
+    }
+
+    #[test]
+    fn parse_reports_duplicate_type_parameter_names() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("duplicate-generics.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("class Box[T, T]:\n    pass\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("declares type parameter `T` more than once"));
     }
 
     #[test]
