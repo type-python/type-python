@@ -235,8 +235,9 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
         })?;
 
     let snapshot = run_pipeline(&config)?;
+    let diagnostics = build_diagnostics(&config, &snapshot.diagnostics);
     let mut notes = Vec::new();
-    if !snapshot.diagnostics.has_errors() {
+    if !diagnostics.has_errors() {
         let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
             .with_context(|| {
                 format!(
@@ -263,8 +264,24 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
         notes,
     };
 
-    print_summary(args.format, &summary, &snapshot.diagnostics)?;
-    Ok(exit_code(&snapshot.diagnostics))
+    print_summary(args.format, &summary, &diagnostics)?;
+    Ok(exit_code(&diagnostics))
+}
+
+fn build_diagnostics(config: &ConfigHandle, diagnostics: &DiagnosticReport) -> DiagnosticReport {
+    let mut build_diagnostics = diagnostics.clone();
+
+    if diagnostics.has_errors() && config.config.emit.no_emit_on_error {
+        build_diagnostics.push(Diagnostic::error(
+            "TPY5002",
+            format!(
+                "emit blocked by `emit.no_emit_on_error` for {}",
+                config.config_dir.display()
+            ),
+        ));
+    }
+
+    build_diagnostics
 }
 
 fn clean_project(args: CleanArgs) -> Result<ExitCode> {
@@ -719,13 +736,14 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_source_paths, verify_build_artifacts};
+    use super::{build_diagnostics, collect_source_paths, verify_build_artifacts};
     use std::{
         env, fs,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
     use typepython_config::load;
+    use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::EmitArtifact;
 
     #[test]
@@ -904,6 +922,23 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn build_diagnostics_adds_emit_blocked_error_when_configured() {
+        let project_dir = temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            let config = load(&project_dir).unwrap();
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+
+            build_diagnostics(&config, &diagnostics).as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("TPY5002"));
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
