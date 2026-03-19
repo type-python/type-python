@@ -1,6 +1,7 @@
 //! `typepython` command-line entrypoint.
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
@@ -8,17 +9,18 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use glob::Pattern;
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
 use typepython_checking::check;
 use typepython_config::{ConfigHandle, ConfigSource, load};
-use typepython_diagnostics::DiagnosticReport;
+use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::plan_emits;
 use typepython_graph::build;
 use typepython_incremental::snapshot;
 use typepython_lowering::{LoweredModule, lower};
-use typepython_syntax::{SourceFile, SourceKind, SyntaxTree, parse};
+use typepython_syntax::{SourceFile, SourceKind, parse};
 
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
@@ -102,10 +104,24 @@ struct MigrateArgs {
 
 #[derive(Debug)]
 struct PipelineSnapshot {
-    syntax_trees: Vec<SyntaxTree>,
     lowered_modules: Vec<LoweredModule>,
     emit_plan_len: usize,
     tracked_modules: usize,
+    discovered_sources: usize,
+    diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredSource {
+    path: PathBuf,
+    root: PathBuf,
+    kind: SourceKind,
+    logical_module: String,
+}
+
+#[derive(Debug)]
+struct SourceDiscovery {
+    sources: Vec<DiscoveredSource>,
     diagnostics: DiagnosticReport,
 }
 
@@ -230,7 +246,7 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
         command: String::from("build"),
         config_path: config.config_path.display().to_string(),
         config_source: config.source,
-        discovered_sources: snapshot.syntax_trees.len(),
+        discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
         planned_artifacts: snapshot.emit_plan_len,
         tracked_modules: snapshot.tracked_modules,
@@ -271,7 +287,7 @@ fn run_lsp(args: RunArgs) -> Result<ExitCode> {
         command: String::from("lsp"),
         config_path: config.config_path.display().to_string(),
         config_source: config.source,
-        discovered_sources: snapshot.syntax_trees.len(),
+        discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
         planned_artifacts: snapshot.emit_plan_len,
         tracked_modules: snapshot.tracked_modules,
@@ -304,7 +320,7 @@ fn run_with_pipeline(
         command: String::from(command),
         config_path: config.config_path.display().to_string(),
         config_source: config.source,
-        discovered_sources: snapshot.syntax_trees.len(),
+        discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
         planned_artifacts: snapshot.emit_plan_len,
         tracked_modules: snapshot.tracked_modules,
@@ -316,7 +332,18 @@ fn run_with_pipeline(
 }
 
 fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
-    let source_paths = collect_source_paths(config)?;
+    let discovery = collect_source_paths(config)?;
+    if discovery.diagnostics.has_errors() {
+        return Ok(PipelineSnapshot {
+            lowered_modules: Vec::new(),
+            emit_plan_len: 0,
+            tracked_modules: 0,
+            discovered_sources: discovery.sources.len(),
+            diagnostics: discovery.diagnostics,
+        });
+    }
+
+    let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
     let syntax_trees: Vec<_> = source_paths
         .iter()
         .map(SourceFile::from_path)
@@ -334,10 +361,10 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let incremental = snapshot(&graph);
 
     Ok(PipelineSnapshot {
-        syntax_trees,
         lowered_modules,
         emit_plan_len: emit_plan.len(),
         tracked_modules: incremental.fingerprints.len(),
+        discovered_sources: source_paths.len(),
         diagnostics: checking.diagnostics,
     })
 }
@@ -354,18 +381,50 @@ fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {
     load(start).context("unable to load TypePython project configuration")
 }
 
-fn collect_source_paths(config: &ConfigHandle) -> Result<Vec<PathBuf>> {
+fn collect_source_paths(config: &ConfigHandle) -> Result<SourceDiscovery> {
+    let include_patterns =
+        compile_patterns(config, &config.config.project.include, "project.include")?;
+    let exclude_patterns =
+        compile_patterns(config, &config.config.project.exclude, "project.exclude")?;
+    let source_roots: Vec<_> =
+        config.config.project.src.iter().map(|root| config.resolve_relative_path(root)).collect();
     let mut sources = Vec::new();
 
-    for root in &config.config.project.src {
-        walk_directory(&config.resolve_relative_path(root), &mut sources)?;
+    for root in &source_roots {
+        walk_directory(config, root, &include_patterns, &exclude_patterns, &mut sources)?;
     }
 
-    sources.sort();
-    Ok(sources)
+    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    let diagnostics = detect_module_collisions(&sources, &source_roots);
+
+    Ok(SourceDiscovery { sources, diagnostics })
 }
 
-fn walk_directory(directory: &Path, sources: &mut Vec<PathBuf>) -> Result<()> {
+fn compile_patterns(
+    config: &ConfigHandle,
+    patterns: &[String],
+    field_name: &str,
+) -> Result<Vec<Pattern>> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            Pattern::new(pattern).with_context(|| {
+                format!(
+                    "TPY1002: invalid configuration value in {}: {field_name} contains invalid glob pattern `{pattern}`",
+                    config.config_path.display()
+                )
+            })
+        })
+        .collect()
+}
+
+fn walk_directory(
+    config: &ConfigHandle,
+    directory: &Path,
+    include_patterns: &[Pattern],
+    exclude_patterns: &[Pattern],
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
     if !directory.exists() {
         return Ok(());
     }
@@ -377,16 +436,313 @@ fn walk_directory(directory: &Path, sources: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
 
         if path.is_dir() {
-            walk_directory(&path, sources)?;
+            walk_directory(config, &path, include_patterns, exclude_patterns, sources)?;
             continue;
         }
 
-        if SourceKind::from_path(&path).is_some() {
-            sources.push(path);
+        let Some(kind) = SourceKind::from_path(&path) else {
+            continue;
+        };
+
+        if !is_selected_source_path(config, &path, include_patterns, exclude_patterns)? {
+            continue;
         }
+
+        let Some(root) = source_root_for_path(config, &path) else {
+            continue;
+        };
+        let Some(logical_module) = logical_module_path(&root, &path) else {
+            continue;
+        };
+
+        sources.push(DiscoveredSource { path, root, kind, logical_module });
     }
 
     Ok(())
+}
+
+fn is_selected_source_path(
+    config: &ConfigHandle,
+    path: &Path,
+    include_patterns: &[Pattern],
+    exclude_patterns: &[Pattern],
+) -> Result<bool> {
+    let relative = path.strip_prefix(&config.config_dir).with_context(|| {
+        format!("unable to relativize {} to {}", path.display(), config.config_dir.display())
+    })?;
+    let relative = normalize_glob_path(relative);
+
+    let is_included = include_patterns.iter().any(|pattern| pattern.matches(&relative));
+    let is_excluded = exclude_patterns.iter().any(|pattern| pattern.matches(&relative));
+
+    Ok(is_included && !is_excluded)
+}
+
+fn source_root_for_path(config: &ConfigHandle, path: &Path) -> Option<PathBuf> {
+    config
+        .config
+        .project
+        .src
+        .iter()
+        .map(|root| config.resolve_relative_path(root))
+        .find(|root| path.starts_with(root))
+}
+
+fn logical_module_path(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    let package_components = explicit_package_components(root, parent)?;
+    let stem = path.file_stem()?.to_str()?;
+
+    if stem == "__init__" {
+        return (!package_components.is_empty()).then(|| package_components.join("."));
+    }
+
+    let mut components = package_components;
+    components.push(stem.to_owned());
+    Some(components.join("."))
+}
+
+fn explicit_package_components(root: &Path, relative_parent: &Path) -> Option<Vec<String>> {
+    let mut components = Vec::new();
+    let mut current = PathBuf::new();
+
+    for component in relative_parent.components() {
+        let name = component.as_os_str().to_str()?.to_owned();
+        current.push(&name);
+        if !is_explicit_package_dir(&root.join(&current)) {
+            return None;
+        }
+        components.push(name);
+    }
+
+    Some(components)
+}
+
+fn is_explicit_package_dir(directory: &Path) -> bool {
+    ["__init__.py", "__init__.tpy", "__init__.pyi"]
+        .iter()
+        .any(|entry| directory.join(entry).is_file())
+}
+
+fn normalize_glob_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn detect_module_collisions(
+    sources: &[DiscoveredSource],
+    source_roots: &[PathBuf],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let mut by_module: BTreeMap<&str, Vec<&DiscoveredSource>> = BTreeMap::new();
+
+    for source in sources {
+        by_module.entry(&source.logical_module).or_default().push(source);
+    }
+
+    let normalized_roots: BTreeSet<_> =
+        source_roots.iter().map(|root| normalize_glob_path(root)).collect();
+
+    for (logical_module, module_sources) in by_module {
+        if module_sources.len() < 2 {
+            continue;
+        }
+
+        let distinct_roots: BTreeSet<_> =
+            module_sources.iter().map(|source| normalize_glob_path(&source.root)).collect();
+        let has_multiple_roots =
+            distinct_roots.len() > 1 && distinct_roots.is_subset(&normalized_roots);
+        let allows_runtime_with_stub = allows_runtime_with_stub_pair(&module_sources);
+
+        if has_multiple_roots || !allows_runtime_with_stub {
+            let mut diagnostic = Diagnostic::error(
+                "TPY3002",
+                format!("logical module `{logical_module}` has conflicting source files"),
+            );
+
+            for source in &module_sources {
+                diagnostic = diagnostic.with_note(format!(
+                    "{} ({})",
+                    source.path.display(),
+                    source_kind_name(source.kind)
+                ));
+            }
+
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    diagnostics
+}
+
+fn allows_runtime_with_stub_pair(module_sources: &[&DiscoveredSource]) -> bool {
+    if module_sources.len() != 2 {
+        return false;
+    }
+
+    matches!(
+        (module_sources[0].kind, module_sources[1].kind),
+        (SourceKind::Python, SourceKind::Stub) | (SourceKind::Stub, SourceKind::Python)
+    ) && module_sources[0].root == module_sources[1].root
+}
+
+fn source_kind_name(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::TypePython => ".tpy",
+        SourceKind::Python => ".py",
+        SourceKind::Stub => ".pyi",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_source_paths;
+    use std::{
+        env, fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use typepython_config::load;
+
+    #[test]
+    fn collect_source_paths_skips_implicit_namespace_packages() {
+        let project_dir = temp_project_dir("skips_implicit_namespace_packages");
+        let result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join("src/pkg/subpkg")).unwrap();
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n").unwrap();
+
+            let config = load(&project_dir).unwrap();
+            collect_source_paths(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.unwrap();
+        assert!(discovery.diagnostics.is_empty());
+        assert_eq!(discovery.sources.len(), 1);
+        assert_eq!(discovery.sources[0].logical_module, "pkg");
+    }
+
+    #[test]
+    fn collect_source_paths_respects_include_and_exclude_patterns() {
+        let project_dir = temp_project_dir("respects_include_and_exclude_patterns");
+        let result = (|| {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n",
+                    "exclude = [\"src/pkg/excluded/**\"]\n"
+                ),
+            )
+            .unwrap();
+            fs::create_dir_all(project_dir.join("src/pkg/excluded")).unwrap();
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/kept.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/excluded/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/excluded/hidden.tpy"), "pass\n").unwrap();
+
+            let config = load(&project_dir).unwrap();
+            collect_source_paths(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.unwrap();
+        let logical_modules: Vec<_> =
+            discovery.sources.iter().map(|source| source.logical_module.as_str()).collect();
+        assert_eq!(logical_modules, vec!["pkg", "pkg.kept"]);
+    }
+
+    #[test]
+    fn collect_source_paths_reports_tpy_python_collisions() {
+        let project_dir = temp_project_dir("reports_tpy_python_collisions");
+        let result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").unwrap();
+
+            let config = load(&project_dir).unwrap();
+            collect_source_paths(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.unwrap();
+        assert!(discovery.diagnostics.has_errors());
+        let text = discovery.diagnostics.as_text();
+        assert!(text.contains("TPY3002"));
+        assert!(text.contains("pkg.value"));
+    }
+
+    #[test]
+    fn collect_source_paths_allows_python_with_companion_stub() {
+        let project_dir = temp_project_dir("allows_python_with_companion_stub");
+        let result = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
+            fs::write(project_dir.join("src/pkg/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/pkg/value.pyi"), "...\n").unwrap();
+
+            let config = load(&project_dir).unwrap();
+            collect_source_paths(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.unwrap();
+        assert!(discovery.diagnostics.is_empty());
+        assert_eq!(discovery.sources.len(), 3);
+    }
+
+    #[test]
+    fn collect_source_paths_reports_cross_root_collisions() {
+        let project_dir = temp_project_dir("reports_cross_root_collisions");
+        let result = (|| {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\", \"vendor\"]\n",
+                    "include = [\"src/**/*.tpy\", \"vendor/**/*.tpy\"]\n"
+                ),
+            )
+            .unwrap();
+            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
+            fs::create_dir_all(project_dir.join("vendor/pkg")).unwrap();
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("vendor/pkg/__init__.tpy"), "pass\n").unwrap();
+
+            let config = load(&project_dir).unwrap();
+            collect_source_paths(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.unwrap();
+        assert!(discovery.diagnostics.has_errors());
+        assert!(discovery.diagnostics.as_text().contains("TPY3002"));
+    }
+
+    fn temp_project_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("typepython-cli-{test_name}-{unique}"));
+        fs::create_dir_all(&directory).expect("temp project directory should be created");
+        directory
+    }
+
+    fn remove_temp_project_dir(path: &Path) {
+        if path.exists() {
+            fs::remove_dir_all(path).expect("temp project directory should be removed");
+        }
+    }
 }
 
 fn write_file(path: &Path, content: &str, force: bool) -> Result<()> {
