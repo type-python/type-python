@@ -19,18 +19,35 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
-        for duplicate in invalid_duplicates(&node.declarations) {
+        for duplicate in duplicate_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(duplicate);
+        }
+    }
+
+    CheckResult { diagnostics }
+}
+
+fn duplicate_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for duplicate in invalid_duplicates(declarations) {
+        if let Some(diagnostic) = overload_shape_diagnostic(module_path, duplicate, declarations) {
+            diagnostics.push(diagnostic);
+        } else {
             diagnostics.push(Diagnostic::error(
                 "TPY4004",
                 format!(
                     "module `{}` declares `{duplicate}` more than once in the same declaration space",
-                    node.module_path.display()
+                    module_path.display()
                 ),
             ));
         }
     }
 
-    CheckResult { diagnostics }
+    diagnostics
 }
 
 fn invalid_duplicates(declarations: &[Declaration]) -> BTreeSet<&str> {
@@ -59,6 +76,43 @@ fn is_invalid_duplicate_group(kinds: &[DeclarationKind]) -> bool {
     }
 
     true
+}
+
+fn overload_shape_diagnostic(
+    module_path: &std::path::Path,
+    duplicate: &str,
+    declarations: &[Declaration],
+) -> Option<Diagnostic> {
+    let overload_count = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.name == duplicate && declaration.kind == DeclarationKind::Overload
+        })
+        .count();
+    if overload_count == 0 {
+        return None;
+    }
+
+    let function_count = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.name == duplicate && declaration.kind == DeclarationKind::Function
+        })
+        .count();
+
+    let message = match function_count {
+        0 => format!(
+            "module `{}` declares overloads for `{duplicate}` without a concrete implementation",
+            module_path.display()
+        ),
+        1 => return None,
+        _ => format!(
+            "module `{}` declares overloads for `{duplicate}` with more than one concrete implementation",
+            module_path.display()
+        ),
+    };
+
+    Some(Diagnostic::error("TPY4004", message))
 }
 
 #[cfg(test)]
@@ -139,5 +193,57 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_overloads_without_concrete_implementation() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                declarations: vec![
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("without a concrete implementation"));
+    }
+
+    #[test]
+    fn check_reports_overloads_with_multiple_concrete_implementations() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                declarations: vec![
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("more than one concrete implementation"));
     }
 }
