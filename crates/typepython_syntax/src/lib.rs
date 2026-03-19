@@ -242,6 +242,35 @@ fn refresh_custom_statements_from_ast(
         match statement {
             SyntaxStatement::Interface(existing) => {
                 if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                    for body_statement in &ast_statement.body {
+                        if !is_valid_interface_body_statement(body_statement) {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    "TPY2001",
+                                    format!(
+                                        "interface `{}` body must not contain executable statements",
+                                        existing.name
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    path.display().to_string(),
+                                    offset_to_line_column(
+                                        normalized,
+                                        body_statement.range().start().to_usize(),
+                                    )
+                                    .0,
+                                    1,
+                                    offset_to_line_column(
+                                        normalized,
+                                        body_statement.range().end().to_usize(),
+                                    )
+                                    .0,
+                                    1,
+                                )),
+                            );
+                            break;
+                        }
+                    }
                     if let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
@@ -320,6 +349,21 @@ fn refresh_custom_statements_from_ast(
             }
             _ => {}
         }
+    }
+}
+
+fn is_valid_interface_body_statement(statement: &Stmt) -> bool {
+    match statement {
+        Stmt::AnnAssign(_) | Stmt::Pass(_) => true,
+        Stmt::Expr(expr) => {
+            matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_))
+        }
+        Stmt::FunctionDef(function) => function
+            .body
+            .iter()
+            .all(|body_statement| matches!(body_statement, Stmt::Pass(_))
+                || matches!(body_statement, Stmt::Expr(expr) if matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)))),
+        _ => false,
     }
 }
 
@@ -1395,6 +1439,20 @@ mod tests {
                 line: 1,
             })]
         );
+    }
+
+    #[test]
+    fn parse_rejects_executable_interface_bodies() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("bad-interface.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from("interface SupportsClose:\n    value = 1\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY2001"));
+        assert!(rendered.contains("body must not contain executable statements"));
     }
 
     #[test]
