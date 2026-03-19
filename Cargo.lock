@@ -940,6 +940,7 @@ dependencies = [
  "typepython-binding",
  "typepython-diagnostics",
  "typepython-graph",
+ "typepython-syntax",
 ]
 
 [[package]]
@@ -995,6 +996,7 @@ name = "typepython-graph"
 version = "0.1.0"
 dependencies = [
  "typepython-binding",
+ "typepython-syntax",
 ]
 
 [[package]]

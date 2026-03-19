@@ -2,12 +2,23 @@
 
 use std::path::PathBuf;
 
-use typepython_syntax::{SyntaxStatement, SyntaxTree};
+use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BindingTable {
     pub module_path: PathBuf,
+    pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
+}
+
+impl Default for BindingTable {
+    fn default() -> Self {
+        Self {
+            module_path: PathBuf::new(),
+            module_kind: SourceKind::TypePython,
+            declarations: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -30,6 +41,7 @@ pub enum DeclarationKind {
 pub fn bind(tree: &SyntaxTree) -> BindingTable {
     BindingTable {
         module_path: tree.source.path.clone(),
+        module_kind: tree.source.kind,
         declarations: tree
             .statements
             .iter()

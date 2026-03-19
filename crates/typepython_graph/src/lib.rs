@@ -7,12 +7,14 @@ use std::{
 };
 
 use typepython_binding::{BindingTable, Declaration};
+use typepython_syntax::SourceKind;
 
 /// Summary node for one module.
 #[derive(Debug, Clone)]
 pub struct ModuleNode {
     /// Module path on disk.
     pub module_path: PathBuf,
+    pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
     pub summary_fingerprint: u64,
 }
@@ -31,6 +33,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
         .iter()
         .map(|binding| ModuleNode {
             module_path: binding.module_path.clone(),
+            module_kind: binding.module_kind,
             declarations: binding.declarations.clone(),
             summary_fingerprint: hash_summary(binding),
         })
@@ -51,11 +54,13 @@ mod tests {
     use super::build;
     use std::path::PathBuf;
     use typepython_binding::{BindingTable, Declaration, DeclarationKind};
+    use typepython_syntax::SourceKind;
 
     #[test]
     fn build_carries_bound_symbols_into_module_nodes() {
         let graph = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_kind: SourceKind::TypePython,
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),
@@ -87,6 +92,7 @@ mod tests {
     fn build_changes_fingerprint_when_symbols_change() {
         let first = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_kind: SourceKind::TypePython,
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
@@ -94,6 +100,7 @@ mod tests {
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_kind: SourceKind::TypePython,
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),

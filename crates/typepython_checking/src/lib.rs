@@ -2,9 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use typepython_binding::{Declaration, DeclarationKind};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_graph::ModuleGraph;
-use typepython_binding::{Declaration, DeclarationKind};
+use typepython_syntax::SourceKind;
 
 /// Result of running the checker.
 #[derive(Debug, Clone, Default)]
@@ -19,7 +20,7 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
-        for duplicate in duplicate_diagnostics(&node.module_path, &node.declarations) {
+        for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
     }
@@ -29,13 +30,16 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
 
 fn duplicate_diagnostics(
     module_path: &std::path::Path,
+    module_kind: SourceKind,
     declarations: &[Declaration],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for duplicate in invalid_duplicates(declarations) {
-        if let Some(diagnostic) = overload_shape_diagnostic(module_path, duplicate, declarations) {
+        if let Some(diagnostic) = overload_shape_diagnostic(module_path, module_kind, duplicate, declarations) {
             diagnostics.push(diagnostic);
+        } else if is_permitted_external_overload_group(module_kind, duplicate, declarations) {
+            continue;
         } else {
             diagnostics.push(Diagnostic::error(
                 "TPY4004",
@@ -48,6 +52,21 @@ fn duplicate_diagnostics(
     }
 
     diagnostics
+}
+
+fn is_permitted_external_overload_group(
+    module_kind: SourceKind,
+    duplicate: &str,
+    declarations: &[Declaration],
+) -> bool {
+    if module_kind == SourceKind::TypePython {
+        return false;
+    }
+
+    declarations
+        .iter()
+        .filter(|declaration| declaration.name == duplicate)
+        .all(|declaration| declaration.kind == DeclarationKind::Overload)
 }
 
 fn invalid_duplicates(declarations: &[Declaration]) -> BTreeSet<&str> {
@@ -80,6 +99,7 @@ fn is_invalid_duplicate_group(kinds: &[DeclarationKind]) -> bool {
 
 fn overload_shape_diagnostic(
     module_path: &std::path::Path,
+    module_kind: SourceKind,
     duplicate: &str,
     declarations: &[Declaration],
 ) -> Option<Diagnostic> {
@@ -99,6 +119,10 @@ fn overload_shape_diagnostic(
             declaration.name == duplicate && declaration.kind == DeclarationKind::Function
         })
         .count();
+
+    if module_kind != SourceKind::TypePython && function_count == 0 {
+        return None;
+    }
 
     let message = match function_count {
         0 => format!(
@@ -121,12 +145,14 @@ mod tests {
     use std::path::PathBuf;
     use typepython_binding::{Declaration, DeclarationKind};
     use typepython_graph::{ModuleGraph, ModuleNode};
+    use typepython_syntax::SourceKind;
 
     #[test]
     fn check_reports_duplicate_module_symbols() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
                         name: String::from("User"),
@@ -152,6 +178,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
                         name: String::from("UserId"),
@@ -174,6 +201,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
                         name: String::from("parse"),
@@ -200,6 +228,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
                         name: String::from("parse"),
@@ -224,6 +253,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
                         name: String::from("parse"),
@@ -245,5 +275,28 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4004"));
         assert!(rendered.contains("more than one concrete implementation"));
+    }
+
+    #[test]
+    fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("types/module.pyi"),
+                module_kind: SourceKind::Stub,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
     }
 }

@@ -493,18 +493,31 @@ fn extract_ast_backed_statement(
                 .unwrap_or_default(),
             line,
         })),
-        Stmt::FunctionDef(stmt) => Some(SyntaxStatement::FunctionDef(FunctionStatement {
-            name: stmt.name.as_str().to_owned(),
-            type_params: extract_ast_type_params(
-                path,
-                source,
-                stmt.type_params.as_deref(),
+        Stmt::FunctionDef(stmt) => {
+            let is_overload = stmt.decorator_list.iter().any(is_overload_decorator);
+            let statement = FunctionStatement {
+                name: stmt.name.as_str().to_owned(),
+                type_params: extract_ast_type_params(
+                    path,
+                    source,
+                    stmt.type_params.as_deref(),
+                    line,
+                    if is_overload {
+                        "overload declaration"
+                    } else {
+                        "function declaration"
+                    },
+                    diagnostics,
+                )?,
                 line,
-                "function declaration",
-                diagnostics,
-            )?,
-            line,
-        })),
+            };
+
+            Some(if is_overload {
+                SyntaxStatement::OverloadDef(statement)
+            } else {
+                SyntaxStatement::FunctionDef(statement)
+            })
+        }
         Stmt::Import(stmt) => {
             let names = stmt
                 .names
@@ -620,6 +633,17 @@ fn extract_assignment_names(expr: &Expr) -> Vec<String> {
         Expr::List(list) => list.elts.iter().flat_map(extract_assignment_names).collect(),
         Expr::Starred(starred) => extract_assignment_names(&starred.value),
         _ => Vec::new(),
+    }
+}
+
+fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+    match &decorator.expression {
+        Expr::Name(name) => name.id.as_str() == "overload",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "overload"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "typing")
+        }
+        _ => false,
     }
 }
 
@@ -1434,6 +1458,31 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn parse_classifies_decorated_overloads_in_stub_sources() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.pyi"),
+            kind: SourceKind::Stub,
+            text: String::from("from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("overload")],
+                    line: 1,
+                }),
+                SyntaxStatement::OverloadDef(FunctionStatement {
+                    name: String::from("parse"),
+                    type_params: Vec::new(),
+                    line: 3,
+                }),
+            ]
+        );
     }
 
     #[test]
