@@ -16,7 +16,7 @@ use typepython_binding::bind;
 use typepython_checking::check;
 use typepython_config::{ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-use typepython_emit::plan_emits;
+use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
 use typepython_incremental::snapshot;
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
@@ -105,7 +105,7 @@ struct MigrateArgs {
 #[derive(Debug)]
 struct PipelineSnapshot {
     lowered_modules: Vec<LoweredModule>,
-    emit_plan_len: usize,
+    emit_plan: Vec<EmitArtifact>,
     tracked_modules: usize,
     discovered_sources: usize,
     diagnostics: DiagnosticReport,
@@ -242,17 +242,30 @@ fn run_build(args: RunArgs) -> Result<ExitCode> {
         })?;
 
     let snapshot = run_pipeline(&config)?;
+    let mut notes = Vec::new();
+    if !snapshot.diagnostics.has_errors() {
+        let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
+            .with_context(|| {
+                format!(
+                    "unable to write runtime artifacts under {}",
+                    config.resolve_relative_path(&config.config.project.out_dir).display()
+                )
+            })?;
+        notes.push(format!(
+            "wrote {} runtime artifact(s); `.pyi` emission for `.tpy` remains milestone work",
+            runtime_summary.runtime_files_written
+        ));
+    }
+
     let summary = CommandSummary {
         command: String::from("build"),
         config_path: config.config_path.display().to_string(),
         config_source: config.source,
         discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan_len,
+        planned_artifacts: snapshot.emit_plan.len(),
         tracked_modules: snapshot.tracked_modules,
-        notes: vec![String::from(
-            "build directories are created, but real lowering/emit is still milestone work",
-        )],
+        notes,
     };
 
     print_summary(args.format, &summary, &snapshot.diagnostics)?;
@@ -289,7 +302,7 @@ fn run_lsp(args: RunArgs) -> Result<ExitCode> {
         config_source: config.source,
         discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan_len,
+        planned_artifacts: snapshot.emit_plan.len(),
         tracked_modules: snapshot.tracked_modules,
         notes,
     };
@@ -322,7 +335,7 @@ fn run_with_pipeline(
         config_source: config.source,
         discovered_sources: snapshot.discovered_sources,
         lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan_len,
+        planned_artifacts: snapshot.emit_plan.len(),
         tracked_modules: snapshot.tracked_modules,
         notes,
     };
@@ -336,7 +349,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     if discovery.diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
-            emit_plan_len: 0,
+            emit_plan: Vec::new(),
             tracked_modules: 0,
             discovered_sources: discovery.sources.len(),
             diagnostics: discovery.diagnostics,
@@ -356,7 +369,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     if parse_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
-            emit_plan_len: 0,
+            emit_plan: Vec::new(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
             diagnostics: parse_diagnostics,
@@ -368,7 +381,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     if lowering_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
-            emit_plan_len: 0,
+            emit_plan: Vec::new(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
             diagnostics: lowering_diagnostics,
@@ -384,7 +397,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
 
     Ok(PipelineSnapshot {
         lowered_modules,
-        emit_plan_len: emit_plan.len(),
+        emit_plan,
         tracked_modules: incremental.fingerprints.len(),
         discovered_sources: source_paths.len(),
         diagnostics: checking.diagnostics,
