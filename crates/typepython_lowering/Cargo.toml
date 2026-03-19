@@ -9,6 +9,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-syntax = { path = "../typepython_syntax" }
 
 [lints]
