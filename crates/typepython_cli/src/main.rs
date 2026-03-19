@@ -177,14 +177,7 @@ fn run() -> Result<ExitCode> {
         ),
         Command::Clean(args) => clean_project(args),
         Command::Lsp(args) => run_lsp(args),
-        Command::Verify(args) => run_with_pipeline(
-            "verify",
-            args,
-            false,
-            vec![String::from(
-                "typed publication checks and runtime/type surface verification are not implemented yet",
-            )],
-        ),
+        Command::Verify(args) => run_verify(args),
         Command::Migrate(args) => {
             let mut notes = vec![String::from(
                 "migration analysis and pass-through inference are not implemented yet",
@@ -313,6 +306,32 @@ fn run_lsp(args: RunArgs) -> Result<ExitCode> {
     Ok(exit_code(&snapshot.diagnostics))
 }
 
+fn run_verify(args: RunArgs) -> Result<ExitCode> {
+    let config = load_project(args.project.as_ref())?;
+    let snapshot = run_pipeline(&config)?;
+    let diagnostics = if snapshot.diagnostics.has_errors() {
+        snapshot.diagnostics.clone()
+    } else {
+        verify_build_artifacts(&config, &snapshot.emit_plan)
+    };
+
+    let summary = CommandSummary {
+        command: String::from("verify"),
+        config_path: config.config_path.display().to_string(),
+        config_source: config.source,
+        discovered_sources: snapshot.discovered_sources,
+        lowered_modules: snapshot.lowered_modules.len(),
+        planned_artifacts: snapshot.emit_plan.len(),
+        tracked_modules: snapshot.tracked_modules,
+        notes: vec![String::from(
+            "verifies current runtime artifacts, copied stubs, and `py.typed`; `.pyi` generation for `.tpy` remains milestone work",
+        )],
+    };
+
+    print_summary(args.format, &summary, &diagnostics)?;
+    Ok(exit_code(&diagnostics))
+}
+
 fn run_with_pipeline(
     command: &str,
     args: RunArgs,
@@ -421,6 +440,52 @@ fn collect_lowering_diagnostics(lowering_results: &[LoweringResult]) -> Diagnost
 
     for result in lowering_results {
         diagnostics.diagnostics.extend(result.diagnostics.diagnostics.iter().cloned());
+    }
+
+    diagnostics
+}
+
+fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let mut package_roots = BTreeSet::new();
+
+    for artifact in artifacts {
+        if let Some(runtime_path) = &artifact.runtime_path {
+            if !runtime_path.exists() {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!("missing runtime artifact `{}`", runtime_path.display()),
+                ));
+            }
+            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+                if let Some(parent) = runtime_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
+            }
+        }
+
+        if SourceKind::from_path(&artifact.source_path) == Some(SourceKind::Stub) {
+            if let Some(stub_path) = &artifact.stub_path {
+                if !stub_path.exists() {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!("missing stub artifact `{}`", stub_path.display()),
+                    ));
+                }
+            }
+        }
+    }
+
+    if config.config.emit.write_py_typed {
+        for package_root in package_roots {
+            let marker_path = package_root.join("py.typed");
+            if !marker_path.exists() {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!("missing package marker `{}`", marker_path.display()),
+                ));
+            }
+        }
     }
 
     diagnostics
@@ -656,13 +721,14 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::collect_source_paths;
+    use super::{collect_source_paths, verify_build_artifacts};
     use std::{
         env, fs,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
     use typepython_config::load;
+    use typepython_emit::EmitArtifact;
 
     #[test]
     fn collect_source_paths_skips_implicit_namespace_packages() {
@@ -783,6 +849,62 @@ mod tests {
         let discovery = result.unwrap();
         assert!(discovery.diagnostics.has_errors());
         assert!(discovery.diagnostics.as_text().contains("TPY3002"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing runtime artifact"));
+        assert!(rendered.contains("missing package marker"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
+        let project_dir = temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
+        let diagnostics = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/helpers.pyi"), "def helper() -> int: ...\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[
+                    EmitArtifact {
+                        source_path: project_dir.join("src/app/__init__.tpy"),
+                        runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                        stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                    },
+                    EmitArtifact {
+                        source_path: project_dir.join("src/app/helpers.pyi"),
+                        runtime_path: None,
+                        stub_path: Some(project_dir.join(".typepython/build/app/helpers.pyi")),
+                    },
+                ],
+            )
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
