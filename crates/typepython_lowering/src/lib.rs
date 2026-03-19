@@ -147,10 +147,19 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             _ => None,
         })
         .collect();
+    let ordinary_type_params = collect_ordinary_type_params(&class_defs, &function_defs);
 
     let mut lowered_lines = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
+    if !ordinary_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing import TypeVar"));
+        lowered_line_number += 1;
+    }
+    for (name, bound) in &ordinary_type_params {
+        lowered_lines.push(rewrite_typevar_line(name, bound.as_deref()));
+        lowered_line_number += 1;
+    }
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import TypeAlias"));
         lowered_line_number += 1;
@@ -206,6 +215,30 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     LoweredText { python_source: lowered, source_map }
 }
 
+fn collect_ordinary_type_params(
+    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+) -> std::collections::BTreeMap<String, Option<String>> {
+    let mut type_params = std::collections::BTreeMap::new();
+
+    for statement in class_defs.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
+    for statement in function_defs.values() {
+        for type_param in &statement.type_params {
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| type_param.bound.clone());
+        }
+    }
+
+    type_params
+}
+
 fn rewrite_unsafe_line(line: &str) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
@@ -224,11 +257,26 @@ fn rewrite_typealias_line(
     )
 }
 
+fn rewrite_typevar_line(name: &str, bound: Option<&str>) -> String {
+    match bound {
+        Some(bound) => format!("{name} = TypeVar(\"{name}\", bound={bound})"),
+        None => format!("{name} = TypeVar(\"{name}\")"),
+    }
+}
+
 fn has_typealias_import(source: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == "from typing import TypeAlias"
             || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeAlias"))
+    })
+}
+
+fn has_typevar_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import TypeVar"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeVar"))
     })
 }
 
@@ -845,30 +893,30 @@ mod tests {
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(
             lowered.module.python_source,
-            "class Box(Base):\n    pass\n\ndef first(value: T) -> T:\n    return value\n"
+            "from typing import TypeVar\nT = TypeVar(\"T\")\nclass Box(Base):\n    pass\n\ndef first(value: T) -> T:\n    return value\n"
         );
         assert_eq!(
             lowered.module.source_map,
             vec![
                 SourceMapEntry {
                     original_line: 1,
-                    lowered_line: 1,
-                },
-                SourceMapEntry {
-                    original_line: 2,
-                    lowered_line: 2,
-                },
-                SourceMapEntry {
-                    original_line: 3,
                     lowered_line: 3,
                 },
                 SourceMapEntry {
-                    original_line: 4,
+                    original_line: 2,
                     lowered_line: 4,
                 },
                 SourceMapEntry {
-                    original_line: 5,
+                    original_line: 3,
                     lowered_line: 5,
+                },
+                SourceMapEntry {
+                    original_line: 4,
+                    lowered_line: 6,
+                },
+                SourceMapEntry {
+                    original_line: 5,
+                    lowered_line: 7,
                 },
             ]
         );
