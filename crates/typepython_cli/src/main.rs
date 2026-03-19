@@ -352,6 +352,16 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         .into_iter()
         .map(parse)
         .collect();
+    let parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
+    if parse_diagnostics.has_errors() {
+        return Ok(PipelineSnapshot {
+            lowered_modules: Vec::new(),
+            emit_plan_len: 0,
+            tracked_modules: 0,
+            discovered_sources: source_paths.len(),
+            diagnostics: parse_diagnostics,
+        });
+    }
 
     let lowered_modules: Vec<_> = syntax_trees.iter().map(lower).collect();
     let bindings: Vec<_> = lowered_modules.iter().map(bind).collect();
@@ -367,6 +377,16 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         discovered_sources: source_paths.len(),
         diagnostics: checking.diagnostics,
     })
+}
+
+fn collect_parse_diagnostics(syntax_trees: &[typepython_syntax::SyntaxTree]) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+
+    for tree in syntax_trees {
+        diagnostics.diagnostics.extend(tree.diagnostics.diagnostics.iter().cloned());
+    }
+
+    diagnostics
 }
 
 fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {
