@@ -33,12 +33,17 @@ pub struct LoweringResult {
     pub diagnostics: DiagnosticReport,
 }
 
+struct LoweredText {
+    python_source: String,
+    source_map: Vec<SourceMapEntry>,
+}
+
 /// Lowers a parsed module into its Python-facing form.
 #[must_use]
 pub fn lower(tree: &SyntaxTree) -> LoweringResult {
-    let python_source = match tree.source.kind {
+    let lowered_text = match tree.source.kind {
         SourceKind::TypePython => lower_typepython(tree),
-        SourceKind::Python | SourceKind::Stub => tree.source.text.clone(),
+        SourceKind::Python | SourceKind::Stub => lower_passthrough(&tree.source.text),
     };
     let diagnostics = collect_lowering_diagnostics(tree);
 
@@ -46,14 +51,28 @@ pub fn lower(tree: &SyntaxTree) -> LoweringResult {
         module: LoweredModule {
             source_path: tree.source.path.clone(),
             source_kind: tree.source.kind,
-            python_source,
-            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            python_source: lowered_text.python_source,
+            source_map: lowered_text.source_map,
         },
         diagnostics,
     }
 }
 
-fn lower_typepython(tree: &SyntaxTree) -> String {
+fn lower_passthrough(source: &str) -> LoweredText {
+    LoweredText {
+        python_source: source.to_owned(),
+        source_map: source
+            .lines()
+            .enumerate()
+            .map(|(index, _)| SourceMapEntry {
+                original_line: index + 1,
+                lowered_line: index + 1,
+            })
+            .collect(),
+    }
+}
+
+fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     let unsafe_lines: BTreeSet<_> = tree
         .statements
         .iter()
@@ -114,43 +133,57 @@ fn lower_typepython(tree: &SyntaxTree) -> String {
         .collect();
 
     let mut lowered_lines = Vec::new();
+    let mut lowered_line_number = 1usize;
+    let mut source_map = Vec::new();
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import TypeAlias"));
+        lowered_line_number += 1;
     }
     if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import Protocol"));
+        lowered_line_number += 1;
     }
     if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
         lowered_lines.push(String::from("from dataclasses import dataclass"));
+        lowered_line_number += 1;
     }
     if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing import overload"));
+        lowered_line_number += 1;
     }
 
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
-        if let Some(statement) = type_aliases.get(&line_number) {
-            lowered_lines.push(rewrite_typealias_line(line, statement));
+        let replacement_lines = if let Some(statement) = type_aliases.get(&line_number) {
+            vec![rewrite_typealias_line(line, statement)]
         } else if let Some(statement) = interfaces.get(&line_number) {
-            lowered_lines.push(rewrite_interface_line(line, statement));
+            vec![rewrite_interface_line(line, statement)]
         } else if let Some(statement) = data_classes.get(&line_number) {
-            lowered_lines.extend(rewrite_data_class_lines(line, statement));
+            rewrite_data_class_lines(line, statement).into_iter().collect()
         } else if overloads.contains_key(&line_number) {
-            lowered_lines.extend(rewrite_overload_lines(line));
+            rewrite_overload_lines(line).into_iter().collect()
         } else if let Some(statement) = sealed_classes.get(&line_number) {
-            lowered_lines.push(rewrite_sealed_class_line(line, statement));
+            vec![rewrite_sealed_class_line(line, statement)]
         } else if unsafe_lines.contains(&line_number) {
-            lowered_lines.push(rewrite_unsafe_line(line));
+            vec![rewrite_unsafe_line(line)]
         } else {
-            lowered_lines.push(line.to_owned());
-        }
+            vec![line.to_owned()]
+        };
+
+        source_map.push(SourceMapEntry {
+            original_line: line_number,
+            lowered_line: lowered_line_number,
+        });
+        lowered_line_number += replacement_lines.len();
+        lowered_lines.extend(replacement_lines);
     }
 
     let mut lowered = lowered_lines.join("\n");
     if tree.source.text.ends_with('\n') {
         lowered.push('\n');
     }
-    lowered
+
+    LoweredText { python_source: lowered, source_map }
 }
 
 fn rewrite_unsafe_line(line: &str) -> String {
@@ -339,7 +372,7 @@ fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagn
 
 #[cfg(test)]
 mod tests {
-    use super::lower;
+    use super::{SourceMapEntry, lower};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -362,6 +395,19 @@ mod tests {
         println!("{}", lowered.module.python_source);
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(lowered.module.python_source, "if True:\n    x = 1\n");
+        assert_eq!(
+            lowered.module.source_map,
+            vec![
+                SourceMapEntry {
+                    original_line: 1,
+                    lowered_line: 1,
+                },
+                SourceMapEntry {
+                    original_line: 2,
+                    lowered_line: 2,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -512,6 +558,23 @@ mod tests {
             lowered.module.python_source,
             "from dataclasses import dataclass\n@dataclass\nclass Point:\n    x: float\n    y: float\n"
         );
+        assert_eq!(
+            lowered.module.source_map,
+            vec![
+                SourceMapEntry {
+                    original_line: 1,
+                    lowered_line: 2,
+                },
+                SourceMapEntry {
+                    original_line: 2,
+                    lowered_line: 4,
+                },
+                SourceMapEntry {
+                    original_line: 3,
+                    lowered_line: 5,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -602,6 +665,13 @@ mod tests {
         assert_eq!(
             lowered.module.python_source,
             "from typing import overload\n@overload\ndef parse(x: str) -> int: ...\n"
+        );
+        assert_eq!(
+            lowered.module.source_map,
+            vec![SourceMapEntry {
+                original_line: 1,
+                lowered_line: 2,
+            }]
         );
     }
 
