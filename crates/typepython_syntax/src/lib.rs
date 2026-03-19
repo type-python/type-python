@@ -197,12 +197,19 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
         let normalized = normalize_typepython_source(&source.text, &statements);
         match parse_module(&normalized) {
             Ok(parsed) => {
-                statements.extend(extract_ast_backed_statements(
+                refresh_custom_statements_from_ast(
                     &source.path,
-                    &source.text,
                     &normalized,
                     parsed.suite(),
-                    &statements,
+                    &mut statements,
+                    &mut diagnostics,
+                );
+            statements.extend(extract_ast_backed_statements(
+                &source.path,
+                &normalized,
+                &normalized,
+                parsed.suite(),
+                &statements,
                     &mut diagnostics,
                 ));
                 statements.sort_by_key(statement_line);
@@ -222,6 +229,120 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     }
 
     SyntaxTree { source, statements, diagnostics }
+}
+
+fn refresh_custom_statements_from_ast(
+    path: &Path,
+    normalized: &str,
+    suite: &[Stmt],
+    statements: &mut [SyntaxStatement],
+    diagnostics: &mut DiagnosticReport,
+) {
+    for statement in statements.iter_mut() {
+        match statement {
+            SyntaxStatement::Interface(existing) => {
+                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                    if let Some(type_params) = extract_ast_type_params(
+                        path,
+                        normalized,
+                        ast_statement.type_params.as_deref(),
+                        existing.line,
+                        "interface declaration",
+                        diagnostics,
+                    ) {
+                        existing.name = ast_statement.name.as_str().to_owned();
+                        existing.type_params = type_params;
+                        existing.header_suffix = ast_statement
+                            .arguments
+                            .as_ref()
+                            .and_then(|arguments| slice_range(normalized, arguments.range()))
+                            .map(str::to_owned)
+                            .unwrap_or_default();
+                    }
+                }
+            }
+            SyntaxStatement::DataClass(existing) => {
+                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                    if let Some(type_params) = extract_ast_type_params(
+                        path,
+                        normalized,
+                        ast_statement.type_params.as_deref(),
+                        existing.line,
+                        "data class declaration",
+                        diagnostics,
+                    ) {
+                        existing.name = ast_statement.name.as_str().to_owned();
+                        existing.type_params = type_params;
+                        existing.header_suffix = ast_statement
+                            .arguments
+                            .as_ref()
+                            .and_then(|arguments| slice_range(normalized, arguments.range()))
+                            .map(str::to_owned)
+                            .unwrap_or_default();
+                    }
+                }
+            }
+            SyntaxStatement::SealedClass(existing) => {
+                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                    if let Some(type_params) = extract_ast_type_params(
+                        path,
+                        normalized,
+                        ast_statement.type_params.as_deref(),
+                        existing.line,
+                        "sealed class declaration",
+                        diagnostics,
+                    ) {
+                        existing.name = ast_statement.name.as_str().to_owned();
+                        existing.type_params = type_params;
+                        existing.header_suffix = ast_statement
+                            .arguments
+                            .as_ref()
+                            .and_then(|arguments| slice_range(normalized, arguments.range()))
+                            .map(str::to_owned)
+                            .unwrap_or_default();
+                    }
+                }
+            }
+            SyntaxStatement::OverloadDef(existing) => {
+                if let Some(ast_statement) = ast_function_def_for_line(normalized, suite, existing.line) {
+                    if let Some(type_params) = extract_ast_type_params(
+                        path,
+                        normalized,
+                        ast_statement.type_params.as_deref(),
+                        existing.line,
+                        "overload declaration",
+                        diagnostics,
+                    ) {
+                        existing.name = ast_statement.name.as_str().to_owned();
+                        existing.type_params = type_params;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn ast_class_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtClassDef> {
+    suite.iter().find_map(|stmt| match stmt {
+        Stmt::ClassDef(class_def)
+            if offset_to_line_column(normalized, class_def.range.start().to_usize()).0 == line =>
+        {
+            Some(class_def)
+        }
+        _ => None,
+    })
+}
+
+fn ast_function_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtFunctionDef> {
+    suite.iter().find_map(|stmt| match stmt {
+        Stmt::FunctionDef(function_def)
+            if offset_to_line_column(normalized, function_def.range.start().to_usize()).0 == line =>
+        {
+            Some(function_def)
+        }
+        _ => None,
+    })
 }
 
 fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> String {
@@ -274,14 +395,20 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
         | SyntaxStatement::SealedClass(statement)
         | SyntaxStatement::ClassDef(statement) => {
             let indentation = leading_indent(line);
-            format!("{indentation}class {}{}:", statement.name, statement.header_suffix)
+            format!(
+                "{indentation}class {}{}{}:",
+                statement.name,
+                render_type_params(&statement.type_params),
+                statement.header_suffix
+            )
         }
-        SyntaxStatement::OverloadDef(_) | SyntaxStatement::FunctionDef(_) => {
+        SyntaxStatement::OverloadDef(_) => {
             let indentation = leading_indent(line);
             let trimmed = line.trim_start();
             let rest = trimmed.strip_prefix("overload ").unwrap_or(trimmed);
-            format!("{indentation}{}", strip_generic_type_params(rest))
+            format!("{indentation}{rest}")
         }
+        SyntaxStatement::FunctionDef(_) => line.to_owned(),
         SyntaxStatement::Import(_) | SyntaxStatement::Value(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
@@ -298,30 +425,22 @@ fn leading_indent(line: &str) -> &str {
     &line[..line.len() - line.trim_start().len()]
 }
 
-fn strip_generic_type_params(source: &str) -> String {
-    let mut bracket_index = None;
-    let mut paren_depth = 0usize;
-
-    for (index, character) in source.char_indices() {
-        match character {
-            '[' if paren_depth == 0 => {
-                bracket_index = Some(index);
-                break;
-            }
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            _ => {}
-        }
+fn render_type_params(type_params: &[TypeParam]) -> String {
+    if type_params.is_empty() {
+        return String::new();
     }
 
-    let Some(bracket_index) = bracket_index else {
-        return source.to_owned();
-    };
-    let (head, tail) = source.split_at(bracket_index);
-    let Some((_params, remainder)) = split_bracketed(tail) else {
-        return source.to_owned();
-    };
-    format!("{head}{remainder}")
+    format!(
+        "[{}]",
+        type_params
+            .iter()
+            .map(|type_param| match &type_param.bound {
+                Some(bound) => format!("{}: {}", type_param.name, bound),
+                None => type_param.name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn extract_ast_backed_statements(
