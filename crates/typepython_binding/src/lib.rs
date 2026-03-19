@@ -24,6 +24,8 @@ pub enum DeclarationKind {
     Class,
     Function,
     Overload,
+    Value,
+    Import,
 }
 
 /// Binds a lowered module into a symbol table.
@@ -65,15 +67,78 @@ fn bind_top_level_declaration(line: &str, previous_was_overload: bool) -> Option
             },
         });
     }
+    if let Some(rest) = line.strip_prefix("import ") {
+        return bind_import_declaration(rest);
+    }
+    if let Some(rest) = line.strip_prefix("from ") {
+        return bind_from_import_declaration(rest);
+    }
 
-    let (name, remainder) = line.split_once(':')?;
-    if !remainder.trim_start().starts_with("TypeAlias =") {
+    if let Some((name, remainder)) = line.split_once(':') {
+        if remainder.trim_start().starts_with("TypeAlias =") {
+            return extract_identifier(name).map(|name| Declaration {
+                name,
+                kind: DeclarationKind::TypeAlias,
+            });
+        }
+
+        if remainder.contains('=') || !remainder.trim().is_empty() {
+            return extract_identifier(name).map(|name| Declaration {
+                name,
+                kind: DeclarationKind::Value,
+            });
+        }
+    }
+
+    bind_assignment_declaration(line)
+}
+
+fn bind_import_declaration(rest: &str) -> Option<Declaration> {
+    let first_import = rest.split(',').next()?.trim();
+    if let Some((_, alias)) = first_import.split_once(" as ") {
+        return extract_identifier(alias).map(|name| Declaration {
+            name,
+            kind: DeclarationKind::Import,
+        });
+    }
+
+    let root = first_import.split('.').next()?.trim();
+    extract_identifier(root).map(|name| Declaration {
+        name,
+        kind: DeclarationKind::Import,
+    })
+}
+
+fn bind_from_import_declaration(rest: &str) -> Option<Declaration> {
+    let (_, imports) = rest.split_once(" import ")?;
+    let first_import = imports.split(',').next()?.trim();
+    if let Some((_, alias)) = first_import.split_once(" as ") {
+        return extract_identifier(alias).map(|name| Declaration {
+            name,
+            kind: DeclarationKind::Import,
+        });
+    }
+
+    extract_identifier(first_import).map(|name| Declaration {
+        name,
+        kind: DeclarationKind::Import,
+    })
+}
+
+fn bind_assignment_declaration(line: &str) -> Option<Declaration> {
+    let (head, tail) = line.split_once('=')?;
+    let tail = tail.trim_start();
+    if tail.starts_with('=') {
+        return None;
+    }
+    let head = head.trim_end();
+    if matches!(head.chars().last(), Some('!' | '<' | '>' | '=')) {
         return None;
     }
 
-    extract_identifier(name).map(|name| Declaration {
+    extract_identifier(head).map(|name| Declaration {
         name,
-        kind: DeclarationKind::TypeAlias,
+        kind: DeclarationKind::Value,
     })
 }
 
@@ -122,6 +187,10 @@ mod tests {
         assert_eq!(
             table.declarations,
             vec![
+                Declaration {
+                    name: String::from("TypeAlias"),
+                    kind: DeclarationKind::Import,
+                },
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
@@ -173,12 +242,50 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    name: String::from("overload"),
+                    kind: DeclarationKind::Import,
+                },
+                Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                 },
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_collects_top_level_values_and_imports() {
+        let table = bind(&LoweredModule {
+            source_path: PathBuf::from("src/app/helpers.py"),
+            source_kind: SourceKind::Python,
+            python_source: String::from(
+                "from pkg import foo as local_foo\nimport tools.helpers\nvalue: int = 1\ncount = 2\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        });
+
+        assert_eq!(
+            table.declarations,
+            vec![
+                Declaration {
+                    name: String::from("local_foo"),
+                    kind: DeclarationKind::Import,
+                },
+                Declaration {
+                    name: String::from("tools"),
+                    kind: DeclarationKind::Import,
+                },
+                Declaration {
+                    name: String::from("value"),
+                    kind: DeclarationKind::Value,
+                },
+                Declaration {
+                    name: String::from("count"),
+                    kind: DeclarationKind::Value,
                 },
             ]
         );
