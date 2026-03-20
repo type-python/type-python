@@ -607,6 +607,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("unsafe.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("unsafe:\n    x = 1\n"),
             },
             statements: vec![SyntaxStatement::Unsafe(UnsafeStatement { line: 1 })],
@@ -637,6 +638,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("nested-unsafe.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("def update():\n    unsafe:\n        x = 1\n"),
             },
             statements: vec![SyntaxStatement::Unsafe(UnsafeStatement { line: 2 })],
@@ -653,6 +655,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("unsupported.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("unknown feature\n"),
             },
             statements: vec![],
@@ -668,6 +671,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("typealias.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("typealias UserId = int\n"),
             },
             statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
@@ -690,6 +694,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("interface.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("interface SupportsClose:\n    def close(self): ...\n"),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
@@ -698,6 +703,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -718,6 +724,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("interface-bases.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("interface SupportsClose(Closable):\n    def close(self): ...\n"),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
@@ -726,6 +733,7 @@ mod tests {
                 header_suffix: String::from("(Closable)"),
                 bases: vec![String::from("Closable")],
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -745,6 +753,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("generic-interface.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("interface SupportsClose[T]:\n    def close(self, value: T) -> T: ...\n"),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
@@ -756,6 +765,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -775,6 +785,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("data-class.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("data class Point:\n    x: float\n    y: float\n"),
             },
             statements: vec![SyntaxStatement::DataClass(NamedBlockStatement {
@@ -783,6 +794,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -820,6 +832,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("data-class-bases.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("data class Point(Base):\n    x: float\n"),
             },
             statements: vec![SyntaxStatement::DataClass(NamedBlockStatement {
@@ -828,6 +841,7 @@ mod tests {
                 header_suffix: String::from("(Base)"),
                 bases: vec![String::from("Base")],
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -847,6 +861,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("generic-classlikes.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("data class Point[T]:\n    x: T\n\nsealed class Expr[T](Base):\n    ...\n"),
             },
             statements: vec![
@@ -859,6 +874,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
@@ -871,6 +887,7 @@ mod tests {
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -891,6 +908,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("sealed-class.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("sealed class Expr:\n    ...\n"),
             },
             statements: vec![SyntaxStatement::SealedClass(NamedBlockStatement {
@@ -899,6 +917,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -916,6 +935,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("sealed-class-bases.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("sealed class Expr(Base):\n    ...\n"),
             },
             statements: vec![SyntaxStatement::SealedClass(NamedBlockStatement {
@@ -924,6 +944,7 @@ mod tests {
                 header_suffix: String::from("(Base)"),
                 bases: vec![String::from("Base")],
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })],
@@ -940,6 +961,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("overload.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("overload def parse(x: str) -> int: ...\n"),
             },
             statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
@@ -974,6 +996,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("generic-typealias.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("typealias Pair[T] = tuple[T, T]\n"),
             },
             statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
@@ -1001,6 +1024,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("generic-overload.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from("overload def parse[T](x: T) -> T: ...\n"),
             },
             statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
@@ -1030,6 +1054,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("ordinary-generics.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::from(
                     "class Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
                 ),
@@ -1044,6 +1069,7 @@ mod tests {
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
