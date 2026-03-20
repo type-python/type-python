@@ -204,7 +204,21 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
                     });
                 }
             }
-            Stmt::ClassDef(class_def) => collect_stub_edits(source, &class_def.body, edits),
+            Stmt::ClassDef(class_def) => {
+                if is_empty_stub_class_body(&class_def.body) {
+                    let start_line = offset_to_line(source, class_def.name.range.start().to_usize());
+                    let end_offset = class_def.range.end().to_usize().saturating_sub(1);
+                    let end_line = offset_to_line(source, end_offset.max(class_def.range.start().to_usize()));
+                    let line = source.lines().nth(start_line - 1).unwrap_or("");
+                    edits.push(StubEdit {
+                        start_line,
+                        end_line,
+                        replacement: Some(rewrite_stub_class_line(line)),
+                    });
+                } else {
+                    collect_stub_edits(source, &class_def.body, edits)
+                }
+            }
             _ => {}
         }
     }
@@ -227,6 +241,25 @@ fn rewrite_stub_annotated_assignment_line(line: &str) -> Option<String> {
     }
     let (head, _) = line.split_once('=')?;
     Some(head.trim_end().to_owned())
+}
+
+fn rewrite_stub_class_line(line: &str) -> String {
+    let trimmed = line.trim_end();
+    if trimmed.contains(": ...") {
+        trimmed.to_owned()
+    } else if trimmed.ends_with(':') {
+        format!("{trimmed} ...")
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn is_empty_stub_class_body(body: &[Stmt]) -> bool {
+    body.iter().all(|statement| match statement {
+        Stmt::Pass(_) => true,
+        Stmt::Expr(expr) => matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
+        _ => false,
+    })
 }
 
 fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
@@ -302,6 +335,12 @@ mod tests {
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
                 LoweredModule {
+                    source_path: PathBuf::from("src/app/empty.tpy"),
+                    source_kind: SourceKind::TypePython,
+                    python_source: String::from("class Empty:\n    pass\n"),
+                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                },
+                LoweredModule {
                     source_path: PathBuf::from("src/app/helpers.pyi"),
                     source_kind: SourceKind::Stub,
                     python_source: String::from("def helper() -> int: ...\n"),
@@ -325,6 +364,11 @@ mod tests {
                     stub_path: Some(temp_dir.join("build/app/parse.pyi")),
                 },
                 EmitArtifact {
+                    source_path: PathBuf::from("src/app/empty.tpy"),
+                    runtime_path: Some(temp_dir.join("build/app/empty.py")),
+                    stub_path: Some(temp_dir.join("build/app/empty.pyi")),
+                },
+                EmitArtifact {
                     source_path: PathBuf::from("src/app/helpers.pyi"),
                     runtime_path: None,
                     stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
@@ -337,19 +381,21 @@ mod tests {
             let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
             let runtime_parse = fs::read_to_string(temp_dir.join("build/app/parse.py")).unwrap();
             let stub_parse = fs::read_to_string(temp_dir.join("build/app/parse.pyi")).unwrap();
+            let runtime_empty = fs::read_to_string(temp_dir.join("build/app/empty.py")).unwrap();
+            let stub_empty = fs::read_to_string(temp_dir.join("build/app/empty.pyi")).unwrap();
             let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi")).unwrap();
             let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
 
-            (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, stub_helpers, py_typed)
+            (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, runtime_empty, stub_empty, stub_helpers, py_typed)
         })();
         remove_temp_dir(&temp_dir);
 
-        let (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, stub_helpers, py_typed) = result;
+        let (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, runtime_empty, stub_empty, stub_helpers, py_typed) = result;
         assert_eq!(
             summary,
             RuntimeWriteSummary {
-                runtime_files_written: 3,
-                stub_files_written: 3,
+                runtime_files_written: 4,
+                stub_files_written: 4,
                 py_typed_written: 1,
             }
         );
@@ -358,6 +404,8 @@ mod tests {
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
         assert_eq!(runtime_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n");
         assert_eq!(stub_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\n");
+        assert_eq!(runtime_empty, "class Empty:\n    pass\n");
+        assert_eq!(stub_empty, "class Empty: ...\n");
         assert_eq!(stub_helpers, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");
     }
