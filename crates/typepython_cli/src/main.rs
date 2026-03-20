@@ -594,10 +594,10 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
 }
 
 fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> Option<Diagnostic> {
-    let runtime_binding = emitted_binding(runtime_path)?;
-    let stub_binding = emitted_binding(stub_path)?;
+    let runtime_syntax = emitted_syntax(runtime_path)?;
+    let stub_syntax = emitted_syntax(stub_path)?;
 
-    if declaration_surface(&runtime_binding) == declaration_surface(&stub_binding) {
+    if declaration_surface(&runtime_syntax) == declaration_surface(&stub_syntax) {
         None
     } else {
         Some(Diagnostic::error(
@@ -611,29 +611,122 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
     }
 }
 
-fn emitted_binding(path: &Path) -> Option<typepython_binding::BindingTable> {
+fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {
     let source = SourceFile::from_path(path).ok()?;
     let syntax = parse(source);
     if syntax.diagnostics.has_errors() {
         None
     } else {
-        Some(bind(&syntax))
+        Some(syntax)
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct SurfaceEntry {
+    owner: Option<String>,
+    kind: &'static str,
+    name: String,
+    detail: String,
+}
+
 fn declaration_surface(
-    binding: &typepython_binding::BindingTable,
-) -> std::collections::BTreeSet<(Option<String>, String)> {
-    binding
-        .declarations
-        .iter()
-        .map(|declaration| {
-            (
-                declaration.owner.as_ref().map(|owner| owner.name.clone()),
-                declaration.name.clone(),
-            )
-        })
-        .collect()
+    syntax: &typepython_syntax::SyntaxTree,
+) -> std::collections::BTreeSet<SurfaceEntry> {
+    let mut surface = std::collections::BTreeSet::new();
+
+    for statement in &syntax.statements {
+        match statement {
+            typepython_syntax::SyntaxStatement::TypeAlias(statement) => {
+                surface.insert(SurfaceEntry {
+                    owner: None,
+                    kind: "typealias",
+                    name: statement.name.clone(),
+                    detail: statement.value.clone(),
+                });
+            }
+            typepython_syntax::SyntaxStatement::Interface(statement)
+            | typepython_syntax::SyntaxStatement::DataClass(statement)
+            | typepython_syntax::SyntaxStatement::SealedClass(statement)
+            | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
+                surface.insert(SurfaceEntry {
+                    owner: None,
+                    kind: "class",
+                    name: statement.name.clone(),
+                    detail: statement.bases.join(","),
+                });
+                for member in &statement.members {
+                    surface.insert(SurfaceEntry {
+                        owner: Some(statement.name.clone()),
+                        kind: match member.kind {
+                            typepython_syntax::ClassMemberKind::Field => "field",
+                            typepython_syntax::ClassMemberKind::Method => "method",
+                            typepython_syntax::ClassMemberKind::Overload => "overload",
+                        },
+                        name: member.name.clone(),
+                        detail: match member.kind {
+                            typepython_syntax::ClassMemberKind::Field => member.annotation.clone().unwrap_or_default(),
+                            typepython_syntax::ClassMemberKind::Method
+                            | typepython_syntax::ClassMemberKind::Overload => format_signature(&member.params, member.returns.as_deref()),
+                        },
+                    });
+                }
+            }
+            typepython_syntax::SyntaxStatement::OverloadDef(statement) => {
+                surface.insert(SurfaceEntry {
+                    owner: None,
+                    kind: "overload",
+                    name: statement.name.clone(),
+                    detail: format_signature(&statement.params, statement.returns.as_deref()),
+                });
+            }
+            typepython_syntax::SyntaxStatement::FunctionDef(statement) => {
+                surface.insert(SurfaceEntry {
+                    owner: None,
+                    kind: "function",
+                    name: statement.name.clone(),
+                    detail: format_signature(&statement.params, statement.returns.as_deref()),
+                });
+            }
+            typepython_syntax::SyntaxStatement::Import(statement) => {
+                for name in &statement.names {
+                    surface.insert(SurfaceEntry {
+                        owner: None,
+                        kind: "import",
+                        name: name.clone(),
+                        detail: String::new(),
+                    });
+                }
+            }
+            typepython_syntax::SyntaxStatement::Value(statement) => {
+                for name in &statement.names {
+                    surface.insert(SurfaceEntry {
+                        owner: None,
+                        kind: "value",
+                        name: name.clone(),
+                        detail: statement.annotation.clone().unwrap_or_default(),
+                    });
+                }
+            }
+            typepython_syntax::SyntaxStatement::Unsafe(_) => {}
+        }
+    }
+
+    surface
+}
+
+fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option<&str>) -> String {
+    format!(
+        "({})->{}",
+        params
+            .iter()
+            .map(|param| match &param.annotation {
+                Some(annotation) => format!("{}:{}", param.name, annotation),
+                None => param.name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        returns.unwrap_or("")
+    )
 }
 
 fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> Result<PathBuf> {
