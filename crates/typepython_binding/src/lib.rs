@@ -181,6 +181,7 @@ mod tests {
                     name: String::from("User"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -345,6 +346,7 @@ mod tests {
                 name: String::from("SupportsClose"),
                 type_params: Vec::new(),
                 header_suffix: String::new(),
+                bases: Vec::new(),
                 members: vec![
                     ClassMember {
                         name: String::from("value"),
@@ -445,6 +447,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
@@ -511,6 +514,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,

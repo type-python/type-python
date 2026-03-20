@@ -98,6 +98,7 @@ pub struct NamedBlockStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub header_suffix: String,
+    pub bases: Vec<String>,
     pub members: Vec<ClassMember>,
     pub line: usize,
 }
@@ -395,6 +396,11 @@ fn refresh_custom_statements_from_ast(
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
                             .unwrap_or_default();
+                        existing.bases = ast_statement
+                            .arguments
+                            .as_ref()
+                            .map(|arguments| extract_class_bases(normalized, arguments))
+                            .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
                 }
@@ -417,6 +423,11 @@ fn refresh_custom_statements_from_ast(
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
                             .unwrap_or_default();
+                        existing.bases = ast_statement
+                            .arguments
+                            .as_ref()
+                            .map(|arguments| extract_class_bases(normalized, arguments))
+                            .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
                 }
@@ -438,6 +449,11 @@ fn refresh_custom_statements_from_ast(
                             .as_ref()
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
+                            .unwrap_or_default();
+                        existing.bases = ast_statement
+                            .arguments
+                            .as_ref()
+                            .map(|arguments| extract_class_bases(normalized, arguments))
                             .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
@@ -741,6 +757,11 @@ fn extract_ast_backed_statement(
                 .and_then(|arguments| slice_range(source, arguments.range()))
                 .map(str::to_owned)
                 .unwrap_or_default(),
+            bases: stmt
+                .arguments
+                .as_ref()
+                .map(|arguments| extract_class_bases(source, arguments))
+                .unwrap_or_default(),
             members: extract_class_members(normalized, &stmt.body),
             line,
         })),
@@ -906,6 +927,14 @@ fn extract_function_params(
                 .and_then(|annotation| slice_range(source, annotation.range()))
                 .map(str::to_owned),
         })
+        .collect()
+}
+
+fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> Vec<String> {
+    arguments
+        .args
+        .iter()
+        .filter_map(|argument| slice_range(source, argument.range()).map(str::to_owned))
         .collect()
 }
 
@@ -1115,6 +1144,7 @@ fn parse_named_block(
         name,
         type_params: parsed_type_params.type_params,
         header_suffix: parsed_type_params.remainder.trim().to_owned(),
+        bases: Vec::new(),
         members: Vec::new(),
         line: line_number,
     }))
@@ -1536,6 +1566,7 @@ mod tests {
                     name: String::from("Service"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1543,6 +1574,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1550,6 +1582,7 @@ mod tests {
                     name: String::from("Result"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1607,6 +1640,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1617,6 +1651,7 @@ mod tests {
                         bound: Some(String::from("Sequence[str]")),
                     }],
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1627,6 +1662,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1719,6 +1755,7 @@ mod tests {
                 name: String::from("SupportsClose"),
                 type_params: Vec::new(),
                 header_suffix: String::from("(Closable)"),
+                bases: vec![String::from("Closable")],
                 members: Vec::new(),
                 line: 1,
             })]
@@ -1889,6 +1926,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: Vec::new(),
                     line: 1,
                 }),
@@ -1966,6 +2004,7 @@ mod tests {
                 name: String::from("Box"),
                 type_params: Vec::new(),
                 header_suffix: String::new(),
+                bases: Vec::new(),
                 members: vec![
                     ClassMember {
                         name: String::from("value"),
@@ -2028,6 +2067,7 @@ mod tests {
                     name: String::from("Parser"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: vec![
                         ClassMember {
                             name: String::from("parse"),
@@ -2102,6 +2142,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
@@ -2146,6 +2187,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    bases: Vec::new(),
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
