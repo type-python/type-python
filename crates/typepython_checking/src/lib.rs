@@ -28,30 +28,30 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
-        for override_violation in override_diagnostics(&node.module_path, &node.declarations) {
+        for override_violation in override_diagnostics(node, &graph.nodes) {
             diagnostics.push(override_violation);
         }
         for override_violation in override_compatibility_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(override_violation);
         }
         if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
-            for override_violation in missing_override_diagnostics(&node.module_path, &node.declarations) {
+            for override_violation in missing_override_diagnostics(node, &graph.nodes) {
                 diagnostics.push(override_violation);
             }
         }
-        for final_violation in final_decorator_diagnostics(&node.module_path, &node.declarations) {
+        for final_violation in final_decorator_diagnostics(node, &graph.nodes) {
             diagnostics.push(final_violation);
         }
-        for override_violation in final_override_diagnostics(&node.module_path, &node.declarations) {
+        for override_violation in final_override_diagnostics(node, &graph.nodes) {
             diagnostics.push(override_violation);
         }
-        for abstract_violation in abstract_member_diagnostics(&node.module_path, &node.declarations) {
+        for abstract_violation in abstract_member_diagnostics(node, &graph.nodes) {
             diagnostics.push(abstract_violation);
         }
-        for instantiation_violation in abstract_instantiation_diagnostics(&node.module_path, &node.declarations, &node.calls) {
+        for instantiation_violation in abstract_instantiation_diagnostics(node, &graph.nodes) {
             diagnostics.push(instantiation_violation);
         }
-        for implementation_violation in interface_implementation_diagnostics(&node.module_path, &node.declarations) {
+        for implementation_violation in interface_implementation_diagnostics(node, &graph.nodes) {
             diagnostics.push(implementation_violation);
         }
     }
@@ -100,10 +100,11 @@ fn override_compatibility_diagnostics(
     diagnostics
 }
 
-fn missing_override_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn missing_override_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
     for declaration in declarations.iter().filter(|declaration| {
@@ -121,9 +122,11 @@ fn missing_override_diagnostics(
         });
         let overrides_any = owner_decl.is_some_and(|owner_decl| {
             owner_decl.bases.iter().any(|base| {
-                declarations.iter().any(|candidate| {
-                    candidate.name == declaration.name
-                        && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == *base)
+                resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+                    base_node.declarations.iter().any(|candidate| {
+                        candidate.name == declaration.name
+                            && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == base_decl.name)
+                    })
                 })
             })
         });
@@ -135,7 +138,7 @@ fn missing_override_diagnostics(
                     "member `{}` in type `{}` in module `{}` overrides a direct base member but is missing @override",
                     declaration.name,
                     owner.name,
-                    module_path.display()
+                    node.module_path.display()
                 ),
             ));
         }
@@ -144,26 +147,11 @@ fn missing_override_diagnostics(
     diagnostics
 }
 
-fn final_decorator_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn final_decorator_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let final_classes: BTreeSet<_> = declarations
-        .iter()
-        .filter(|declaration| {
-            declaration.kind == DeclarationKind::Class
-                && declaration.owner.is_none()
-                && declaration.is_final_decorator
-        })
-        .map(|declaration| declaration.name.clone())
-        .collect();
-    let final_members: BTreeSet<_> = declarations
-        .iter()
-        .filter(|declaration| declaration.owner.is_some() && declaration.is_final_decorator)
-        .filter_map(|declaration| {
-            declaration.owner.as_ref().map(|owner| (owner.name.clone(), declaration.name.clone()))
-        })
-        .collect();
+    let declarations = &node.declarations;
 
     let mut diagnostics = Vec::new();
 
@@ -172,14 +160,15 @@ fn final_decorator_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
     {
         for base in &class_declaration.bases {
-            if final_classes.contains(base) {
+            if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) {
+                if base_decl.is_final_decorator {
                 diagnostics.push(Diagnostic::error(
                     "TPY4005",
                     format!(
                         "type `{}` in module `{}` subclasses final class `{}`",
                         class_declaration.name,
-                        module_path.display(),
-                        base
+                        node.module_path.display(),
+                        base_decl.name
                     ),
                 ));
             }
@@ -187,18 +176,23 @@ fn final_decorator_diagnostics(
             for member in declarations.iter().filter(|declaration| {
                 declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
             }) {
-                if final_members.contains(&(base.clone(), member.name.clone())) {
+                if base_node.declarations.iter().any(|declaration| {
+                    declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
+                        && declaration.name == member.name
+                        && declaration.is_final_decorator
+                }) {
                     diagnostics.push(Diagnostic::error(
                         "TPY4005",
                         format!(
                             "type `{}` in module `{}` overrides final member `{}` from base `{}`",
                             class_declaration.name,
-                            module_path.display(),
+                            node.module_path.display(),
                             member.name,
-                            base
+                            base_decl.name
                         ),
                     ));
                 }
+            }
             }
         }
     }
@@ -206,17 +200,11 @@ fn final_decorator_diagnostics(
     diagnostics
 }
 
-fn abstract_member_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn abstract_member_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let abstract_members: BTreeMap<_, _> = declarations
-        .iter()
-        .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
-        .filter_map(|declaration| {
-            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
-        })
-        .collect();
+    let declarations = &node.declarations;
 
     let mut diagnostics = Vec::new();
 
@@ -234,15 +222,18 @@ fn abstract_member_diagnostics(
         }
 
         for base in &class_declaration.bases {
-            for ((abstract_owner, member_name), member_kind) in &abstract_members {
-                if abstract_owner != base {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+                continue;
+            };
+            for ((abstract_owner, member_name), member_kind) in abstract_member_index(&base_node.declarations) {
+                if abstract_owner != base_decl.name {
                     continue;
                 }
 
                 let implemented = declarations.iter().any(|declaration| {
                     declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
                         && declaration.name == *member_name
-                        && declaration.kind == *member_kind
+                        && declaration.kind == member_kind
                         && !declaration.is_abstract_method
                 });
                 if !implemented {
@@ -251,9 +242,9 @@ fn abstract_member_diagnostics(
                         format!(
                             "type `{}` in module `{}` does not implement abstract member `{}` from `{}`",
                             class_declaration.name,
-                            module_path.display(),
+                            node.module_path.display(),
                             member_name,
-                            base
+                            base_decl.name
                         ),
                     ));
                 }
@@ -264,18 +255,11 @@ fn abstract_member_diagnostics(
     diagnostics
 }
 
-fn abstract_instantiation_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
-    calls: &[String],
+fn abstract_instantiation_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let abstract_members: BTreeMap<_, _> = declarations
-        .iter()
-        .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
-        .filter_map(|declaration| {
-            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
-        })
-        .collect();
+    let declarations = &node.declarations;
 
     let abstract_classes: BTreeSet<_> = declarations
         .iter()
@@ -286,8 +270,11 @@ fn abstract_instantiation_diagnostics(
                     && declaration.is_abstract_method
             });
             let inherited_abstract = class_declaration.bases.iter().any(|base| {
-                abstract_members.iter().any(|((abstract_owner, member_name), member_kind)| {
-                    abstract_owner == base
+                let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+                    return false;
+                };
+                abstract_member_index(&base_node.declarations).iter().any(|((abstract_owner, member_name), member_kind)| {
+                    abstract_owner == &base_decl.name
                         && !declarations.iter().any(|declaration| {
                             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
                                 && declaration.name == *member_name
@@ -301,7 +288,7 @@ fn abstract_instantiation_diagnostics(
         })
         .collect();
 
-    calls
+    node.calls
         .iter()
         .filter(|callee| abstract_classes.contains(*callee))
         .map(|callee| {
@@ -309,7 +296,7 @@ fn abstract_instantiation_diagnostics(
                 "TPY4007",
                 format!(
                     "module `{}` directly instantiates abstract class `{}`",
-                    module_path.display(),
+                    node.module_path.display(),
                     callee
                 ),
             )
@@ -317,10 +304,47 @@ fn abstract_instantiation_diagnostics(
         .collect()
 }
 
-fn override_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn abstract_member_index(declarations: &[Declaration]) -> BTreeMap<(String, String), DeclarationKind> {
+    declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
+        .filter_map(|declaration| {
+            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
+        })
+        .collect()
+}
+
+fn resolve_direct_base<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    node: &'a typepython_graph::ModuleNode,
+    base_name: &str,
+) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+    if let Some(local) = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == base_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Class)
+    {
+        return Some((node, local));
+    }
+
+    let import = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == base_name)?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    let target_decl = target_node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Class)?;
+    Some((target_node, target_decl))
+}
+
+fn override_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
     for declaration in declarations.iter().filter(|declaration| declaration.is_override) {
@@ -328,7 +352,7 @@ fn override_diagnostics(
             None => Some(format!(
                 "declaration `{}` in module `{}` is marked with @override but has no base member to override",
                 declaration.name,
-                module_path.display()
+                node.module_path.display()
             )),
             Some(owner) => {
                 let owner_decl = declarations.iter().find(|candidate| {
@@ -338,9 +362,11 @@ fn override_diagnostics(
                 });
                 let overrides_any = owner_decl.is_some_and(|owner_decl| {
                     owner_decl.bases.iter().any(|base| {
-                        declarations.iter().any(|candidate| {
-                            candidate.name == declaration.name
-                                && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == *base)
+                        resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+                            base_node.declarations.iter().any(|candidate| {
+                                candidate.name == declaration.name
+                                    && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == base_decl.name)
+                            })
                         })
                     })
                 });
@@ -350,7 +376,7 @@ fn override_diagnostics(
                         "member `{}` in type `{}` in module `{}` is marked with @override but no direct base member was found",
                         declaration.name,
                         owner.name,
-                        module_path.display()
+                        node.module_path.display()
                     )
                 })
             }
@@ -364,17 +390,11 @@ fn override_diagnostics(
     diagnostics
 }
 
-fn final_override_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn final_override_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let class_final_members: BTreeMap<_, _> = declarations
-        .iter()
-        .filter(|declaration| declaration.owner.is_some() && declaration.is_final)
-        .filter_map(|declaration| {
-            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), ()))
-        })
-        .collect();
+    let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
     for class_declaration in declarations
@@ -382,6 +402,9 @@ fn final_override_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
     {
         for base in &class_declaration.bases {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+                continue;
+            };
             for member in declarations {
                 let Some(owner) = member.owner.as_ref() else {
                     continue;
@@ -389,15 +412,19 @@ fn final_override_diagnostics(
                 if owner.name != class_declaration.name {
                     continue;
                 }
-                if class_final_members.contains_key(&(base.clone(), member.name.clone())) {
+                if base_node.declarations.iter().any(|declaration| {
+                    declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
+                        && declaration.name == member.name
+                        && declaration.is_final
+                }) {
                     diagnostics.push(Diagnostic::error(
                         "TPY4006",
                         format!(
                             "type `{}` in module `{}` overrides Final member `{}` from base `{}`",
                             class_declaration.name,
-                            module_path.display(),
+                            node.module_path.display(),
                             member.name,
-                            base
+                            base_decl.name
                         ),
                     ));
                 }
@@ -408,24 +435,11 @@ fn final_override_diagnostics(
     diagnostics
 }
 
-fn interface_implementation_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn interface_implementation_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let interface_members: BTreeMap<_, _> = declarations
-        .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Value || declaration.kind == DeclarationKind::Function)
-        .filter_map(|declaration| {
-            let owner = declaration.owner.as_ref()?;
-            let interface_decl = declarations.iter().find(|candidate| {
-                candidate.name == owner.name
-                    && candidate.owner.is_none()
-                    && candidate.class_kind == Some(DeclarationOwnerKind::Interface)
-            })?;
-            Some(((interface_decl.name.clone(), declaration.name.clone()), (declaration.kind, declaration.method_kind, declaration.detail.clone())))
-        })
-        .collect::<BTreeMap<_, _>>();
-
+    let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
     for class_declaration in declarations.iter().filter(|declaration| {
@@ -434,16 +448,27 @@ fn interface_implementation_diagnostics(
             && declaration.class_kind != Some(DeclarationOwnerKind::Interface)
     }) {
         for base in &class_declaration.bases {
-            if !declarations.iter().any(|declaration| {
-                declaration.name == *base
-                    && declaration.owner.is_none()
-                    && declaration.class_kind == Some(DeclarationOwnerKind::Interface)
-            }) {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+                continue;
+            };
+            if base_decl.class_kind != Some(DeclarationOwnerKind::Interface) {
                 continue;
             }
 
+            let interface_members: BTreeMap<_, _> = base_node
+                .declarations
+                .iter()
+                .filter(|declaration| declaration.kind == DeclarationKind::Value || declaration.kind == DeclarationKind::Function)
+                .filter_map(|declaration| {
+                    let owner = declaration.owner.as_ref()?;
+                    (owner.name == base_decl.name).then(|| {
+                        ((owner.name.clone(), declaration.name.clone()), (declaration.kind, declaration.method_kind, declaration.detail.clone()))
+                    })
+                })
+                .collect::<BTreeMap<_, _>>();
+
             for ((interface_name, member_name), (member_kind, member_method_kind, member_detail)) in &interface_members {
-                if interface_name != base {
+                if interface_name != &base_decl.name {
                     continue;
                 }
 
@@ -460,9 +485,9 @@ fn interface_implementation_diagnostics(
                             format!(
                                 "type `{}` in module `{}` does not implement interface member `{}` from `{}`",
                                 class_declaration.name,
-                                module_path.display(),
+                                node.module_path.display(),
                                 member_name,
-                                base
+                                base_decl.name
                             ),
                         ));
                     }
@@ -475,9 +500,9 @@ fn interface_implementation_diagnostics(
                             format!(
                                 "type `{}` in module `{}` implements interface member `{}` from `{}` with an incompatible signature or annotation",
                                 class_declaration.name,
-                                module_path.display(),
+                                node.module_path.display(),
                                 member_name,
-                                base
+                                base_decl.name
                             ),
                         ));
                     }
@@ -1414,6 +1439,76 @@ mod tests {
                 calls: Vec::new(),
                 summary_fingerprint: 1,
             }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("subclasses final class `Base`"));
+    }
+
+    #[test]
+    fn check_reports_subclassing_imported_final_class() {
+        let result = check(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/base.py"),
+                    module_key: String::from("app.base"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: true,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    }],
+                    calls: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/child.py"),
+                    module_key: String::from("app.child"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Base"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("app.base.Base"),
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Child"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Base"),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Base")],
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 2,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
