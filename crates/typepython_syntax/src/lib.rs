@@ -132,6 +132,7 @@ pub struct ClassMember {
 pub enum ClassMemberKind {
     Field,
     Method,
+    Overload,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -420,7 +421,11 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
         match statement {
             Stmt::FunctionDef(function) => members.push(ClassMember {
                 name: function.name.as_str().to_owned(),
-                kind: ClassMemberKind::Method,
+                kind: if function.decorator_list.iter().any(is_overload_decorator) {
+                    ClassMemberKind::Overload
+                } else {
+                    ClassMemberKind::Method
+                },
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
             }),
             Stmt::AnnAssign(assign) => {
@@ -1768,6 +1773,46 @@ mod tests {
                 ],
                 line: 1,
             })]
+        );
+    }
+
+    #[test]
+    fn parse_marks_decorated_class_methods_as_overload_members() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("class-overloads.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from(
+                "from typing import overload\n\nclass Parser:\n    @overload\n    def parse(self, x: str) -> int: ...\n\n    def parse(self, x):\n        return 0\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("overload")],
+                    line: 1,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Parser"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    members: vec![
+                        ClassMember {
+                            name: String::from("parse"),
+                            kind: ClassMemberKind::Overload,
+                            line: 4,
+                        },
+                        ClassMember {
+                            name: String::from("parse"),
+                            kind: ClassMemberKind::Method,
+                            line: 7,
+                        },
+                    ],
+                    line: 3,
+                }),
+            ]
         );
     }
 }
