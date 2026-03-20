@@ -40,6 +40,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
+        for assignment_diagnostic in annotated_assignment_type_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(assignment_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -72,6 +75,46 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn annotated_assignment_type_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Value)
+        .filter_map(|declaration| {
+            let annotation = declaration.detail.as_str();
+            let value_type = declaration.value_type.as_deref()?;
+            let expected = match annotation {
+                "int" | "str" | "None" => annotation,
+                _ => return None,
+            };
+            (expected != value_type).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    match declaration.owner.as_ref() {
+                        Some(owner) => format!(
+                            "type `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                            owner.name,
+                            module_path.display(),
+                            value_type,
+                            declaration.name,
+                            expected
+                        ),
+                        None => format!(
+                            "module `{}` assigns `{}` where `{}` expects `{}`",
+                            module_path.display(),
+                            value_type,
+                            declaration.name,
+                            expected
+                        ),
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 fn direct_member_access_diagnostics(
@@ -1099,6 +1142,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1113,6 +1157,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1148,6 +1193,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1162,6 +1208,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1194,6 +1241,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1208,6 +1256,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1222,6 +1271,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1254,6 +1304,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1268,6 +1319,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1302,6 +1354,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1316,6 +1369,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1330,6 +1384,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1364,6 +1419,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1378,6 +1434,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1410,6 +1467,7 @@ mod tests {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1424,6 +1482,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1441,6 +1500,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1479,6 +1539,7 @@ mod tests {
                     name: String::from("Parser"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1493,6 +1554,7 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1510,6 +1572,7 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1545,6 +1608,7 @@ mod tests {
                         name: String::from("MAX_SIZE"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: None,
@@ -1559,6 +1623,7 @@ mod tests {
                         name: String::from("MAX_SIZE"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: None,
@@ -1593,6 +1658,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1607,6 +1673,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1624,6 +1691,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1662,6 +1730,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1676,6 +1745,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1693,6 +1763,7 @@ mod tests {
                         name: String::from("Derived"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1707,6 +1778,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1744,6 +1816,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1758,6 +1831,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1792,6 +1866,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1815,6 +1890,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Import,
                             detail: String::from("app.base.Base"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: None,
                             owner: None,
@@ -1829,6 +1905,7 @@ mod tests {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
                             detail: String::from("Base"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -1864,6 +1941,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1878,6 +1956,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1895,6 +1974,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -1909,6 +1989,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1946,6 +2027,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
@@ -1960,6 +2042,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -1977,6 +2060,7 @@ mod tests {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2011,6 +2095,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
@@ -2025,6 +2110,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self)->int"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2042,6 +2128,7 @@ mod tests {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2056,6 +2143,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self)->str"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2094,6 +2182,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Interface),
                             owner: None,
@@ -2108,6 +2197,7 @@ mod tests {
                             name: String::from("close"),
                             kind: DeclarationKind::Function,
                             detail: String::from("(self)->int"),
+                            value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -2135,6 +2225,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                             kind: DeclarationKind::Import,
                             detail: String::from("app.protocols.SupportsClose"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: None,
                             owner: None,
@@ -2149,6 +2240,7 @@ mod tests {
                             name: String::from("Widget"),
                             kind: DeclarationKind::Class,
                             detail: String::from("SupportsClose"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -2163,6 +2255,7 @@ mod tests {
                             name: String::from("close"),
                             kind: DeclarationKind::Function,
                             detail: String::from("(self)->str"),
+                            value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -2201,6 +2294,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2215,6 +2309,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2232,6 +2327,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2266,6 +2362,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2280,6 +2377,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2323,6 +2421,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -2337,6 +2436,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::from("(self)->None"),
+                            value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -2363,6 +2463,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
                         detail: String::from("app.base.Base"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: None,
@@ -2401,6 +2502,7 @@ mod tests {
                     name: String::from("Missing"),
                     kind: DeclarationKind::Import,
                     detail: String::from("app.missing.Missing"),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -2433,6 +2535,7 @@ mod tests {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
                     detail: String::from("(x:int,y:int)->None"),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -2470,6 +2573,7 @@ mod tests {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
                     detail: String::from("(x:int,y:str)->None"),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -2507,6 +2611,7 @@ mod tests {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
                     detail: String::from("(x:int,y:int)->None"),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -2544,6 +2649,7 @@ mod tests {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
@@ -2581,6 +2687,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2595,6 +2702,7 @@ mod tests {
                         name: String::from("__init__"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:int,y:int)->None"),
+                        value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2637,6 +2745,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2651,6 +2760,7 @@ mod tests {
                         name: String::from("__init__"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:int,y:str)->None"),
+                        value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2693,6 +2803,7 @@ mod tests {
                     name: String::from("top_level"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -2726,6 +2837,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2740,6 +2852,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2754,6 +2867,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2791,6 +2905,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2805,6 +2920,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:int)->int"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2822,6 +2938,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::from("Base"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2836,6 +2953,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:str)->int"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -2874,6 +2992,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -2888,6 +3007,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::from("(self,x:int)->int"),
+                            value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -2915,6 +3035,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Import,
                             detail: String::from("app.base.Base"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: None,
                             owner: None,
@@ -2929,6 +3050,7 @@ mod tests {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
                             detail: String::from("Base"),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -2943,6 +3065,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::from("(self,x:str)->int"),
+                            value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -2981,6 +3104,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -2995,6 +3119,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(cls)->None"),
+                        value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Class),
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -3012,6 +3137,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::from("Base"),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -3026,6 +3152,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self)->None"),
+                        value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
                         owner: Some(DeclarationOwner {
@@ -3064,6 +3191,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -3078,6 +3206,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -3095,6 +3224,7 @@ mod tests {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
@@ -3109,6 +3239,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::new(),
+                            value_type: None,
                             method_kind: None,
                             class_kind: None,
                             owner: Some(DeclarationOwner {
@@ -3150,6 +3281,7 @@ mod tests {
                                 name: String::from("Base"),
                                 kind: DeclarationKind::Class,
                                 detail: String::new(),
+                                value_type: None,
                                 method_kind: None,
                                 class_kind: Some(DeclarationOwnerKind::Class),
                                 owner: None,
@@ -3164,6 +3296,7 @@ mod tests {
                                 name: String::from("run"),
                                 kind: DeclarationKind::Function,
                                 detail: String::from("(self)->None"),
+                                value_type: None,
                                 method_kind: Some(typepython_syntax::MethodKind::Instance),
                                 class_kind: None,
                                 owner: Some(DeclarationOwner {
@@ -3191,6 +3324,7 @@ mod tests {
                                 name: String::from("Base"),
                                 kind: DeclarationKind::Import,
                                 detail: String::from("app.base.Base"),
+                                value_type: None,
                                 method_kind: None,
                                 class_kind: None,
                                 owner: None,
@@ -3205,6 +3339,7 @@ mod tests {
                                 name: String::from("Child"),
                                 kind: DeclarationKind::Class,
                                 detail: String::from("Base"),
+                                value_type: None,
                                 method_kind: None,
                                 class_kind: Some(DeclarationOwnerKind::Class),
                                 owner: None,
@@ -3219,6 +3354,7 @@ mod tests {
                                 name: String::from("run"),
                                 kind: DeclarationKind::Function,
                                 detail: String::from("(self)->None"),
+                                value_type: None,
                                 method_kind: Some(typepython_syntax::MethodKind::Instance),
                                 class_kind: None,
                                 owner: Some(DeclarationOwner {
@@ -3258,6 +3394,7 @@ mod tests {
                     name: String::from("VALUE"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -3291,6 +3428,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -3305,6 +3443,7 @@ mod tests {
                         name: String::from("cache"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        value_type: None,
                         method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {

@@ -145,6 +145,7 @@ pub struct ImportBinding {
 pub struct ValueStatement {
     pub names: Vec<String>,
     pub annotation: Option<String>,
+    pub value_type: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -173,6 +174,7 @@ pub struct ClassMember {
     pub kind: ClassMemberKind,
     pub method_kind: Option<MethodKind>,
     pub annotation: Option<String>,
+    pub value_type: Option<String>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
     pub is_override: bool,
@@ -601,6 +603,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 },
                 method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
                 annotation: None,
+                value_type: None,
                 params: extract_function_params(normalized, &function.parameters),
                 returns: function
                     .returns
@@ -622,6 +625,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     kind: ClassMemberKind::Field,
                     method_kind: None,
                     annotation: slice_range(normalized, assign.annotation.range()).map(str::to_owned),
+                    value_type: assign.value.as_deref().map(infer_literal_arg_type),
                     params: Vec::new(),
                     returns: None,
                     is_override: false,
@@ -639,6 +643,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     kind: ClassMemberKind::Field,
                     method_kind: None,
                     annotation: None,
+                    value_type: None,
                     params: Vec::new(),
                     returns: None,
                     is_override: false,
@@ -936,6 +941,7 @@ fn extract_ast_backed_statement(
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: None,
+                    value_type: None,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -950,6 +956,7 @@ fn extract_ast_backed_statement(
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
+                    value_type: stmt.value.as_deref().map(infer_literal_arg_type),
                     is_final: is_final_annotation(&stmt.annotation),
                     is_class_var: is_classvar_annotation(&stmt.annotation),
                     line,
@@ -2326,6 +2333,7 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
                     annotation: Some(String::from("int")),
+                    value_type: Some(String::from("int")),
                     is_final: false,
                     is_class_var: false,
                     line: 3,
@@ -2333,6 +2341,7 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("a"), String::from("b")],
                     annotation: None,
+                    value_type: None,
                     is_final: false,
                     is_class_var: false,
                     line: 4,
@@ -2386,6 +2395,7 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
                     annotation: None,
+                    value_type: None,
                     is_final: false,
                     is_class_var: false,
                     line: 2,
@@ -2534,6 +2544,7 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("int")),
+                        value_type: None,
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
@@ -2548,6 +2559,7 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                        value_type: None,
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
@@ -2562,6 +2574,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
@@ -2615,6 +2628,7 @@ mod tests {
                             kind: ClassMemberKind::Overload,
                             method_kind: Some(MethodKind::Instance),
                             annotation: None,
+                            value_type: None,
                             params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
@@ -2638,6 +2652,7 @@ mod tests {
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Instance),
                             annotation: None,
+                            value_type: None,
                             params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
@@ -2688,6 +2703,7 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("MAX_SIZE")],
                     annotation: Some(String::from("Final")),
+                    value_type: Some(String::from("int")),
                     is_final: true,
                     is_class_var: false,
                     line: 2,
@@ -2704,6 +2720,7 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("Final[int]")),
+                        value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
@@ -2753,6 +2770,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
@@ -2796,6 +2814,7 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("VALUE")],
                     annotation: Some(String::from("ClassVar[int]")),
+                    value_type: Some(String::from("int")),
                     is_final: false,
                     is_class_var: true,
                     line: 2,
@@ -2812,6 +2831,7 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("ClassVar[int]")),
+                        value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
@@ -2965,6 +2985,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
@@ -3017,6 +3038,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
@@ -3062,6 +3084,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Class),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("cls"),
                             annotation: None,
@@ -3079,6 +3102,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Static),
                         annotation: None,
+                        value_type: None,
                         params: Vec::new(),
                         returns: Some(String::from("None")),
                         is_override: false,
@@ -3093,6 +3117,7 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Property),
                         annotation: None,
+                        value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
