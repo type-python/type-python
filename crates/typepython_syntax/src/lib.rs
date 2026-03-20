@@ -170,6 +170,13 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
 
     match parse_module(&source.text) {
         Ok(parsed) => {
+            collect_invalid_classvar_body_diagnostics(
+                &source.path,
+                &source.text,
+                parsed.suite(),
+                false,
+                &mut diagnostics,
+            );
             statements.extend(extract_ast_backed_statements(
                 &source.path,
                 &source.text,
@@ -216,6 +223,13 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
         let normalized = normalize_typepython_source(&source.text, &statements);
         match parse_module(&normalized) {
             Ok(parsed) => {
+                collect_invalid_classvar_body_diagnostics(
+                    &source.path,
+                    &normalized,
+                    parsed.suite(),
+                    false,
+                    &mut diagnostics,
+                );
                 refresh_custom_statements_from_ast(
                     &source.path,
                     &normalized,
@@ -248,6 +262,36 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     }
 
     SyntaxTree { source, statements, diagnostics }
+}
+
+fn collect_invalid_classvar_body_diagnostics(
+    path: &Path,
+    source: &str,
+    suite: &[Stmt],
+    in_function_body: bool,
+    diagnostics: &mut DiagnosticReport,
+) {
+    for statement in suite {
+        match statement {
+            Stmt::AnnAssign(assign) if in_function_body && is_classvar_annotation(&assign.annotation) => {
+                let line = offset_to_line_column(source, assign.range.start().to_usize()).0;
+                diagnostics.push(
+                    Diagnostic::error(
+                        "TPY4001",
+                        "ClassVar[...] is not allowed inside function or method bodies",
+                    )
+                    .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                );
+            }
+            Stmt::FunctionDef(function) => {
+                collect_invalid_classvar_body_diagnostics(path, source, &function.body, true, diagnostics)
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_invalid_classvar_body_diagnostics(path, source, &class_def.body, false, diagnostics)
+            }
+            _ => {}
+        }
+    }
 }
 
 fn refresh_custom_statements_from_ast(
@@ -1956,5 +2000,21 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn parse_rejects_classvar_inside_function_body() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("bad-classvar.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from typing import ClassVar\n\ndef build() -> None:\n    value: ClassVar[int] = 1\n",
+            ),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("ClassVar[...] is not allowed inside function or method bodies"));
     }
 }
