@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, fs, io, path::{Path, PathBuf}};
 
+use ruff_python_ast::Stmt;
+use ruff_python_parser::parse_module;
 use typepython_config::ConfigHandle;
 use typepython_lowering::LoweredModule;
 use typepython_syntax::SourceKind;
@@ -90,7 +92,12 @@ pub fn write_runtime_outputs(
             if let Some(parent) = stub_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::write(stub_path, &module.python_source)?;
+            let stub_source = if module.source_kind == SourceKind::TypePython {
+                rewrite_to_stub_source(&module.python_source)?
+            } else {
+                module.python_source.clone()
+            };
+            fs::write(stub_path, stub_source)?;
             stub_files_written += 1;
         }
     }
@@ -106,6 +113,97 @@ pub fn write_runtime_outputs(
         stub_files_written,
         py_typed_written,
     })
+}
+
+fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
+    let parsed = parse_module(python).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unable to parse lowered Python for stub emission: {}", error.error),
+        )
+    })?;
+
+    let mut edits = Vec::new();
+    collect_function_stub_edits(python, parsed.suite(), &mut edits);
+    edits.sort_by_key(|edit| edit.start_line);
+
+    let lines: Vec<&str> = python.lines().collect();
+    let mut output = Vec::new();
+    let mut line = 1usize;
+    let mut edits = edits.into_iter().peekable();
+
+    while line <= lines.len() {
+        if let Some(edit) = edits.peek() {
+            if edit.start_line == line {
+                output.push(edit.replacement.clone());
+                line = edit.end_line + 1;
+                edits.next();
+                continue;
+            }
+        }
+
+        output.push(lines[line - 1].to_owned());
+        line += 1;
+    }
+
+    let mut rewritten = output.join("\n");
+    if python.ends_with('\n') {
+        rewritten.push('\n');
+    }
+    Ok(rewritten)
+}
+
+#[derive(Debug)]
+struct StubEdit {
+    start_line: usize,
+    end_line: usize,
+    replacement: String,
+}
+
+fn collect_function_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
+    for statement in suite {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                let start_line = offset_to_line(source, function.range.start().to_usize());
+                let end_offset = function.range.end().to_usize().saturating_sub(1);
+                let end_line = offset_to_line(source, end_offset.max(function.range.start().to_usize()));
+                let line = source.lines().nth(start_line - 1).unwrap_or("");
+                edits.push(StubEdit {
+                    start_line,
+                    end_line,
+                    replacement: rewrite_stub_signature_line(line),
+                });
+            }
+            Stmt::ClassDef(class_def) => collect_function_stub_edits(source, &class_def.body, edits),
+            _ => {}
+        }
+    }
+}
+
+fn rewrite_stub_signature_line(line: &str) -> String {
+    let trimmed = line.trim_end();
+    if trimmed.contains(": ...") {
+        trimmed.to_owned()
+    } else if trimmed.ends_with(':') {
+        format!("{trimmed} ...")
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn offset_to_line(source: &str, offset: usize) -> usize {
+    let mut line = 1usize;
+
+    for (index, character) in source.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if character == '\n' {
+            line += 1;
+        }
+    }
+
+    line
 }
 
 fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
@@ -137,7 +235,7 @@ mod tests {
                 LoweredModule {
                     source_path: PathBuf::from("src/app/__init__.tpy"),
                     source_kind: SourceKind::TypePython,
-                    python_source: String::from("from typing import TypeAlias\nUserId: TypeAlias = int\n"),
+                    python_source: String::from("from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int:\n    return 1\n"),
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
                 LoweredModule {
@@ -191,8 +289,8 @@ mod tests {
                 py_typed_written: 1,
             }
         );
-        assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
-        assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
+        assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int:\n    return 1\n");
+        assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int: ...\n");
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
         assert_eq!(stub_helpers, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");

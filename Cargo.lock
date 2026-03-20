@@ -986,6 +986,9 @@ dependencies = [
 name = "typepython-emit"
 version = "0.1.0"
 dependencies = [
+ "littrs-ruff-python-ast",
+ "littrs-ruff-python-parser",
+ "littrs-ruff-text-size",
  "typepython-config",
  "typepython-lowering",
  "typepython-syntax",
