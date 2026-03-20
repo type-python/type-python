@@ -75,26 +75,7 @@ fn direct_call_arity_diagnostics(
     node.calls
         .iter()
         .filter_map(|call| {
-            let target = if let Some(local) = node
-                .declarations
-                .iter()
-                .find(|declaration| declaration.name == call.callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
-            {
-                Some(local)
-            } else {
-                let import = node
-                    .declarations
-                    .iter()
-                    .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == call.callee)?;
-                let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-                let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-                target_node
-                    .declarations
-                    .iter()
-                    .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
-            }?;
-
-            let expected = direct_param_count(&target.detail)?;
+            let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
             (call.arg_count != expected).then(|| {
                 Diagnostic::error(
                     "TPY4001",
@@ -141,37 +122,9 @@ fn direct_call_keyword_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.calls {
-        let target = if let Some(local) = node
-            .declarations
-            .iter()
-            .find(|declaration| declaration.name == call.callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
-        {
-            Some(local)
-        } else if let Some(import) = node
-            .declarations
-            .iter()
-            .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == call.callee)
-        {
-            if let Some((module_key, symbol_name)) = import.detail.rsplit_once('.') {
-                if let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key) {
-                    target_node
-                        .declarations
-                        .iter()
-                        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let Some(target) = target else {
+        let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee) else {
             continue;
         };
-        let param_names = direct_param_names(&target.detail).unwrap_or_default();
         for keyword in &call.keyword_names {
             if !param_names.iter().any(|param| param == keyword) {
                 diagnostics.push(Diagnostic::error(
@@ -188,6 +141,51 @@ fn direct_call_keyword_diagnostics(
     }
 
     diagnostics
+}
+
+fn resolve_direct_callable_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(usize, Vec<String>)> {
+    if let Some(local) = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+    {
+        return Some((
+            direct_param_count(&local.detail).unwrap_or_default(),
+            direct_param_names(&local.detail).unwrap_or_default(),
+        ));
+    }
+
+    if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        let init = class_node.declarations.iter().find(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == "__init__"
+                && declaration.kind == DeclarationKind::Function
+        });
+        let param_names = init
+            .and_then(|declaration| direct_param_names(&declaration.detail))
+            .unwrap_or_default();
+        let arg_count = param_names.len().saturating_sub(1);
+        return Some((arg_count, param_names.into_iter().skip(1).collect()));
+    }
+
+    let import = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    let function = target_node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)?;
+    Some((
+        direct_param_count(&function.detail).unwrap_or_default(),
+        direct_param_names(&function.detail).unwrap_or_default(),
+    ))
 }
 
 fn unresolved_import_diagnostics(
@@ -2349,6 +2347,60 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("unknown keyword `z`"));
+    }
+
+    #[test]
+    fn check_reports_direct_constructor_arity_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("__init__"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:int,y:int)->None"),
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("Box"),
+                    arg_count: 1,
+                    keyword_names: Vec::new(),
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("call to `Box`"));
     }
 
     #[test]
