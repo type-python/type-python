@@ -25,6 +25,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
+        for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
+            diagnostics.push(resolution_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -57,6 +60,52 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn unresolved_import_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    let project_roots: BTreeSet<_> = nodes
+        .iter()
+        .filter_map(|candidate| candidate.module_key.split('.').next())
+        .map(str::to_owned)
+        .collect();
+
+    node.declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            let root = declaration.detail.split('.').next()?;
+            if !project_roots.contains(root) {
+                return None;
+            }
+
+            let resolves = nodes.iter().any(|candidate| candidate.module_key == declaration.detail)
+                || declaration
+                    .detail
+                    .rsplit_once('.')
+                    .and_then(|(module_key, symbol_name)| {
+                        nodes.iter().find(|candidate| candidate.module_key == module_key).map(|target| {
+                            target.declarations.iter().any(|declaration| {
+                                declaration.owner.is_none() && declaration.name == symbol_name
+                            })
+                        })
+                    })
+                    .unwrap_or(false);
+
+            (!resolves).then(|| {
+                Diagnostic::error(
+                    "TPY3001",
+                    format!(
+                        "module `{}` imports unresolved same-project target `{}`",
+                        node.module_path.display(),
+                        declaration.detail
+                    ),
+                )
+            })
+        })
+        .collect()
 }
 
 fn override_compatibility_diagnostics(
@@ -2060,6 +2109,37 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4007"));
         assert!(rendered.contains("directly instantiates abstract class `Base`"));
+    }
+
+    #[test]
+    fn check_reports_unresolved_same_project_imports() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/use.py"),
+                module_key: String::from("app.use"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("Missing"),
+                    kind: DeclarationKind::Import,
+                    detail: String::from("app.missing.Missing"),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY3001"));
+        assert!(rendered.contains("app.missing.Missing"));
     }
 
     #[test]
