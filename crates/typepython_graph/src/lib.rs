@@ -67,6 +67,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    detail: String::new(),
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -79,6 +80,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    detail: String::new(),
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -98,6 +100,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    detail: String::new(),
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -110,6 +113,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    detail: String::new(),
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -131,6 +135,7 @@ mod tests {
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
+                detail: String::new(),
                 class_kind: None,
                 owner: None,
                 is_override: false,
@@ -149,6 +154,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    detail: String::new(),
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -161,6 +167,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    detail: String::new(),
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
