@@ -652,7 +652,11 @@ fn declaration_surface(
                     owner: None,
                     kind: "class",
                     name: statement.name.clone(),
-                    detail: statement.bases.join(","),
+                    detail: format!(
+                        "bases=[{}];final={}",
+                        statement.bases.join(","),
+                        statement.is_final_decorator
+                    ),
                 });
                 for member in &statement.members {
                     surface.insert(SurfaceEntry {
@@ -664,9 +668,19 @@ fn declaration_surface(
                         },
                         name: member.name.clone(),
                         detail: match member.kind {
-                            typepython_syntax::ClassMemberKind::Field => member.annotation.clone().unwrap_or_default(),
+                            typepython_syntax::ClassMemberKind::Field => format!(
+                                "annotation={};final={};classvar={}",
+                                member.annotation.clone().unwrap_or_default(),
+                                member.is_final_decorator,
+                                member.is_class_var
+                            ),
                             typepython_syntax::ClassMemberKind::Method
-                            | typepython_syntax::ClassMemberKind::Overload => format_signature(&member.params, member.returns.as_deref()),
+                            | typepython_syntax::ClassMemberKind::Overload => format!(
+                                "kind={:?};final={};sig={}",
+                                member.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance),
+                                member.is_final_decorator,
+                                format_signature(&member.params, member.returns.as_deref())
+                            ),
                         },
                     });
                 }
@@ -1332,6 +1346,43 @@ mod tests {
             fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def build_user() -> int:\n    return 1\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("declaration surfaces differ"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "class Box:\n    @classmethod\n    def build(cls) -> None:\n        pass\n",
+            )
+            .unwrap();
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "class Box:\n    def build(self) -> None: ...\n",
+            )
+            .unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
             fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
             let config = load(&project_dir).unwrap();
