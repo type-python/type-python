@@ -100,6 +100,7 @@ pub struct NamedBlockStatement {
     pub type_params: Vec<TypeParam>,
     pub header_suffix: String,
     pub bases: Vec<String>,
+    pub is_final_decorator: bool,
     pub members: Vec<ClassMember>,
     pub line: usize,
 }
@@ -150,6 +151,7 @@ pub struct ClassMember {
     pub returns: Option<String>,
     pub is_override: bool,
     pub is_abstract_method: bool,
+    pub is_final_decorator: bool,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -401,6 +403,7 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
+                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -428,6 +431,7 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
+                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -455,6 +459,7 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
+                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -562,6 +567,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     .map(str::to_owned),
                 is_override: function.decorator_list.iter().any(is_override_decorator),
                 is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
+                is_final_decorator: function.decorator_list.iter().any(is_final_decorator),
                 is_final: false,
                 is_class_var: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
@@ -577,6 +583,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     returns: None,
                     is_override: false,
                     is_abstract_method: false,
+                    is_final_decorator: false,
                     is_final,
                     is_class_var,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
@@ -592,6 +599,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     returns: None,
                     is_override: false,
                     is_abstract_method: false,
+                    is_final_decorator: false,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -784,6 +792,7 @@ fn extract_ast_backed_statement(
                 .as_ref()
                 .map(|arguments| extract_class_bases(source, arguments))
                 .unwrap_or_default(),
+            is_final_decorator: stmt.decorator_list.iter().any(is_final_decorator),
             members: extract_class_members(normalized, &stmt.body),
             line,
         })),
@@ -1040,6 +1049,17 @@ fn is_abstractmethod_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
+fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+    match &decorator.expression {
+        Expr::Name(name) => name.id.as_str() == "final",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "final"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
+        }
+        _ => false,
+    }
+}
+
 fn is_final_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "Final",
@@ -1226,6 +1246,7 @@ fn parse_named_block(
         type_params: parsed_type_params.type_params,
         header_suffix: parsed_type_params.remainder.trim().to_owned(),
         bases: Vec::new(),
+        is_final_decorator: false,
         members: Vec::new(),
         line: line_number,
     }))
@@ -1649,6 +1670,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1657,6 +1679,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1665,6 +1688,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1724,6 +1748,7 @@ mod tests {
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1735,6 +1760,7 @@ mod tests {
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1746,6 +1772,7 @@ mod tests {
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1840,6 +1867,7 @@ mod tests {
                 type_params: Vec::new(),
                 header_suffix: String::from("(Closable)"),
                 bases: vec![String::from("Closable")],
+                is_final_decorator: false,
                 members: Vec::new(),
                 line: 1,
             })]
@@ -2014,6 +2042,7 @@ mod tests {
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: Vec::new(),
                     line: 1,
                 }),
@@ -2126,6 +2155,7 @@ mod tests {
                 type_params: Vec::new(),
                 header_suffix: String::new(),
                 bases: Vec::new(),
+                is_final_decorator: false,
                 members: vec![
                     ClassMember {
                         name: String::from("value"),
@@ -2135,6 +2165,7 @@ mod tests {
                         returns: None,
                         is_override: false,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -2147,6 +2178,7 @@ mod tests {
                         returns: None,
                         is_override: false,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -2162,6 +2194,7 @@ mod tests {
                         returns: Some(String::from("int")),
                         is_override: false,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -2195,6 +2228,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: vec![
                         ClassMember {
                             name: String::from("parse"),
@@ -2213,6 +2247,7 @@ mod tests {
                             returns: Some(String::from("int")),
                             is_override: false,
                             is_abstract_method: false,
+                            is_final_decorator: false,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -2234,6 +2269,7 @@ mod tests {
                             returns: None,
                             is_override: false,
                             is_abstract_method: false,
+                            is_final_decorator: false,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -2275,6 +2311,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
@@ -2283,9 +2320,56 @@ mod tests {
                         returns: None,
                         is_override: false,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
+                    }],
+                    line: 3,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_marks_final_decorated_classes_and_methods() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("final-decorators.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from typing import final\n\n@final\nclass Base:\n    @final\n    def run(self) -> None:\n        pass\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("final")],
+                    line: 1,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Base"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: true,
+                    members: vec![ClassMember {
+                        name: String::from("run"),
+                        kind: ClassMemberKind::Method,
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("self"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("None")),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: true,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 5,
                     }],
                     line: 3,
                 }),
@@ -2323,6 +2407,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
@@ -2331,6 +2416,7 @@ mod tests {
                         returns: None,
                         is_override: false,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: true,
                         line: 4,
@@ -2461,6 +2547,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
+                    is_final_decorator: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
@@ -2472,6 +2559,7 @@ mod tests {
                         returns: Some(String::from("None")),
                         is_override: true,
                         is_abstract_method: false,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: false,
                         line: 8,
@@ -2505,6 +2593,7 @@ mod tests {
                     type_params: Vec::new(),
                     header_suffix: String::new(),
                     bases: Vec::new(),
+                    is_final_decorator: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
@@ -2516,6 +2605,7 @@ mod tests {
                         returns: Some(String::from("None")),
                         is_override: false,
                         is_abstract_method: true,
+                        is_final_decorator: false,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
