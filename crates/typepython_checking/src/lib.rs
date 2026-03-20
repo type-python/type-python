@@ -23,6 +23,9 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
+        for override_violation in override_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(override_violation);
+        }
         for override_violation in final_override_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(override_violation);
         }
@@ -32,6 +35,53 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     }
 
     CheckResult { diagnostics }
+}
+
+fn override_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for declaration in declarations.iter().filter(|declaration| declaration.is_override) {
+        let message = match declaration.owner.as_ref() {
+            None => Some(format!(
+                "declaration `{}` in module `{}` is marked with @override but has no base member to override",
+                declaration.name,
+                module_path.display()
+            )),
+            Some(owner) => {
+                let owner_decl = declarations.iter().find(|candidate| {
+                    candidate.name == owner.name
+                        && candidate.owner.is_none()
+                        && candidate.class_kind == Some(owner.kind)
+                });
+                let overrides_any = owner_decl.is_some_and(|owner_decl| {
+                    owner_decl.bases.iter().any(|base| {
+                        declarations.iter().any(|candidate| {
+                            candidate.name == declaration.name
+                                && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == *base)
+                        })
+                    })
+                });
+
+                (!overrides_any).then(|| {
+                    format!(
+                        "member `{}` in type `{}` in module `{}` is marked with @override but no direct base member was found",
+                        declaration.name,
+                        owner.name,
+                        module_path.display()
+                    )
+                })
+            }
+        };
+
+        if let Some(message) = message {
+            diagnostics.push(Diagnostic::error("TPY4005", message));
+        }
+    }
+
+    diagnostics
 }
 
 fn final_override_diagnostics(
@@ -404,6 +454,7 @@ mod tests {
                     kind: DeclarationKind::Class,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -413,6 +464,7 @@ mod tests {
                     kind: DeclarationKind::Class,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -440,6 +492,7 @@ mod tests {
                     kind: DeclarationKind::TypeAlias,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -449,6 +502,7 @@ mod tests {
                     kind: DeclarationKind::Class,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -473,6 +527,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -482,6 +537,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -491,6 +547,7 @@ mod tests {
                     kind: DeclarationKind::Function,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -515,6 +572,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -524,6 +582,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -550,6 +609,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -559,6 +619,7 @@ mod tests {
                     kind: DeclarationKind::Function,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -568,6 +629,7 @@ mod tests {
                     kind: DeclarationKind::Function,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -594,6 +656,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -603,6 +666,7 @@ mod tests {
                     kind: DeclarationKind::Overload,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -627,6 +691,7 @@ mod tests {
                     kind: DeclarationKind::Class,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -639,6 +704,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
                     }),
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -651,6 +717,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
                     }),
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -678,6 +745,7 @@ mod tests {
                     kind: DeclarationKind::Class,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -690,6 +758,7 @@ mod tests {
                             name: String::from("Parser"),
                         kind: DeclarationOwnerKind::Class,
                     }),
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -702,6 +771,7 @@ mod tests {
                             name: String::from("Parser"),
                         kind: DeclarationOwnerKind::Class,
                     }),
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -726,6 +796,7 @@ mod tests {
                         kind: DeclarationKind::Value,
                         class_kind: None,
                         owner: None,
+                    is_override: false,
                         is_final: true,
                         is_class_var: false,
                     bases: Vec::new(),
@@ -735,6 +806,7 @@ mod tests {
                         kind: DeclarationKind::Value,
                         class_kind: None,
                         owner: None,
+                    is_override: false,
                         is_final: false,
                         is_class_var: false,
                     bases: Vec::new(),
@@ -759,11 +831,12 @@ mod tests {
                     Declaration {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
-                        class_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -773,9 +846,10 @@ mod tests {
                             name: String::from("Box"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_override: false,
                         is_final: true,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -785,9 +859,10 @@ mod tests {
                             name: String::from("Box"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                 ],
                 summary_fingerprint: 1,
@@ -810,8 +885,9 @@ mod tests {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
-                        class_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -824,6 +900,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_override: false,
                         is_final: true,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -831,8 +908,9 @@ mod tests {
                     Declaration {
                         name: String::from("Derived"),
                         kind: DeclarationKind::Class,
-                        class_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -845,6 +923,7 @@ mod tests {
                             name: String::from("Derived"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -871,6 +950,7 @@ mod tests {
                         kind: DeclarationKind::Class,
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -883,6 +963,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                             kind: DeclarationOwnerKind::Interface,
                         }),
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -892,6 +973,7 @@ mod tests {
                         kind: DeclarationKind::Class,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("SupportsClose")],
@@ -907,6 +989,81 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_invalid_top_level_override_usage() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("top_level"),
+                    kind: DeclarationKind::Function,
+                    class_kind: None,
+                    owner: None,
+                    is_override: true,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("top_level"));
+    }
+
+    #[test]
+    fn check_reports_member_override_without_base_member() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Child"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: true,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("no direct base member was found"));
+    }
+
+    #[test]
     fn check_reports_classvar_outside_class_scope() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -917,6 +1074,7 @@ mod tests {
                     kind: DeclarationKind::Value,
                     class_kind: None,
                     owner: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: true,
                     bases: Vec::new(),
@@ -940,11 +1098,12 @@ mod tests {
                     Declaration {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
-                        class_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("cache"),
@@ -954,9 +1113,10 @@ mod tests {
                             name: String::from("Box"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_override: false,
                         is_final: false,
                         is_class_var: true,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                 ],
                 summary_fingerprint: 1,

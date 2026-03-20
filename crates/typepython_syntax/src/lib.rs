@@ -109,6 +109,7 @@ pub struct FunctionStatement {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub is_override: bool,
     pub line: usize,
 }
 
@@ -140,6 +141,7 @@ pub struct ClassMember {
     pub annotation: Option<String>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub is_override: bool,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -504,6 +506,7 @@ fn refresh_custom_statements_from_ast(
                             .as_ref()
                             .and_then(|returns| slice_range(normalized, returns.range()))
                             .map(str::to_owned);
+                        existing.is_override = ast_statement.decorator_list.iter().any(is_override_decorator);
                     }
                 }
             }
@@ -549,6 +552,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     .as_ref()
                     .and_then(|returns| slice_range(normalized, returns.range()))
                     .map(str::to_owned),
+                is_override: function.decorator_list.iter().any(is_override_decorator),
                 is_final: false,
                 is_class_var: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
@@ -562,6 +566,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     annotation: slice_range(normalized, assign.annotation.range()).map(str::to_owned),
                     params: Vec::new(),
                     returns: None,
+                    is_override: false,
                     is_final,
                     is_class_var,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
@@ -575,6 +580,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     annotation: None,
                     params: Vec::new(),
                     returns: None,
+                    is_override: false,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -788,6 +794,7 @@ fn extract_ast_backed_statement(
                     .as_ref()
                     .and_then(|returns| slice_range(source, returns.range()))
                     .map(str::to_owned),
+                is_override: stmt.decorator_list.iter().any(is_override_decorator),
                 line,
             };
 
@@ -957,6 +964,17 @@ fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
         Expr::Attribute(attribute) => {
             attribute.attr.as_str() == "overload"
                 && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "typing")
+        }
+        _ => false,
+    }
+}
+
+fn is_override_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+    match &decorator.expression {
+        Expr::Name(name) => name.id.as_str() == "override",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "override"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
         }
         _ => false,
     }
@@ -1224,6 +1242,7 @@ fn parse_function(
         type_params: parsed_type_params.type_params,
         params: Vec::new(),
         returns: None,
+        is_override: false,
         line: line_number,
     }))
 }
@@ -1597,6 +1616,7 @@ mod tests {
                         annotation: None,
                     }],
                     returns: None,
+                    is_override: false,
                     line: 8,
                 }),
                 SyntaxStatement::Unsafe(UnsafeStatement { line: 10 }),
@@ -1680,6 +1700,7 @@ mod tests {
                         annotation: None,
                     }],
                     returns: None,
+                    is_override: false,
                     line: 8,
                 }),
             ]
@@ -1798,6 +1819,7 @@ mod tests {
                     annotation: Some(String::from("str")),
                 }],
                 returns: Some(String::from("int")),
+                is_override: false,
                 line: 1,
             })]
         );
@@ -1836,6 +1858,7 @@ mod tests {
                     annotation: None,
                 }],
                 returns: None,
+                is_override: false,
                 line: 1,
             })]
         );
@@ -1890,6 +1913,7 @@ mod tests {
                         annotation: Some(String::from("str")),
                     }],
                     returns: Some(String::from("int")),
+                    is_override: false,
                     line: 3,
                 }),
             ]
@@ -1944,6 +1968,7 @@ mod tests {
                         annotation: Some(String::from("T")),
                     }],
                     returns: Some(String::from("T")),
+                    is_override: false,
                     line: 4,
                 }),
             ]
@@ -2017,6 +2042,7 @@ mod tests {
                         annotation: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -2027,6 +2053,7 @@ mod tests {
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -2040,6 +2067,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("int")),
+                        is_override: false,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -2089,6 +2117,7 @@ mod tests {
                                 },
                             ],
                             returns: Some(String::from("int")),
+                            is_override: false,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -2108,6 +2137,7 @@ mod tests {
                                 },
                             ],
                             returns: None,
+                            is_override: false,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -2155,6 +2185,7 @@ mod tests {
                         annotation: Some(String::from("Final[int]")),
                         params: Vec::new(),
                         returns: None,
+                        is_override: false,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
@@ -2201,6 +2232,7 @@ mod tests {
                         annotation: Some(String::from("ClassVar[int]")),
                         params: Vec::new(),
                         returns: None,
+                        is_override: false,
                         is_final: false,
                         is_class_var: true,
                         line: 4,
@@ -2282,6 +2314,7 @@ mod tests {
                         annotation: Some(String::from("str")),
                     }],
                     returns: Some(String::from("int")),
+                    is_override: false,
                     line: 3,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -2292,7 +2325,59 @@ mod tests {
                         annotation: Some(String::from("int")),
                     }],
                     returns: Some(String::from("str")),
+                    is_override: false,
                     line: 6,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_marks_override_decorated_functions_and_members() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("override.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from typing import override\n\n@override\ndef top_level() -> None:\n    pass\n\nclass Child(Base):\n    @override\n    def run(self) -> None:\n        pass\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("override")],
+                    line: 1,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("top_level"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("None")),
+                    is_override: true,
+                    line: 3,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Child"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(Base)"),
+                    bases: vec![String::from("Base")],
+                    members: vec![ClassMember {
+                        name: String::from("run"),
+                        kind: ClassMemberKind::Method,
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("self"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("None")),
+                        is_override: true,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 8,
+                    }],
+                    line: 7,
                 }),
             ]
         );
