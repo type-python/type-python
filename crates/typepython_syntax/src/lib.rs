@@ -118,6 +118,7 @@ pub struct ImportStatement {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValueStatement {
     pub names: Vec<String>,
+    pub is_final: bool,
     pub line: usize,
 }
 
@@ -125,6 +126,7 @@ pub struct ValueStatement {
 pub struct ClassMember {
     pub name: String,
     pub kind: ClassMemberKind,
+    pub is_final: bool,
     pub line: usize,
 }
 
@@ -426,12 +428,15 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 } else {
                     ClassMemberKind::Method
                 },
+                is_final: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
             }),
             Stmt::AnnAssign(assign) => {
+                let is_final = is_final_annotation(&assign.annotation);
                 members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    is_final,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
                 }));
             }
@@ -440,6 +445,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    is_final: false,
                     line,
                 }));
             }
@@ -685,11 +691,19 @@ fn extract_ast_backed_statement(
                 .iter()
                 .flat_map(extract_assignment_names)
                 .collect::<Vec<_>>();
-            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement { names, line }))
+            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
+                names,
+                is_final: false,
+                line,
+            }))
         }
         Stmt::AnnAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
-            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement { names, line }))
+            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
+                names,
+                is_final: is_final_annotation(&stmt.annotation),
+                line,
+            }))
         }
         _ => None,
     }
@@ -774,6 +788,18 @@ fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
             attribute.attr.as_str() == "overload"
                 && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "typing")
         }
+        _ => false,
+    }
+}
+
+fn is_final_annotation(expr: &Expr) -> bool {
+    match expr {
+        Expr::Name(name) => name.id.as_str() == "Final",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "Final"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
+        }
+        Expr::Subscript(subscript) => is_final_annotation(&subscript.value),
         _ => false,
     }
 }
@@ -1726,10 +1752,12 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    is_final: false,
                     line: 3,
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("a"), String::from("b")],
+                    is_final: false,
                     line: 4,
                 }),
             ]
@@ -1758,16 +1786,19 @@ mod tests {
                     ClassMember {
                         name: String::from("value"),
                         kind: ClassMemberKind::Field,
+                        is_final: false,
                         line: 2,
                     },
                     ClassMember {
                         name: String::from("total"),
                         kind: ClassMemberKind::Field,
+                        is_final: false,
                         line: 3,
                     },
                     ClassMember {
                         name: String::from("get"),
                         kind: ClassMemberKind::Method,
+                        is_final: false,
                         line: 4,
                     },
                 ],
@@ -1802,14 +1833,55 @@ mod tests {
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Overload,
+                            is_final: false,
                             line: 4,
                         },
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Method,
+                            is_final: false,
                             line: 7,
                         },
                     ],
+                    line: 3,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_marks_final_value_declarations() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("finals.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from typing import Final\nMAX_SIZE: Final = 100\nclass Box:\n    limit: Final[int] = 1\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("Final")],
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("MAX_SIZE")],
+                    is_final: true,
+                    line: 2,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    members: vec![ClassMember {
+                        name: String::from("limit"),
+                        kind: ClassMemberKind::Field,
+                        is_final: true,
+                        line: 4,
+                    }],
                     line: 3,
                 }),
             ]

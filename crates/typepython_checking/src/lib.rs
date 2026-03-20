@@ -37,7 +37,14 @@ fn duplicate_diagnostics(
 
     for (owner_name, owner_kind, space_declarations) in declaration_spaces(declarations) {
         for duplicate in invalid_duplicates(&space_declarations) {
-            if let Some(diagnostic) = overload_shape_diagnostic(
+            if let Some(diagnostic) = final_reassignment_diagnostic(
+                module_path,
+                owner_name.as_deref(),
+                duplicate,
+                &space_declarations,
+            ) {
+                diagnostics.push(diagnostic);
+            } else if let Some(diagnostic) = overload_shape_diagnostic(
                 module_path,
                 module_kind,
                 owner_name.as_deref(),
@@ -58,6 +65,43 @@ fn duplicate_diagnostics(
     }
 
     diagnostics
+}
+
+fn final_reassignment_diagnostic(
+    module_path: &std::path::Path,
+    owner_name: Option<&str>,
+    duplicate: &str,
+    declarations: &[Declaration],
+) -> Option<Diagnostic> {
+    let final_count = declarations
+        .iter()
+        .filter(|declaration| declaration.name == duplicate && declaration.is_final)
+        .count();
+    if final_count == 0 {
+        return None;
+    }
+
+    let total_count = declarations
+        .iter()
+        .filter(|declaration| declaration.name == duplicate)
+        .count();
+    if total_count <= 1 {
+        return None;
+    }
+
+    Some(Diagnostic::error(
+        "TPY4006",
+        match owner_name {
+            Some(owner_name) => format!(
+                "type `{owner_name}` in module `{}` reassigns Final binding `{duplicate}`",
+                module_path.display()
+            ),
+            None => format!(
+                "module `{}` reassigns Final binding `{duplicate}`",
+                module_path.display()
+            ),
+        },
+    ))
 }
 
 fn declaration_spaces(
@@ -216,11 +260,13 @@ mod tests {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -244,11 +290,13 @@ mod tests {
                         name: String::from("UserId"),
                         kind: DeclarationKind::TypeAlias,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -269,16 +317,19 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -299,11 +350,13 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -326,16 +379,19 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -358,11 +414,13 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: None,
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -383,6 +441,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("close"),
@@ -391,6 +450,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                             kind: DeclarationOwnerKind::Interface,
                         }),
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("close"),
@@ -399,6 +459,7 @@ mod tests {
                             name: String::from("SupportsClose"),
                             kind: DeclarationOwnerKind::Interface,
                         }),
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -422,6 +483,7 @@ mod tests {
                         name: String::from("Parser"),
                         kind: DeclarationKind::Class,
                         owner: None,
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
@@ -430,6 +492,7 @@ mod tests {
                             name: String::from("Parser"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_final: false,
                     },
                     Declaration {
                         name: String::from("parse"),
@@ -438,6 +501,7 @@ mod tests {
                             name: String::from("Parser"),
                             kind: DeclarationOwnerKind::Class,
                         }),
+                        is_final: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -445,5 +509,76 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_final_reassignment_in_module_scope() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("MAX_SIZE"),
+                        kind: DeclarationKind::Value,
+                        owner: None,
+                        is_final: true,
+                    },
+                    Declaration {
+                        name: String::from("MAX_SIZE"),
+                        kind: DeclarationKind::Value,
+                        owner: None,
+                        is_final: false,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("Final binding `MAX_SIZE`"));
+    }
+
+    #[test]
+    fn check_reports_final_reassignment_in_class_scope() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                        is_final: false,
+                    },
+                    Declaration {
+                        name: String::from("limit"),
+                        kind: DeclarationKind::Value,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_final: true,
+                    },
+                    Declaration {
+                        name: String::from("limit"),
+                        kind: DeclarationKind::Value,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_final: false,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("type `Box`"));
+        assert!(rendered.contains("Final binding `limit`"));
     }
 }
