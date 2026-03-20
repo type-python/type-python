@@ -226,6 +226,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             );
             statements.extend(extract_ast_backed_statements(
                 &source.path,
+                &source.logical_module,
                 &source.text,
                 &source.text,
                 parsed.suite(),
@@ -287,6 +288,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                 );
                 statements.extend(extract_ast_backed_statements(
                     &source.path,
+                    &source.logical_module,
                     &normalized,
                     &normalized,
                     parsed.suite(),
@@ -765,6 +767,7 @@ fn render_type_params(type_params: &[TypeParam]) -> String {
 
 fn extract_ast_backed_statements(
     path: &Path,
+    current_module_key: &str,
     source: &str,
     normalized: &str,
     suite: &[Stmt],
@@ -780,7 +783,7 @@ fn extract_ast_backed_statements(
             continue;
         }
         if let Some(statement) =
-            extract_ast_backed_statement(path, source, normalized, stmt, line, diagnostics)
+            extract_ast_backed_statement(path, current_module_key, source, normalized, stmt, line, diagnostics)
         {
             statements.push(statement);
         }
@@ -794,6 +797,7 @@ fn extract_ast_backed_statements(
 
 fn extract_ast_backed_statement(
     path: &Path,
+    current_module_key: &str,
     source: &str,
     normalized: &str,
     stmt: &Stmt,
@@ -893,6 +897,7 @@ fn extract_ast_backed_statement(
                 .map(|alias| {
                     let imported_name = alias.name.as_str();
                     let module = stmt.module.as_ref().map(|id| id.as_str()).unwrap_or("");
+                    let module = normalize_import_module(path, current_module_key, stmt.level, module);
                     ImportBinding {
                         local_name: alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned(),
                         source_path: if module.is_empty() {
@@ -1177,6 +1182,24 @@ fn is_classvar_annotation(expr: &Expr) -> bool {
         Expr::Subscript(subscript) => is_classvar_annotation(&subscript.value),
         _ => false,
     }
+}
+
+fn normalize_import_module(path: &Path, current_module_key: &str, level: u32, module: &str) -> String {
+    if level == 0 {
+        return module.to_owned();
+    }
+
+    let mut parts: Vec<_> = current_module_key.split('.').filter(|part| !part.is_empty()).collect();
+    if path.file_stem().and_then(|stem| stem.to_str()) != Some("__init__") {
+        parts.pop();
+    }
+    for _ in 1..level {
+        parts.pop();
+    }
+    if !module.is_empty() {
+        parts.extend(module.split('.'));
+    }
+    parts.join(".")
 }
 
 fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
@@ -2244,6 +2267,28 @@ mod tests {
                     line: 4,
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_normalizes_relative_import_provenance() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("src/app/child.py"),
+            kind: SourceKind::Python,
+            logical_module: String::from("app.child"),
+            text: String::from("from .base import Base\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Import(ImportStatement {
+                bindings: vec![ImportBinding {
+                    local_name: String::from("Base"),
+                    source_path: String::from("app.base.Base"),
+                }],
+                line: 1,
+            })]
         );
     }
 
