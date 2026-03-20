@@ -2593,6 +2593,115 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_missing_explicit_override_when_required_for_imported_base() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![
+                    ModuleNode {
+                        module_path: PathBuf::from("src/app/base.py"),
+                        module_key: String::from("app.base"),
+                        module_kind: SourceKind::Python,
+                        declarations: vec![
+                            Declaration {
+                                name: String::from("Base"),
+                                kind: DeclarationKind::Class,
+                                detail: String::new(),
+                                method_kind: None,
+                                class_kind: Some(DeclarationOwnerKind::Class),
+                                owner: None,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_final: false,
+                                is_class_var: false,
+                                bases: Vec::new(),
+                            },
+                            Declaration {
+                                name: String::from("run"),
+                                kind: DeclarationKind::Function,
+                                detail: String::from("(self)->None"),
+                                method_kind: Some(typepython_syntax::MethodKind::Instance),
+                                class_kind: None,
+                                owner: Some(DeclarationOwner {
+                                    name: String::from("Base"),
+                                    kind: DeclarationOwnerKind::Class,
+                                }),
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_final: false,
+                                is_class_var: false,
+                                bases: Vec::new(),
+                            },
+                        ],
+                        calls: Vec::new(),
+                        summary_fingerprint: 1,
+                    },
+                    ModuleNode {
+                        module_path: PathBuf::from("src/app/child.tpy"),
+                        module_key: String::from("app.child"),
+                        module_kind: SourceKind::TypePython,
+                        declarations: vec![
+                            Declaration {
+                                name: String::from("Base"),
+                                kind: DeclarationKind::Import,
+                                detail: String::from("app.base.Base"),
+                                method_kind: None,
+                                class_kind: None,
+                                owner: None,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_final: false,
+                                is_class_var: false,
+                                bases: Vec::new(),
+                            },
+                            Declaration {
+                                name: String::from("Child"),
+                                kind: DeclarationKind::Class,
+                                detail: String::from("Base"),
+                                method_kind: None,
+                                class_kind: Some(DeclarationOwnerKind::Class),
+                                owner: None,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_final: false,
+                                is_class_var: false,
+                                bases: vec![String::from("Base")],
+                            },
+                            Declaration {
+                                name: String::from("run"),
+                                kind: DeclarationKind::Function,
+                                detail: String::from("(self)->None"),
+                                method_kind: Some(typepython_syntax::MethodKind::Instance),
+                                class_kind: None,
+                                owner: Some(DeclarationOwner {
+                                    name: String::from("Child"),
+                                    kind: DeclarationOwnerKind::Class,
+                                }),
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_final: false,
+                                is_class_var: false,
+                                bases: Vec::new(),
+                            },
+                        ],
+                        calls: Vec::new(),
+                        summary_fingerprint: 2,
+                    },
+                ],
+            },
+            true,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("missing @override"));
+    }
+
+    #[test]
     fn check_reports_classvar_outside_class_scope() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
