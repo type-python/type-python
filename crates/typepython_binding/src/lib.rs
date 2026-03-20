@@ -133,13 +133,12 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             bases: Vec::new(),
         }],
         SyntaxStatement::Import(statement) => statement
-            .names
+            .bindings
             .iter()
-            .cloned()
-            .map(|name| Declaration {
-                name,
+            .map(|binding| Declaration {
+                name: binding.local_name.clone(),
                 kind: DeclarationKind::Import,
-                detail: String::new(),
+                detail: binding.source_path.clone(),
                 method_kind: None,
                 class_kind: None,
                 owner: None,
@@ -271,6 +270,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -413,7 +413,16 @@ mod tests {
             },
             statements: vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("local_foo"), String::from("bar")],
+                    bindings: vec![
+                        typepython_syntax::ImportBinding {
+                            local_name: String::from("local_foo"),
+                            source_path: String::from("pkg.foo"),
+                        },
+                        typepython_syntax::ImportBinding {
+                            local_name: String::from("bar"),
+                            source_path: String::from("pkg.bar"),
+                        },
+                    ],
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -433,7 +442,7 @@ mod tests {
                 Declaration {
                     name: String::from("local_foo"),
                     kind: DeclarationKind::Import,
-                    detail: String::new(),
+                    detail: String::from("pkg.foo"),
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -447,7 +456,7 @@ mod tests {
                 Declaration {
                     name: String::from("bar"),
                     kind: DeclarationKind::Import,
-                    detail: String::new(),
+                    detail: String::from("pkg.bar"),
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -504,6 +513,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: vec![
                     ClassMember {
                         name: String::from("value"),
@@ -647,6 +657,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
@@ -741,6 +752,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
@@ -836,6 +848,7 @@ mod tests {
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,

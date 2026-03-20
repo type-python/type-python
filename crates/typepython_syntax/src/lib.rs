@@ -101,6 +101,7 @@ pub struct NamedBlockStatement {
     pub header_suffix: String,
     pub bases: Vec<String>,
     pub is_final_decorator: bool,
+    pub is_abstract_class: bool,
     pub members: Vec<ClassMember>,
     pub line: usize,
 }
@@ -123,8 +124,14 @@ pub struct FunctionParam {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ImportStatement {
-    pub names: Vec<String>,
+    pub bindings: Vec<ImportBinding>,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ImportBinding {
+    pub local_name: String,
+    pub source_path: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -427,6 +434,7 @@ fn refresh_custom_statements_from_ast(
                             .map(|arguments| extract_class_bases(normalized, arguments))
                             .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
+                        existing.is_abstract_class = is_abstract_class(existing);
                     }
                 }
             }
@@ -455,6 +463,7 @@ fn refresh_custom_statements_from_ast(
                             .map(|arguments| extract_class_bases(normalized, arguments))
                             .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
+                        existing.is_abstract_class = is_abstract_class(existing);
                     }
                 }
             }
@@ -483,6 +492,7 @@ fn refresh_custom_statements_from_ast(
                             .map(|arguments| extract_class_bases(normalized, arguments))
                             .unwrap_or_default();
                         existing.members = extract_class_members(normalized, &ast_statement.body);
+                        existing.is_abstract_class = is_abstract_class(existing);
                     }
                 }
             }
@@ -785,31 +795,36 @@ fn extract_ast_backed_statement(
     diagnostics: &mut DiagnosticReport,
 ) -> Option<SyntaxStatement> {
     match stmt {
-        Stmt::ClassDef(stmt) => Some(SyntaxStatement::ClassDef(NamedBlockStatement {
-            name: stmt.name.as_str().to_owned(),
-            type_params: extract_ast_type_params(
-                path,
-                source,
-                stmt.type_params.as_deref(),
+        Stmt::ClassDef(stmt) => {
+            let mut statement = NamedBlockStatement {
+                name: stmt.name.as_str().to_owned(),
+                type_params: extract_ast_type_params(
+                    path,
+                    source,
+                    stmt.type_params.as_deref(),
+                    line,
+                    "class declaration",
+                    diagnostics,
+                )?,
+                header_suffix: stmt
+                    .arguments
+                    .as_ref()
+                    .and_then(|arguments| slice_range(source, arguments.range()))
+                    .map(str::to_owned)
+                    .unwrap_or_default(),
+                bases: stmt
+                    .arguments
+                    .as_ref()
+                    .map(|arguments| extract_class_bases(source, arguments))
+                    .unwrap_or_default(),
+                is_final_decorator: stmt.decorator_list.iter().any(is_final_decorator),
+                members: extract_class_members(normalized, &stmt.body),
+                is_abstract_class: false,
                 line,
-                "class declaration",
-                diagnostics,
-            )?,
-            header_suffix: stmt
-                .arguments
-                .as_ref()
-                .and_then(|arguments| slice_range(source, arguments.range()))
-                .map(str::to_owned)
-                .unwrap_or_default(),
-            bases: stmt
-                .arguments
-                .as_ref()
-                .map(|arguments| extract_class_bases(source, arguments))
-                .unwrap_or_default(),
-            is_final_decorator: stmt.decorator_list.iter().any(is_final_decorator),
-            members: extract_class_members(normalized, &stmt.body),
-            line,
-        })),
+            };
+            statement.is_abstract_class = is_abstract_class(&statement);
+            Some(SyntaxStatement::ClassDef(statement))
+        }
         Stmt::FunctionDef(stmt) => {
             let is_overload = stmt.decorator_list.iter().any(is_overload_decorator);
             let statement = FunctionStatement {
@@ -843,11 +858,11 @@ fn extract_ast_backed_statement(
             })
         }
         Stmt::Import(stmt) => {
-            let names = stmt
+            let bindings = stmt
                 .names
                 .iter()
-                .map(|alias| {
-                    alias
+                .map(|alias| ImportBinding {
+                    local_name: alias
                         .asname
                         .as_ref()
                         .map(|identifier| identifier.as_str().to_owned())
@@ -859,18 +874,30 @@ fn extract_ast_backed_statement(
                                 .next()
                                 .unwrap_or(alias.name.as_str())
                                 .to_owned()
-                        })
+                        }),
+                    source_path: alias.name.as_str().to_owned(),
                 })
                 .collect::<Vec<_>>();
-            (!names.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { names, line }))
+            (!bindings.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
         }
         Stmt::ImportFrom(stmt) => {
-            let names = stmt
+            let bindings = stmt
                 .names
                 .iter()
-                .map(|alias| alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned())
+                .map(|alias| {
+                    let imported_name = alias.name.as_str();
+                    let module = stmt.module.as_ref().map(|id| id.as_str()).unwrap_or("");
+                    ImportBinding {
+                        local_name: alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned(),
+                        source_path: if module.is_empty() {
+                            imported_name.to_owned()
+                        } else {
+                            format!("{module}.{imported_name}")
+                        },
+                    }
+                })
                 .collect::<Vec<_>>();
-            (!names.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { names, line }))
+            (!bindings.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
         }
         Stmt::Assign(stmt) => {
             let names = stmt
@@ -1117,6 +1144,11 @@ fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> Met
     MethodKind::Instance
 }
 
+fn is_abstract_class(statement: &NamedBlockStatement) -> bool {
+    statement.bases.iter().any(|base| matches!(base.as_str(), "ABC" | "abc.ABC"))
+        || statement.members.iter().any(|member| member.is_abstract_method)
+}
+
 fn is_final_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "Final",
@@ -1304,6 +1336,7 @@ fn parse_named_block(
         header_suffix: parsed_type_params.remainder.trim().to_owned(),
         bases: Vec::new(),
         is_final_decorator: false,
+        is_abstract_class: false,
         members: Vec::new(),
         line: line_number,
     }))
@@ -1682,8 +1715,8 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportStatement,
-        MethodKind,
+        CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
+        ImportStatement, MethodKind,
         NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -1729,6 +1762,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1738,6 +1772,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1747,6 +1782,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1807,6 +1843,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
                 }),
@@ -1819,6 +1856,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
                 }),
@@ -1831,6 +1869,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
                 }),
@@ -1926,6 +1965,7 @@ mod tests {
                 header_suffix: String::from("(Closable)"),
                 bases: vec![String::from("Closable")],
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
             })]
@@ -2048,7 +2088,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("overload")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("overload"),
+                        source_path: String::from("typing.overload"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -2101,6 +2144,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
@@ -2138,11 +2182,29 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("foo"), String::from("baz")],
+                    bindings: vec![
+                        ImportBinding {
+                            local_name: String::from("foo"),
+                            source_path: String::from("pkg.foo"),
+                        },
+                        ImportBinding {
+                            local_name: String::from("baz"),
+                            source_path: String::from("pkg.bar"),
+                        },
+                    ],
                     line: 1,
                 }),
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("tools"), String::from("alias")],
+                    bindings: vec![
+                        ImportBinding {
+                            local_name: String::from("tools"),
+                            source_path: String::from("tools.helpers"),
+                        },
+                        ImportBinding {
+                            local_name: String::from("alias"),
+                            source_path: String::from("more.tools"),
+                        },
+                    ],
                     line: 2,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -2242,6 +2304,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: vec![
                     ClassMember {
                         name: String::from("value"),
@@ -2309,7 +2372,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("overload")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("overload"),
+                        source_path: String::from("typing.overload"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -2318,6 +2384,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![
                         ClassMember {
                             name: String::from("parse"),
@@ -2387,7 +2454,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("Final")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("Final"),
+                        source_path: String::from("typing.Final"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -2403,6 +2473,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
@@ -2438,7 +2509,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("final")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("final"),
+                        source_path: String::from("typing.final"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -2447,6 +2521,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: true,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
@@ -2485,7 +2560,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("ClassVar")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("ClassVar"),
+                        source_path: String::from("typing.ClassVar"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -2501,6 +2579,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
@@ -2581,7 +2660,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("overload")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("overload"),
+                        source_path: String::from("typing.overload"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -2625,7 +2707,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("override")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("override"),
+                        source_path: String::from("typing.override"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -2642,6 +2727,7 @@ mod tests {
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
+                    is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
@@ -2680,7 +2766,10 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::Import(ImportStatement {
-                    names: vec![String::from("abstractmethod")],
+                    bindings: vec![ImportBinding {
+                        local_name: String::from("abstractmethod"),
+                        source_path: String::from("abc.abstractmethod"),
+                    }],
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -2689,6 +2778,7 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                    is_abstract_class: true,
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
@@ -2731,6 +2821,7 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_abstract_class: false,
                 members: vec![
                     ClassMember {
                         name: String::from("make"),

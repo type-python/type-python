@@ -702,12 +702,12 @@ fn declaration_surface(
                 });
             }
             typepython_syntax::SyntaxStatement::Import(statement) => {
-                for name in &statement.names {
+                for binding in &statement.bindings {
                     surface.insert(SurfaceEntry {
                         owner: None,
                         kind: "import",
-                        name: name.clone(),
-                        detail: String::new(),
+                        name: binding.local_name.clone(),
+                        detail: binding.source_path.clone(),
                     });
                 }
             }
