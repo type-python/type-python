@@ -31,6 +31,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
             diagnostics.push(access_diagnostic);
         }
+        for return_diagnostic in direct_return_type_diagnostics(node) {
+            diagnostics.push(return_diagnostic);
+        }
         for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
@@ -75,6 +78,53 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn direct_return_type_diagnostics(node: &typepython_graph::ModuleNode) -> Vec<Diagnostic> {
+    node.returns
+        .iter()
+        .filter_map(|return_site| {
+            let target = node.declarations.iter().find(|declaration| {
+                declaration.name == return_site.owner_name
+                    && declaration.kind == DeclarationKind::Function
+                    && match (&return_site.owner_type_name, &declaration.owner) {
+                        (Some(owner_type), Some(owner)) => owner.name == *owner_type,
+                        (None, None) => true,
+                        _ => false,
+                    }
+            })?;
+
+            let actual = return_site.value_type.as_deref()?;
+            let expected = target.detail.split_once("->").map(|(_, annotation)| annotation.trim()).unwrap_or("");
+            let expected = match expected {
+                "int" | "str" | "None" => expected,
+                _ => return None,
+            };
+
+            (actual != expected).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    match &return_site.owner_type_name {
+                        Some(owner_type) => format!(
+                            "type `{}` in module `{}` returns `{}` where member `{}` expects `{}`",
+                            owner_type,
+                            node.module_path.display(),
+                            actual,
+                            return_site.owner_name,
+                            expected
+                        ),
+                        None => format!(
+                            "module `{}` returns `{}` where `{}` expects `{}`",
+                            node.module_path.display(),
+                            actual,
+                            return_site.owner_name,
+                            expected
+                        ),
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 fn annotated_assignment_type_diagnostics(
@@ -1170,6 +1220,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1221,6 +1272,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1284,6 +1336,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1332,6 +1385,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1397,6 +1451,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1447,6 +1502,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1516,6 +1572,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1588,6 +1645,7 @@ mod tests {
                 },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1636,6 +1694,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1707,6 +1766,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1794,6 +1854,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1845,6 +1906,7 @@ mod tests {
                 ],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -1879,6 +1941,7 @@ mod tests {
                     }],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -1919,6 +1982,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2006,6 +2070,7 @@ mod tests {
                 ],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2073,6 +2138,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2160,6 +2226,7 @@ mod tests {
                 ],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2214,6 +2281,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -2272,6 +2340,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2340,6 +2409,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2399,6 +2469,7 @@ mod tests {
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2453,6 +2524,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -2481,6 +2553,7 @@ mod tests {
                         keyword_names: Vec::new(),
                     }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2515,6 +2588,7 @@ mod tests {
                 }],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2553,6 +2627,7 @@ mod tests {
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2591,6 +2666,7 @@ mod tests {
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2598,6 +2674,44 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("passes `str` where parameter expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_direct_return_type_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->int"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("str")),
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("returns `str` where `build` expects `int`"));
     }
 
     #[test]
@@ -2629,6 +2743,7 @@ mod tests {
                     keyword_names: vec![String::from("z")],
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2661,6 +2776,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 calls: Vec::new(),
+                returns: Vec::new(),
                 member_accesses: vec![typepython_binding::MemberAccessSite {
                     owner_name: String::from("Box"),
                     member: String::from("missing"),
@@ -2724,6 +2840,7 @@ mod tests {
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2782,6 +2899,7 @@ mod tests {
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2815,6 +2933,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2883,6 +3002,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2970,6 +3090,7 @@ mod tests {
                 ],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -3024,6 +3145,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -3082,6 +3204,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -3169,6 +3292,7 @@ mod tests {
                 ],
                 calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -3256,6 +3380,7 @@ mod tests {
                     ],
                     calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                     summary_fingerprint: 1,
                 }],
             },
@@ -3313,6 +3438,7 @@ mod tests {
                         ],
                         calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                         summary_fingerprint: 1,
                     },
                     ModuleNode {
@@ -3371,6 +3497,7 @@ mod tests {
                         ],
                         calls: Vec::new(),
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                         summary_fingerprint: 2,
                     },
                 ],
@@ -3406,6 +3533,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -3459,6 +3587,7 @@ mod tests {
                     },
                 ],
                 member_accesses: Vec::new(),
+                returns: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],

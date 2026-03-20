@@ -171,7 +171,8 @@ pub struct MemberAccessStatement {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReturnStatement {
-    pub owner_name: Option<String>,
+    pub owner_name: String,
+    pub owner_type_name: Option<String>,
     pub value_type: Option<String>,
     pub line: usize,
 }
@@ -255,6 +256,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 &[],
                 &mut diagnostics,
             ));
+            collect_return_statements(&source.text, parsed.suite(), None, &mut statements);
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
             statements.sort_by_key(statement_line);
         }
@@ -317,6 +319,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &statements,
                     &mut diagnostics,
                 ));
+                collect_return_statements(&normalized, parsed.suite(), None, &mut statements);
                 collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
                 statements.sort_by_key(statement_line);
             }
@@ -728,6 +731,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::Value(statement) => statement.line,
         SyntaxStatement::Call(statement) => statement.line,
         SyntaxStatement::MemberAccess(statement) => statement.line,
+        SyntaxStatement::Return(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -757,7 +761,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MemberAccess(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -1074,6 +1078,33 @@ fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut
     }
 }
 
+fn collect_return_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                for body_stmt in &function.body {
+                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    if let Some(return_statement) =
+                        extract_return_statement(body_stmt, line, function.name.as_str(), owner_type_name)
+                    {
+                        statements.push(return_statement);
+                    }
+                }
+                collect_return_statements(source, &function.body, owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_return_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
@@ -1086,6 +1117,24 @@ fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<S
             statements.push(call);
         }
     }
+}
+
+fn extract_return_statement(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: &str,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::Return(return_stmt) = stmt else {
+        return None;
+    };
+
+    Some(SyntaxStatement::Return(ReturnStatement {
+        owner_name: owner_name.to_owned(),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        value_type: return_stmt.value.as_deref().map(infer_literal_arg_type),
+        line,
+    }))
 }
 
 fn extract_ast_type_params(
@@ -1831,7 +1880,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        ImportStatement, MemberAccessStatement, MethodKind,
+        ImportStatement, MemberAccessStatement, MethodKind, ReturnStatement,
         NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -2171,6 +2220,12 @@ mod tests {
                 returns: None,
                 is_override: false,
                 line: 1,
+            }),
+            SyntaxStatement::Return(ReturnStatement {
+                owner_name: String::from("unsafe"),
+                owner_type_name: None,
+                value_type: Some(String::new()),
+                line: 2,
             })]
         );
     }
@@ -2291,6 +2346,12 @@ mod tests {
                     returns: Some(String::from("T")),
                     is_override: false,
                     line: 4,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("first"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    line: 5,
                 }),
             ]
         );
@@ -2496,6 +2557,37 @@ mod tests {
     }
 
     #[test]
+    fn parse_extracts_direct_return_literals() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("returns.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def build() -> int:\n    return \"x\"\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("int")),
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("str")),
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
     fn parse_extracts_direct_member_accesses() {
         let tree = parse(SourceFile {
             path: PathBuf::from("member-access.py"),
@@ -2681,6 +2773,12 @@ mod tests {
                         },
                     ],
                     line: 3,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("parse"),
+                    owner_type_name: Some(String::from("Parser")),
+                    value_type: Some(String::from("int")),
+                    line: 8,
                 }),
             ]
         );
@@ -2947,6 +3045,12 @@ mod tests {
                     is_override: false,
                     line: 6,
                 }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("str")),
+                    line: 7,
+                }),
             ]
         );
     }
@@ -3140,6 +3244,12 @@ mod tests {
                     },
                 ],
                 line: 1,
+            }),
+            SyntaxStatement::Return(ReturnStatement {
+                owner_name: String::from("name"),
+                owner_type_name: Some(String::from("Box")),
+                value_type: Some(String::from("str")),
+                line: 12,
             })]
         );
     }

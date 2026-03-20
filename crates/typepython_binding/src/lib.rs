@@ -12,6 +12,7 @@ pub struct BindingTable {
     pub declarations: Vec<Declaration>,
     pub calls: Vec<CallSite>,
     pub member_accesses: Vec<MemberAccessSite>,
+    pub returns: Vec<ReturnSite>,
 }
 
 impl Default for BindingTable {
@@ -23,6 +24,7 @@ impl Default for BindingTable {
             declarations: Vec::new(),
             calls: Vec::new(),
             member_accesses: Vec::new(),
+            returns: Vec::new(),
         }
     }
 }
@@ -40,6 +42,13 @@ pub struct MemberAccessSite {
     pub owner_name: String,
     pub member: String,
     pub through_instance: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ReturnSite {
+    pub owner_name: String,
+    pub owner_type_name: Option<String>,
+    pub value_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -115,6 +124,18 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     member: statement.member.clone(),
                     through_instance: statement.through_instance,
+                }),
+                _ => None,
+            })
+            .collect(),
+        returns: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Return(statement) => Some(ReturnSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    value_type: statement.value_type.clone(),
                 }),
                 _ => None,
             })
@@ -214,6 +235,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .collect(),
         SyntaxStatement::Call(_) => Vec::new(),
         SyntaxStatement::MemberAccess(_) => Vec::new(),
+        SyntaxStatement::Return(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
 }

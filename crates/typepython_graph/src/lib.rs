@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::{BindingTable, CallSite, Declaration, MemberAccessSite};
+use typepython_binding::{BindingTable, CallSite, Declaration, MemberAccessSite, ReturnSite};
 use typepython_syntax::SourceKind;
 
 /// Summary node for one module.
@@ -19,6 +19,7 @@ pub struct ModuleNode {
     pub declarations: Vec<Declaration>,
     pub calls: Vec<CallSite>,
     pub member_accesses: Vec<MemberAccessSite>,
+    pub returns: Vec<ReturnSite>,
     pub summary_fingerprint: u64,
 }
 
@@ -41,6 +42,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
             declarations: binding.declarations.clone(),
             calls: binding.calls.clone(),
             member_accesses: binding.member_accesses.clone(),
+            returns: binding.returns.clone(),
             summary_fingerprint: hash_summary(binding),
         })
         .collect();
@@ -74,6 +76,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -88,6 +91,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
@@ -101,6 +105,7 @@ mod tests {
             ],
             calls: Vec::new(),
             member_accesses: Vec::new(),
+            returns: Vec::new(),
         }]);
 
         assert_eq!(
@@ -110,6 +115,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -124,6 +130,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
@@ -148,6 +155,7 @@ mod tests {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
                 detail: String::new(),
+                value_type: None,
                 method_kind: None,
                 class_kind: None,
                 owner: None,
@@ -160,6 +168,7 @@ mod tests {
             }],
             calls: Vec::new(),
             member_accesses: Vec::new(),
+            returns: Vec::new(),
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
@@ -170,6 +179,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -184,6 +194,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    value_type: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
@@ -197,6 +208,7 @@ mod tests {
             ],
             calls: Vec::new(),
             member_accesses: Vec::new(),
+            returns: Vec::new(),
         }]);
 
         println!(
