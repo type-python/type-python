@@ -106,7 +106,15 @@ pub struct NamedBlockStatement {
 pub struct FunctionStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub params: Vec<FunctionParam>,
+    pub returns: Option<String>,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FunctionParam {
+    pub name: String,
+    pub annotation: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -470,6 +478,12 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
+                        existing.params = extract_function_params(normalized, &ast_statement.parameters);
+                        existing.returns = ast_statement
+                            .returns
+                            .as_ref()
+                            .and_then(|returns| slice_range(normalized, returns.range()))
+                            .map(str::to_owned);
                     }
                 }
             }
@@ -730,6 +744,12 @@ fn extract_ast_backed_statement(
                     },
                     diagnostics,
                 )?,
+                params: extract_function_params(source, &stmt.parameters),
+                returns: stmt
+                    .returns
+                    .as_ref()
+                    .and_then(|returns| slice_range(source, returns.range()))
+                    .map(str::to_owned),
                 line,
             };
 
@@ -855,6 +875,22 @@ fn extract_ast_type_params(
     }
 
     Some(parsed)
+}
+
+fn extract_function_params(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+) -> Vec<FunctionParam> {
+    parameters
+        .iter()
+        .map(|parameter| FunctionParam {
+            name: parameter.name().as_str().to_owned(),
+            annotation: parameter
+                .annotation()
+                .and_then(|annotation| slice_range(source, annotation.range()))
+                .map(str::to_owned),
+        })
+        .collect()
 }
 
 fn extract_assignment_names(expr: &Expr) -> Vec<String> {
@@ -1137,6 +1173,8 @@ fn parse_function(
     Some(constructor(FunctionStatement {
         name,
         type_params: parsed_type_params.type_params,
+        params: Vec::new(),
+        returns: None,
         line: line_number,
     }))
 }
@@ -1439,7 +1477,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, NamedBlockStatement,
-        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeParam,
+        FunctionParam, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeParam,
         UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
@@ -1502,6 +1540,11 @@ mod tests {
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                    }],
+                    returns: None,
                     line: 8,
                 }),
                 SyntaxStatement::Unsafe(UnsafeStatement { line: 10 }),
@@ -1577,6 +1620,11 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                    }],
+                    returns: None,
                     line: 8,
                 }),
             ]
@@ -1689,6 +1737,11 @@ mod tests {
             vec![SyntaxStatement::OverloadDef(FunctionStatement {
                 name: String::from("parse"),
                 type_params: Vec::new(),
+                params: vec![FunctionParam {
+                    name: String::from("x"),
+                    annotation: Some(String::from("str")),
+                }],
+                returns: Some(String::from("int")),
                 line: 1,
             })]
         );
@@ -1722,6 +1775,11 @@ mod tests {
             vec![SyntaxStatement::FunctionDef(FunctionStatement {
                 name: String::from("unsafe"),
                 type_params: Vec::new(),
+                params: vec![FunctionParam {
+                    name: String::from("value"),
+                    annotation: None,
+                }],
+                returns: None,
                 line: 1,
             })]
         );
@@ -1771,6 +1829,11 @@ mod tests {
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("x"),
+                        annotation: Some(String::from("str")),
+                    }],
+                    returns: Some(String::from("int")),
                     line: 3,
                 }),
             ]
@@ -1819,6 +1882,11 @@ mod tests {
                         name: String::from("T"),
                         bound: None,
                     }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("T")),
+                    }],
+                    returns: Some(String::from("T")),
                     line: 4,
                 }),
             ]
@@ -2078,5 +2146,48 @@ mod tests {
         assert!(tree.diagnostics.has_errors());
         assert!(rendered.contains("TPY4010"));
         assert!(rendered.contains("deferred beyond v1"));
+    }
+
+    #[test]
+    fn parse_retains_function_signature_shapes() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("signatures.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from typing import overload\n\n@overload\ndef parse(value: str) -> int: ...\n\ndef build(value: int) -> str:\n    return \"x\"\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        println!("{:?}", tree.statements);
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("overload")],
+                    line: 1,
+                }),
+                SyntaxStatement::OverloadDef(FunctionStatement {
+                    name: String::from("parse"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("str")),
+                    }],
+                    returns: Some(String::from("int")),
+                    line: 3,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("int")),
+                    }],
+                    returns: Some(String::from("str")),
+                    line: 6,
+                }),
+            ]
+        );
     }
 }
