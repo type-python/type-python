@@ -13,7 +13,7 @@ use glob::Pattern;
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
-use typepython_checking::check;
+use typepython_checking::check_with_options;
 use typepython_config::{ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
@@ -450,7 +450,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
     let bindings: Vec<_> = syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
-    let checking = check(&graph);
+    let checking = check_with_options(&graph, config.config.typing.require_explicit_overrides);
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
     let tracked_modules = incremental.fingerprints.len();

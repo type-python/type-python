@@ -17,6 +17,11 @@ pub struct CheckResult {
 /// Runs the placeholder checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
+    check_with_options(graph, false)
+}
+
+#[must_use]
+pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool) -> CheckResult {
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
@@ -25,6 +30,11 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
         }
         for override_violation in override_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(override_violation);
+        }
+        if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
+            for override_violation in missing_override_diagnostics(&node.module_path, &node.declarations) {
+                diagnostics.push(override_violation);
+            }
         }
         for final_violation in final_decorator_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(final_violation);
@@ -44,6 +54,50 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     }
 
     CheckResult { diagnostics }
+}
+
+fn missing_override_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for declaration in declarations.iter().filter(|declaration| {
+        declaration.owner.is_some()
+            && declaration.kind == DeclarationKind::Function
+            && !declaration.is_override
+    }) {
+        let Some(owner) = declaration.owner.as_ref() else {
+            continue;
+        };
+        let owner_decl = declarations.iter().find(|candidate| {
+            candidate.name == owner.name
+                && candidate.owner.is_none()
+                && candidate.class_kind == Some(owner.kind)
+        });
+        let overrides_any = owner_decl.is_some_and(|owner_decl| {
+            owner_decl.bases.iter().any(|base| {
+                declarations.iter().any(|candidate| {
+                    candidate.name == declaration.name
+                        && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == *base)
+                })
+            })
+        });
+
+        if overrides_any {
+            diagnostics.push(Diagnostic::error(
+                "TPY4005",
+                format!(
+                    "member `{}` in type `{}` in module `{}` overrides a direct base member but is missing @override",
+                    declaration.name,
+                    owner.name,
+                    module_path.display()
+                ),
+            ));
+        }
+    }
+
+    diagnostics
 }
 
 fn final_decorator_diagnostics(
@@ -618,7 +672,7 @@ fn overload_shape_message(
 
 #[cfg(test)]
 mod tests {
-    use super::check;
+    use super::{check, check_with_options};
     use std::path::PathBuf;
     use typepython_binding::{Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind};
     use typepython_graph::{ModuleGraph, ModuleNode};
@@ -1545,6 +1599,81 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4005"));
         assert!(rendered.contains("no direct base member was found"));
+    }
+
+    #[test]
+    fn check_reports_missing_explicit_override_when_required() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![ModuleNode {
+                    module_path: PathBuf::from("src/app/module.tpy"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Base"),
+                            kind: DeclarationKind::Class,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("run"),
+                            kind: DeclarationKind::Function,
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Base"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Child"),
+                            kind: DeclarationKind::Class,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Base")],
+                        },
+                        Declaration {
+                            name: String::from("run"),
+                            kind: DeclarationKind::Function,
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Child"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 1,
+                }],
+            },
+            true,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("missing @override"));
     }
 
     #[test]
