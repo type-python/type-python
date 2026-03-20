@@ -154,6 +154,7 @@ pub struct ValueStatement {
 pub struct CallStatement {
     pub callee: String,
     pub arg_count: usize,
+    pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
     pub line: usize,
 }
@@ -973,6 +974,7 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
         arg_count: call.arguments.args.len(),
+        arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
         keyword_names: call
             .arguments
             .keywords
@@ -981,6 +983,14 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
             .collect(),
         line,
     }))
+}
+
+fn infer_literal_arg_type(expr: &Expr) -> String {
+    match expr {
+        Expr::NumberLiteral(_) => String::from("int"),
+        Expr::StringLiteral(_) => String::from("str"),
+        _ => String::new(),
+    }
 }
 
 fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
@@ -2369,6 +2379,7 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Builder"),
                     arg_count: 0,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                     line: 1,
                 }),
@@ -2382,6 +2393,7 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
                     arg_count: 0,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                     line: 2,
                 }),
@@ -2404,7 +2416,30 @@ mod tests {
             vec![SyntaxStatement::Call(CallStatement {
                 callee: String::from("build"),
                 arg_count: 0,
+                arg_types: Vec::new(),
                 keyword_names: vec![String::from("x"), String::from("y")],
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_call_literal_arg_types() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("call-types.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("build(1, \"x\")\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Call(CallStatement {
+                callee: String::from("build"),
+                arg_count: 2,
+                arg_types: vec![String::from("int"), String::from("str")],
+                keyword_names: Vec::new(),
                 line: 1,
             })]
         );
@@ -2434,6 +2469,7 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
                     arg_count: 0,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                     line: 2,
                 }),

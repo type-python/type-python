@@ -31,6 +31,7 @@ impl Default for BindingTable {
 pub struct CallSite {
     pub callee: String,
     pub arg_count: usize,
+    pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
 }
 
@@ -99,6 +100,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 SyntaxStatement::Call(statement) => Some(CallSite {
                     callee: statement.callee.clone(),
                     arg_count: statement.arg_count,
+                    arg_types: statement.arg_types.clone(),
                     keyword_names: statement.keyword_names.clone(),
                 }),
                 _ => None,

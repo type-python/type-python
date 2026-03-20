@@ -34,6 +34,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
+        for call_diagnostic in direct_call_type_diagnostics(node, &graph.nodes) {
+            diagnostics.push(call_diagnostic);
+        }
         for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
@@ -146,6 +149,54 @@ fn direct_param_names(signature: &str) -> Option<Vec<String>> {
     )
 }
 
+fn direct_param_types(signature: &str) -> Option<Vec<String>> {
+    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    Some(
+        inner
+            .split(',')
+            .map(|part| part.split_once(':').map(|(_, annotation)| annotation.trim().to_owned()).unwrap_or_default())
+            .collect(),
+    )
+}
+
+fn direct_call_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.calls
+        .iter()
+        .flat_map(|call| {
+            let Some(target) = resolve_direct_function(node, nodes, &call.callee) else {
+                return Vec::new();
+            };
+            let param_types = direct_param_types(&target.detail).unwrap_or_default();
+            call.arg_types
+                .iter()
+                .zip(param_types.iter())
+                .filter(|(arg_ty, param_ty)| {
+                    !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+                })
+                .map(|(arg_ty, param_ty)| {
+                    Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "call to `{}` in module `{}` passes `{}` where parameter expects `{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            arg_ty,
+                            param_ty
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 fn direct_call_keyword_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -174,16 +225,37 @@ fn direct_call_keyword_diagnostics(
     diagnostics
 }
 
-fn resolve_direct_callable_signature(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
+fn resolve_direct_function<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
-) -> Option<(usize, Vec<String>)> {
+) -> Option<&'a Declaration> {
     if let Some(local) = node
         .declarations
         .iter()
         .find(|declaration| declaration.name == callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
     {
+        return Some(local);
+    }
+
+    let import = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    target_node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+}
+
+fn resolve_direct_callable_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(usize, Vec<String>)> {
+    if let Some(local) = resolve_direct_function(node, nodes, callee) {
         return Some((
             direct_param_count(&local.detail).unwrap_or_default(),
             direct_param_names(&local.detail).unwrap_or_default(),
@@ -203,16 +275,7 @@ fn resolve_direct_callable_signature(
         return Some((arg_count, param_names.into_iter().skip(1).collect()));
     }
 
-    let import = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    let function = target_node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)?;
+    let function = resolve_direct_function(node, nodes, callee)?;
     Some((
         direct_param_count(&function.detail).unwrap_or_default(),
         direct_param_names(&function.detail).unwrap_or_default(),
@@ -2211,6 +2274,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("Base"),
                     arg_count: 0,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
@@ -2289,6 +2353,7 @@ mod tests {
                     calls: vec![typepython_binding::CallSite {
                         callee: String::from("Base"),
                         arg_count: 0,
+                        arg_types: Vec::new(),
                         keyword_names: Vec::new(),
                     }],
                 member_accesses: Vec::new(),
@@ -2358,6 +2423,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("build"),
                     arg_count: 1,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
@@ -2368,6 +2434,43 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("expects 2 positional argument(s) but received 1"));
+    }
+
+    #[test]
+    fn check_reports_direct_call_type_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(x:int,y:str)->None"),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("build"),
+                    arg_count: 2,
+                    arg_types: vec![String::from("str"), String::from("int")],
+                    keyword_names: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes `str` where parameter expects `int`"));
     }
 
     #[test]
@@ -2394,6 +2497,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("build"),
                     arg_count: 0,
+                    arg_types: Vec::new(),
                     keyword_names: vec![String::from("z")],
                 }],
                 member_accesses: Vec::new(),
@@ -2485,6 +2589,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("Box"),
                     arg_count: 1,
+                    arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
