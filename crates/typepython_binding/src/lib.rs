@@ -7,6 +7,7 @@ use typepython_syntax::{MethodKind, SourceKind, SyntaxStatement, SyntaxTree};
 #[derive(Debug, Clone)]
 pub struct BindingTable {
     pub module_path: PathBuf,
+    pub module_key: String,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
     pub calls: Vec<String>,
@@ -16,6 +17,7 @@ impl Default for BindingTable {
     fn default() -> Self {
         Self {
             module_path: PathBuf::new(),
+            module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: Vec::new(),
             calls: Vec::new(),
@@ -67,6 +69,7 @@ pub enum DeclarationKind {
 pub fn bind(tree: &SyntaxTree) -> BindingTable {
     BindingTable {
         module_path: tree.source.path.clone(),
+        module_key: tree.source.logical_module.clone(),
         module_kind: tree.source.kind,
         declarations: tree
             .statements
@@ -255,6 +258,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/__init__.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
                 text: String::new(),
             },
             statements: vec![
@@ -286,7 +290,8 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        println!("{:?}", table.declarations);
+        println!("{} {:?}", table.module_key, table.declarations);
+        assert_eq!(table.module_key, "app");
         assert_eq!(
             table.declarations,
             vec![
@@ -342,6 +347,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/__init__.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![
@@ -409,6 +415,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/helpers.py"),
                 kind: SourceKind::Python,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![
@@ -505,6 +512,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/models.tpy"),
                 kind: SourceKind::TypePython,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
@@ -641,6 +649,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/finals.py"),
                 kind: SourceKind::Python,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![
@@ -736,6 +745,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/classvars.py"),
                 kind: SourceKind::Python,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![
@@ -831,6 +841,7 @@ mod tests {
             source: SourceFile {
                 path: PathBuf::from("src/app/override.py"),
                 kind: SourceKind::Python,
+                logical_module: String::new(),
                 text: String::new(),
             },
             statements: vec![

@@ -14,6 +14,7 @@ use typepython_syntax::SourceKind;
 pub struct ModuleNode {
     /// Module path on disk.
     pub module_path: PathBuf,
+    pub module_key: String,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
     pub calls: Vec<String>,
@@ -34,6 +35,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
         .iter()
         .map(|binding| ModuleNode {
             module_path: binding.module_path.clone(),
+            module_key: binding.module_key.clone(),
             module_kind: binding.module_kind,
             declarations: binding.declarations.clone(),
             calls: binding.calls.clone(),
@@ -47,6 +49,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
 fn hash_summary(binding: &BindingTable) -> u64 {
     let mut hasher = DefaultHasher::new();
     binding.module_path.hash(&mut hasher);
+    binding.module_key.hash(&mut hasher);
     binding.declarations.hash(&mut hasher);
     hasher.finish()
 }
@@ -62,12 +65,14 @@ mod tests {
     fn build_carries_bound_symbols_into_module_nodes() {
         let graph = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -81,6 +86,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -101,6 +107,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -114,6 +121,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -131,11 +139,13 @@ mod tests {
     fn build_changes_fingerprint_when_symbols_change() {
         let first = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
                 detail: String::new(),
+                method_kind: None,
                 class_kind: None,
                 owner: None,
                 is_override: false,
@@ -149,12 +159,14 @@ mod tests {
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -168,6 +180,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,

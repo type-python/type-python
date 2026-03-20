@@ -414,14 +414,16 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees: Vec<_> = source_paths
+    let syntax_trees: Vec<_> = discovery
+        .sources
         .iter()
-        .map(SourceFile::from_path)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context("unable to read discovered source files")?
-        .into_iter()
-        .map(parse)
-        .collect();
+        .map(|source| {
+            let mut source_file = SourceFile::from_path(&source.path)
+                .with_context(|| format!("unable to read {}", source.path.display()))?;
+            source_file.logical_module = source.logical_module.clone();
+            Ok(parse(source_file))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     if parse_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {

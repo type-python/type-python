@@ -42,6 +42,7 @@ pub struct SourceFile {
     pub path: PathBuf,
     /// Classified input kind.
     pub kind: SourceKind,
+    pub logical_module: String,
     /// Source text.
     pub text: String,
 }
@@ -58,7 +59,12 @@ impl SourceFile {
             )
         })?;
 
-        Ok(Self { path, kind, text })
+        Ok(Self {
+            path,
+            kind,
+            logical_module: String::new(),
+            text,
+        })
     }
 }
 
@@ -1727,6 +1733,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("example.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: concat!(
                 "typealias Pair[T] = tuple[T, T]\n",
                 "interface Service:\n",
@@ -1807,6 +1814,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("generic.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: concat!(
                 "typealias Pair[T: Hashable] = tuple[T, T]\n",
                 "interface Box[T]:\n",
@@ -1896,6 +1904,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("broken.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: concat!(
                 "typealias Pair tuple[int, int]\n",
                 "interface:\n",
@@ -1919,6 +1928,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("broken-generics.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: concat!(
                 "typealias Pair[T = int] = tuple[T, T]\n",
                 "interface Box[T:] :\n",
@@ -1939,6 +1949,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("duplicate-generics.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("class Box[T, T]:\n    pass\n"),
         });
 
@@ -1953,6 +1964,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("interface-bases.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("interface SupportsClose(Closable):\n    pass\n"),
         });
 
@@ -1977,6 +1989,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("bad-interface.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("interface SupportsClose:\n    value = 1\n"),
         });
 
@@ -1991,6 +2004,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("overload-simple-suite.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("overload def parse(x: str) -> int: ...\n"),
         });
 
@@ -2016,6 +2030,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("bad-overload.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("overload def parse(x: str) -> int:\n    return 1\n"),
         });
 
@@ -2030,6 +2045,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("module.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("def unsafe(value):\n    return value\n"),
         });
 
@@ -2055,6 +2071,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("broken.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("def broken(:\n    return 1\n"),
         });
 
@@ -2069,6 +2086,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("module.pyi"),
             kind: SourceKind::Stub,
+            logical_module: String::new(),
             text: String::from("def helper() -> int: ...\n"),
         });
 
@@ -2080,6 +2098,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("module.pyi"),
             kind: SourceKind::Stub,
+            logical_module: String::new(),
             text: String::from("from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n"),
         });
 
@@ -2114,6 +2133,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("broken.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("typealias UserId = int\ndef broken():\n    return )\n"),
         });
 
@@ -2128,6 +2148,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("generic.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from("class Box[T]:\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n"),
         });
 
@@ -2171,6 +2192,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("module.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from(
                 "from pkg import foo, bar as baz\nimport tools.helpers, more.tools as alias\nvalue: int = 1\na = b = 2\n",
             ),
@@ -2230,6 +2252,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("calls.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("Builder()\nvalue = Factory()\n"),
         });
 
@@ -2261,6 +2284,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("nested-calls.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("def build() -> None:\n    Factory()\n"),
         });
 
@@ -2289,6 +2313,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("members.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from(
                 "class Box:\n    value: int\n    total = 1\n    def get(self) -> int: ...\n",
             ),
@@ -2362,6 +2387,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("class-overloads.tpy"),
             kind: SourceKind::TypePython,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import overload\n\nclass Parser:\n    @overload\n    def parse(self, x: str) -> int: ...\n\n    def parse(self, x):\n        return 0\n",
             ),
@@ -2444,6 +2470,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("finals.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import Final\nMAX_SIZE: Final = 100\nclass Box:\n    limit: Final[int] = 1\n",
             ),
@@ -2499,6 +2526,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("final-decorators.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import final\n\n@final\nclass Base:\n    @final\n    def run(self) -> None:\n        pass\n",
             ),
@@ -2550,6 +2578,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("classvars.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import ClassVar\nVALUE: ClassVar[int] = 1\nclass Box:\n    cache: ClassVar[int] = 2\n",
             ),
@@ -2605,6 +2634,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("bad-classvar.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import ClassVar\n\ndef build() -> None:\n    value: ClassVar[int] = 1\n",
             ),
@@ -2621,6 +2651,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("bad-classvar-param.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("from typing import ClassVar\n\ndef build(value: ClassVar[int]) -> None:\n    pass\n"),
         });
 
@@ -2635,6 +2666,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("bad-final-param.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from("from typing import Final\n\ndef build(value: Final[int]) -> None:\n    pass\n"),
         });
 
@@ -2649,6 +2681,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("signatures.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import overload\n\n@overload\ndef parse(value: str) -> int: ...\n\ndef build(value: int) -> str:\n    return \"x\"\n",
             ),
@@ -2697,6 +2730,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("override.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from typing import override\n\n@override\ndef top_level() -> None:\n    pass\n\nclass Child(Base):\n    @override\n    def run(self) -> None:\n        pass\n",
             ),
@@ -2756,6 +2790,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("abstracts.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "from abc import abstractmethod\n\nclass Base:\n    @abstractmethod\n    def run(self) -> None:\n        pass\n",
             ),
@@ -2807,6 +2842,7 @@ mod tests {
         let tree = parse(SourceFile {
             path: PathBuf::from("member-kinds.py"),
             kind: SourceKind::Python,
+            logical_module: String::new(),
             text: String::from(
                 "class Box:\n    @classmethod\n    def make(cls) -> None:\n        pass\n\n    @staticmethod\n    def build() -> None:\n        pass\n\n    @property\n    def name(self) -> str:\n        return \"x\"\n",
             ),
