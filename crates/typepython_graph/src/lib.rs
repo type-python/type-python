@@ -65,10 +65,12 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    owner: None,
                 },
             ],
         }]);
@@ -79,10 +81,12 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    owner: None,
                 },
             ]
         );
@@ -96,6 +100,7 @@ mod tests {
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
+                owner: None,
             }],
         }]);
         let second = build(&[BindingTable {
@@ -105,10 +110,12 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    owner: None,
                 },
             ],
         }]);

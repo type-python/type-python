@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use typepython_binding::{Declaration, DeclarationKind};
+use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_graph::ModuleGraph;
 use typepython_syntax::SourceKind;
@@ -35,23 +35,63 @@ fn duplicate_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    for duplicate in invalid_duplicates(declarations) {
-        if let Some(diagnostic) = overload_shape_diagnostic(module_path, module_kind, duplicate, declarations) {
-            diagnostics.push(diagnostic);
-        } else if is_permitted_external_overload_group(module_kind, duplicate, declarations) {
-            continue;
-        } else {
-            diagnostics.push(Diagnostic::error(
-                "TPY4004",
-                format!(
-                    "module `{}` declares `{duplicate}` more than once in the same declaration space",
-                    module_path.display()
-                ),
-            ));
+    for (owner_name, owner_kind, space_declarations) in declaration_spaces(declarations) {
+        for duplicate in invalid_duplicates(&space_declarations) {
+            if let Some(diagnostic) = overload_shape_diagnostic(
+                module_path,
+                module_kind,
+                owner_name.as_deref(),
+                owner_kind,
+                duplicate,
+                &space_declarations,
+            ) {
+                diagnostics.push(diagnostic);
+            } else if is_permitted_external_overload_group(module_kind, duplicate, &space_declarations) {
+                continue;
+            } else {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4004",
+                    duplicate_message(module_path, owner_name.as_deref(), duplicate),
+                ));
+            }
         }
     }
 
     diagnostics
+}
+
+fn declaration_spaces(
+    declarations: &[Declaration],
+) -> Vec<(Option<String>, Option<DeclarationOwnerKind>, Vec<Declaration>)> {
+    let mut spaces: BTreeMap<(Option<String>, Option<DeclarationOwnerKind>), Vec<Declaration>> =
+        BTreeMap::new();
+
+    for declaration in declarations {
+        let key = declaration.owner.as_ref().map(|owner| owner.name.clone());
+        let owner_kind = declaration.owner.as_ref().map(|owner| owner.kind);
+        spaces
+            .entry((key, owner_kind))
+            .or_default()
+            .push(declaration.clone());
+    }
+
+    spaces
+        .into_iter()
+        .map(|((owner_name, owner_kind), declarations)| (owner_name, owner_kind, declarations))
+        .collect()
+}
+
+fn duplicate_message(module_path: &std::path::Path, owner_name: Option<&str>, duplicate: &str) -> String {
+    match owner_name {
+        Some(owner_name) => format!(
+            "type `{owner_name}` in module `{}` declares member `{duplicate}` more than once in the same declaration space",
+            module_path.display()
+        ),
+        None => format!(
+            "module `{}` declares `{duplicate}` more than once in the same declaration space",
+            module_path.display()
+        ),
+    }
 }
 
 fn is_permitted_external_overload_group(
@@ -100,9 +140,15 @@ fn is_invalid_duplicate_group(kinds: &[DeclarationKind]) -> bool {
 fn overload_shape_diagnostic(
     module_path: &std::path::Path,
     module_kind: SourceKind,
+    owner_name: Option<&str>,
+    owner_kind: Option<DeclarationOwnerKind>,
     duplicate: &str,
     declarations: &[Declaration],
 ) -> Option<Diagnostic> {
+    if matches!(owner_kind, Some(DeclarationOwnerKind::Interface)) {
+        return None;
+    }
+
     let overload_count = declarations
         .iter()
         .filter(|declaration| {
@@ -125,25 +171,37 @@ fn overload_shape_diagnostic(
     }
 
     let message = match function_count {
-        0 => format!(
-            "module `{}` declares overloads for `{duplicate}` without a concrete implementation",
-            module_path.display()
-        ),
+        0 => overload_shape_message(module_path, owner_name, duplicate, "without a concrete implementation"),
         1 => return None,
-        _ => format!(
-            "module `{}` declares overloads for `{duplicate}` with more than one concrete implementation",
-            module_path.display()
-        ),
+        _ => overload_shape_message(module_path, owner_name, duplicate, "with more than one concrete implementation"),
     };
 
     Some(Diagnostic::error("TPY4004", message))
+}
+
+fn overload_shape_message(
+    module_path: &std::path::Path,
+    owner_name: Option<&str>,
+    duplicate: &str,
+    suffix: &str,
+) -> String {
+    match owner_name {
+        Some(owner_name) => format!(
+            "type `{owner_name}` in module `{}` declares overloads for `{duplicate}` {suffix}",
+            module_path.display()
+        ),
+        None => format!(
+            "module `{}` declares overloads for `{duplicate}` {suffix}",
+            module_path.display()
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::check;
     use std::path::PathBuf;
-    use typepython_binding::{Declaration, DeclarationKind};
+    use typepython_binding::{Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind};
     use typepython_graph::{ModuleGraph, ModuleNode};
     use typepython_syntax::SourceKind;
 
@@ -157,10 +215,12 @@ mod tests {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        owner: None,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -183,10 +243,12 @@ mod tests {
                     Declaration {
                         name: String::from("UserId"),
                         kind: DeclarationKind::TypeAlias,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        owner: None,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -206,14 +268,17 @@ mod tests {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
+                        owner: None,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -233,10 +298,12 @@ mod tests {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -258,14 +325,17 @@ mod tests {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
+                        owner: None,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -287,10 +357,87 @@ mod tests {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
                     },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        owner: None,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_duplicate_interface_members() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                    },
+                    Declaration {
+                        name: String::from("close"),
+                        kind: DeclarationKind::Function,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                    },
+                    Declaration {
+                        name: String::from("close"),
+                        kind: DeclarationKind::Function,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("SupportsClose"));
+        assert!(rendered.contains("member `close` more than once"));
+    }
+
+    #[test]
+    fn check_accepts_class_method_overload_group() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Parser"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Parser"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Parser"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
                     },
                 ],
                 summary_fingerprint: 1,

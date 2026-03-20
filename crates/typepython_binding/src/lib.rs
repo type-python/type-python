@@ -25,6 +25,21 @@ impl Default for BindingTable {
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
+    pub owner: Option<DeclarationOwner>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct DeclarationOwner {
+    pub name: String,
+    pub kind: DeclarationOwnerKind,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum DeclarationOwnerKind {
+    Class,
+    Interface,
+    DataClass,
+    SealedClass,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
@@ -55,21 +70,21 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::TypeAlias(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
+            owner: None,
         }],
-        SyntaxStatement::Interface(statement)
-        | SyntaxStatement::DataClass(statement)
-        | SyntaxStatement::SealedClass(statement)
-        | SyntaxStatement::ClassDef(statement) => vec![Declaration {
-            name: statement.name.clone(),
-            kind: DeclarationKind::Class,
-        }],
+        SyntaxStatement::Interface(statement) => bind_named_block(statement, DeclarationOwnerKind::Interface),
+        SyntaxStatement::DataClass(statement) => bind_named_block(statement, DeclarationOwnerKind::DataClass),
+        SyntaxStatement::SealedClass(statement) => bind_named_block(statement, DeclarationOwnerKind::SealedClass),
+        SyntaxStatement::ClassDef(statement) => bind_named_block(statement, DeclarationOwnerKind::Class),
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
+            owner: None,
         }],
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
+            owner: None,
         }],
         SyntaxStatement::Import(statement) => statement
             .names
@@ -78,6 +93,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::Import,
+                owner: None,
             })
             .collect(),
         SyntaxStatement::Value(statement) => statement
@@ -87,20 +103,47 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::Value,
+                owner: None,
             })
             .collect(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
 }
 
+fn bind_named_block(
+    statement: &typepython_syntax::NamedBlockStatement,
+    owner_kind: DeclarationOwnerKind,
+) -> Vec<Declaration> {
+    let owner = DeclarationOwner {
+        name: statement.name.clone(),
+        kind: owner_kind,
+    };
+    let mut declarations = vec![Declaration {
+        name: statement.name.clone(),
+        kind: DeclarationKind::Class,
+        owner: None,
+    }];
+    declarations.extend(statement.members.iter().map(|member| Declaration {
+        name: member.name.clone(),
+        kind: match member.kind {
+            typepython_syntax::ClassMemberKind::Field => DeclarationKind::Value,
+            typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
+            typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
+        },
+        owner: Some(owner.clone()),
+    }));
+    declarations
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Declaration, DeclarationKind, bind};
+    use super::{Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        FunctionStatement, ImportStatement, NamedBlockStatement, SourceFile, SourceKind,
-        SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam, ValueStatement,
+        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, NamedBlockStatement,
+        SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
+        ValueStatement,
     };
 
     #[test]
@@ -141,14 +184,17 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    owner: None,
                 },
             ]
         );
@@ -186,10 +232,12 @@ mod tests {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    owner: None,
                 },
             ]
         );
@@ -222,18 +270,92 @@ mod tests {
                 Declaration {
                     name: String::from("local_foo"),
                     kind: DeclarationKind::Import,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("bar"),
                     kind: DeclarationKind::Import,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    owner: None,
                 },
                 Declaration {
                     name: String::from("count"),
                     kind: DeclarationKind::Value,
+                    owner: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_collects_class_like_member_declarations_with_owner() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.tpy"),
+                kind: SourceKind::TypePython,
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("SupportsClose"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                members: vec![
+                    ClassMember {
+                        name: String::from("value"),
+                        kind: ClassMemberKind::Field,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("close"),
+                        kind: ClassMemberKind::Method,
+                        line: 3,
+                    },
+                    ClassMember {
+                        name: String::from("close"),
+                        kind: ClassMemberKind::Overload,
+                        line: 4,
+                    },
+                ],
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.declarations,
+            vec![
+                Declaration {
+                    name: String::from("SupportsClose"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                },
+                Declaration {
+                    name: String::from("value"),
+                    kind: DeclarationKind::Value,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationOwnerKind::Interface,
+                    }),
+                },
+                Declaration {
+                    name: String::from("close"),
+                    kind: DeclarationKind::Function,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationOwnerKind::Interface,
+                    }),
+                },
+                Declaration {
+                    name: String::from("close"),
+                    kind: DeclarationKind::Overload,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationOwnerKind::Interface,
+                    }),
                 },
             ]
         );
