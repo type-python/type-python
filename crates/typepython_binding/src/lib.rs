@@ -28,6 +28,7 @@ pub struct Declaration {
     pub owner: Option<DeclarationOwner>,
     pub is_final: bool,
     pub is_class_var: bool,
+    pub bases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -75,6 +76,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             owner: None,
             is_final: false,
             is_class_var: false,
+            bases: Vec::new(),
         }],
         SyntaxStatement::Interface(statement) => bind_named_block(statement, DeclarationOwnerKind::Interface),
         SyntaxStatement::DataClass(statement) => bind_named_block(statement, DeclarationOwnerKind::DataClass),
@@ -86,6 +88,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             owner: None,
             is_final: false,
             is_class_var: false,
+            bases: Vec::new(),
         }],
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
@@ -93,6 +96,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             owner: None,
             is_final: false,
             is_class_var: false,
+            bases: Vec::new(),
         }],
         SyntaxStatement::Import(statement) => statement
             .names
@@ -104,6 +108,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 owner: None,
                 is_final: false,
                 is_class_var: false,
+                bases: Vec::new(),
             })
             .collect(),
         SyntaxStatement::Value(statement) => statement
@@ -116,6 +121,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 owner: None,
                 is_final: statement.is_final,
                 is_class_var: statement.is_class_var,
+                bases: Vec::new(),
             })
             .collect(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
@@ -136,6 +142,7 @@ fn bind_named_block(
         owner: None,
         is_final: false,
         is_class_var: false,
+        bases: statement.bases.clone(),
     }];
     declarations.extend(statement.members.iter().map(|member| Declaration {
         name: member.name.clone(),
@@ -147,6 +154,7 @@ fn bind_named_block(
         owner: Some(owner.clone()),
         is_final: member.is_final,
         is_class_var: member.is_class_var,
+        bases: Vec::new(),
     }));
     declarations
 }
@@ -206,6 +214,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
@@ -213,6 +222,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("helper"),
@@ -220,6 +230,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -264,6 +275,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("parse"),
@@ -271,6 +283,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -308,6 +321,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("bar"),
@@ -315,6 +329,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("value"),
@@ -322,6 +337,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("count"),
@@ -329,6 +345,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -393,6 +410,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("value"),
@@ -403,6 +421,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("close"),
@@ -413,6 +432,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("close"),
@@ -423,6 +443,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -473,6 +494,7 @@ mod tests {
                     owner: None,
                     is_final: true,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("Box"),
@@ -480,6 +502,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("limit"),
@@ -490,6 +513,7 @@ mod tests {
                     }),
                     is_final: true,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -540,6 +564,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: true,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("Box"),
@@ -547,6 +572,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("cache"),
@@ -557,6 +583,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: true,
+                    bases: Vec::new(),
                 },
             ]
         );

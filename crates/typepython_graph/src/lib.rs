@@ -66,11 +66,17 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
             ],
         }]);
@@ -82,11 +88,17 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
             ]
         );
@@ -101,6 +113,9 @@ mod tests {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
                 owner: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
             }],
         }]);
         let second = build(&[BindingTable {
@@ -111,11 +126,17 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
                 },
             ],
         }]);

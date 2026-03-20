@@ -23,9 +23,56 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
+        for override_violation in final_override_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(override_violation);
+        }
     }
 
     CheckResult { diagnostics }
+}
+
+fn final_override_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let class_final_members: BTreeMap<_, _> = declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_some() && declaration.is_final)
+        .filter_map(|declaration| {
+            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), ()))
+        })
+        .collect();
+    let mut diagnostics = Vec::new();
+
+    for class_declaration in declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
+    {
+        for base in &class_declaration.bases {
+            for member in declarations {
+                let Some(owner) = member.owner.as_ref() else {
+                    continue;
+                };
+                if owner.name != class_declaration.name {
+                    continue;
+                }
+                if class_final_members.contains_key(&(base.clone(), member.name.clone())) {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4006",
+                        format!(
+                            "type `{}` in module `{}` overrides Final member `{}` from base `{}`",
+                            class_declaration.name,
+                            module_path.display(),
+                            member.name,
+                            base
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    diagnostics
 }
 
 fn duplicate_diagnostics(
@@ -291,6 +338,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("User"),
@@ -298,6 +346,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -323,6 +372,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("User"),
@@ -330,6 +380,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -352,6 +403,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -359,6 +411,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -366,6 +419,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -388,6 +442,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -395,6 +450,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -419,6 +475,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -426,6 +483,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -433,6 +491,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -457,6 +516,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                     name: String::from("parse"),
@@ -464,6 +524,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -486,6 +547,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                         name: String::from("close"),
@@ -496,6 +558,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                         name: String::from("close"),
@@ -506,6 +569,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -531,6 +595,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                         name: String::from("parse"),
@@ -541,6 +606,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                     Declaration {
                         name: String::from("parse"),
@@ -551,6 +617,7 @@ mod tests {
                     }),
                     is_final: false,
                     is_class_var: false,
+                    bases: Vec::new(),
                 },
                 ],
                 summary_fingerprint: 1,
@@ -573,6 +640,7 @@ mod tests {
                         owner: None,
                         is_final: true,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("MAX_SIZE"),
@@ -580,6 +648,7 @@ mod tests {
                         owner: None,
                         is_final: false,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                 ],
                 summary_fingerprint: 1,
@@ -604,6 +673,7 @@ mod tests {
                         owner: None,
                         is_final: false,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -614,6 +684,7 @@ mod tests {
                         }),
                         is_final: true,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -624,6 +695,7 @@ mod tests {
                         }),
                         is_final: false,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                 ],
                 summary_fingerprint: 1,
@@ -634,6 +706,61 @@ mod tests {
         assert!(rendered.contains("TPY4006"));
         assert!(rendered.contains("type `Box`"));
         assert!(rendered.contains("Final binding `limit`"));
+    }
+
+    #[test]
+    fn check_reports_overriding_base_final_member() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("limit"),
+                        kind: DeclarationKind::Value,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_final: true,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Derived"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                    },
+                    Declaration {
+                        name: String::from("limit"),
+                        kind: DeclarationKind::Value,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Derived"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("overrides Final member `limit` from base `Base`"));
     }
 
     #[test]
@@ -648,6 +775,7 @@ mod tests {
                     owner: None,
                     is_final: false,
                     is_class_var: true,
+                    bases: Vec::new(),
                 }],
                 summary_fingerprint: 1,
             }],
@@ -671,6 +799,7 @@ mod tests {
                         owner: None,
                         is_final: false,
                         is_class_var: false,
+                    bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("cache"),
@@ -681,6 +810,7 @@ mod tests {
                         }),
                         is_final: false,
                         is_class_var: true,
+                    bases: Vec::new(),
                     },
                 ],
                 summary_fingerprint: 1,
