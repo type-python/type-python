@@ -34,7 +34,7 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for override_violation in override_diagnostics(node, &graph.nodes) {
             diagnostics.push(override_violation);
         }
-        for override_violation in override_compatibility_diagnostics(&node.module_path, &node.declarations) {
+        for override_violation in override_compatibility_diagnostics(node, &graph.nodes) {
             diagnostics.push(override_violation);
         }
         if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
@@ -108,10 +108,11 @@ fn unresolved_import_diagnostics(
         .collect()
 }
 
-fn override_compatibility_diagnostics(
-    module_path: &std::path::Path,
-    declarations: &[Declaration],
+fn override_compatibility_diagnostics<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
     for class_declaration in declarations
@@ -122,11 +123,12 @@ fn override_compatibility_diagnostics(
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
         }) {
             for base in &class_declaration.bases {
-                if let Some(base_member) = declarations.iter().find(|declaration| {
-                    declaration.owner.as_ref().is_some_and(|owner| owner.name == *base)
-                        && declaration.name == member.name
-                        && declaration.kind == member.kind
-                }) {
+                if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) {
+                    if let Some(base_member) = base_node.declarations.iter().find(|declaration| {
+                        declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
+                            && declaration.name == member.name
+                            && declaration.kind == member.kind
+                    }) {
                     if base_member.detail != member.detail
                         || base_member.method_kind != member.method_kind
                     {
@@ -135,11 +137,12 @@ fn override_compatibility_diagnostics(
                             format!(
                                 "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
                                 class_declaration.name,
-                                module_path.display(),
+                                node.module_path.display(),
                                 member.name,
-                                base
+                                base_decl.name
                             ),
                         ));
+                    }
                     }
                 }
             }
@@ -2311,6 +2314,112 @@ mod tests {
                 calls: Vec::new(),
                 summary_fingerprint: 1,
             }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("incompatible signature or annotation"));
+    }
+
+    #[test]
+    fn check_reports_incompatible_imported_override_signature() {
+        let result = check(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/base.py"),
+                    module_key: String::from("app.base"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Base"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("run"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self,x:int)->int"),
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Base"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/child.tpy"),
+                    module_key: String::from("app.child"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Base"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("app.base.Base"),
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Child"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Base"),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Base")],
+                        },
+                        Declaration {
+                            name: String::from("run"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self,x:str)->int"),
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Child"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 2,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
