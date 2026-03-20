@@ -860,6 +860,53 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_missing_interface_members() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Interface),
+                        owner: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("close"),
+                        kind: DeclarationKind::Function,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Widget"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("SupportsClose")],
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4008"));
+        assert!(rendered.contains("does not implement interface member `close`"));
+    }
+
+    #[test]
     fn check_reports_classvar_outside_class_scope() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
