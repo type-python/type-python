@@ -29,12 +29,73 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
         for override_violation in final_override_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(override_violation);
         }
+        for abstract_violation in abstract_member_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(abstract_violation);
+        }
         for implementation_violation in interface_implementation_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(implementation_violation);
         }
     }
 
     CheckResult { diagnostics }
+}
+
+fn abstract_member_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let abstract_members: BTreeMap<_, _> = declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
+        .filter_map(|declaration| {
+            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
+        })
+        .collect();
+
+    let mut diagnostics = Vec::new();
+
+    for class_declaration in declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::Class
+            && declaration.owner.is_none()
+            && declaration.class_kind == Some(DeclarationOwnerKind::Class)
+    }) {
+        let class_is_abstract = declarations.iter().any(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                && declaration.is_abstract_method
+        });
+        if class_is_abstract {
+            continue;
+        }
+
+        for base in &class_declaration.bases {
+            for ((abstract_owner, member_name), member_kind) in &abstract_members {
+                if abstract_owner != base {
+                    continue;
+                }
+
+                let implemented = declarations.iter().any(|declaration| {
+                    declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                        && declaration.name == *member_name
+                        && declaration.kind == *member_kind
+                        && !declaration.is_abstract_method
+                });
+                if !implemented {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4008",
+                        format!(
+                            "type `{}` in module `{}` does not implement abstract member `{}` from `{}`",
+                            class_declaration.name,
+                            module_path.display(),
+                            member_name,
+                            base
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    diagnostics
 }
 
 fn override_diagnostics(
@@ -455,6 +516,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -465,6 +527,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -493,6 +556,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -503,6 +567,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -528,6 +593,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -538,6 +604,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -548,6 +615,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -573,6 +641,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -583,6 +652,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -610,6 +680,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -620,6 +691,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -630,6 +702,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -657,6 +730,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -667,6 +741,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -692,6 +767,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -705,6 +781,7 @@ mod tests {
                         kind: DeclarationOwnerKind::Interface,
                     }),
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -718,6 +795,7 @@ mod tests {
                         kind: DeclarationOwnerKind::Interface,
                     }),
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -746,6 +824,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -759,6 +838,7 @@ mod tests {
                         kind: DeclarationOwnerKind::Class,
                     }),
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -772,6 +852,7 @@ mod tests {
                         kind: DeclarationOwnerKind::Class,
                     }),
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -797,6 +878,7 @@ mod tests {
                         class_kind: None,
                         owner: None,
                     is_override: false,
+                        is_abstract_method: false,
                         is_final: true,
                         is_class_var: false,
                     bases: Vec::new(),
@@ -807,6 +889,7 @@ mod tests {
                         class_kind: None,
                         owner: None,
                     is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                     bases: Vec::new(),
@@ -834,6 +917,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -847,6 +931,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: true,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -860,6 +945,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -888,6 +974,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -901,6 +988,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: true,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -911,6 +999,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -924,6 +1013,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -951,6 +1041,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -964,6 +1055,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Interface,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -974,6 +1066,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("SupportsClose")],
@@ -989,6 +1082,59 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_missing_abstract_base_members() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: true,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4008"));
+        assert!(rendered.contains("does not implement abstract member `run`"));
+    }
+
+    #[test]
     fn check_reports_invalid_top_level_override_usage() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -1000,6 +1146,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: true,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -1026,6 +1173,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -1036,6 +1184,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -1049,6 +1198,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: true,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -1075,6 +1225,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: true,
                     bases: Vec::new(),
@@ -1101,6 +1252,7 @@ mod tests {
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -1114,6 +1266,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: true,
                         bases: Vec::new(),

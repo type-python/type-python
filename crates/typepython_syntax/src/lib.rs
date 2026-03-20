@@ -142,6 +142,7 @@ pub struct ClassMember {
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
     pub is_override: bool,
+    pub is_abstract_method: bool,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -553,6 +554,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     .and_then(|returns| slice_range(normalized, returns.range()))
                     .map(str::to_owned),
                 is_override: function.decorator_list.iter().any(is_override_decorator),
+                is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
                 is_final: false,
                 is_class_var: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
@@ -567,6 +569,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     params: Vec::new(),
                     returns: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final,
                     is_class_var,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
@@ -581,6 +584,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     params: Vec::new(),
                     returns: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -975,6 +979,17 @@ fn is_override_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
         Expr::Attribute(attribute) => {
             attribute.attr.as_str() == "override"
                 && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
+        }
+        _ => false,
+    }
+}
+
+fn is_abstractmethod_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+    match &decorator.expression {
+        Expr::Name(name) => name.id.as_str() == "abstractmethod",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "abstractmethod"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "abc")
         }
         _ => false,
     }
@@ -2043,6 +2058,7 @@ mod tests {
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -2054,6 +2070,7 @@ mod tests {
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -2068,6 +2085,7 @@ mod tests {
                         }],
                         returns: Some(String::from("int")),
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -2118,6 +2136,7 @@ mod tests {
                             ],
                             returns: Some(String::from("int")),
                             is_override: false,
+                            is_abstract_method: false,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -2138,6 +2157,7 @@ mod tests {
                             ],
                             returns: None,
                             is_override: false,
+                            is_abstract_method: false,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -2186,6 +2206,7 @@ mod tests {
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
@@ -2233,6 +2254,7 @@ mod tests {
                         params: Vec::new(),
                         returns: None,
                         is_override: false,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: true,
                         line: 4,
@@ -2373,11 +2395,56 @@ mod tests {
                         }],
                         returns: Some(String::from("None")),
                         is_override: true,
+                        is_abstract_method: false,
                         is_final: false,
                         is_class_var: false,
                         line: 8,
                     }],
                     line: 7,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_marks_abstract_class_methods() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("abstracts.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "from abc import abstractmethod\n\nclass Base:\n    @abstractmethod\n    def run(self) -> None:\n        pass\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Import(ImportStatement {
+                    names: vec![String::from("abstractmethod")],
+                    line: 1,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Base"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    members: vec![ClassMember {
+                        name: String::from("run"),
+                        kind: ClassMemberKind::Method,
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("self"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("None")),
+                        is_override: false,
+                        is_abstract_method: true,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 4,
+                    }],
+                    line: 3,
                 }),
             ]
         );
