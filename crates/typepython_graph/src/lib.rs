@@ -16,6 +16,7 @@ pub struct ModuleNode {
     pub module_path: PathBuf,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
+    pub calls: Vec<String>,
     pub summary_fingerprint: u64,
 }
 
@@ -35,6 +36,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
             module_path: binding.module_path.clone(),
             module_kind: binding.module_kind,
             declarations: binding.declarations.clone(),
+            calls: binding.calls.clone(),
             summary_fingerprint: hash_summary(binding),
         })
         .collect();
@@ -68,6 +70,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -78,11 +81,13 @@ mod tests {
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
                 },
             ],
+            calls: Vec::new(),
         }]);
 
         assert_eq!(
@@ -94,6 +99,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -104,6 +110,7 @@ mod tests {
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -122,11 +129,13 @@ mod tests {
                 kind: DeclarationKind::TypeAlias,
                 class_kind: None,
                 owner: None,
-                    is_override: false,
+                is_override: false,
+                is_abstract_method: false,
                 is_final: false,
                 is_class_var: false,
                 bases: Vec::new(),
             }],
+            calls: Vec::new(),
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
@@ -138,6 +147,7 @@ mod tests {
                     class_kind: None,
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -148,11 +158,13 @@ mod tests {
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
+                    is_abstract_method: false,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
                 },
             ],
+            calls: Vec::new(),
         }]);
 
         println!(

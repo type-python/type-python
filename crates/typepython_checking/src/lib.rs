@@ -32,6 +32,9 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
         for abstract_violation in abstract_member_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(abstract_violation);
         }
+        for instantiation_violation in abstract_instantiation_diagnostics(&node.module_path, &node.declarations, &node.calls) {
+            diagnostics.push(instantiation_violation);
+        }
         for implementation_violation in interface_implementation_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(implementation_violation);
         }
@@ -96,6 +99,59 @@ fn abstract_member_diagnostics(
     }
 
     diagnostics
+}
+
+fn abstract_instantiation_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+    calls: &[String],
+) -> Vec<Diagnostic> {
+    let abstract_members: BTreeMap<_, _> = declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
+        .filter_map(|declaration| {
+            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
+        })
+        .collect();
+
+    let abstract_classes: BTreeSet<_> = declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
+        .filter_map(|class_declaration| {
+            let own_abstract = declarations.iter().any(|declaration| {
+                declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                    && declaration.is_abstract_method
+            });
+            let inherited_abstract = class_declaration.bases.iter().any(|base| {
+                abstract_members.iter().any(|((abstract_owner, member_name), member_kind)| {
+                    abstract_owner == base
+                        && !declarations.iter().any(|declaration| {
+                            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                                && declaration.name == *member_name
+                                && declaration.kind == *member_kind
+                                && !declaration.is_abstract_method
+                        })
+                })
+            });
+
+            (own_abstract || inherited_abstract).then(|| class_declaration.name.clone())
+        })
+        .collect();
+
+    calls
+        .iter()
+        .filter(|callee| abstract_classes.contains(*callee))
+        .map(|callee| {
+            Diagnostic::error(
+                "TPY4007",
+                format!(
+                    "module `{}` directly instantiates abstract class `{}`",
+                    module_path.display(),
+                    callee
+                ),
+            )
+        })
+        .collect()
 }
 
 fn override_diagnostics(
@@ -534,6 +590,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -574,6 +631,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -622,6 +680,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -659,6 +718,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -709,6 +769,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -748,6 +809,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -802,6 +864,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -859,6 +922,7 @@ mod tests {
                 },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -896,6 +960,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -952,6 +1017,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1020,6 +1086,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1073,6 +1140,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1126,12 +1194,56 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4008"));
         assert!(rendered.contains("does not implement abstract member `run`"));
+    }
+
+    #[test]
+    fn check_reports_direct_instantiation_of_abstract_class() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: true,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: vec![String::from("Base")],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4007"));
+        assert!(rendered.contains("directly instantiates abstract class `Base`"));
     }
 
     #[test]
@@ -1152,6 +1264,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1205,6 +1318,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1231,6 +1345,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 
@@ -1273,6 +1388,7 @@ mod tests {
                     },
                 ],
                 summary_fingerprint: 1,
+                calls: Vec::new(),
             }],
         });
 

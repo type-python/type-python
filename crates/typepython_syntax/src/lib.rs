@@ -82,6 +82,7 @@ pub enum SyntaxStatement {
     FunctionDef(FunctionStatement),
     Import(ImportStatement),
     Value(ValueStatement),
+    Call(CallStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -131,6 +132,12 @@ pub struct ValueStatement {
     pub annotation: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CallStatement {
+    pub callee: String,
     pub line: usize,
 }
 
@@ -654,6 +661,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::FunctionDef(statement) => statement.line,
         SyntaxStatement::Import(statement) => statement.line,
         SyntaxStatement::Value(statement) => statement.line,
+        SyntaxStatement::Call(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -683,7 +691,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -737,6 +745,9 @@ fn extract_ast_backed_statements(
             extract_ast_backed_statement(path, source, normalized, stmt, line, diagnostics)
         {
             statements.push(statement);
+        }
+        if let Some(call_statement) = extract_supplemental_call_statement(stmt, line) {
+            statements.push(call_statement);
         }
     }
 
@@ -844,24 +855,58 @@ fn extract_ast_backed_statement(
                 .iter()
                 .flat_map(extract_assignment_names)
                 .collect::<Vec<_>>();
-            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
-                names,
-                annotation: None,
-                is_final: false,
-                is_class_var: false,
-                line,
-            }))
+            if !names.is_empty() {
+                Some(SyntaxStatement::Value(ValueStatement {
+                    names,
+                    annotation: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line,
+                }))
+            } else {
+                None
+            }
         }
         Stmt::AnnAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
-            (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
-                names,
-                annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
-                is_final: is_final_annotation(&stmt.annotation),
-                is_class_var: is_classvar_annotation(&stmt.annotation),
-                line,
-            }))
+            if !names.is_empty() {
+                Some(SyntaxStatement::Value(ValueStatement {
+                    names,
+                    annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
+                    is_final: is_final_annotation(&stmt.annotation),
+                    is_class_var: is_classvar_annotation(&stmt.annotation),
+                    line,
+                }))
+            } else {
+                None
+            }
         }
+        Stmt::Expr(stmt) => extract_call_statement(&stmt.value, line),
+        _ => None,
+    }
+}
+
+fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Name(name) = call.func.as_ref() else {
+        return None;
+    };
+
+    Some(SyntaxStatement::Call(CallStatement {
+        callee: name.id.as_str().to_owned(),
+        line,
+    }))
+}
+
+fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+    match stmt {
+        Stmt::Assign(assign) => extract_call_statement(&assign.value, line),
+        Stmt::AnnAssign(assign) => assign
+            .value
+            .as_deref()
+            .and_then(|value| extract_call_statement(value, line)),
         _ => None,
     }
 }
@@ -1559,9 +1604,9 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, NamedBlockStatement,
-        FunctionParam, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeParam,
-        UnsafeStatement, ValueStatement, parse,
+        CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportStatement,
+        NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
+        TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
 
@@ -2026,6 +2071,37 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_top_level_direct_calls() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("calls.py"),
+            kind: SourceKind::Python,
+            text: String::from("Builder()\nvalue = Factory()\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("Builder"),
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("value")],
+                    annotation: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("Factory"),
+                    line: 2,
                 }),
             ]
         );

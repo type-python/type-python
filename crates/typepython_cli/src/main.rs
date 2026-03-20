@@ -707,6 +707,7 @@ fn declaration_surface(
                     });
                 }
             }
+            typepython_syntax::SyntaxStatement::Call(_) => {}
             typepython_syntax::SyntaxStatement::Unsafe(_) => {}
         }
     }

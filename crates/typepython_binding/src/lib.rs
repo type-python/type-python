@@ -9,6 +9,7 @@ pub struct BindingTable {
     pub module_path: PathBuf,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
+    pub calls: Vec<String>,
 }
 
 impl Default for BindingTable {
@@ -17,6 +18,7 @@ impl Default for BindingTable {
             module_path: PathBuf::new(),
             module_kind: SourceKind::TypePython,
             declarations: Vec::new(),
+            calls: Vec::new(),
         }
     }
 }
@@ -67,6 +69,14 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
             .statements
             .iter()
             .flat_map(bind_statement)
+            .collect(),
+        calls: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Call(statement) => Some(statement.callee.clone()),
+                _ => None,
+            })
             .collect(),
     }
 }
@@ -142,6 +152,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 bases: Vec::new(),
             })
             .collect(),
+        SyntaxStatement::Call(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
 }
