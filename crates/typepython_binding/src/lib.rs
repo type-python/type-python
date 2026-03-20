@@ -11,6 +11,7 @@ pub struct BindingTable {
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
     pub calls: Vec<CallSite>,
+    pub member_accesses: Vec<MemberAccessSite>,
 }
 
 impl Default for BindingTable {
@@ -21,6 +22,7 @@ impl Default for BindingTable {
             module_kind: SourceKind::TypePython,
             declarations: Vec::new(),
             calls: Vec::new(),
+            member_accesses: Vec::new(),
         }
     }
 }
@@ -30,6 +32,13 @@ pub struct CallSite {
     pub callee: String,
     pub arg_count: usize,
     pub keyword_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct MemberAccessSite {
+    pub owner_name: String,
+    pub member: String,
+    pub through_instance: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -91,6 +100,18 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     callee: statement.callee.clone(),
                     arg_count: statement.arg_count,
                     keyword_names: statement.keyword_names.clone(),
+                }),
+                _ => None,
+            })
+            .collect(),
+        member_accesses: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::MemberAccess(statement) => Some(MemberAccessSite {
+                    owner_name: statement.owner_name.clone(),
+                    member: statement.member.clone(),
+                    through_instance: statement.through_instance,
                 }),
                 _ => None,
             })
@@ -184,6 +205,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             })
             .collect(),
         SyntaxStatement::Call(_) => Vec::new(),
+        SyntaxStatement::MemberAccess(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
 }

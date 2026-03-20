@@ -28,6 +28,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
             diagnostics.push(resolution_diagnostic);
         }
+        for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
+            diagnostics.push(access_diagnostic);
+        }
         for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
@@ -66,6 +69,34 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn direct_member_access_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.member_accesses
+        .iter()
+        .filter_map(|access| {
+            let (class_node, class_decl) = resolve_direct_base(nodes, node, &access.owner_name)?;
+            let has_member = class_node.declarations.iter().any(|declaration| {
+                declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                    && declaration.name == access.member
+            });
+
+            (!has_member).then(|| {
+                Diagnostic::error(
+                    "TPY4002",
+                    format!(
+                        "type `{}` in module `{}` has no member `{}`",
+                        class_decl.name,
+                        node.module_path.display(),
+                        access.member
+                    ),
+                )
+            })
+        })
+        .collect()
 }
 
 fn direct_call_arity_diagnostics(
@@ -1007,6 +1038,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1055,6 +1087,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1114,6 +1147,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1159,6 +1193,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1220,6 +1255,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1267,6 +1303,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1332,6 +1369,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1400,6 +1438,7 @@ mod tests {
                     bases: Vec::new(),
                 },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1445,6 +1484,7 @@ mod tests {
                     bases: Vec::new(),
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1512,6 +1552,7 @@ mod tests {
                         bases: Vec::new(),
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1594,6 +1635,7 @@ mod tests {
                         bases: Vec::new(),
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1642,6 +1684,7 @@ mod tests {
                     },
                 ],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -1674,6 +1717,7 @@ mod tests {
                         bases: Vec::new(),
                     }],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -1711,6 +1755,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -1793,6 +1838,7 @@ mod tests {
                     },
                 ],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -1856,6 +1902,7 @@ mod tests {
                         bases: vec![String::from("SupportsClose")],
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -1938,6 +1985,7 @@ mod tests {
                     },
                 ],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -1989,6 +2037,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -2043,6 +2092,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2107,6 +2157,7 @@ mod tests {
                         bases: vec![String::from("Base")],
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2162,6 +2213,7 @@ mod tests {
                     arg_count: 0,
                     keyword_names: Vec::new(),
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2213,6 +2265,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -2238,6 +2291,7 @@ mod tests {
                         arg_count: 0,
                         keyword_names: Vec::new(),
                     }],
+                member_accesses: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2270,6 +2324,7 @@ mod tests {
                     bases: Vec::new(),
                 }],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2305,6 +2360,7 @@ mod tests {
                     arg_count: 1,
                     keyword_names: Vec::new(),
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2340,6 +2396,7 @@ mod tests {
                     arg_count: 0,
                     keyword_names: vec![String::from("z")],
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2347,6 +2404,42 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("unknown keyword `z`"));
+    }
+
+    #[test]
+    fn check_reports_missing_direct_member_access() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("Box"),
+                    kind: DeclarationKind::Class,
+                    detail: String::new(),
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                member_accesses: vec![typepython_binding::MemberAccessSite {
+                    owner_name: String::from("Box"),
+                    member: String::from("missing"),
+                    through_instance: false,
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4002"));
+        assert!(rendered.contains("has no member `missing`"));
     }
 
     #[test]
@@ -2394,6 +2487,7 @@ mod tests {
                     arg_count: 1,
                     keyword_names: Vec::new(),
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2424,6 +2518,7 @@ mod tests {
                     is_class_var: false,
                     bases: Vec::new(),
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2488,6 +2583,7 @@ mod tests {
                         bases: Vec::new(),
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -2570,6 +2666,7 @@ mod tests {
                     },
                 ],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2621,6 +2718,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 1,
                 },
                 ModuleNode {
@@ -2675,6 +2773,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 2,
                 },
             ],
@@ -2757,6 +2856,7 @@ mod tests {
                     },
                 ],
                 calls: Vec::new(),
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
             }],
         });
@@ -2839,6 +2939,7 @@ mod tests {
                         },
                     ],
                     calls: Vec::new(),
+                member_accesses: Vec::new(),
                     summary_fingerprint: 1,
                 }],
             },
@@ -2893,6 +2994,7 @@ mod tests {
                             },
                         ],
                         calls: Vec::new(),
+                member_accesses: Vec::new(),
                         summary_fingerprint: 1,
                     },
                     ModuleNode {
@@ -2947,6 +3049,7 @@ mod tests {
                             },
                         ],
                         calls: Vec::new(),
+                member_accesses: Vec::new(),
                         summary_fingerprint: 2,
                     },
                 ],
@@ -2980,6 +3083,7 @@ mod tests {
                     is_class_var: true,
                     bases: Vec::new(),
                 }],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],
@@ -3030,6 +3134,7 @@ mod tests {
                         bases: Vec::new(),
                     },
                 ],
+                member_accesses: Vec::new(),
                 summary_fingerprint: 1,
                 calls: Vec::new(),
             }],

@@ -89,6 +89,7 @@ pub enum SyntaxStatement {
     Import(ImportStatement),
     Value(ValueStatement),
     Call(CallStatement),
+    MemberAccess(MemberAccessStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -154,6 +155,14 @@ pub struct CallStatement {
     pub callee: String,
     pub arg_count: usize,
     pub keyword_names: Vec<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MemberAccessStatement {
+    pub owner_name: String,
+    pub member: String,
+    pub through_instance: bool,
     pub line: usize,
 }
 
@@ -704,6 +713,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::Import(statement) => statement.line,
         SyntaxStatement::Value(statement) => statement.line,
         SyntaxStatement::Call(statement) => statement.line,
+        SyntaxStatement::MemberAccess(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -733,7 +743,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MemberAccess(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -791,6 +801,9 @@ fn extract_ast_backed_statements(
         }
         if let Some(call_statement) = extract_supplemental_call_statement(stmt, line) {
             statements.push(call_statement);
+        }
+        if let Some(member_access) = extract_member_access_statement(stmt, line) {
+            statements.push(member_access);
         }
     }
 
@@ -977,6 +990,45 @@ fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<Synta
             .value
             .as_deref()
             .and_then(|value| extract_call_statement(value, line)),
+        _ => None,
+    }
+}
+
+fn extract_member_access_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+    match stmt {
+        Stmt::Expr(expr) => extract_member_access_from_expr(&expr.value, line),
+        Stmt::Assign(assign) => extract_member_access_from_expr(&assign.value, line),
+        Stmt::AnnAssign(assign) => assign
+            .value
+            .as_deref()
+            .and_then(|value| extract_member_access_from_expr(value, line)),
+        _ => None,
+    }
+}
+
+fn extract_member_access_from_expr(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+    let Expr::Attribute(attribute) = expr else {
+        return None;
+    };
+
+    match attribute.value.as_ref() {
+        Expr::Name(name) => Some(SyntaxStatement::MemberAccess(MemberAccessStatement {
+            owner_name: name.id.as_str().to_owned(),
+            member: attribute.attr.as_str().to_owned(),
+            through_instance: false,
+            line,
+        })),
+        Expr::Call(call) => {
+            let Expr::Name(name) = call.func.as_ref() else {
+                return None;
+            };
+            Some(SyntaxStatement::MemberAccess(MemberAccessStatement {
+                owner_name: name.id.as_str().to_owned(),
+                member: attribute.attr.as_str().to_owned(),
+                through_instance: true,
+                line,
+            }))
+        }
         _ => None,
     }
 }
@@ -1754,7 +1806,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        ImportStatement, MethodKind,
+        ImportStatement, MemberAccessStatement, MethodKind,
         NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -2383,6 +2435,35 @@ mod tests {
                     callee: String::from("Factory"),
                     arg_count: 0,
                     keyword_names: Vec::new(),
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_direct_member_accesses() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("member-access.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("Box.missing\nBox().value\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    owner_name: String::from("Box"),
+                    member: String::from("missing"),
+                    through_instance: false,
+                    line: 1,
+                }),
+                SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    owner_name: String::from("Box"),
+                    member: String::from("value"),
+                    through_instance: true,
                     line: 2,
                 }),
             ]
