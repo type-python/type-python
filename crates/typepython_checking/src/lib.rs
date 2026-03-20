@@ -170,10 +170,9 @@ fn direct_call_type_diagnostics(
     node.calls
         .iter()
         .flat_map(|call| {
-            let Some(target) = resolve_direct_function(node, nodes, &call.callee) else {
+            let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee) else {
                 return Vec::new();
             };
-            let param_types = direct_param_types(&target.detail).unwrap_or_default();
             call.arg_types
                 .iter()
                 .zip(param_types.iter())
@@ -223,6 +222,30 @@ fn direct_call_keyword_diagnostics(
     }
 
     diagnostics
+}
+
+fn resolve_direct_callable_param_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<Vec<String>> {
+    if let Some(local) = resolve_direct_function(node, nodes, callee) {
+        return Some(direct_param_types(&local.detail).unwrap_or_default());
+    }
+
+    if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        let init = class_node.declarations.iter().find(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == "__init__"
+                && declaration.kind == DeclarationKind::Function
+        });
+        let param_types = init
+            .and_then(|declaration| direct_param_types(&declaration.detail))
+            .unwrap_or_default();
+        return Some(param_types.into_iter().skip(1).collect());
+    }
+
+    None
 }
 
 fn resolve_direct_function<'a>(
@@ -2600,6 +2623,63 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("call to `Box`"));
+    }
+
+    #[test]
+    fn check_reports_direct_constructor_type_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("__init__"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:int,y:str)->None"),
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("Box"),
+                    arg_count: 2,
+                    arg_types: vec![String::from("str"), String::from("int")],
+                    keyword_names: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("call to `Box`"));
+        assert!(rendered.contains("parameter expects `int`"));
     }
 
     #[test]
