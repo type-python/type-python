@@ -90,6 +90,7 @@ pub enum SyntaxStatement {
     Value(ValueStatement),
     Call(CallStatement),
     MemberAccess(MemberAccessStatement),
+    Return(ReturnStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -165,6 +166,13 @@ pub struct MemberAccessStatement {
     pub owner_name: String,
     pub member: String,
     pub through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ReturnStatement {
+    pub owner_name: Option<String>,
+    pub value_type: Option<String>,
     pub line: usize,
 }
 
