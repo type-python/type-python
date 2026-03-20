@@ -36,6 +36,16 @@ fn duplicate_diagnostics(
     let mut diagnostics = Vec::new();
 
     for (owner_name, owner_kind, space_declarations) in declaration_spaces(declarations) {
+        for declaration in &space_declarations {
+            if let Some(diagnostic) = classvar_placement_diagnostic(
+                module_path,
+                owner_name.as_deref(),
+                declaration,
+            ) {
+                diagnostics.push(diagnostic);
+            }
+        }
+
         for duplicate in invalid_duplicates(&space_declarations) {
             if let Some(diagnostic) = final_reassignment_diagnostic(
                 module_path,
@@ -65,6 +75,25 @@ fn duplicate_diagnostics(
     }
 
     diagnostics
+}
+
+fn classvar_placement_diagnostic(
+    module_path: &std::path::Path,
+    owner_name: Option<&str>,
+    declaration: &Declaration,
+) -> Option<Diagnostic> {
+    if !declaration.is_class_var || owner_name.is_some() {
+        return None;
+    }
+
+    Some(Diagnostic::error(
+        "TPY4001",
+        format!(
+            "module `{}` uses ClassVar binding `{}` outside a class attribute declaration",
+            module_path.display(),
+            declaration.name
+        ),
+    ))
 }
 
 fn final_reassignment_diagnostic(
@@ -257,17 +286,19 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("User"),
-                        kind: DeclarationKind::Class,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("User"),
-                        kind: DeclarationKind::Class,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -287,17 +318,19 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("UserId"),
-                        kind: DeclarationKind::TypeAlias,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("UserId"),
+                    kind: DeclarationKind::TypeAlias,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("User"),
-                        kind: DeclarationKind::Class,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -314,23 +347,26 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Function,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Function,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -347,17 +383,19 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -376,23 +414,26 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Function,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Function,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Function,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Function,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -411,17 +452,19 @@ mod tests {
                 module_kind: SourceKind::Stub,
                 declarations: vec![
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
-                        name: String::from("parse"),
-                        kind: DeclarationKind::Overload,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Overload,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -438,29 +481,32 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("SupportsClose"),
-                        kind: DeclarationKind::Class,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("SupportsClose"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_final: false,
-                    },
+                        kind: DeclarationOwnerKind::Interface,
+                    }),
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_final: false,
-                    },
+                        kind: DeclarationOwnerKind::Interface,
+                    }),
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -480,29 +526,32 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                        name: String::from("Parser"),
-                        kind: DeclarationKind::Class,
-                        owner: None,
-                        is_final: false,
-                    },
+                    name: String::from("Parser"),
+                    kind: DeclarationKind::Class,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_final: false,
-                    },
+                        kind: DeclarationOwnerKind::Class,
+                    }),
+                    is_final: false,
+                    is_class_var: false,
+                },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_final: false,
-                    },
+                        kind: DeclarationOwnerKind::Class,
+                    }),
+                    is_final: false,
+                    is_class_var: false,
+                },
                 ],
                 summary_fingerprint: 1,
             }],
@@ -523,12 +572,14 @@ mod tests {
                         kind: DeclarationKind::Value,
                         owner: None,
                         is_final: true,
+                        is_class_var: false,
                     },
                     Declaration {
                         name: String::from("MAX_SIZE"),
                         kind: DeclarationKind::Value,
                         owner: None,
                         is_final: false,
+                        is_class_var: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -552,6 +603,7 @@ mod tests {
                         kind: DeclarationKind::Class,
                         owner: None,
                         is_final: false,
+                        is_class_var: false,
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -561,6 +613,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_final: true,
+                        is_class_var: false,
                     },
                     Declaration {
                         name: String::from("limit"),
@@ -570,6 +623,7 @@ mod tests {
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_final: false,
+                        is_class_var: false,
                     },
                 ],
                 summary_fingerprint: 1,
@@ -580,5 +634,59 @@ mod tests {
         assert!(rendered.contains("TPY4006"));
         assert!(rendered.contains("type `Box`"));
         assert!(rendered.contains("Final binding `limit`"));
+    }
+
+    #[test]
+    fn check_reports_classvar_outside_class_scope() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("VALUE"),
+                    kind: DeclarationKind::Value,
+                    owner: None,
+                    is_final: false,
+                    is_class_var: true,
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("ClassVar binding `VALUE`"));
+    }
+
+    #[test]
+    fn check_accepts_classvar_inside_class_scope() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        owner: None,
+                        is_final: false,
+                        is_class_var: false,
+                    },
+                    Declaration {
+                        name: String::from("cache"),
+                        kind: DeclarationKind::Value,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_final: false,
+                        is_class_var: true,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
     }
 }
