@@ -153,6 +153,7 @@ pub struct ValueStatement {
 pub struct CallStatement {
     pub callee: String,
     pub arg_count: usize,
+    pub keyword_names: Vec<String>,
     pub line: usize,
 }
 
@@ -959,6 +960,12 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
         arg_count: call.arguments.args.len(),
+        keyword_names: call
+            .arguments
+            .keywords
+            .iter()
+            .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
+            .collect(),
         line,
     }))
 }
@@ -2310,6 +2317,7 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Builder"),
                     arg_count: 0,
+                    keyword_names: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -2322,9 +2330,31 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
                     arg_count: 0,
+                    keyword_names: Vec::new(),
                     line: 2,
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_call_keyword_names() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("call-keywords.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("build(x=1, y=2)\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Call(CallStatement {
+                callee: String::from("build"),
+                arg_count: 0,
+                keyword_names: vec![String::from("x"), String::from("y")],
+                line: 1,
+            })]
         );
     }
 
@@ -2352,6 +2382,7 @@ mod tests {
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
                     arg_count: 0,
+                    keyword_names: Vec::new(),
                     line: 2,
                 }),
             ]

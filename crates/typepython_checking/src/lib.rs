@@ -31,6 +31,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
+        for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
+            diagnostics.push(call_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -115,6 +118,76 @@ fn direct_param_count(signature: &str) -> Option<usize> {
     } else {
         Some(inner.split(',').count())
     }
+}
+
+fn direct_param_names(signature: &str) -> Option<Vec<String>> {
+    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    Some(
+        inner
+            .split(',')
+            .map(|part| part.split(':').next().unwrap_or(part).trim().to_owned())
+            .collect(),
+    )
+}
+
+fn direct_call_keyword_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for call in &node.calls {
+        let target = if let Some(local) = node
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name == call.callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+        {
+            Some(local)
+        } else if let Some(import) = node
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == call.callee)
+        {
+            if let Some((module_key, symbol_name)) = import.detail.rsplit_once('.') {
+                if let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key) {
+                    target_node
+                        .declarations
+                        .iter()
+                        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let Some(target) = target else {
+            continue;
+        };
+        let param_names = direct_param_names(&target.detail).unwrap_or_default();
+        for keyword in &call.keyword_names {
+            if !param_names.iter().any(|param| param == keyword) {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` uses unknown keyword `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
+                ));
+            }
+        }
+    }
+
+    diagnostics
 }
 
 fn unresolved_import_diagnostics(
@@ -2089,6 +2162,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("Base"),
                     arg_count: 0,
+                    keyword_names: Vec::new(),
                 }],
                 summary_fingerprint: 1,
             }],
@@ -2164,6 +2238,7 @@ mod tests {
                     calls: vec![typepython_binding::CallSite {
                         callee: String::from("Base"),
                         arg_count: 0,
+                        keyword_names: Vec::new(),
                     }],
                     summary_fingerprint: 2,
                 },
@@ -2230,6 +2305,7 @@ mod tests {
                 calls: vec![typepython_binding::CallSite {
                     callee: String::from("build"),
                     arg_count: 1,
+                    keyword_names: Vec::new(),
                 }],
                 summary_fingerprint: 1,
             }],
@@ -2238,6 +2314,41 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("expects 2 positional argument(s) but received 1"));
+    }
+
+    #[test]
+    fn check_reports_unknown_direct_call_keyword() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(x:int,y:int)->None"),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("build"),
+                    arg_count: 0,
+                    keyword_names: vec![String::from("z")],
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("unknown keyword `z`"));
     }
 
     #[test]
