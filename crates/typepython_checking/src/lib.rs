@@ -745,6 +745,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -792,6 +793,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -836,6 +838,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -894,6 +897,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -940,6 +944,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1000,6 +1005,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("types/module.pyi"),
+                module_key: String::new(),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
                     Declaration {
@@ -1044,6 +1050,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1111,6 +1118,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1175,6 +1183,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1221,6 +1230,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1288,6 +1298,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1368,6 +1379,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1414,6 +1426,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1494,6 +1507,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1557,6 +1571,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
@@ -1637,6 +1652,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1700,6 +1716,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/__init__.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1749,6 +1766,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![Declaration {
                     name: String::from("top_level"),
@@ -1779,6 +1797,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1842,6 +1861,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -1922,6 +1942,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
@@ -2003,6 +2024,7 @@ mod tests {
             &ModuleGraph {
                 nodes: vec![ModuleNode {
                     module_path: PathBuf::from("src/app/module.tpy"),
+                    module_key: String::new(),
                     module_kind: SourceKind::TypePython,
                     declarations: vec![
                         Declaration {
@@ -2085,6 +2107,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![Declaration {
                     name: String::from("VALUE"),
@@ -2115,6 +2138,7 @@ mod tests {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
                 module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
                 module_kind: SourceKind::Python,
                 declarations: vec![
                     Declaration {
