@@ -537,6 +537,14 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                 diagnostics.push(diagnostic);
             }
         }
+
+        if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
+            if runtime_path.exists() && stub_path.exists() {
+                if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
+                    diagnostics.push(diagnostic);
+                }
+            }
+        }
     }
 
     if config.config.emit.write_py_typed {
@@ -583,6 +591,49 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
     } else {
         None
     }
+}
+
+fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> Option<Diagnostic> {
+    let runtime_binding = emitted_binding(runtime_path)?;
+    let stub_binding = emitted_binding(stub_path)?;
+
+    if declaration_surface(&runtime_binding) == declaration_surface(&stub_binding) {
+        None
+    } else {
+        Some(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "emitted runtime/stub declaration surfaces differ between `{}` and `{}`",
+                runtime_path.display(),
+                stub_path.display()
+            ),
+        ))
+    }
+}
+
+fn emitted_binding(path: &Path) -> Option<typepython_binding::BindingTable> {
+    let source = SourceFile::from_path(path).ok()?;
+    let syntax = parse(source);
+    if syntax.diagnostics.has_errors() {
+        None
+    } else {
+        Some(bind(&syntax))
+    }
+}
+
+fn declaration_surface(
+    binding: &typepython_binding::BindingTable,
+) -> std::collections::BTreeSet<(Option<String>, String)> {
+    binding
+        .declarations
+        .iter()
+        .map(|declaration| {
+            (
+                declaration.owner.as_ref().map(|owner| owner.name.clone()),
+                declaration.name.clone(),
+            )
+        })
+        .collect()
 }
 
 fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> Result<PathBuf> {
@@ -1176,6 +1227,35 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("is not valid Python syntax"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def build_user() -> int:\n    return 1\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("declaration surfaces differ"));
     }
 
     #[test]
