@@ -1770,6 +1770,112 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_incompatible_imported_interface_member_signature() {
+        let result = check(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/protocols.tpy"),
+                    module_key: String::from("app.protocols"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("close"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->int"),
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("SupportsClose"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/impl.tpy"),
+                    module_key: String::from("app.impl"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("app.protocols.SupportsClose"),
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Widget"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("SupportsClose"),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("SupportsClose")],
+                        },
+                        Declaration {
+                            name: String::from("close"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->str"),
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Widget"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 2,
+                },
+            ],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4008"));
+        assert!(rendered.contains("incompatible signature or annotation"));
+    }
+
+    #[test]
     fn check_reports_missing_abstract_base_members() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
