@@ -127,6 +127,7 @@ pub struct ImportStatement {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValueStatement {
     pub names: Vec<String>,
+    pub annotation: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -834,6 +835,7 @@ fn extract_ast_backed_statement(
                 .collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
                 names,
+                annotation: None,
                 is_final: false,
                 is_class_var: false,
                 line,
@@ -843,6 +845,7 @@ fn extract_ast_backed_statement(
             let names = extract_assignment_names(&stmt.target);
             (!names.is_empty()).then_some(SyntaxStatement::Value(ValueStatement {
                 names,
+                annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
                 is_final: is_final_annotation(&stmt.annotation),
                 is_class_var: is_classvar_annotation(&stmt.annotation),
                 line,
@@ -1972,12 +1975,14 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    annotation: Some(String::from("int")),
                     is_final: false,
                     is_class_var: false,
                     line: 3,
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("a"), String::from("b")],
+                    annotation: None,
                     is_final: false,
                     is_class_var: false,
                     line: 4,
@@ -2134,6 +2139,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("MAX_SIZE")],
+                    annotation: Some(String::from("Final")),
                     is_final: true,
                     is_class_var: false,
                     line: 2,
@@ -2179,6 +2185,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("VALUE")],
+                    annotation: Some(String::from("ClassVar[int]")),
                     is_final: false,
                     is_class_var: true,
                     line: 2,

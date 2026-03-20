@@ -304,6 +304,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value"), String::from("count")],
+                    annotation: None,
                     is_final: false,
                     is_class_var: false,
                     line: 2,
@@ -460,6 +461,7 @@ mod tests {
             statements: vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("MAX_SIZE")],
+                    annotation: Some(String::from("Final")),
                     is_final: true,
                     is_class_var: false,
                     line: 1,
@@ -530,6 +532,7 @@ mod tests {
             statements: vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("VALUE")],
+                    annotation: Some(String::from("ClassVar[int]")),
                     is_final: false,
                     is_class_var: true,
                     line: 1,
