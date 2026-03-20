@@ -10,7 +10,7 @@ pub struct BindingTable {
     pub module_key: String,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
-    pub calls: Vec<String>,
+    pub calls: Vec<CallSite>,
 }
 
 impl Default for BindingTable {
@@ -23,6 +23,12 @@ impl Default for BindingTable {
             calls: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct CallSite {
+    pub callee: String,
+    pub arg_count: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -80,7 +86,10 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
             .statements
             .iter()
             .filter_map(|statement| match statement {
-                SyntaxStatement::Call(statement) => Some(statement.callee.clone()),
+                SyntaxStatement::Call(statement) => Some(CallSite {
+                    callee: statement.callee.clone(),
+                    arg_count: statement.arg_count,
+                }),
                 _ => None,
             })
             .collect(),

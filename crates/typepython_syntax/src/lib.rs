@@ -152,6 +152,7 @@ pub struct ValueStatement {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CallStatement {
     pub callee: String,
+    pub arg_count: usize,
     pub line: usize,
 }
 
@@ -957,6 +958,7 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
 
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
+        arg_count: call.arguments.args.len(),
         line,
     }))
 }
@@ -2307,6 +2309,7 @@ mod tests {
             vec![
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Builder"),
+                    arg_count: 0,
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -2318,6 +2321,7 @@ mod tests {
                 }),
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
+                    arg_count: 0,
                     line: 2,
                 }),
             ]
@@ -2347,6 +2351,7 @@ mod tests {
                 }),
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
+                    arg_count: 0,
                     line: 2,
                 }),
             ]

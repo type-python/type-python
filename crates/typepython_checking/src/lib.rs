@@ -28,6 +28,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
             diagnostics.push(resolution_diagnostic);
         }
+        for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
+            diagnostics.push(call_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -60,6 +63,58 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn direct_call_arity_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.calls
+        .iter()
+        .filter_map(|call| {
+            let target = if let Some(local) = node
+                .declarations
+                .iter()
+                .find(|declaration| declaration.name == call.callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+            {
+                Some(local)
+            } else {
+                let import = node
+                    .declarations
+                    .iter()
+                    .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == call.callee)?;
+                let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+                let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+                target_node
+                    .declarations
+                    .iter()
+                    .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+            }?;
+
+            let expected = direct_param_count(&target.detail)?;
+            (call.arg_count != expected).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` expects {} positional argument(s) but received {}",
+                        call.callee,
+                        node.module_path.display(),
+                        expected,
+                        call.arg_count
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn direct_param_count(signature: &str) -> Option<usize> {
+    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
+    if inner.is_empty() {
+        Some(0)
+    } else {
+        Some(inner.split(',').count())
+    }
 }
 
 fn unresolved_import_diagnostics(
@@ -342,11 +397,11 @@ fn abstract_instantiation_diagnostics<'a>(
 
     node.calls
         .iter()
-        .filter_map(|callee| {
-            let abstract_name = if abstract_classes.contains(callee) {
-                Some(callee.as_str())
+        .filter_map(|call| {
+            let abstract_name = if abstract_classes.contains(&call.callee) {
+                Some(call.callee.as_str())
             } else {
-                resolve_direct_base(nodes, node, callee)
+                resolve_direct_base(nodes, node, &call.callee)
                     .and_then(|(base_node, declaration)| {
                         let own_abstract = base_node.declarations.iter().any(|declaration_member| {
                             declaration_member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
@@ -2031,7 +2086,10 @@ mod tests {
                         bases: Vec::new(),
                     },
                 ],
-                calls: vec![String::from("Base")],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("Base"),
+                    arg_count: 0,
+                }],
                 summary_fingerprint: 1,
             }],
         });
@@ -2103,7 +2161,10 @@ mod tests {
                         is_class_var: false,
                         bases: Vec::new(),
                     }],
-                    calls: vec![String::from("Base")],
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("Base"),
+                        arg_count: 0,
+                    }],
                     summary_fingerprint: 2,
                 },
             ],
@@ -2143,6 +2204,40 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY3001"));
         assert!(rendered.contains("app.missing.Missing"));
+    }
+
+    #[test]
+    fn check_reports_direct_call_arity_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(x:int,y:int)->None"),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("build"),
+                    arg_count: 1,
+                }],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("expects 2 positional argument(s) but received 1"));
     }
 
     #[test]

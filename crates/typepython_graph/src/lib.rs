@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::{BindingTable, Declaration};
+use typepython_binding::{BindingTable, CallSite, Declaration};
 use typepython_syntax::SourceKind;
 
 /// Summary node for one module.
@@ -17,7 +17,7 @@ pub struct ModuleNode {
     pub module_key: String,
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
-    pub calls: Vec<String>,
+    pub calls: Vec<CallSite>,
     pub summary_fingerprint: u64,
 }
 
