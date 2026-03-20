@@ -170,7 +170,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
 
     match parse_module(&source.text) {
         Ok(parsed) => {
-            collect_invalid_classvar_body_diagnostics(
+            collect_invalid_annotation_placement_diagnostics(
                 &source.path,
                 &source.text,
                 parsed.suite(),
@@ -223,7 +223,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
         let normalized = normalize_typepython_source(&source.text, &statements);
         match parse_module(&normalized) {
             Ok(parsed) => {
-                collect_invalid_classvar_body_diagnostics(
+                collect_invalid_annotation_placement_diagnostics(
                     &source.path,
                     &normalized,
                     parsed.suite(),
@@ -264,7 +264,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     SyntaxTree { source, statements, diagnostics }
 }
 
-fn collect_invalid_classvar_body_diagnostics(
+fn collect_invalid_annotation_placement_diagnostics(
     path: &Path,
     source: &str,
     suite: &[Stmt],
@@ -284,12 +284,46 @@ fn collect_invalid_classvar_body_diagnostics(
                 );
             }
             Stmt::FunctionDef(function) => {
-                collect_invalid_classvar_body_diagnostics(path, source, &function.body, true, diagnostics)
+                collect_invalid_parameter_annotation_diagnostics(path, source, &function.parameters, diagnostics);
+                collect_invalid_annotation_placement_diagnostics(path, source, &function.body, true, diagnostics)
             }
             Stmt::ClassDef(class_def) => {
-                collect_invalid_classvar_body_diagnostics(path, source, &class_def.body, false, diagnostics)
+                collect_invalid_annotation_placement_diagnostics(path, source, &class_def.body, false, diagnostics)
             }
             _ => {}
+        }
+    }
+}
+
+fn collect_invalid_parameter_annotation_diagnostics(
+    path: &Path,
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    diagnostics: &mut DiagnosticReport,
+) {
+    for parameter in parameters.iter() {
+        let Some(annotation) = parameter.annotation() else {
+            continue;
+        };
+        let line = offset_to_line_column(source, parameter.range().start().to_usize()).0;
+
+        if is_classvar_annotation(annotation) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY4001",
+                    "ClassVar[...] is not allowed in function or method parameter annotations",
+                )
+                .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+            );
+        }
+        if is_final_annotation(annotation) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY4010",
+                    "Final[...] in function or method parameter position is deferred beyond v1",
+                )
+                .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+            );
         }
     }
 }
@@ -2016,5 +2050,33 @@ mod tests {
         assert!(tree.diagnostics.has_errors());
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("ClassVar[...] is not allowed inside function or method bodies"));
+    }
+
+    #[test]
+    fn parse_rejects_classvar_in_parameter_position() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("bad-classvar-param.py"),
+            kind: SourceKind::Python,
+            text: String::from("from typing import ClassVar\n\ndef build(value: ClassVar[int]) -> None:\n    pass\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("parameter annotations"));
+    }
+
+    #[test]
+    fn parse_rejects_final_in_parameter_position() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("bad-final-param.py"),
+            kind: SourceKind::Python,
+            text: String::from("from typing import Final\n\ndef build(value: Final[int]) -> None:\n    pass\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4010"));
+        assert!(rendered.contains("deferred beyond v1"));
     }
 }
