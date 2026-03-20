@@ -290,16 +290,43 @@ fn abstract_instantiation_diagnostics<'a>(
 
     node.calls
         .iter()
-        .filter(|callee| abstract_classes.contains(*callee))
-        .map(|callee| {
-            Diagnostic::error(
+        .filter_map(|callee| {
+            let abstract_name = if abstract_classes.contains(callee) {
+                Some(callee.as_str())
+            } else {
+                resolve_direct_base(nodes, node, callee)
+                    .and_then(|(base_node, declaration)| {
+                        let own_abstract = base_node.declarations.iter().any(|declaration_member| {
+                            declaration_member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+                                && declaration_member.is_abstract_method
+                        });
+                        let inherited_abstract = declaration.bases.iter().any(|base| {
+                            let Some((resolved_node, resolved_decl)) = resolve_direct_base(nodes, base_node, base) else {
+                                return false;
+                            };
+                            abstract_member_index(&resolved_node.declarations).iter().any(|((abstract_owner, member_name), member_kind)| {
+                                abstract_owner == &resolved_decl.name
+                                    && !base_node.declarations.iter().any(|declaration_member| {
+                                        declaration_member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+                                            && declaration_member.name == *member_name
+                                            && declaration_member.kind == *member_kind
+                                            && !declaration_member.is_abstract_method
+                                    })
+                            })
+                        });
+
+                        (own_abstract || inherited_abstract).then_some(declaration.name.as_str())
+                    })
+            }?;
+
+            Some(Diagnostic::error(
                 "TPY4007",
                 format!(
                     "module `{}` directly instantiates abstract class `{}`",
                     node.module_path.display(),
-                    callee
+                    abstract_name
                 ),
-            )
+            ))
         })
         .collect()
 }
@@ -1849,6 +1876,79 @@ mod tests {
                 calls: vec![String::from("Base")],
                 summary_fingerprint: 1,
             }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4007"));
+        assert!(rendered.contains("directly instantiates abstract class `Base`"));
+    }
+
+    #[test]
+    fn check_reports_direct_instantiation_of_imported_abstract_class() {
+        let result = check(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/base.py"),
+                    module_key: String::from("app.base"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Base"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("run"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->None"),
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                name: String::from("Base"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_override: false,
+                            is_abstract_method: true,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/use.py"),
+                    module_key: String::from("app.use"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("app.base.Base"),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    }],
+                    calls: vec![String::from("Base")],
+                    summary_fingerprint: 2,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
