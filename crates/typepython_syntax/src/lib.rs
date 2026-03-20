@@ -210,6 +210,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 &[],
                 &mut diagnostics,
             ));
+            collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
             statements.sort_by_key(statement_line);
         }
         Err(error) => {
@@ -262,14 +263,15 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &mut statements,
                     &mut diagnostics,
                 );
-            statements.extend(extract_ast_backed_statements(
-                &source.path,
-                &normalized,
-                &normalized,
-                parsed.suite(),
-                &statements,
+                statements.extend(extract_ast_backed_statements(
+                    &source.path,
+                    &normalized,
+                    &normalized,
+                    parsed.suite(),
+                    &statements,
                     &mut diagnostics,
                 ));
+                collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
                 statements.sort_by_key(statement_line);
             }
             Err(error) => {
@@ -917,6 +919,36 @@ fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<Synta
             .as_deref()
             .and_then(|value| extract_call_statement(value, line)),
         _ => None,
+    }
+}
+
+fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_calls_from_suite(source, &function.body, statements);
+                collect_nested_call_statements(source, &function.body, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_calls_from_suite(source, &class_def.body, statements);
+                collect_nested_call_statements(source, &class_def.body, statements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
+    for stmt in suite {
+        let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+        if let Some(call) = extract_supplemental_call_statement(stmt, line)
+            .or_else(|| match stmt {
+                Stmt::Expr(expr) => extract_call_statement(&expr.value, line),
+                _ => None,
+            })
+        {
+            statements.push(call);
+        }
     }
 }
 
@@ -2127,6 +2159,34 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     line: 2,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("Factory"),
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_nested_direct_calls() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("nested-calls.py"),
+            kind: SourceKind::Python,
+            text: String::from("def build() -> None:\n    Factory()\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("None")),
+                    is_override: false,
+                    line: 1,
                 }),
                 SyntaxStatement::Call(CallStatement {
                     callee: String::from("Factory"),
