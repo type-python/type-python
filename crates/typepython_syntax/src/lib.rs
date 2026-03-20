@@ -135,6 +135,9 @@ pub struct ValueStatement {
 pub struct ClassMember {
     pub name: String,
     pub kind: ClassMemberKind,
+    pub annotation: Option<String>,
+    pub params: Vec<FunctionParam>,
+    pub returns: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -522,6 +525,13 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 } else {
                     ClassMemberKind::Method
                 },
+                annotation: None,
+                params: extract_function_params(normalized, &function.parameters),
+                returns: function
+                    .returns
+                    .as_ref()
+                    .and_then(|returns| slice_range(normalized, returns.range()))
+                    .map(str::to_owned),
                 is_final: false,
                 is_class_var: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
@@ -532,6 +542,9 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    annotation: slice_range(normalized, assign.annotation.range()).map(str::to_owned),
+                    params: Vec::new(),
+                    returns: None,
                     is_final,
                     is_class_var,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
@@ -542,6 +555,9 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    annotation: None,
+                    params: Vec::new(),
+                    returns: None,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -1954,6 +1970,9 @@ mod tests {
                     ClassMember {
                         name: String::from("value"),
                         kind: ClassMemberKind::Field,
+                        annotation: Some(String::from("int")),
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -1961,6 +1980,9 @@ mod tests {
                     ClassMember {
                         name: String::from("total"),
                         kind: ClassMemberKind::Field,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -1968,6 +1990,12 @@ mod tests {
                     ClassMember {
                         name: String::from("get"),
                         kind: ClassMemberKind::Method,
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("self"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("int")),
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -2004,6 +2032,18 @@ mod tests {
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Overload,
+                            annotation: None,
+                            params: vec![
+                                FunctionParam {
+                                    name: String::from("self"),
+                                    annotation: None,
+                                },
+                                FunctionParam {
+                                    name: String::from("x"),
+                                    annotation: Some(String::from("str")),
+                                },
+                            ],
+                            returns: Some(String::from("int")),
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -2011,6 +2051,18 @@ mod tests {
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Method,
+                            annotation: None,
+                            params: vec![
+                                FunctionParam {
+                                    name: String::from("self"),
+                                    annotation: None,
+                                },
+                                FunctionParam {
+                                    name: String::from("x"),
+                                    annotation: None,
+                                },
+                            ],
+                            returns: None,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -2053,6 +2105,9 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
+                        annotation: Some(String::from("Final[int]")),
+                        params: Vec::new(),
+                        returns: None,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
@@ -2094,6 +2149,9 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
+                        annotation: Some(String::from("ClassVar[int]")),
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: true,
                         line: 4,

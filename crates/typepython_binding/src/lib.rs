@@ -349,6 +349,9 @@ mod tests {
                     ClassMember {
                         name: String::from("value"),
                         kind: ClassMemberKind::Field,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -356,6 +359,9 @@ mod tests {
                     ClassMember {
                         name: String::from("close"),
                         kind: ClassMemberKind::Method,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -363,6 +369,9 @@ mod tests {
                     ClassMember {
                         name: String::from("close"),
                         kind: ClassMemberKind::Overload,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -439,6 +448,9 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: true,
                         is_class_var: false,
                         line: 2,
@@ -502,6 +514,9 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: None,
                         is_final: false,
                         is_class_var: true,
                         line: 2,
