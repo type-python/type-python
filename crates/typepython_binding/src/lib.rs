@@ -122,6 +122,7 @@ mod tests {
                     name: String::from("User"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {

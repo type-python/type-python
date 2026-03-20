@@ -98,6 +98,7 @@ pub struct NamedBlockStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub header_suffix: String,
+    pub members: Vec<ClassMember>,
     pub line: usize,
 }
 
@@ -118,6 +119,19 @@ pub struct ImportStatement {
 pub struct ValueStatement {
     pub names: Vec<String>,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ClassMember {
+    pub name: String,
+    pub kind: ClassMemberKind,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ClassMemberKind {
+    Field,
+    Method,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -287,6 +301,7 @@ fn refresh_custom_statements_from_ast(
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
                             .unwrap_or_default();
+                        existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
                 }
             }
@@ -308,6 +323,7 @@ fn refresh_custom_statements_from_ast(
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
                             .unwrap_or_default();
+                        existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
                 }
             }
@@ -329,6 +345,7 @@ fn refresh_custom_statements_from_ast(
                             .and_then(|arguments| slice_range(normalized, arguments.range()))
                             .map(str::to_owned)
                             .unwrap_or_default();
+                        existing.members = extract_class_members(normalized, &ast_statement.body);
                     }
                 }
             }
@@ -394,6 +411,38 @@ fn is_stub_like_function_body(body: &[Stmt]) -> bool {
         matches!(statement, Stmt::Pass(_))
             || matches!(statement, Stmt::Expr(expr) if matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)))
     })
+}
+
+fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
+    let mut members = Vec::new();
+
+    for statement in body {
+        match statement {
+            Stmt::FunctionDef(function) => members.push(ClassMember {
+                name: function.name.as_str().to_owned(),
+                kind: ClassMemberKind::Method,
+                line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
+            }),
+            Stmt::AnnAssign(assign) => {
+                members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| ClassMember {
+                    name,
+                    kind: ClassMemberKind::Field,
+                    line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
+                }));
+            }
+            Stmt::Assign(assign) => {
+                let line = offset_to_line_column(normalized, assign.range.start().to_usize()).0;
+                members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(|name| ClassMember {
+                    name,
+                    kind: ClassMemberKind::Field,
+                    line,
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    members
 }
 
 fn ast_class_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtClassDef> {
@@ -532,7 +581,9 @@ fn extract_ast_backed_statements(
         if existing_lines.contains(&line) {
             continue;
         }
-        if let Some(statement) = extract_ast_backed_statement(path, source, stmt, line, diagnostics) {
+        if let Some(statement) =
+            extract_ast_backed_statement(path, source, normalized, stmt, line, diagnostics)
+        {
             statements.push(statement);
         }
     }
@@ -543,6 +594,7 @@ fn extract_ast_backed_statements(
 fn extract_ast_backed_statement(
     path: &Path,
     source: &str,
+    normalized: &str,
     stmt: &Stmt,
     line: usize,
     diagnostics: &mut DiagnosticReport,
@@ -564,6 +616,7 @@ fn extract_ast_backed_statement(
                 .and_then(|arguments| slice_range(source, arguments.range()))
                 .map(str::to_owned)
                 .unwrap_or_default(),
+            members: extract_class_members(normalized, &stmt.body),
             line,
         })),
         Stmt::FunctionDef(stmt) => {
@@ -881,6 +934,7 @@ fn parse_named_block(
         name,
         type_params: parsed_type_params.type_params,
         header_suffix: parsed_type_params.remainder.trim().to_owned(),
+        members: Vec::new(),
         line: line_number,
     }))
 }
@@ -1255,8 +1309,9 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        FunctionStatement, ImportStatement, NamedBlockStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
+        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, NamedBlockStatement,
+        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeParam,
+        UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
 
@@ -1298,18 +1353,21 @@ mod tests {
                     name: String::from("Service"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::DataClass(NamedBlockStatement {
                     name: String::from("Box"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 4,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
                     type_params: Vec::new(),
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 6,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -1361,6 +1419,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::DataClass(NamedBlockStatement {
@@ -1370,6 +1429,7 @@ mod tests {
                         bound: Some(String::from("Sequence[str]")),
                     }],
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 4,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
@@ -1379,6 +1439,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 6,
                 }),
                 SyntaxStatement::OverloadDef(FunctionStatement {
@@ -1465,6 +1526,7 @@ mod tests {
                 name: String::from("SupportsClose"),
                 type_params: Vec::new(),
                 header_suffix: String::from("(Closable)"),
+                members: Vec::new(),
                 line: 1,
             })]
         );
@@ -1619,6 +1681,7 @@ mod tests {
                         bound: None,
                     }],
                     header_suffix: String::new(),
+                    members: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -1665,6 +1728,46 @@ mod tests {
                     line: 4,
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_class_like_members_from_ast_body() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("members.tpy"),
+            kind: SourceKind::TypePython,
+            text: String::from(
+                "class Box:\n    value: int\n    total = 1\n    def get(self) -> int: ...\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        println!("{:?}", tree.statements);
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("Box"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                members: vec![
+                    ClassMember {
+                        name: String::from("value"),
+                        kind: ClassMemberKind::Field,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("total"),
+                        kind: ClassMemberKind::Field,
+                        line: 3,
+                    },
+                    ClassMember {
+                        name: String::from("get"),
+                        kind: ClassMemberKind::Method,
+                        line: 4,
+                    },
+                ],
+                line: 1,
+            })]
         );
     }
 }
