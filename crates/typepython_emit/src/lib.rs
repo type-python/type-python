@@ -124,7 +124,7 @@ fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
     })?;
 
     let mut edits = Vec::new();
-    collect_function_stub_edits(python, parsed.suite(), &mut edits);
+    collect_stub_edits(python, parsed.suite(), &mut edits);
     edits.sort_by_key(|edit| edit.start_line);
 
     let lines: Vec<&str> = python.lines().collect();
@@ -162,7 +162,7 @@ struct StubEdit {
     replacement: Option<String>,
 }
 
-fn collect_function_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
+fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
     let overloaded_names: std::collections::BTreeSet<_> = suite
         .iter()
         .filter_map(|statement| match statement {
@@ -192,7 +192,19 @@ fn collect_function_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<Stu
                     },
                 });
             }
-            Stmt::ClassDef(class_def) => collect_function_stub_edits(source, &class_def.body, edits),
+            Stmt::AnnAssign(assign) => {
+                if let Some(replacement) = rewrite_stub_annotated_assignment_line(
+                    source.lines().nth(offset_to_line(source, assign.range.start().to_usize()) - 1).unwrap_or(""),
+                ) {
+                    let start_line = offset_to_line(source, assign.range.start().to_usize());
+                    edits.push(StubEdit {
+                        start_line,
+                        end_line: start_line,
+                        replacement: Some(replacement),
+                    });
+                }
+            }
+            Stmt::ClassDef(class_def) => collect_stub_edits(source, &class_def.body, edits),
             _ => {}
         }
     }
@@ -207,6 +219,14 @@ fn rewrite_stub_signature_line(line: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn rewrite_stub_annotated_assignment_line(line: &str) -> Option<String> {
+    if line.contains("TypeAlias =") {
+        return None;
+    }
+    let (head, _) = line.split_once('=')?;
+    Some(head.trim_end().to_owned())
 }
 
 fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
@@ -264,7 +284,7 @@ mod tests {
                 LoweredModule {
                     source_path: PathBuf::from("src/app/__init__.tpy"),
                     source_kind: SourceKind::TypePython,
-                    python_source: String::from("from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int:\n    return 1\n"),
+                    python_source: String::from("from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n"),
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
                 LoweredModule {
@@ -333,8 +353,8 @@ mod tests {
                 py_typed_written: 1,
             }
         );
-        assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int:\n    return 1\n");
-        assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int: ...\n");
+        assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n");
+        assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int\n\ndef build_user() -> int: ...\n");
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
         assert_eq!(runtime_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n");
         assert_eq!(stub_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\n");
