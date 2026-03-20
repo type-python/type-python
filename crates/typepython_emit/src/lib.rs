@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, fs, io, path::{Path, PathBuf}};
 
-use ruff_python_ast::Stmt;
+use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use typepython_config::ConfigHandle;
 use typepython_lowering::LoweredModule;
@@ -135,7 +135,9 @@ fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
     while line <= lines.len() {
         if let Some(edit) = edits.peek() {
             if edit.start_line == line {
-                output.push(edit.replacement.clone());
+                if let Some(replacement) = &edit.replacement {
+                    output.push(replacement.clone());
+                }
                 line = edit.end_line + 1;
                 edits.next();
                 continue;
@@ -157,21 +159,37 @@ fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
 struct StubEdit {
     start_line: usize,
     end_line: usize,
-    replacement: String,
+    replacement: Option<String>,
 }
 
 fn collect_function_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
+    let overloaded_names: std::collections::BTreeSet<_> = suite
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::FunctionDef(function) if function.decorator_list.iter().any(is_overload_decorator) => {
+                Some(function.name.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+
     for statement in suite {
         match statement {
             Stmt::FunctionDef(function) => {
-                let start_line = offset_to_line(source, function.range.start().to_usize());
+                let start_line = offset_to_line(source, function.name.range.start().to_usize());
                 let end_offset = function.range.end().to_usize().saturating_sub(1);
                 let end_line = offset_to_line(source, end_offset.max(function.range.start().to_usize()));
                 let line = source.lines().nth(start_line - 1).unwrap_or("");
                 edits.push(StubEdit {
                     start_line,
                     end_line,
-                    replacement: rewrite_stub_signature_line(line),
+                    replacement: if function.decorator_list.iter().any(is_overload_decorator) {
+                        Some(rewrite_stub_signature_line(line))
+                    } else if overloaded_names.contains(function.name.as_str()) {
+                        None
+                    } else {
+                        Some(rewrite_stub_signature_line(line))
+                    },
                 });
             }
             Stmt::ClassDef(class_def) => collect_function_stub_edits(source, &class_def.body, edits),
@@ -188,6 +206,17 @@ fn rewrite_stub_signature_line(line: &str) -> String {
         format!("{trimmed} ...")
     } else {
         trimmed.to_owned()
+    }
+}
+
+fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+    match &decorator.expression {
+        Expr::Name(name) => name.id.as_str() == "overload",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "overload"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "typing")
+        }
+        _ => false,
     }
 }
 
@@ -245,6 +274,14 @@ mod tests {
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
                 LoweredModule {
+                    source_path: PathBuf::from("src/app/parse.tpy"),
+                    source_kind: SourceKind::TypePython,
+                    python_source: String::from(
+                        "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n",
+                    ),
+                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                },
+                LoweredModule {
                     source_path: PathBuf::from("src/app/helpers.pyi"),
                     source_kind: SourceKind::Stub,
                     python_source: String::from("def helper() -> int: ...\n"),
@@ -263,6 +300,11 @@ mod tests {
                     stub_path: None,
                 },
                 EmitArtifact {
+                    source_path: PathBuf::from("src/app/parse.tpy"),
+                    runtime_path: Some(temp_dir.join("build/app/parse.py")),
+                    stub_path: Some(temp_dir.join("build/app/parse.pyi")),
+                },
+                EmitArtifact {
                     source_path: PathBuf::from("src/app/helpers.pyi"),
                     runtime_path: None,
                     stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
@@ -273,25 +315,29 @@ mod tests {
             let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
             let stub_init = fs::read_to_string(temp_dir.join("build/app/__init__.pyi")).unwrap();
             let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
+            let runtime_parse = fs::read_to_string(temp_dir.join("build/app/parse.py")).unwrap();
+            let stub_parse = fs::read_to_string(temp_dir.join("build/app/parse.pyi")).unwrap();
             let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi")).unwrap();
             let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
 
-            (summary, runtime_init, stub_init, runtime_helpers, stub_helpers, py_typed)
+            (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, stub_helpers, py_typed)
         })();
         remove_temp_dir(&temp_dir);
 
-        let (summary, runtime_init, stub_init, runtime_helpers, stub_helpers, py_typed) = result;
+        let (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, stub_helpers, py_typed) = result;
         assert_eq!(
             summary,
             RuntimeWriteSummary {
-                runtime_files_written: 2,
-                stub_files_written: 2,
+                runtime_files_written: 3,
+                stub_files_written: 3,
                 py_typed_written: 1,
             }
         );
         assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int:\n    return 1\n");
         assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\n\ndef build_user() -> int: ...\n");
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
+        assert_eq!(runtime_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n");
+        assert_eq!(stub_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\n");
         assert_eq!(stub_helpers, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");
     }
