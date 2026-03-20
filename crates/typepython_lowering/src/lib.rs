@@ -577,6 +577,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             SyntaxStatement::Value(_) => {}
             SyntaxStatement::Call(_) => {}
             SyntaxStatement::MemberAccess(_) => {}
+            SyntaxStatement::Return(_) => {}
             SyntaxStatement::OverloadDef(_) => {}
         }
     }
