@@ -78,7 +78,9 @@ fn override_compatibility_diagnostics(
                         && declaration.name == member.name
                         && declaration.kind == member.kind
                 }) {
-                    if base_member.detail != member.detail {
+                    if base_member.detail != member.detail
+                        || base_member.method_kind != member.method_kind
+                    {
                         diagnostics.push(Diagnostic::error(
                             "TPY4005",
                             format!(
@@ -420,7 +422,7 @@ fn interface_implementation_diagnostics(
                     && candidate.owner.is_none()
                     && candidate.class_kind == Some(DeclarationOwnerKind::Interface)
             })?;
-            Some(((interface_decl.name.clone(), declaration.name.clone()), (declaration.kind, declaration.detail.clone())))
+            Some(((interface_decl.name.clone(), declaration.name.clone()), (declaration.kind, declaration.method_kind, declaration.detail.clone())))
         })
         .collect::<BTreeMap<_, _>>();
 
@@ -440,7 +442,7 @@ fn interface_implementation_diagnostics(
                 continue;
             }
 
-            for ((interface_name, member_name), (member_kind, member_detail)) in &interface_members {
+            for ((interface_name, member_name), (member_kind, member_method_kind, member_detail)) in &interface_members {
                 if interface_name != base {
                     continue;
                 }
@@ -464,7 +466,10 @@ fn interface_implementation_diagnostics(
                             ),
                         ));
                     }
-                    Some(implementation) if implementation.detail != *member_detail => {
+                    Some(implementation)
+                        if implementation.detail != *member_detail
+                            || implementation.method_kind != *member_method_kind =>
+                    {
                         diagnostics.push(Diagnostic::error(
                             "TPY4008",
                             format!(
@@ -746,6 +751,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -759,6 +765,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -791,6 +798,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -804,6 +812,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -833,6 +842,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -846,6 +856,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -859,6 +870,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -888,6 +900,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -901,6 +914,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -932,6 +946,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -945,6 +960,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -958,6 +974,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -989,6 +1006,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -1002,6 +1020,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -1031,6 +1050,7 @@ mod tests {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -1044,6 +1064,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
@@ -1060,6 +1081,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
@@ -1095,6 +1117,7 @@ mod tests {
                     name: String::from("Parser"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -1108,6 +1131,7 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
@@ -1124,6 +1148,7 @@ mod tests {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
@@ -1156,6 +1181,7 @@ mod tests {
                         name: String::from("MAX_SIZE"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: None,
                     is_override: false,
@@ -1169,6 +1195,7 @@ mod tests {
                         name: String::from("MAX_SIZE"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: None,
                     is_override: false,
@@ -1200,6 +1227,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1213,6 +1241,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Box"),
@@ -1229,6 +1258,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Box"),
@@ -1264,6 +1294,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1277,6 +1308,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Base"),
@@ -1293,6 +1325,7 @@ mod tests {
                         name: String::from("Derived"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1306,6 +1339,7 @@ mod tests {
                         name: String::from("limit"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Derived"),
@@ -1340,6 +1374,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1353,6 +1388,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1384,6 +1420,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1397,6 +1434,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Base"),
@@ -1413,6 +1451,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1426,6 +1465,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Child"),
@@ -1460,6 +1500,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_override: false,
@@ -1473,6 +1514,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
@@ -1489,6 +1531,7 @@ mod tests {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1520,6 +1563,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_override: false,
@@ -1533,6 +1577,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self)->int"),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
@@ -1549,6 +1594,7 @@ mod tests {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1562,6 +1608,7 @@ mod tests {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self)->str"),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Widget"),
@@ -1596,6 +1643,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1609,6 +1657,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Base"),
@@ -1625,6 +1674,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1656,6 +1706,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1669,6 +1720,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Base"),
@@ -1702,6 +1754,7 @@ mod tests {
                     name: String::from("top_level"),
                     kind: DeclarationKind::Function,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: true,
@@ -1732,6 +1785,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1745,6 +1799,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1758,6 +1813,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Child"),
@@ -1792,6 +1848,7 @@ mod tests {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1805,6 +1862,7 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:int)->int"),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Base"),
@@ -1821,6 +1879,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         detail: String::from("Base"),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1834,6 +1893,87 @@ mod tests {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         detail: String::from("(self,x:str)->int"),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Child"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("incompatible signature or annotation"));
+    }
+
+    #[test]
+    fn check_reports_incompatible_override_method_kind() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(cls)->None"),
+                        method_kind: Some(typepython_syntax::MethodKind::Class),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        detail: String::from("Base"),
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->None"),
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Child"),
@@ -1869,6 +2009,7 @@ mod tests {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
                             is_override: false,
@@ -1882,6 +2023,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::new(),
+                            method_kind: None,
                             class_kind: None,
                             owner: Some(DeclarationOwner {
                                 name: String::from("Base"),
@@ -1898,6 +2040,7 @@ mod tests {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
                             detail: String::new(),
+                            method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
                             owner: None,
                             is_override: false,
@@ -1911,6 +2054,7 @@ mod tests {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
                             detail: String::new(),
+                            method_kind: None,
                             class_kind: None,
                             owner: Some(DeclarationOwner {
                                 name: String::from("Child"),
@@ -1946,6 +2090,7 @@ mod tests {
                     name: String::from("VALUE"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -1976,6 +2121,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
                         is_override: false,
@@ -1989,6 +2135,7 @@ mod tests {
                         name: String::from("cache"),
                         kind: DeclarationKind::Value,
                         detail: String::new(),
+                        method_kind: None,
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Box"),

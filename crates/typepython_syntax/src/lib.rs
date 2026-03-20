@@ -146,6 +146,7 @@ pub struct CallStatement {
 pub struct ClassMember {
     pub name: String,
     pub kind: ClassMemberKind,
+    pub method_kind: Option<MethodKind>,
     pub annotation: Option<String>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
@@ -162,6 +163,14 @@ pub enum ClassMemberKind {
     Field,
     Method,
     Overload,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum MethodKind {
+    Instance,
+    Class,
+    Static,
+    Property,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -560,6 +569,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 } else {
                     ClassMemberKind::Method
                 },
+                method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
                 annotation: None,
                 params: extract_function_params(normalized, &function.parameters),
                 returns: function
@@ -580,6 +590,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    method_kind: None,
                     annotation: slice_range(normalized, assign.annotation.range()).map(str::to_owned),
                     params: Vec::new(),
                     returns: None,
@@ -596,6 +607,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(|name| ClassMember {
                     name,
                     kind: ClassMemberKind::Field,
+                    method_kind: None,
                     annotation: None,
                     params: Vec::new(),
                     returns: None,
@@ -1090,6 +1102,19 @@ fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
         }
         _ => false,
     }
+}
+
+fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> MethodKind {
+    for decorator in decorators {
+        match &decorator.expression {
+            Expr::Name(name) if name.id.as_str() == "classmethod" => return MethodKind::Class,
+            Expr::Name(name) if name.id.as_str() == "staticmethod" => return MethodKind::Static,
+            Expr::Name(name) if name.id.as_str() == "property" => return MethodKind::Property,
+            _ => {}
+        }
+    }
+
+    MethodKind::Instance
 }
 
 fn is_final_annotation(expr: &Expr) -> bool {
@@ -1658,6 +1683,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportStatement,
+        MethodKind,
         NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -2220,6 +2246,7 @@ mod tests {
                     ClassMember {
                         name: String::from("value"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
@@ -2233,6 +2260,7 @@ mod tests {
                     ClassMember {
                         name: String::from("total"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -2246,6 +2274,7 @@ mod tests {
                     ClassMember {
                         name: String::from("get"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
@@ -2293,6 +2322,7 @@ mod tests {
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Overload,
+                            method_kind: Some(MethodKind::Instance),
                             annotation: None,
                             params: vec![
                                 FunctionParam {
@@ -2315,6 +2345,7 @@ mod tests {
                         ClassMember {
                             name: String::from("parse"),
                             kind: ClassMemberKind::Method,
+                            method_kind: Some(MethodKind::Instance),
                             annotation: None,
                             params: vec![
                                 FunctionParam {
@@ -2375,6 +2406,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: Some(String::from("Final[int]")),
                         params: Vec::new(),
                         returns: None,
@@ -2418,6 +2450,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
@@ -2471,6 +2504,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: Some(String::from("ClassVar[int]")),
                         params: Vec::new(),
                         returns: None,
@@ -2611,6 +2645,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
@@ -2657,6 +2692,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
@@ -2673,6 +2709,80 @@ mod tests {
                     line: 3,
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_marks_method_kinds_from_decorators() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("member-kinds.py"),
+            kind: SourceKind::Python,
+            text: String::from(
+                "class Box:\n    @classmethod\n    def make(cls) -> None:\n        pass\n\n    @staticmethod\n    def build() -> None:\n        pass\n\n    @property\n    def name(self) -> str:\n        return \"x\"\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("Box"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                members: vec![
+                    ClassMember {
+                        name: String::from("make"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Class),
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("cls"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("None")),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("build"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Static),
+                        annotation: None,
+                        params: Vec::new(),
+                        returns: Some(String::from("None")),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 6,
+                    },
+                    ClassMember {
+                        name: String::from("name"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Property),
+                        annotation: None,
+                        params: vec![FunctionParam {
+                            name: String::from("self"),
+                            annotation: None,
+                        }],
+                        returns: Some(String::from("str")),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 10,
+                    },
+                ],
+                line: 1,
+            })]
         );
     }
 }

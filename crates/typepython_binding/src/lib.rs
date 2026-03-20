@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
+use typepython_syntax::{MethodKind, SourceKind, SyntaxStatement, SyntaxTree};
 
 #[derive(Debug, Clone)]
 pub struct BindingTable {
@@ -28,6 +28,7 @@ pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
     pub detail: String,
+    pub method_kind: Option<MethodKind>,
     pub class_kind: Option<DeclarationOwnerKind>,
     pub owner: Option<DeclarationOwner>,
     pub is_override: bool,
@@ -89,6 +90,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
             detail: statement.value.clone(),
+            method_kind: None,
             class_kind: None,
             owner: None,
             is_override: false,
@@ -106,6 +108,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
             detail: format_signature(&statement.params, statement.returns.as_deref()),
+            method_kind: None,
             class_kind: None,
             owner: None,
             is_override: false,
@@ -119,6 +122,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
             detail: format_signature(&statement.params, statement.returns.as_deref()),
+            method_kind: None,
             class_kind: None,
             owner: None,
             is_override: statement.is_override,
@@ -136,6 +140,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 name,
                 kind: DeclarationKind::Import,
                 detail: String::new(),
+                method_kind: None,
                 class_kind: None,
                 owner: None,
                 is_override: false,
@@ -154,6 +159,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 name,
                 kind: DeclarationKind::Value,
                 detail: statement.annotation.clone().unwrap_or_default(),
+                method_kind: None,
                 class_kind: None,
                 owner: None,
                 is_override: false,
@@ -181,6 +187,7 @@ fn bind_named_block(
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
         detail: statement.bases.join(","),
+        method_kind: None,
         class_kind: Some(owner_kind),
         owner: None,
         is_override: false,
@@ -203,6 +210,7 @@ fn bind_named_block(
                 format_signature(&member.params, member.returns.as_deref())
             }
         },
+        method_kind: member.method_kind,
         class_kind: None,
         owner: Some(owner.clone()),
         is_override: member.is_override,
@@ -236,8 +244,9 @@ mod tests {
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, NamedBlockStatement,
-        SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
+        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, MethodKind,
+        NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
+        TypeAliasStatement, TypeParam,
         ValueStatement,
     };
 
@@ -285,6 +294,7 @@ mod tests {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::from("int"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -298,6 +308,7 @@ mod tests {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -311,6 +322,7 @@ mod tests {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -363,6 +375,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::from("()->"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -376,6 +389,7 @@ mod tests {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -420,6 +434,7 @@ mod tests {
                     name: String::from("local_foo"),
                     kind: DeclarationKind::Import,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -433,6 +448,7 @@ mod tests {
                     name: String::from("bar"),
                     kind: DeclarationKind::Import,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -446,6 +462,7 @@ mod tests {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -459,6 +476,7 @@ mod tests {
                     name: String::from("count"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -490,6 +508,7 @@ mod tests {
                     ClassMember {
                         name: String::from("value"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -503,6 +522,7 @@ mod tests {
                     ClassMember {
                         name: String::from("close"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -516,6 +536,7 @@ mod tests {
                     ClassMember {
                         name: String::from("close"),
                         kind: ClassMemberKind::Overload,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -539,6 +560,7 @@ mod tests {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
                     owner: None,
                     is_override: false,
@@ -552,6 +574,7 @@ mod tests {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
@@ -568,6 +591,7 @@ mod tests {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
+                    method_kind: Some(MethodKind::Instance),
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
@@ -584,6 +608,7 @@ mod tests {
                     name: String::from("close"),
                     kind: DeclarationKind::Overload,
                     detail: String::from("()->"),
+                    method_kind: Some(MethodKind::Instance),
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
@@ -625,6 +650,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("limit"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -648,6 +674,7 @@ mod tests {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
                     detail: String::from("Final"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -661,6 +688,7 @@ mod tests {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -674,6 +702,7 @@ mod tests {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("Box"),
@@ -715,6 +744,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("cache"),
                         kind: ClassMemberKind::Field,
+                        method_kind: None,
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -738,6 +768,7 @@ mod tests {
                     name: String::from("VALUE"),
                     kind: DeclarationKind::Value,
                     detail: String::from("ClassVar[int]"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: false,
@@ -751,6 +782,7 @@ mod tests {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -764,6 +796,7 @@ mod tests {
                     name: String::from("cache"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
+                    method_kind: None,
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("Box"),
@@ -806,6 +839,7 @@ mod tests {
                     members: vec![ClassMember {
                         name: String::from("run"),
                         kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         params: Vec::new(),
                         returns: None,
@@ -829,6 +863,7 @@ mod tests {
                     name: String::from("top_level"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
+                    method_kind: None,
                     class_kind: None,
                     owner: None,
                     is_override: true,
@@ -842,6 +877,7 @@ mod tests {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     detail: String::from("Base"),
+                    method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_override: false,
@@ -855,6 +891,7 @@ mod tests {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
+                    method_kind: Some(MethodKind::Instance),
                     class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("Child"),
