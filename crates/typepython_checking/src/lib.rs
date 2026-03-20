@@ -31,6 +31,9 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
         for override_violation in override_diagnostics(&node.module_path, &node.declarations) {
             diagnostics.push(override_violation);
         }
+        for override_violation in override_compatibility_diagnostics(&node.module_path, &node.declarations) {
+            diagnostics.push(override_violation);
+        }
         if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
             for override_violation in missing_override_diagnostics(&node.module_path, &node.declarations) {
                 diagnostics.push(override_violation);
@@ -54,6 +57,45 @@ pub fn check_with_options(graph: &ModuleGraph, require_explicit_overrides: bool)
     }
 
     CheckResult { diagnostics }
+}
+
+fn override_compatibility_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for class_declaration in declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
+    {
+        for member in declarations.iter().filter(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+        }) {
+            for base in &class_declaration.bases {
+                if let Some(base_member) = declarations.iter().find(|declaration| {
+                    declaration.owner.as_ref().is_some_and(|owner| owner.name == *base)
+                        && declaration.name == member.name
+                        && declaration.kind == member.kind
+                }) {
+                    if base_member.detail != member.detail {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY4005",
+                            format!(
+                                "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
+                                class_declaration.name,
+                                module_path.display(),
+                                member.name,
+                                base
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    diagnostics
 }
 
 fn missing_override_diagnostics(
@@ -1737,6 +1779,82 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4005"));
         assert!(rendered.contains("no direct base member was found"));
+    }
+
+    #[test]
+    fn check_reports_incompatible_direct_override_signature() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:int)->int"),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        detail: String::from("Base"),
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:str)->int"),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Child"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4005"));
+        assert!(rendered.contains("incompatible signature or annotation"));
     }
 
     #[test]
