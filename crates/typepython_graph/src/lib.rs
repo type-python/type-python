@@ -53,7 +53,7 @@ fn hash_summary(binding: &BindingTable) -> u64 {
 mod tests {
     use super::build;
     use std::path::PathBuf;
-    use typepython_binding::{BindingTable, Declaration, DeclarationKind};
+    use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
     use typepython_syntax::SourceKind;
 
     #[test]
@@ -65,6 +65,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -73,6 +74,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -87,6 +89,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -95,6 +98,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -112,6 +116,7 @@ mod tests {
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
+                class_kind: None,
                 owner: None,
                 is_final: false,
                 is_class_var: false,
@@ -125,6 +130,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -133,6 +139,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,

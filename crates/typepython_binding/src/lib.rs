@@ -25,6 +25,7 @@ impl Default for BindingTable {
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
+    pub class_kind: Option<DeclarationOwnerKind>,
     pub owner: Option<DeclarationOwner>,
     pub is_final: bool,
     pub is_class_var: bool,
@@ -73,6 +74,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::TypeAlias(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
+            class_kind: None,
             owner: None,
             is_final: false,
             is_class_var: false,
@@ -85,6 +87,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
+            class_kind: None,
             owner: None,
             is_final: false,
             is_class_var: false,
@@ -93,6 +96,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
+            class_kind: None,
             owner: None,
             is_final: false,
             is_class_var: false,
@@ -105,6 +109,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::Import,
+                class_kind: None,
                 owner: None,
                 is_final: false,
                 is_class_var: false,
@@ -118,6 +123,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|name| Declaration {
                 name,
                 kind: DeclarationKind::Value,
+                class_kind: None,
                 owner: None,
                 is_final: statement.is_final,
                 is_class_var: statement.is_class_var,
@@ -139,6 +145,7 @@ fn bind_named_block(
     let mut declarations = vec![Declaration {
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
+        class_kind: Some(owner_kind),
         owner: None,
         is_final: false,
         is_class_var: false,
@@ -151,6 +158,7 @@ fn bind_named_block(
             typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
             typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
         },
+        class_kind: None,
         owner: Some(owner.clone()),
         is_final: member.is_final,
         is_class_var: member.is_class_var,
@@ -211,6 +219,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -219,6 +228,7 @@ mod tests {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -227,6 +237,7 @@ mod tests {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -272,6 +283,7 @@ mod tests {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -280,6 +292,7 @@ mod tests {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -319,6 +332,7 @@ mod tests {
                 Declaration {
                     name: String::from("local_foo"),
                     kind: DeclarationKind::Import,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -327,6 +341,7 @@ mod tests {
                 Declaration {
                     name: String::from("bar"),
                     kind: DeclarationKind::Import,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -335,6 +350,7 @@ mod tests {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -343,6 +359,7 @@ mod tests {
                 Declaration {
                     name: String::from("count"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -408,6 +425,7 @@ mod tests {
                 Declaration {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Interface),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -416,6 +434,7 @@ mod tests {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
@@ -427,6 +446,7 @@ mod tests {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
@@ -438,6 +458,7 @@ mod tests {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Overload,
+                    class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
@@ -493,6 +514,7 @@ mod tests {
                 Declaration {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: None,
                     is_final: true,
                     is_class_var: false,
@@ -501,6 +523,7 @@ mod tests {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -509,6 +532,7 @@ mod tests {
                 Declaration {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("Box"),
                         kind: DeclarationOwnerKind::Class,
@@ -564,6 +588,7 @@ mod tests {
                 Declaration {
                     name: String::from("VALUE"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: None,
                     is_final: false,
                     is_class_var: true,
@@ -572,6 +597,7 @@ mod tests {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
                     is_final: false,
                     is_class_var: false,
@@ -580,6 +606,7 @@ mod tests {
                 Declaration {
                     name: String::from("cache"),
                     kind: DeclarationKind::Value,
+                    class_kind: None,
                     owner: Some(DeclarationOwner {
                         name: String::from("Box"),
                         kind: DeclarationOwnerKind::Class,
