@@ -724,8 +724,13 @@ fn declaration_surface(
                 }
             }
             typepython_syntax::SyntaxStatement::Call(_) => {}
+            typepython_syntax::SyntaxStatement::MethodCall(_) => {}
             typepython_syntax::SyntaxStatement::MemberAccess(_) => {}
             typepython_syntax::SyntaxStatement::Return(_) => {}
+            typepython_syntax::SyntaxStatement::Yield(_) => {}
+            typepython_syntax::SyntaxStatement::For(_) => {}
+            typepython_syntax::SyntaxStatement::With(_) => {}
+            typepython_syntax::SyntaxStatement::ExceptHandler(_) => {}
             typepython_syntax::SyntaxStatement::Unsafe(_) => {}
         }
     }
