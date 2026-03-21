@@ -576,8 +576,13 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             SyntaxStatement::Import(_) => {}
             SyntaxStatement::Value(_) => {}
             SyntaxStatement::Call(_) => {}
+            SyntaxStatement::MethodCall(_) => {}
             SyntaxStatement::MemberAccess(_) => {}
             SyntaxStatement::Return(_) => {}
+            SyntaxStatement::Yield(_) => {}
+            SyntaxStatement::For(_) => {}
+            SyntaxStatement::With(_) => {}
+            SyntaxStatement::ExceptHandler(_) => {}
             SyntaxStatement::OverloadDef(_) => {}
         }
     }
@@ -971,6 +976,7 @@ mod tests {
                 type_params: Vec::new(),
                 params: Vec::new(),
                 returns: None,
+                is_async: false,
                 is_override: false,
                 line: 1,
             })],
@@ -1037,6 +1043,7 @@ mod tests {
                 }],
                 params: Vec::new(),
                 returns: None,
+                is_async: false,
                 is_override: false,
                 line: 1,
             })],
@@ -1083,6 +1090,7 @@ mod tests {
                     }],
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 4,
                 }),
