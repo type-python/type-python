@@ -1081,6 +1081,35 @@ fn apply_guard_narrowing(
         narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, branch_true);
     }
 
+    let mut post_if_guards = node
+        .if_guards
+        .iter()
+        .filter(|guard| {
+            guard.owner_name.as_deref() == current_owner_name
+                && guard.owner_type_name.as_deref() == current_owner_type_name
+                && guard.line < current_line
+                && !name_reassigned_after_line(node, current_owner_name, current_owner_type_name, value_name, guard.line, current_line)
+                && current_line > guard.false_end_line.unwrap_or(guard.true_end_line)
+        })
+        .filter_map(|guard| {
+            let true_terminal = branch_has_return(node, current_owner_name, current_owner_type_name, guard.true_start_line, guard.true_end_line);
+            let false_terminal = guard
+                .false_start_line
+                .zip(guard.false_end_line)
+                .is_some_and(|(start, end)| branch_has_return(node, current_owner_name, current_owner_type_name, start, end));
+            let branch_true = match (true_terminal, false_terminal, guard.false_start_line.is_some()) {
+                (true, false, _) => Some(false),
+                (false, true, true) => Some(true),
+                _ => None,
+            }?;
+            Some((guard.line, branch_true, guard.guard.as_ref()?))
+        })
+        .collect::<Vec<_>>();
+    post_if_guards.sort_by_key(|(line, _, _)| *line);
+    for (_, branch_true, guard) in post_if_guards {
+        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, branch_true);
+    }
+
     let mut asserts = node
         .asserts
         .iter()
@@ -1098,6 +1127,21 @@ fn apply_guard_narrowing(
     }
 
     narrowed
+}
+
+fn branch_has_return(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    start_line: usize,
+    end_line: usize,
+) -> bool {
+    node.returns.iter().any(|site| {
+        site.owner_name == current_owner_name.unwrap_or_default()
+            && site.owner_type_name.as_deref() == current_owner_type_name
+            && start_line <= site.line
+            && site.line <= end_line
+    })
 }
 
 fn name_reassigned_after_line(
@@ -14461,6 +14505,109 @@ line: 5,
                     true_end_line: 3,
                     false_start_line: Some(5),
                     false_end_line: Some(5),
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_typeis_post_if_fallthrough_narrowing() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("is_text"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->TypeIs[str]"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![
+                    typepython_binding::ReturnSite {
+                        owner_name: String::from("build"),
+                        owner_type_name: None,
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        line: 3,
+                    },
+                    typepython_binding::ReturnSite {
+                        owner_name: String::from("build"),
+                        owner_type_name: None,
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: Some(String::from("value")),
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        line: 4,
+                    },
+                ],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::PredicateCall {
+                        name: String::from("value"),
+                        callee: String::from("is_text"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
                 }],
                 asserts: Vec::new(),
                 matches: Vec::new(),
