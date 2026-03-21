@@ -452,7 +452,12 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
     let bindings: Vec<_> = syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
-    let checking = check_with_options(&graph, config.config.typing.require_explicit_overrides);
+    let mut diagnostics = check_with_options(&graph, config.config.typing.require_explicit_overrides).diagnostics;
+    diagnostics.diagnostics.extend(
+        public_surface_completeness_diagnostics(config, &syntax_trees)
+            .diagnostics
+            .into_iter(),
+    );
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
     let tracked_modules = incremental.fingerprints.len();
@@ -463,7 +468,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         incremental,
         tracked_modules,
         discovered_sources: source_paths.len(),
-        diagnostics: checking.diagnostics,
+        diagnostics,
     })
 }
 
@@ -736,6 +741,76 @@ fn declaration_surface(
     }
 
     surface
+}
+
+fn public_surface_completeness_diagnostics(
+    config: &ConfigHandle,
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+
+    if !config.config.typing.require_known_public_types {
+        return diagnostics;
+    }
+
+    for syntax in syntax_trees {
+        for entry in declaration_surface(syntax)
+            .into_iter()
+            .filter(is_public_surface_entry)
+            .filter(|entry| entry.kind != "import")
+        {
+            if !surface_detail_is_incomplete(&entry.detail) {
+                continue;
+            }
+
+            diagnostics.push(Diagnostic::error(
+                "TPY4015",
+                format!(
+                    "module `{}` exports incomplete type surface for `{}`",
+                    syntax.source.path.display(),
+                    display_surface_entry(&entry)
+                ),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn is_public_surface_entry(entry: &SurfaceEntry) -> bool {
+    if entry.name.starts_with('_') {
+        return false;
+    }
+
+    match &entry.owner {
+        Some(owner) => !owner.starts_with('_'),
+        None => true,
+    }
+}
+
+fn display_surface_entry(entry: &SurfaceEntry) -> String {
+    match &entry.owner {
+        Some(owner) => format!("{owner}.{}", entry.name),
+        None => entry.name.clone(),
+    }
+}
+
+fn surface_detail_is_incomplete(detail: &str) -> bool {
+    let mut token = String::new();
+
+    for ch in detail.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            token.push(ch);
+            continue;
+        }
+
+        if matches!(token.as_str(), "dynamic" | "unknown") {
+            return true;
+        }
+        token.clear();
+    }
+
+    matches!(token.as_str(), "dynamic" | "unknown")
 }
 
 fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option<&str>) -> String {
@@ -1065,7 +1140,7 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 mod tests {
     use super::{
         build_diagnostics, collect_source_paths, compile_runtime_bytecode,
-        should_emit_build_outputs,
+        run_pipeline, should_emit_build_outputs,
         verify_build_artifacts, write_incremental_snapshot,
     };
     use std::{
@@ -1410,6 +1485,55 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("declaration surfaces differ"));
+    }
+
+    #[test]
+    fn run_pipeline_reports_incomplete_public_surface_when_required() {
+        let project_dir = temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
+        let rendered = (|| {
+            fs::create_dir_all(project_dir.join("src/app")).unwrap();
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
+            )
+            .unwrap();
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def leak(value: dynamic) -> int:\n    return 0\n",
+            )
+            .unwrap();
+            let config = load(&project_dir).unwrap();
+
+            run_pipeline(&config).unwrap().diagnostics.as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY4015"));
+        assert!(rendered.contains("exports incomplete type surface for `leak`"));
+    }
+
+    #[test]
+    fn run_pipeline_ignores_private_incomplete_surface_when_required() {
+        let project_dir = temp_project_dir("run_pipeline_ignores_private_incomplete_surface_when_required");
+        let diagnostics = (|| {
+            fs::create_dir_all(project_dir.join("src/app")).unwrap();
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
+            )
+            .unwrap();
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def _leak(value: dynamic) -> int:\n    return 0\n",
+            )
+            .unwrap();
+            let config = load(&project_dir).unwrap();
+
+            run_pipeline(&config).unwrap().diagnostics
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
