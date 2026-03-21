@@ -902,6 +902,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             SyntaxStatement::Yield(_) => {}
             SyntaxStatement::If(_) => {}
             SyntaxStatement::Assert(_) => {}
+            SyntaxStatement::Invalidate(_) => {}
             SyntaxStatement::Match(_) => {}
             SyntaxStatement::For(_) => {}
             SyntaxStatement::With(_) => {}

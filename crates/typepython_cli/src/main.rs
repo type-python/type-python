@@ -728,6 +728,7 @@ fn accumulate_statement_coverage(statement: &typepython_syntax::SyntaxStatement,
         }
         typepython_syntax::SyntaxStatement::If(_) => {}
         typepython_syntax::SyntaxStatement::Assert(_) => {}
+        typepython_syntax::SyntaxStatement::Invalidate(_) => {}
         typepython_syntax::SyntaxStatement::Match(_) => {}
         typepython_syntax::SyntaxStatement::Import(_)
         | typepython_syntax::SyntaxStatement::Call(_)
@@ -1225,6 +1226,7 @@ fn declaration_surface(
             typepython_syntax::SyntaxStatement::Yield(_) => {}
             typepython_syntax::SyntaxStatement::If(_) => {}
             typepython_syntax::SyntaxStatement::Assert(_) => {}
+            typepython_syntax::SyntaxStatement::Invalidate(_) => {}
             typepython_syntax::SyntaxStatement::Match(_) => {}
             typepython_syntax::SyntaxStatement::For(_) => {}
             typepython_syntax::SyntaxStatement::With(_) => {}

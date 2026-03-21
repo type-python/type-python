@@ -17,6 +17,7 @@ pub struct BindingTable {
     pub yields: Vec<YieldSite>,
     pub if_guards: Vec<IfGuardSite>,
     pub asserts: Vec<AssertGuardSite>,
+    pub invalidations: Vec<InvalidationSite>,
     pub matches: Vec<MatchSite>,
     pub for_loops: Vec<ForSite>,
     pub with_statements: Vec<WithSite>,
@@ -38,6 +39,7 @@ impl Default for BindingTable {
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
+            invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
@@ -123,6 +125,14 @@ pub struct AssertGuardSite {
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub guard: Option<GuardConditionSite>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct InvalidationSite {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub names: Vec<String>,
     pub line: usize,
 }
 
@@ -403,6 +413,19 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 _ => None,
             })
             .collect(),
+        invalidations: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Invalidate(statement) => Some(InvalidationSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    names: statement.names.clone(),
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
         matches: tree
             .statements
             .iter()
@@ -647,6 +670,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::Yield(_) => Vec::new(),
         SyntaxStatement::If(_) => Vec::new(),
         SyntaxStatement::Assert(_) => Vec::new(),
+        SyntaxStatement::Invalidate(_) => Vec::new(),
         SyntaxStatement::Match(_) => Vec::new(),
         SyntaxStatement::For(_) => Vec::new(),
         SyntaxStatement::With(_) => Vec::new(),
@@ -753,7 +777,7 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
 
 #[cfg(test)]
 mod tests {
-    use super::{AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, GuardConditionSite, IfGuardSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind};
+    use super::{AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, GuardConditionSite, IfGuardSite, InvalidationSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -1518,6 +1542,35 @@ is_yield_from: false,
                     name: String::from("ready"),
                 }),
                 line: 4,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_invalidation_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/invalidate.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Invalidate(typepython_syntax::InvalidationStatement {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                names: vec![String::from("value")],
+                line: 3,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.invalidations,
+            vec![InvalidationSite {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                names: vec![String::from("value")],
+                line: 3,
             }]
         );
     }

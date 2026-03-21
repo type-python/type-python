@@ -95,6 +95,7 @@ pub enum SyntaxStatement {
     Yield(YieldStatement),
     If(IfStatement),
     Assert(AssertStatement),
+    Invalidate(InvalidationStatement),
     Match(MatchStatement),
     For(ForStatement),
     With(WithStatement),
@@ -251,6 +252,14 @@ pub struct AssertStatement {
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub guard: Option<GuardCondition>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct InvalidationStatement {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub names: Vec<String>,
     pub line: usize,
 }
 
@@ -442,6 +451,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
             collect_if_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_assert_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_invalidation_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_match_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_for_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_with_statements(&source.text, parsed.suite(), None, None, &mut statements);
@@ -517,8 +527,10 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &mut diagnostics,
                 ));
                 collect_return_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_yield_statements(&normalized, parsed.suite(), None, &mut statements);
                 collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_assert_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_invalidation_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_match_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
@@ -1008,6 +1020,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::Yield(statement) => statement.line,
         SyntaxStatement::If(statement) => statement.line,
         SyntaxStatement::Assert(statement) => statement.line,
+        SyntaxStatement::Invalidate(statement) => statement.line,
         SyntaxStatement::Match(statement) => statement.line,
         SyntaxStatement::For(statement) => statement.line,
         SyntaxStatement::With(statement) => statement.line,
@@ -1041,7 +1054,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::If(_) | SyntaxStatement::Assert(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::If(_) | SyntaxStatement::Assert(_) | SyntaxStatement::Invalidate(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -1316,6 +1329,42 @@ fn extract_ast_backed_statement(
             guard: extract_guard_condition(source, &stmt.test),
             line,
         })),
+        Stmt::AugAssign(stmt) => {
+            let names = extract_assignment_names(&stmt.target);
+            (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                owner_name: None,
+                owner_type_name: None,
+                names,
+                line,
+            }))
+        }
+        Stmt::Delete(stmt) => {
+            let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                owner_name: None,
+                owner_type_name: None,
+                names,
+                line,
+            }))
+        }
+        Stmt::Global(stmt) => {
+            let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                owner_name: None,
+                owner_type_name: None,
+                names,
+                line,
+            }))
+        }
+        Stmt::Nonlocal(stmt) => {
+            let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+            (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                owner_name: None,
+                owner_type_name: None,
+                names,
+                line,
+            }))
+        }
         Stmt::Expr(stmt) => extract_call_statement(&stmt.value, line),
         _ => None,
     }
@@ -1775,6 +1824,94 @@ fn collect_assert_statements(
                         owner_name: owner_name.map(str::to_owned),
                         owner_type_name: owner_type_name.map(str::to_owned),
                         guard: extract_guard_condition(source, &assert_stmt.test),
+                        line,
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_invalidation_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_invalidation_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_invalidation_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Try(try_stmt) => {
+                collect_invalidation_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_invalidation_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_invalidation_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_invalidation_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            Stmt::If(if_stmt) => {
+                collect_invalidation_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_invalidation_statements(source, suite, owner_name, owner_type_name, statements);
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_invalidation_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
+            }
+            Stmt::AugAssign(stmt) => {
+                let names = extract_assignment_names(&stmt.target);
+                if !names.is_empty() {
+                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        names,
+                        line,
+                    }));
+                }
+            }
+            Stmt::Delete(stmt) => {
+                let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+                if !names.is_empty() {
+                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        names,
+                        line,
+                    }));
+                }
+            }
+            Stmt::Global(stmt) => {
+                let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+                if !names.is_empty() {
+                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        names,
+                        line,
+                    }));
+                }
+            }
+            Stmt::Nonlocal(stmt) => {
+                let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+                if !names.is_empty() {
+                    let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
+                    statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        names,
                         line,
                     }));
                 }
@@ -3226,6 +3363,7 @@ mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
         AssertStatement, ExceptionHandlerStatement, ForStatement, GuardCondition, IfStatement,
+        InvalidationStatement,
         ImportStatement, MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
         MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
         YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
@@ -5917,5 +6055,52 @@ line: 12,
             }),
             line: 4,
         }));
+    }
+
+    #[test]
+    fn parse_retains_invalidation_statement_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("invalidate.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(value: int | None) -> int:\n    if value is not None:\n        value += 1\n        del value\n        global value\n        nonlocal value\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements
+                .iter()
+                .filter(|statement| matches!(statement, SyntaxStatement::Invalidate(_)))
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![
+                SyntaxStatement::Invalidate(InvalidationStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 3,
+                }),
+                SyntaxStatement::Invalidate(InvalidationStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 4,
+                }),
+                SyntaxStatement::Invalidate(InvalidationStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 5,
+                }),
+                SyntaxStatement::Invalidate(InvalidationStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 6,
+                }),
+            ]
+        );
     }
 }

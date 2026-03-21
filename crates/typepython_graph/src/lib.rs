@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::{AssertGuardSite, AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, DeclarationOwnerKind, ExceptHandlerSite, ForSite, IfGuardSite, MatchSite, MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite};
+use typepython_binding::{AssertGuardSite, AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, DeclarationOwnerKind, ExceptHandlerSite, ForSite, IfGuardSite, InvalidationSite, MatchSite, MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite};
 use typepython_syntax::{MethodKind, SourceKind};
 
 /// Summary node for one module.
@@ -24,6 +24,7 @@ pub struct ModuleNode {
     pub yields: Vec<YieldSite>,
     pub if_guards: Vec<IfGuardSite>,
     pub asserts: Vec<AssertGuardSite>,
+    pub invalidations: Vec<InvalidationSite>,
     pub matches: Vec<MatchSite>,
     pub for_loops: Vec<ForSite>,
     pub with_statements: Vec<WithSite>,
@@ -56,6 +57,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
             yields: binding.yields.clone(),
             if_guards: binding.if_guards.clone(),
             asserts: binding.asserts.clone(),
+            invalidations: binding.invalidations.clone(),
             matches: binding.matches.clone(),
             for_loops: binding.for_loops.clone(),
             with_statements: binding.with_statements.clone(),
@@ -86,6 +88,7 @@ fn hash_summary(binding: &BindingTable) -> u64 {
     binding.assignments.hash(&mut hasher);
     binding.if_guards.hash(&mut hasher);
     binding.asserts.hash(&mut hasher);
+    binding.invalidations.hash(&mut hasher);
     binding.matches.hash(&mut hasher);
     hasher.finish()
 }
@@ -198,6 +201,7 @@ fn prelude_node(module_path: &str, module_key: &str, declarations: Vec<Declarati
         yields: Vec::new(),
         if_guards: Vec::new(),
         asserts: Vec::new(),
+        invalidations: Vec::new(),
         matches: Vec::new(),
         for_loops: Vec::new(),
         with_statements: Vec::new(),
@@ -286,6 +290,7 @@ fn collections_abc_prelude_node() -> ModuleNode {
         yields: Vec::new(),
         if_guards: Vec::new(),
         asserts: Vec::new(),
+        invalidations: Vec::new(),
         matches: Vec::new(),
         for_loops: Vec::new(),
         with_statements: Vec::new(),
@@ -470,6 +475,7 @@ mod tests {
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
+            invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
@@ -545,6 +551,7 @@ mod tests {
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
+            invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
@@ -596,6 +603,7 @@ mod tests {
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
+            invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
@@ -628,6 +636,7 @@ mod tests {
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
+            invalidations: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
