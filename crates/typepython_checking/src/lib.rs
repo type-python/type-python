@@ -1551,13 +1551,56 @@ fn resolve_local_assignment_reference_type(
     value_name: &str,
 ) -> Option<String> {
     let owner_name = current_owner_name?;
+    if let Some(joined) = resolve_post_if_joined_assignment_type(
+        node,
+        nodes,
+        signature,
+        Some(owner_name),
+        current_owner_type_name,
+        current_line,
+        value_name,
+    ) {
+        return Some(joined);
+    }
     let assignment = node.assignments.iter().rev().find(|assignment| {
         assignment.name == value_name
             && assignment.owner_name.as_deref() == Some(owner_name)
             && assignment.owner_type_name.as_deref() == current_owner_type_name
             && assignment.line < current_line
     })?;
+    resolve_assignment_site_type(node, nodes, signature, assignment)
+}
 
+fn resolve_module_level_assignment_reference_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    if let Some(joined) = resolve_post_if_joined_assignment_type(
+        node,
+        nodes,
+        signature,
+        None,
+        None,
+        current_line,
+        value_name,
+    ) {
+        return Some(joined);
+    }
+    let assignment = node.assignments.iter().rev().find(|assignment| {
+        assignment.name == value_name && assignment.owner_name.is_none() && assignment.line < current_line
+    })?;
+    resolve_assignment_site_type(node, nodes, signature, assignment)
+}
+
+fn resolve_assignment_site_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    assignment: &typepython_binding::AssignmentSite,
+) -> Option<String> {
     if let Some(annotation) = assignment.annotation.as_deref() {
         if let Some(annotation) = normalized_assignment_annotation(annotation) {
             return Some(normalize_type_text(annotation));
@@ -1585,42 +1628,90 @@ fn resolve_local_assignment_reference_type(
     )
 }
 
-fn resolve_module_level_assignment_reference_type(
+fn resolve_post_if_joined_assignment_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
-    let assignment = node.assignments.iter().rev().find(|assignment| {
-        assignment.name == value_name && assignment.owner_name.is_none() && assignment.line < current_line
-    })?;
+    let mut guards = node
+        .if_guards
+        .iter()
+        .filter(|guard| {
+            guard.owner_name.as_deref() == current_owner_name
+                && guard.owner_type_name.as_deref() == current_owner_type_name
+                && guard.false_start_line.is_some()
+                && guard.false_end_line.is_some()
+        })
+        .filter_map(|guard| {
+            let false_end = guard.false_end_line?;
+            let after_line = guard.true_end_line.max(false_end);
+            (current_line > after_line).then_some((after_line, guard))
+        })
+        .collect::<Vec<_>>();
+    guards.sort_by_key(|(after_line, _)| *after_line);
 
-    if let Some(annotation) = assignment.annotation.as_deref() {
-        if let Some(annotation) = normalized_assignment_annotation(annotation) {
-            return Some(normalize_type_text(annotation));
+    for (after_line, guard) in guards.into_iter().rev() {
+        if name_reassigned_after_line(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            value_name,
+            after_line,
+            current_line,
+        ) {
+            continue;
         }
+
+        let true_assignment = latest_assignment_in_range(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            value_name,
+            guard.true_start_line,
+            guard.true_end_line,
+        )?;
+        let false_assignment = latest_assignment_in_range(
+            node,
+            current_owner_name,
+            current_owner_type_name,
+            value_name,
+            guard.false_start_line?,
+            guard.false_end_line?,
+        )?;
+        let true_type = resolve_assignment_site_type(node, nodes, signature, true_assignment)?;
+        let false_type = resolve_assignment_site_type(node, nodes, signature, false_assignment)?;
+        return Some(join_branch_types(vec![true_type, false_type]));
     }
 
-    resolve_direct_expression_type(
-        node,
-        nodes,
-        signature,
-        Some(assignment.name.as_str()),
-        None,
-        None,
-        assignment.line,
-        assignment.value_type.as_deref(),
-        assignment.is_awaited,
-        assignment.value_callee.as_deref(),
-        assignment.value_name.as_deref(),
-        assignment.value_member_owner_name.as_deref(),
-        assignment.value_member_name.as_deref(),
-        assignment.value_member_through_instance,
-        assignment.value_method_owner_name.as_deref(),
-        assignment.value_method_name.as_deref(),
-        assignment.value_method_through_instance,
-    )
+    None
+}
+
+fn latest_assignment_in_range<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Option<&'a typepython_binding::AssignmentSite> {
+    node.assignments.iter().rev().find(|assignment| {
+        assignment.name == value_name
+            && assignment.owner_name.as_deref() == current_owner_name
+            && assignment.owner_type_name.as_deref() == current_owner_type_name
+            && start_line <= assignment.line
+            && assignment.line <= end_line
+    })
+}
+
+fn join_branch_types(types: Vec<String>) -> String {
+    if types.iter().any(|ty| ty == "Any") {
+        return String::from("Any");
+    }
+    join_type_candidates(types)
 }
 
 fn resolve_direct_member_reference_type(
@@ -15106,6 +15197,109 @@ line: 5,
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("returns `Optional[int]` where `build` expects `int`"));
+    }
+
+    #[test]
+    fn check_joins_branch_local_assignments_after_if() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(flag:bool)->Union[str, int]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("result")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 5,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::TruthyName {
+                        name: String::from("flag"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: Some(4),
+                    false_end_line: Some(4),
+                }],
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: vec![
+                    typepython_binding::AssignmentSite {
+                        name: String::from("result"),
+                        annotation: None,
+                        value_type: Some(String::from("str")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        owner_name: Some(String::from("build")),
+                        owner_type_name: None,
+                        line: 3,
+                    },
+                    typepython_binding::AssignmentSite {
+                        name: String::from("result"),
+                        annotation: None,
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        owner_name: Some(String::from("build")),
+                        owner_type_name: None,
+                        line: 4,
+                    },
+                ],
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
     }
 
     #[test]
