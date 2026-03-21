@@ -1170,7 +1170,17 @@ dependencies = [
 name = "typepython-lsp"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "glob",
+ "serde",
+ "serde_json",
  "thiserror",
+ "typepython-binding",
+ "typepython-checking",
+ "typepython-config",
+ "typepython-diagnostics",
+ "typepython-graph",
+ "typepython-syntax",
 ]
 
 [[package]]

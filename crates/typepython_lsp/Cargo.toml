@@ -9,7 +9,17 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+glob.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+typepython-binding = { path = "../typepython_binding" }
+typepython-checking = { path = "../typepython_checking" }
+typepython-config = { path = "../typepython_config" }
+typepython-diagnostics = { path = "../typepython_diagnostics" }
+typepython-graph = { path = "../typepython_graph" }
+typepython-syntax = { path = "../typepython_syntax" }
 
 [lints]
 workspace = true

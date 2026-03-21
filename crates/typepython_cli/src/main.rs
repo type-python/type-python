@@ -349,26 +349,11 @@ fn clean_project(args: CleanArgs) -> Result<ExitCode> {
 
 fn run_lsp(args: RunArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
-    let mut notes = Vec::new();
-
-    if let Err(error) = typepython_lsp::serve() {
-        notes.push(error.to_string());
+    if args.format == OutputFormat::Json {
+        return Err(anyhow::anyhow!("`typepython lsp` speaks JSON-RPC over stdio and does not support `--format json`"));
     }
-
-    let snapshot = run_pipeline(&config)?;
-    let summary = CommandSummary {
-        command: String::from("lsp"),
-        config_path: config.config_path.display().to_string(),
-        config_source: config.source,
-        discovered_sources: snapshot.discovered_sources,
-        lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan.len(),
-        tracked_modules: snapshot.tracked_modules,
-        notes,
-    };
-
-    print_summary(args.format, &summary, &snapshot.diagnostics)?;
-    Ok(exit_code(&snapshot.diagnostics))
+    typepython_lsp::serve(&config)?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_verify(args: RunArgs) -> Result<ExitCode> {
