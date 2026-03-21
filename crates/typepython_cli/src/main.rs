@@ -141,6 +141,51 @@ struct CommandSummary {
     notes: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct MigrationReport {
+    total_declarations: usize,
+    known_declarations: usize,
+    total_dynamic_boundaries: usize,
+    total_unknown_boundaries: usize,
+    files: Vec<MigrationCoverageEntry>,
+    directories: Vec<MigrationCoverageEntry>,
+    high_impact_untyped_files: Vec<MigrationImpactEntry>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct MigrationCoverageEntry {
+    path: String,
+    declarations: usize,
+    known_declarations: usize,
+    coverage_percent: f64,
+    dynamic_boundaries: usize,
+    unknown_boundaries: usize,
+    source_kind: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MigrationImpactEntry {
+    path: String,
+    downstream_references: usize,
+    untyped_declarations: usize,
+    dynamic_boundaries: usize,
+    unknown_boundaries: usize,
+}
+
+#[derive(Debug, Clone)]
+struct MigrationFileStats {
+    module_key: String,
+    entry: MigrationCoverageEntry,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct CoverageTally {
+    declarations: usize,
+    known_declarations: usize,
+    dynamic_boundaries: usize,
+    unknown_boundaries: usize,
+}
+
 fn main() -> ExitCode {
     if let Err(error) = init_tracing() {
         eprintln!("failed to initialize tracing: {error:#}");
@@ -177,17 +222,7 @@ fn run() -> Result<ExitCode> {
         Command::Clean(args) => clean_project(args),
         Command::Lsp(args) => run_lsp(args),
         Command::Verify(args) => run_verify(args),
-        Command::Migrate(args) => {
-            let mut notes = vec![String::from(
-                "migration analysis and pass-through inference are not implemented yet",
-            )];
-            if args.report {
-                notes.push(String::from(
-                    "--report requested: JSON/text migration reports will land in a later milestone",
-                ));
-            }
-            run_with_pipeline("migrate", args.run, false, notes)
-        }
+        Command::Migrate(args) => run_migrate(args),
     }
 }
 
@@ -362,6 +397,40 @@ fn run_verify(args: RunArgs) -> Result<ExitCode> {
     Ok(exit_code(&diagnostics))
 }
 
+fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
+    let config = load_project(args.run.project.as_ref())?;
+    let discovery = collect_source_paths(&config)?;
+    let syntax_trees = load_syntax_trees(&discovery.sources)?;
+    let mut diagnostics = discovery.diagnostics.clone();
+    diagnostics
+        .diagnostics
+        .extend(collect_parse_diagnostics(&syntax_trees).diagnostics.into_iter());
+
+    let report = build_migration_report(&config, &syntax_trees);
+    let mut notes = vec![String::from(
+        "pass-through inference and stub generation remain experimental and disabled",
+    )];
+    if args.report {
+        notes.push(String::from(
+            "migration report includes file coverage, directory coverage, and high-impact untyped files",
+        ));
+    }
+
+    let summary = CommandSummary {
+        command: String::from("migrate"),
+        config_path: config.config_path.display().to_string(),
+        config_source: config.source,
+        discovered_sources: discovery.sources.len(),
+        lowered_modules: 0,
+        planned_artifacts: 0,
+        tracked_modules: 0,
+        notes,
+    };
+
+    print_migration_report(args.run.format, &summary, &report, &diagnostics)?;
+    Ok(exit_code(&diagnostics))
+}
+
 fn run_build_like_command(
     config: &ConfigHandle,
     format: OutputFormat,
@@ -469,6 +538,337 @@ fn format_watch_rebuild_note(changed_paths: &BTreeSet<PathBuf>) -> String {
     }
 }
 
+fn build_migration_report(
+    config: &ConfigHandle,
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> MigrationReport {
+    let mut files = syntax_trees
+        .iter()
+        .map(|syntax| migration_file_stats(config, syntax))
+        .filter(|stats| stats.entry.declarations > 0)
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.entry.path.cmp(&right.entry.path));
+
+    let mut directories = BTreeMap::<String, CoverageTally>::new();
+    let mut total = CoverageTally::default();
+    for stats in &files {
+        total.declarations += stats.entry.declarations;
+        total.known_declarations += stats.entry.known_declarations;
+        total.dynamic_boundaries += stats.entry.dynamic_boundaries;
+        total.unknown_boundaries += stats.entry.unknown_boundaries;
+
+        let directory = Path::new(&stats.entry.path)
+            .parent()
+            .map(normalize_glob_path)
+            .filter(|path| !path.is_empty())
+            .unwrap_or_else(|| String::from("."));
+        let tally = directories.entry(directory).or_default();
+        tally.declarations += stats.entry.declarations;
+        tally.known_declarations += stats.entry.known_declarations;
+        tally.dynamic_boundaries += stats.entry.dynamic_boundaries;
+        tally.unknown_boundaries += stats.entry.unknown_boundaries;
+    }
+
+    let mut directory_entries = directories
+        .into_iter()
+        .map(|(path, tally)| MigrationCoverageEntry {
+            path,
+            declarations: tally.declarations,
+            known_declarations: tally.known_declarations,
+            coverage_percent: coverage_percent(tally.known_declarations, tally.declarations),
+            dynamic_boundaries: tally.dynamic_boundaries,
+            unknown_boundaries: tally.unknown_boundaries,
+            source_kind: None,
+        })
+        .collect::<Vec<_>>();
+    directory_entries.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let mut downstream_reference_counts = BTreeMap::<String, usize>::new();
+    for syntax in syntax_trees {
+        for statement in &syntax.statements {
+            let typepython_syntax::SyntaxStatement::Import(statement) = statement else {
+                continue;
+            };
+            for binding in &statement.bindings {
+                let target = files
+                    .iter()
+                    .filter(|stats| syntax.source.logical_module != stats.module_key)
+                    .filter(|stats| {
+                        binding.source_path == stats.module_key
+                            || binding.source_path.starts_with(&format!("{}.", stats.module_key))
+                    })
+                    .max_by_key(|stats| stats.module_key.len());
+                if let Some(stats) = target {
+                    *downstream_reference_counts
+                        .entry(stats.entry.path.clone())
+                        .or_default() += 1;
+                }
+            }
+        }
+    }
+    let mut high_impact_untyped_files = files
+        .iter()
+        .filter(|stats| stats.entry.known_declarations < stats.entry.declarations)
+        .map(|stats| MigrationImpactEntry {
+            path: stats.entry.path.clone(),
+            downstream_references: downstream_reference_counts
+                .get(&stats.entry.path)
+                .copied()
+                .unwrap_or(0),
+            untyped_declarations: stats.entry.declarations - stats.entry.known_declarations,
+            dynamic_boundaries: stats.entry.dynamic_boundaries,
+            unknown_boundaries: stats.entry.unknown_boundaries,
+        })
+        .collect::<Vec<_>>();
+    high_impact_untyped_files.sort_by(|left, right| {
+        right
+            .downstream_references
+            .cmp(&left.downstream_references)
+            .then_with(|| right.untyped_declarations.cmp(&left.untyped_declarations))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    MigrationReport {
+        total_declarations: total.declarations,
+        known_declarations: total.known_declarations,
+        total_dynamic_boundaries: total.dynamic_boundaries,
+        total_unknown_boundaries: total.unknown_boundaries,
+        files: files.into_iter().map(|stats| stats.entry).collect(),
+        directories: directory_entries,
+        high_impact_untyped_files,
+    }
+}
+
+fn migration_file_stats(
+    config: &ConfigHandle,
+    syntax: &typepython_syntax::SyntaxTree,
+) -> MigrationFileStats {
+    let mut tally = CoverageTally::default();
+    for statement in &syntax.statements {
+        accumulate_statement_coverage(statement, &mut tally);
+    }
+
+    MigrationFileStats {
+        module_key: syntax.source.logical_module.clone(),
+        entry: MigrationCoverageEntry {
+            path: syntax
+                .source
+                .path
+                .strip_prefix(&config.config_dir)
+                .map(normalize_glob_path)
+                .unwrap_or_else(|_| syntax.source.path.display().to_string()),
+            declarations: tally.declarations,
+            known_declarations: tally.known_declarations,
+            coverage_percent: coverage_percent(tally.known_declarations, tally.declarations),
+            dynamic_boundaries: tally.dynamic_boundaries,
+            unknown_boundaries: tally.unknown_boundaries,
+            source_kind: Some(source_kind_label(syntax.source.kind).to_owned()),
+        },
+    }
+}
+
+fn accumulate_statement_coverage(statement: &typepython_syntax::SyntaxStatement, tally: &mut CoverageTally) {
+    match statement {
+        typepython_syntax::SyntaxStatement::TypeAlias(statement) => {
+            tally.declarations += 1;
+            let (dynamic_count, unknown_count) = count_boundary_tokens(&statement.value);
+            tally.dynamic_boundaries += dynamic_count;
+            tally.unknown_boundaries += unknown_count;
+            if !statement.value.is_empty() && dynamic_count == 0 && unknown_count == 0 {
+                tally.known_declarations += 1;
+            }
+        }
+        typepython_syntax::SyntaxStatement::Interface(statement)
+        | typepython_syntax::SyntaxStatement::DataClass(statement)
+        | typepython_syntax::SyntaxStatement::SealedClass(statement)
+        | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
+            tally.declarations += 1;
+            let mut class_known = true;
+            for base in &statement.bases {
+                let (dynamic_count, unknown_count) = count_boundary_tokens(base);
+                tally.dynamic_boundaries += dynamic_count;
+                tally.unknown_boundaries += unknown_count;
+                if dynamic_count > 0 || unknown_count > 0 {
+                    class_known = false;
+                }
+            }
+            if class_known {
+                tally.known_declarations += 1;
+            }
+            for member in &statement.members {
+                tally.declarations += 1;
+                let (member_known, dynamic_count, unknown_count) = class_member_coverage(member);
+                tally.dynamic_boundaries += dynamic_count;
+                tally.unknown_boundaries += unknown_count;
+                if member_known {
+                    tally.known_declarations += 1;
+                }
+            }
+        }
+        typepython_syntax::SyntaxStatement::OverloadDef(statement) => {
+            tally.declarations += 1;
+            let (known, dynamic_count, unknown_count) =
+                function_signature_coverage(&statement.params, statement.returns.as_deref(), false);
+            tally.dynamic_boundaries += dynamic_count;
+            tally.unknown_boundaries += unknown_count;
+            if known {
+                tally.known_declarations += 1;
+            }
+        }
+        typepython_syntax::SyntaxStatement::FunctionDef(statement) => {
+            tally.declarations += 1;
+            let (known, dynamic_count, unknown_count) =
+                function_signature_coverage(&statement.params, statement.returns.as_deref(), false);
+            tally.dynamic_boundaries += dynamic_count;
+            tally.unknown_boundaries += unknown_count;
+            if known {
+                tally.known_declarations += 1;
+            }
+        }
+        typepython_syntax::SyntaxStatement::Value(statement) => {
+            let (annotation_known, dynamic_count, unknown_count) =
+                known_type_slot(statement.annotation.as_deref().or(statement.value_type.as_deref()));
+            tally.dynamic_boundaries += dynamic_count;
+            tally.unknown_boundaries += unknown_count;
+            for _ in &statement.names {
+                tally.declarations += 1;
+                if annotation_known {
+                    tally.known_declarations += 1;
+                }
+            }
+        }
+        typepython_syntax::SyntaxStatement::Import(_)
+        | typepython_syntax::SyntaxStatement::Call(_)
+        | typepython_syntax::SyntaxStatement::MethodCall(_)
+        | typepython_syntax::SyntaxStatement::MemberAccess(_)
+        | typepython_syntax::SyntaxStatement::Return(_)
+        | typepython_syntax::SyntaxStatement::Yield(_)
+        | typepython_syntax::SyntaxStatement::For(_)
+        | typepython_syntax::SyntaxStatement::With(_)
+        | typepython_syntax::SyntaxStatement::ExceptHandler(_)
+        | typepython_syntax::SyntaxStatement::Unsafe(_) => {}
+    }
+}
+
+fn class_member_coverage(member: &typepython_syntax::ClassMember) -> (bool, usize, usize) {
+    match member.kind {
+        typepython_syntax::ClassMemberKind::Field => {
+            known_type_slot(member.annotation.as_deref().or(member.value_type.as_deref()))
+        }
+        typepython_syntax::ClassMemberKind::Method | typepython_syntax::ClassMemberKind::Overload => {
+            function_signature_coverage(
+                &member.params,
+                member.returns.as_deref(),
+                !matches!(member.method_kind, Some(typepython_syntax::MethodKind::Static)),
+            )
+        }
+    }
+}
+
+fn function_signature_coverage(
+    params: &[typepython_syntax::FunctionParam],
+    returns: Option<&str>,
+    allow_implicit_receiver: bool,
+) -> (bool, usize, usize) {
+    let mut known = true;
+    let mut dynamic_boundaries = 0usize;
+    let mut unknown_boundaries = 0usize;
+
+    for (index, param) in params.iter().enumerate() {
+        let is_implicit_receiver = allow_implicit_receiver
+            && index == 0
+            && param.annotation.is_none()
+            && matches!(param.name.as_str(), "self" | "cls");
+        if is_implicit_receiver {
+            continue;
+        }
+
+        let (param_known, dynamic_count, unknown_count) = known_type_slot(param.annotation.as_deref());
+        dynamic_boundaries += dynamic_count;
+        unknown_boundaries += unknown_count;
+        if !param_known {
+            known = false;
+        }
+    }
+
+    let (return_known, dynamic_count, unknown_count) = known_type_slot(returns);
+    dynamic_boundaries += dynamic_count;
+    unknown_boundaries += unknown_count;
+    if !return_known {
+        known = false;
+    }
+
+    (known, dynamic_boundaries, unknown_boundaries)
+}
+
+fn known_type_slot(text: Option<&str>) -> (bool, usize, usize) {
+    let Some(text) = text else {
+        return (false, 0, 0);
+    };
+    let (dynamic_count, unknown_count) = count_boundary_tokens(text);
+    (
+        !text.is_empty() && dynamic_count == 0 && unknown_count == 0,
+        dynamic_count,
+        unknown_count,
+    )
+}
+
+fn count_boundary_tokens(text: &str) -> (usize, usize) {
+    let mut dynamic_count = 0usize;
+    let mut unknown_count = 0usize;
+    let mut token = String::new();
+
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            token.push(ch);
+            continue;
+        }
+
+        match token.as_str() {
+            "dynamic" => dynamic_count += 1,
+            "unknown" => unknown_count += 1,
+            _ => {}
+        }
+        token.clear();
+    }
+
+    match token.as_str() {
+        "dynamic" => dynamic_count += 1,
+        "unknown" => unknown_count += 1,
+        _ => {}
+    }
+
+    (dynamic_count, unknown_count)
+}
+
+fn coverage_percent(known: usize, total: usize) -> f64 {
+    if total == 0 {
+        100.0
+    } else {
+        ((known as f64 / total as f64) * 1000.0).round() / 10.0
+    }
+}
+
+fn source_kind_label(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::TypePython => "tpy",
+        SourceKind::Python => "py",
+        SourceKind::Stub => "pyi",
+    }
+}
+
+fn load_syntax_trees(sources: &[DiscoveredSource]) -> Result<Vec<typepython_syntax::SyntaxTree>> {
+    sources
+        .iter()
+        .map(|source| {
+            let mut source_file = SourceFile::from_path(&source.path)
+                .with_context(|| format!("unable to read {}", source.path.display()))?;
+            source_file.logical_module = source.logical_module.clone();
+            Ok(parse(source_file))
+        })
+        .collect::<Result<Vec<_>>>()
+}
+
 fn run_with_pipeline(
     command: &str,
     args: RunArgs,
@@ -516,16 +916,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees: Vec<_> = discovery
-        .sources
-        .iter()
-        .map(|source| {
-            let mut source_file = SourceFile::from_path(&source.path)
-                .with_context(|| format!("unable to read {}", source.path.display()))?;
-            source_file.logical_module = source.logical_module.clone();
-            Ok(parse(source_file))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let syntax_trees = load_syntax_trees(&discovery.sources)?;
     let parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     if parse_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
@@ -1241,9 +1632,10 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_diagnostics, collect_source_paths, compile_runtime_bytecode,
-        format_watch_rebuild_note, run_pipeline, should_emit_build_outputs, watch_targets,
-        verify_build_artifacts, write_incremental_snapshot,
+        build_diagnostics, build_migration_report, collect_source_paths,
+        compile_runtime_bytecode, format_watch_rebuild_note, load_syntax_trees, run_pipeline,
+        should_emit_build_outputs, watch_targets, verify_build_artifacts,
+        write_incremental_snapshot,
     };
     use notify::RecursiveMode;
     use std::{
@@ -1781,6 +2173,58 @@ mod tests {
         assert!(note.contains("and 1 more path(s)"));
     }
 
+    #[test]
+    fn build_migration_report_counts_file_coverage_and_boundaries() {
+        let project_dir = temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
+        let report = (|| {
+            fs::create_dir_all(project_dir.join("src/app")).unwrap();
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def typed(value: int) -> int:\n    return value\n\ndef untyped(value) -> int:\n    return 0\n\nleak: dynamic = 1\n",
+            )
+            .unwrap();
+            let config = load(&project_dir).unwrap();
+            let discovery = collect_source_paths(&config).unwrap();
+            let syntax_trees = load_syntax_trees(&discovery.sources).unwrap();
+            build_migration_report(&config, &syntax_trees)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(report.total_declarations, 3);
+        assert_eq!(report.known_declarations, 1);
+        assert_eq!(report.total_dynamic_boundaries, 1);
+        assert_eq!(report.total_unknown_boundaries, 0);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].known_declarations, 1);
+    }
+
+    #[test]
+    fn build_migration_report_ranks_high_impact_untyped_files() {
+        let project_dir = temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
+        let report = (|| {
+            fs::create_dir_all(project_dir.join("src/app")).unwrap();
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n").unwrap();
+            fs::write(project_dir.join("src/app/a.tpy"), "def untyped(value) -> int:\n    return 0\n").unwrap();
+            fs::write(
+                project_dir.join("src/app/b.tpy"),
+                "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
+            )
+            .unwrap();
+            fs::write(project_dir.join("src/app/c.tpy"), "def clean(value: int) -> int:\n    return value\n").unwrap();
+            let config = load(&project_dir).unwrap();
+            let discovery = collect_source_paths(&config).unwrap();
+            let syntax_trees = load_syntax_trees(&discovery.sources).unwrap();
+            build_migration_report(&config, &syntax_trees)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!report.high_impact_untyped_files.is_empty());
+        assert!(report.high_impact_untyped_files[0].path.ends_with("src/app/a.tpy"));
+        assert_eq!(report.high_impact_untyped_files[0].downstream_references, 1);
+    }
+
     fn temp_project_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1849,6 +2293,79 @@ fn print_summary(
                 "{}",
                 serde_json::to_string_pretty(&payload)
                     .context("unable to serialize command summary as JSON")?
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn print_migration_report(
+    format: OutputFormat,
+    summary: &CommandSummary,
+    report: &MigrationReport,
+    diagnostics: &DiagnosticReport,
+) -> Result<()> {
+    match format {
+        OutputFormat::Text => {
+            print_summary(OutputFormat::Text, summary, diagnostics)?;
+            println!("  migration total declarations: {}", report.total_declarations);
+            println!("  migration known declarations: {}", report.known_declarations);
+            println!(
+                "  migration dynamic boundaries: {}",
+                report.total_dynamic_boundaries
+            );
+            println!(
+                "  migration unknown boundaries: {}",
+                report.total_unknown_boundaries
+            );
+            println!("  file coverage:");
+            for entry in &report.files {
+                println!(
+                    "    {} [{}]: {}/{} known ({:.1}%), dynamic={}, unknown={}",
+                    entry.path,
+                    entry.source_kind.as_deref().unwrap_or("?"),
+                    entry.known_declarations,
+                    entry.declarations,
+                    entry.coverage_percent,
+                    entry.dynamic_boundaries,
+                    entry.unknown_boundaries
+                );
+            }
+            println!("  directory coverage:");
+            for entry in &report.directories {
+                println!(
+                    "    {}: {}/{} known ({:.1}%), dynamic={}, unknown={}",
+                    entry.path,
+                    entry.known_declarations,
+                    entry.declarations,
+                    entry.coverage_percent,
+                    entry.dynamic_boundaries,
+                    entry.unknown_boundaries
+                );
+            }
+            println!("  high-impact untyped files:");
+            for entry in &report.high_impact_untyped_files {
+                println!(
+                    "    {}: downstream_refs={}, untyped={}, dynamic={}, unknown={}",
+                    entry.path,
+                    entry.downstream_references,
+                    entry.untyped_declarations,
+                    entry.dynamic_boundaries,
+                    entry.unknown_boundaries
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let payload = serde_json::json!({
+                "summary": summary,
+                "report": report,
+                "diagnostics": diagnostics,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&payload)
+                    .context("unable to serialize migration report as JSON")?
             );
         }
     }
