@@ -436,9 +436,15 @@ impl Server {
         if !parse_diagnostics.has_errors() {
             let bindings = syntax_trees.iter().map(bind).collect::<Vec<_>>();
             let graph = build(&bindings);
-            diagnostics
+            diagnostics.diagnostics.extend(
+                check_with_options(
+                    &graph,
+                    self.config.config.typing.require_explicit_overrides,
+                    self.config.config.typing.enable_sealed_exhaustiveness,
+                )
                 .diagnostics
-                .extend(check_with_options(&graph, self.config.config.typing.require_explicit_overrides).diagnostics.diagnostics);
+                .diagnostics,
+            );
         }
 
         let mut documents = syntax_trees

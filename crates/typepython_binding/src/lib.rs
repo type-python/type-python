@@ -15,6 +15,7 @@ pub struct BindingTable {
     pub member_accesses: Vec<MemberAccessSite>,
     pub returns: Vec<ReturnSite>,
     pub yields: Vec<YieldSite>,
+    pub matches: Vec<MatchSite>,
     pub for_loops: Vec<ForSite>,
     pub with_statements: Vec<WithSite>,
     pub except_handlers: Vec<ExceptHandlerSite>,
@@ -33,6 +34,7 @@ impl Default for BindingTable {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: Vec::new(),
+            matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
             except_handlers: Vec::new(),
@@ -98,6 +100,39 @@ pub struct YieldSite {
     pub value_method_through_instance: bool,
     pub is_yield_from: bool,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct MatchSite {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub subject_type: Option<String>,
+    pub subject_is_awaited: bool,
+    pub subject_callee: Option<String>,
+    pub subject_name: Option<String>,
+    pub subject_member_owner_name: Option<String>,
+    pub subject_member_name: Option<String>,
+    pub subject_member_through_instance: bool,
+    pub subject_method_owner_name: Option<String>,
+    pub subject_method_name: Option<String>,
+    pub subject_method_through_instance: bool,
+    pub cases: Vec<MatchCaseSite>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct MatchCaseSite {
+    pub patterns: Vec<MatchPatternSite>,
+    pub has_guard: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum MatchPatternSite {
+    Wildcard,
+    Literal(String),
+    Class(String),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -298,6 +333,46 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     value_method_name: statement.value_method_name.clone(),
                     value_method_through_instance: statement.value_method_through_instance,
                     is_yield_from: statement.is_yield_from,
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        matches: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Match(statement) => Some(MatchSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    subject_type: statement.subject_type.clone(),
+                    subject_is_awaited: statement.subject_is_awaited,
+                    subject_callee: statement.subject_callee.clone(),
+                    subject_name: statement.subject_name.clone(),
+                    subject_member_owner_name: statement.subject_member_owner_name.clone(),
+                    subject_member_name: statement.subject_member_name.clone(),
+                    subject_member_through_instance: statement.subject_member_through_instance,
+                    subject_method_owner_name: statement.subject_method_owner_name.clone(),
+                    subject_method_name: statement.subject_method_name.clone(),
+                    subject_method_through_instance: statement.subject_method_through_instance,
+                    cases: statement
+                        .cases
+                        .iter()
+                        .map(|case| MatchCaseSite {
+                            patterns: case
+                                .patterns
+                                .iter()
+                                .map(|pattern| match pattern {
+                                    typepython_syntax::MatchPattern::Wildcard => MatchPatternSite::Wildcard,
+                                    typepython_syntax::MatchPattern::Literal(value) => MatchPatternSite::Literal(value.clone()),
+                                    typepython_syntax::MatchPattern::Class(value) => MatchPatternSite::Class(value.clone()),
+                                    typepython_syntax::MatchPattern::Unsupported => MatchPatternSite::Unsupported,
+                                })
+                                .collect(),
+                            has_guard: case.has_guard,
+                            line: case.line,
+                        })
+                        .collect(),
                     line: statement.line,
                 }),
                 _ => None,
@@ -505,6 +580,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::MemberAccess(_) => Vec::new(),
         SyntaxStatement::Return(_) => Vec::new(),
         SyntaxStatement::Yield(_) => Vec::new(),
+        SyntaxStatement::Match(_) => Vec::new(),
         SyntaxStatement::For(_) => Vec::new(),
         SyntaxStatement::With(_) => Vec::new(),
         SyntaxStatement::ExceptHandler(_) => Vec::new(),
@@ -581,14 +657,13 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
 
 #[cfg(test)]
 mod tests {
-    use super::{AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, WithSite, YieldSite, bind};
+    use super::{AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
         ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, MethodKind,
         NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-        TypeAliasStatement, TypeParam,
-        ValueStatement,
+        TypeAliasStatement, TypeParam, ValueStatement,
     };
 
     #[test]
@@ -1225,6 +1300,63 @@ is_yield_from: false,
                 iter_method_owner_name: None,
                 iter_method_name: None,
                 iter_method_through_instance: false,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_match_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/match.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                subject_type: Some(String::new()),
+                subject_is_awaited: false,
+                subject_callee: None,
+                subject_name: Some(String::from("expr")),
+                subject_member_owner_name: None,
+                subject_member_name: None,
+                subject_member_through_instance: false,
+                subject_method_owner_name: None,
+                subject_method_name: None,
+                subject_method_through_instance: false,
+                cases: vec![typepython_syntax::MatchCaseStatement {
+                    patterns: vec![typepython_syntax::MatchPattern::Class(String::from("Add"))],
+                    has_guard: false,
+                    line: 3,
+                }],
+                line: 2,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.matches,
+            vec![MatchSite {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                subject_type: Some(String::new()),
+                subject_is_awaited: false,
+                subject_callee: None,
+                subject_name: Some(String::from("expr")),
+                subject_member_owner_name: None,
+                subject_member_name: None,
+                subject_member_through_instance: false,
+                subject_method_owner_name: None,
+                subject_method_name: None,
+                subject_method_through_instance: false,
+                cases: vec![MatchCaseSite {
+                    patterns: vec![MatchPatternSite::Class(String::from("Add"))],
+                    has_guard: false,
+                    line: 3,
+                }],
                 line: 2,
             }]
         );

@@ -900,6 +900,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
             SyntaxStatement::MemberAccess(_) => {}
             SyntaxStatement::Return(_) => {}
             SyntaxStatement::Yield(_) => {}
+            SyntaxStatement::Match(_) => {}
             SyntaxStatement::For(_) => {}
             SyntaxStatement::With(_) => {}
             SyntaxStatement::ExceptHandler(_) => {}

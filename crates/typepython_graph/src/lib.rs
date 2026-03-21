@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::{AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, DeclarationOwnerKind, ExceptHandlerSite, ForSite, MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite};
+use typepython_binding::{AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, DeclarationOwnerKind, ExceptHandlerSite, ForSite, MatchSite, MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite};
 use typepython_syntax::{MethodKind, SourceKind};
 
 /// Summary node for one module.
@@ -22,6 +22,7 @@ pub struct ModuleNode {
     pub member_accesses: Vec<MemberAccessSite>,
     pub returns: Vec<ReturnSite>,
     pub yields: Vec<YieldSite>,
+    pub matches: Vec<MatchSite>,
     pub for_loops: Vec<ForSite>,
     pub with_statements: Vec<WithSite>,
     pub except_handlers: Vec<ExceptHandlerSite>,
@@ -51,6 +52,7 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
             member_accesses: binding.member_accesses.clone(),
             returns: binding.returns.clone(),
             yields: binding.yields.clone(),
+            matches: binding.matches.clone(),
             for_loops: binding.for_loops.clone(),
             with_statements: binding.with_statements.clone(),
             except_handlers: binding.except_handlers.clone(),
@@ -78,6 +80,7 @@ fn hash_summary(binding: &BindingTable) -> u64 {
     binding.module_key.hash(&mut hasher);
     binding.declarations.hash(&mut hasher);
     binding.assignments.hash(&mut hasher);
+    binding.matches.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -187,6 +190,7 @@ fn prelude_node(module_path: &str, module_key: &str, declarations: Vec<Declarati
         member_accesses: Vec::new(),
         returns: Vec::new(),
         yields: Vec::new(),
+        matches: Vec::new(),
         for_loops: Vec::new(),
         with_statements: Vec::new(),
         except_handlers: Vec::new(),
@@ -272,6 +276,7 @@ fn collections_abc_prelude_node() -> ModuleNode {
         member_accesses: Vec::new(),
         returns: Vec::new(),
         yields: Vec::new(),
+        matches: Vec::new(),
         for_loops: Vec::new(),
         with_statements: Vec::new(),
         except_handlers: Vec::new(),
@@ -452,11 +457,12 @@ mod tests {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: Vec::new(),
-        yields: Vec::new(),
-        for_loops: Vec::new(),
-        with_statements: Vec::new(),
-        except_handlers: Vec::new(),
-        assignments: Vec::new(),
+            yields: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
         }]);
 
         assert_eq!(
@@ -524,11 +530,12 @@ mod tests {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: Vec::new(),
-        yields: Vec::new(),
-        for_loops: Vec::new(),
-        with_statements: Vec::new(),
-        except_handlers: Vec::new(),
-        assignments: Vec::new(),
+            yields: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
         }]);
         let second = build(&[BindingTable {
             module_path: PathBuf::from("src/app/__init__.tpy"),
@@ -572,11 +579,12 @@ mod tests {
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: Vec::new(),
-        yields: Vec::new(),
-        for_loops: Vec::new(),
-        with_statements: Vec::new(),
-        except_handlers: Vec::new(),
-        assignments: Vec::new(),
+            yields: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
         }]);
 
         println!(
@@ -602,6 +610,7 @@ mod tests {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: Vec::new(),
+            matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
             except_handlers: Vec::new(),

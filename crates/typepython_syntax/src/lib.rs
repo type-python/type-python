@@ -93,6 +93,7 @@ pub enum SyntaxStatement {
     MethodCall(MethodCallStatement),
     Return(ReturnStatement),
     Yield(YieldStatement),
+    Match(MatchStatement),
     For(ForStatement),
     With(WithStatement),
     ExceptHandler(ExceptionHandlerStatement),
@@ -229,6 +230,39 @@ pub struct YieldStatement {
     pub value_method_through_instance: bool,
     pub is_yield_from: bool,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MatchStatement {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub subject_type: Option<String>,
+    pub subject_is_awaited: bool,
+    pub subject_callee: Option<String>,
+    pub subject_name: Option<String>,
+    pub subject_member_owner_name: Option<String>,
+    pub subject_member_name: Option<String>,
+    pub subject_member_through_instance: bool,
+    pub subject_method_owner_name: Option<String>,
+    pub subject_method_name: Option<String>,
+    pub subject_method_through_instance: bool,
+    pub cases: Vec<MatchCaseStatement>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MatchCaseStatement {
+    pub patterns: Vec<MatchPattern>,
+    pub has_guard: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum MatchPattern {
+    Wildcard,
+    Literal(String),
+    Class(String),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -373,6 +407,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             ));
             collect_return_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
+            collect_match_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_for_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_with_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_except_handler_statements(&source.text, parsed.suite(), None, None, &mut statements);
@@ -447,6 +482,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &mut diagnostics,
                 ));
                 collect_return_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_match_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_except_handler_statements(&normalized, parsed.suite(), None, None, &mut statements);
@@ -933,6 +969,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::MemberAccess(statement) => statement.line,
         SyntaxStatement::Return(statement) => statement.line,
         SyntaxStatement::Yield(statement) => statement.line,
+        SyntaxStatement::Match(statement) => statement.line,
         SyntaxStatement::For(statement) => statement.line,
         SyntaxStatement::With(statement) => statement.line,
         SyntaxStatement::ExceptHandler(statement) => statement.line,
@@ -965,7 +1002,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -1375,6 +1412,12 @@ fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut
                 collect_calls_from_suite(source, &class_def.body, statements);
                 collect_nested_call_statements(source, &class_def.body, statements);
             }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_calls_from_suite(source, &case.body, statements);
+                    collect_nested_call_statements(source, &case.body, statements);
+                }
+            }
             _ => {}
         }
     }
@@ -1403,6 +1446,11 @@ fn collect_return_statements(
                 }
                 collect_return_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
                 collect_return_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_return_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
             }
             _ => {
                 let Some(owner_name) = owner_name else {
@@ -1439,7 +1487,46 @@ fn collect_yield_statements(
             Stmt::ClassDef(class_def) => {
                 collect_yield_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
             }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_yield_statements(source, &case.body, owner_type_name, statements);
+                }
+            }
             _ => {}
+        }
+    }
+}
+
+fn collect_match_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_match_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_match_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Try(try_stmt) => {
+                collect_match_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_match_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_match_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_match_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            _ => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if let Some(match_statement) = extract_match_statement(source, stmt, line, owner_name, owner_type_name) {
+                    statements.push(match_statement);
+                }
+            }
         }
     }
 }
@@ -1458,6 +1545,11 @@ fn collect_for_statements(
             }
             Stmt::ClassDef(class_def) => {
                 collect_for_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_for_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
@@ -1483,6 +1575,11 @@ fn collect_with_statements(
             }
             Stmt::ClassDef(class_def) => {
                 collect_with_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_with_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
@@ -1534,6 +1631,11 @@ fn collect_except_handler_statements(
                 collect_except_handler_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
                 collect_except_handler_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
             }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_except_handler_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
+            }
             _ => {}
         }
     }
@@ -1565,6 +1667,11 @@ fn collect_function_body_assignments(
             Stmt::ClassDef(class_def) => {
                 collect_function_body_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
             }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_function_body_assignments(source, &case.body, owner_type_name, statements);
+                }
+            }
             _ => {}
         }
     }
@@ -1594,6 +1701,11 @@ fn collect_function_body_bare_assignments(
             }
             Stmt::ClassDef(class_def) => {
                 collect_function_body_bare_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_function_body_bare_assignments(source, &case.body, owner_type_name, statements);
+                }
             }
             _ => {}
         }
@@ -1735,6 +1847,69 @@ fn extract_yield_statement(
         is_yield_from,
         line,
     }))
+}
+
+fn extract_match_statement(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::Match(match_stmt) = stmt else {
+        return None;
+    };
+    let subject = extract_direct_expr_metadata(&match_stmt.subject);
+    Some(SyntaxStatement::Match(MatchStatement {
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        subject_type: subject.value_type,
+        subject_is_awaited: subject.is_awaited,
+        subject_callee: subject.value_callee,
+        subject_name: subject.value_name,
+        subject_member_owner_name: subject.value_member_owner_name,
+        subject_member_name: subject.value_member_name,
+        subject_member_through_instance: subject.value_member_through_instance,
+        subject_method_owner_name: subject.value_method_owner_name,
+        subject_method_name: subject.value_method_name,
+        subject_method_through_instance: subject.value_method_through_instance,
+        cases: match_stmt
+            .cases
+            .iter()
+            .map(|case| MatchCaseStatement {
+                patterns: extract_match_patterns(source, &case.pattern),
+                has_guard: case.guard.is_some(),
+                line: offset_to_line_column(source, case.range.start().to_usize()).0,
+            })
+            .collect(),
+        line,
+    }))
+}
+
+fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> Vec<MatchPattern> {
+    use ruff_python_ast::Pattern;
+
+    if pattern.is_wildcard() {
+        return vec![MatchPattern::Wildcard];
+    }
+
+    match pattern {
+        Pattern::MatchOr(pattern) => pattern
+            .patterns
+            .iter()
+            .flat_map(|pattern| extract_match_patterns(source, pattern))
+            .collect(),
+        Pattern::MatchClass(pattern) => slice_range(source, pattern.cls.range())
+            .map(|text| vec![MatchPattern::Class(text.to_owned())])
+            .unwrap_or_else(|| vec![MatchPattern::Unsupported]),
+        Pattern::MatchValue(pattern) => slice_range(source, pattern.value.range())
+            .map(|text| vec![MatchPattern::Literal(text.to_owned())])
+            .unwrap_or_else(|| vec![MatchPattern::Unsupported]),
+        Pattern::MatchSingleton(pattern) => slice_range(source, pattern.range())
+            .map(|text| vec![MatchPattern::Literal(text.to_owned())])
+            .unwrap_or_else(|| vec![MatchPattern::Unsupported]),
+        _ => vec![MatchPattern::Unsupported],
+    }
 }
 
 fn extract_for_statement(
@@ -2763,7 +2938,8 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        ExceptionHandlerStatement, ForStatement, ImportStatement, MemberAccessStatement, MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
+        ExceptionHandlerStatement, ForStatement, ImportStatement, MatchCaseStatement, MatchPattern,
+        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
         YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -5363,6 +5539,58 @@ line: 7,
                 value_method_name: None,
                 value_method_through_instance: false,
 line: 12,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_match_statement_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("match_case.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "match value:\n    case Add():\n        pass\n    case Mul() | Div():\n        pass\n    case _:\n        pass\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Match(MatchStatement {
+                owner_name: None,
+                owner_type_name: None,
+                subject_type: Some(String::new()),
+                subject_is_awaited: false,
+                subject_callee: None,
+                subject_name: Some(String::from("value")),
+                subject_member_owner_name: None,
+                subject_member_name: None,
+                subject_member_through_instance: false,
+                subject_method_owner_name: None,
+                subject_method_name: None,
+                subject_method_through_instance: false,
+                cases: vec![
+                    MatchCaseStatement {
+                        patterns: vec![MatchPattern::Class(String::from("Add"))],
+                        has_guard: false,
+                        line: 2,
+                    },
+                    MatchCaseStatement {
+                        patterns: vec![
+                            MatchPattern::Class(String::from("Mul")),
+                            MatchPattern::Class(String::from("Div")),
+                        ],
+                        has_guard: false,
+                        line: 4,
+                    },
+                    MatchCaseStatement {
+                        patterns: vec![MatchPattern::Wildcard],
+                        has_guard: false,
+                        line: 6,
+                    },
+                ],
+                line: 1,
             })]
         );
     }

@@ -726,6 +726,7 @@ fn accumulate_statement_coverage(statement: &typepython_syntax::SyntaxStatement,
                 }
             }
         }
+        typepython_syntax::SyntaxStatement::Match(_) => {}
         typepython_syntax::SyntaxStatement::Import(_)
         | typepython_syntax::SyntaxStatement::Call(_)
         | typepython_syntax::SyntaxStatement::MethodCall(_)
@@ -934,7 +935,12 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
     let bindings: Vec<_> = syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
-    let mut diagnostics = check_with_options(&graph, config.config.typing.require_explicit_overrides).diagnostics;
+    let mut diagnostics = check_with_options(
+        &graph,
+        config.config.typing.require_explicit_overrides,
+        config.config.typing.enable_sealed_exhaustiveness,
+    )
+    .diagnostics;
     diagnostics.diagnostics.extend(
         public_surface_completeness_diagnostics(config, &syntax_trees)
             .diagnostics
@@ -1215,6 +1221,7 @@ fn declaration_surface(
             typepython_syntax::SyntaxStatement::MemberAccess(_) => {}
             typepython_syntax::SyntaxStatement::Return(_) => {}
             typepython_syntax::SyntaxStatement::Yield(_) => {}
+            typepython_syntax::SyntaxStatement::Match(_) => {}
             typepython_syntax::SyntaxStatement::For(_) => {}
             typepython_syntax::SyntaxStatement::With(_) => {}
             typepython_syntax::SyntaxStatement::ExceptHandler(_) => {}
