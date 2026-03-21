@@ -381,7 +381,7 @@ fn run_with_pipeline(
     }
 
     notes.push(String::from(
-        "include/exclude globs, parser extensions, and semantic checking are still placeholders",
+        "parser extensions are still incomplete in this milestone",
     ));
 
     let snapshot = run_pipeline(&config)?;
