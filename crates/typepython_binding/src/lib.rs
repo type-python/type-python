@@ -15,6 +15,8 @@ pub struct BindingTable {
     pub member_accesses: Vec<MemberAccessSite>,
     pub returns: Vec<ReturnSite>,
     pub yields: Vec<YieldSite>,
+    pub if_guards: Vec<IfGuardSite>,
+    pub asserts: Vec<AssertGuardSite>,
     pub matches: Vec<MatchSite>,
     pub for_loops: Vec<ForSite>,
     pub with_statements: Vec<WithSite>,
@@ -34,6 +36,8 @@ impl Default for BindingTable {
             member_accesses: Vec::new(),
             returns: Vec::new(),
             yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
             matches: Vec::new(),
             for_loops: Vec::new(),
             with_statements: Vec::new(),
@@ -100,6 +104,33 @@ pub struct YieldSite {
     pub value_method_through_instance: bool,
     pub is_yield_from: bool,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct IfGuardSite {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub guard: Option<GuardConditionSite>,
+    pub line: usize,
+    pub true_start_line: usize,
+    pub true_end_line: usize,
+    pub false_start_line: Option<usize>,
+    pub false_end_line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AssertGuardSite {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub guard: Option<GuardConditionSite>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum GuardConditionSite {
+    IsNone { name: String, negated: bool },
+    IsInstance { name: String, types: Vec<String> },
+    TruthyName { name: String },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -333,6 +364,36 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     value_method_name: statement.value_method_name.clone(),
                     value_method_through_instance: statement.value_method_through_instance,
                     is_yield_from: statement.is_yield_from,
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        if_guards: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::If(statement) => Some(IfGuardSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    guard: statement.guard.as_ref().map(map_guard_condition),
+                    line: statement.line,
+                    true_start_line: statement.true_start_line,
+                    true_end_line: statement.true_end_line,
+                    false_start_line: statement.false_start_line,
+                    false_end_line: statement.false_end_line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        asserts: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Assert(statement) => Some(AssertGuardSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    guard: statement.guard.as_ref().map(map_guard_condition),
                     line: statement.line,
                 }),
                 _ => None,
@@ -580,11 +641,29 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::MemberAccess(_) => Vec::new(),
         SyntaxStatement::Return(_) => Vec::new(),
         SyntaxStatement::Yield(_) => Vec::new(),
+        SyntaxStatement::If(_) => Vec::new(),
+        SyntaxStatement::Assert(_) => Vec::new(),
         SyntaxStatement::Match(_) => Vec::new(),
         SyntaxStatement::For(_) => Vec::new(),
         SyntaxStatement::With(_) => Vec::new(),
         SyntaxStatement::ExceptHandler(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
+    }
+}
+
+fn map_guard_condition(condition: &typepython_syntax::GuardCondition) -> GuardConditionSite {
+    match condition {
+        typepython_syntax::GuardCondition::IsNone { name, negated } => GuardConditionSite::IsNone {
+            name: name.clone(),
+            negated: *negated,
+        },
+        typepython_syntax::GuardCondition::IsInstance { name, types } => GuardConditionSite::IsInstance {
+            name: name.clone(),
+            types: types.clone(),
+        },
+        typepython_syntax::GuardCondition::TruthyName { name } => GuardConditionSite::TruthyName {
+            name: name.clone(),
+        },
     }
 }
 
@@ -657,7 +736,7 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
 
 #[cfg(test)]
 mod tests {
-    use super::{AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind};
+    use super::{AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, GuardConditionSite, IfGuardSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -1358,6 +1437,70 @@ is_yield_from: false,
                     line: 3,
                 }],
                 line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_if_and_assert_guard_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/guards.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![
+                SyntaxStatement::If(typepython_syntax::IfStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_syntax::GuardCondition::IsNone {
+                        name: String::from("value"),
+                        negated: true,
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
+                }),
+                SyntaxStatement::Assert(typepython_syntax::AssertStatement {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_syntax::GuardCondition::TruthyName {
+                        name: String::from("ready"),
+                    }),
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.if_guards,
+            vec![IfGuardSite {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                guard: Some(GuardConditionSite::IsNone {
+                    name: String::from("value"),
+                    negated: true,
+                }),
+                line: 2,
+                true_start_line: 3,
+                true_end_line: 3,
+                false_start_line: None,
+                false_end_line: None,
+            }]
+        );
+        assert_eq!(
+            table.asserts,
+            vec![AssertGuardSite {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                guard: Some(GuardConditionSite::TruthyName {
+                    name: String::from("ready"),
+                }),
+                line: 4,
             }]
         );
     }

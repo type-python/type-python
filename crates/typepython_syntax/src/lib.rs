@@ -93,6 +93,8 @@ pub enum SyntaxStatement {
     MethodCall(MethodCallStatement),
     Return(ReturnStatement),
     Yield(YieldStatement),
+    If(IfStatement),
+    Assert(AssertStatement),
     Match(MatchStatement),
     For(ForStatement),
     With(WithStatement),
@@ -230,6 +232,33 @@ pub struct YieldStatement {
     pub value_method_through_instance: bool,
     pub is_yield_from: bool,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct IfStatement {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub guard: Option<GuardCondition>,
+    pub line: usize,
+    pub true_start_line: usize,
+    pub true_end_line: usize,
+    pub false_start_line: Option<usize>,
+    pub false_end_line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AssertStatement {
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub guard: Option<GuardCondition>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum GuardCondition {
+    IsNone { name: String, negated: bool },
+    IsInstance { name: String, types: Vec<String> },
+    TruthyName { name: String },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -407,6 +436,8 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             ));
             collect_return_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
+            collect_if_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_assert_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_match_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_for_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_with_statements(&source.text, parsed.suite(), None, None, &mut statements);
@@ -482,6 +513,8 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &mut diagnostics,
                 ));
                 collect_return_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_assert_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_match_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
@@ -969,6 +1002,8 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::MemberAccess(statement) => statement.line,
         SyntaxStatement::Return(statement) => statement.line,
         SyntaxStatement::Yield(statement) => statement.line,
+        SyntaxStatement::If(statement) => statement.line,
+        SyntaxStatement::Assert(statement) => statement.line,
         SyntaxStatement::Match(statement) => statement.line,
         SyntaxStatement::For(statement) => statement.line,
         SyntaxStatement::With(statement) => statement.line,
@@ -1002,7 +1037,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::If(_) | SyntaxStatement::Assert(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -1261,8 +1296,109 @@ fn extract_ast_backed_statement(
                 None
             }
         }
+        Stmt::If(stmt) => Some(SyntaxStatement::If(IfStatement {
+            owner_name: None,
+            owner_type_name: None,
+            guard: extract_guard_condition(source, &stmt.test),
+            line,
+            true_start_line: suite_start_line(source, &stmt.body),
+            true_end_line: suite_end_line(source, &stmt.body),
+            false_start_line: if_false_start_line(source, stmt),
+            false_end_line: if_false_end_line(source, stmt),
+        })),
+        Stmt::Assert(stmt) => Some(SyntaxStatement::Assert(AssertStatement {
+            owner_name: None,
+            owner_type_name: None,
+            guard: extract_guard_condition(source, &stmt.test),
+            line,
+        })),
         Stmt::Expr(stmt) => extract_call_statement(&stmt.value, line),
         _ => None,
+    }
+}
+
+fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> {
+    match expr {
+        Expr::Name(name) => Some(GuardCondition::TruthyName {
+            name: name.id.as_str().to_owned(),
+        }),
+        Expr::Compare(compare) if compare.ops.len() == 1 && compare.comparators.len() == 1 => {
+            let Expr::Name(name) = compare.left.as_ref() else {
+                return None;
+            };
+            let right = compare.comparators.first()?;
+            match (compare.ops.first()?, right) {
+                (ruff_python_ast::CmpOp::Is, Expr::NoneLiteral(_)) => Some(GuardCondition::IsNone {
+                    name: name.id.as_str().to_owned(),
+                    negated: false,
+                }),
+                (ruff_python_ast::CmpOp::IsNot, Expr::NoneLiteral(_)) => Some(GuardCondition::IsNone {
+                    name: name.id.as_str().to_owned(),
+                    negated: true,
+                }),
+                _ => None,
+            }
+        }
+        Expr::Call(call) => {
+            let Expr::Name(callee) = call.func.as_ref() else {
+                return None;
+            };
+            if callee.id.as_str() != "isinstance" || call.arguments.args.len() != 2 {
+                return None;
+            }
+            let Expr::Name(name) = &call.arguments.args[0] else {
+                return None;
+            };
+            let guard_types = match &call.arguments.args[1] {
+                Expr::Tuple(tuple) => tuple
+                    .elts
+                    .iter()
+                    .filter_map(|elt| slice_range(source, elt.range()).map(str::to_owned))
+                    .collect::<Vec<_>>(),
+                other => slice_range(source, other.range())
+                    .map(|text| vec![text.to_owned()])
+                    .unwrap_or_default(),
+            };
+            (!guard_types.is_empty()).then_some(GuardCondition::IsInstance {
+                name: name.id.as_str().to_owned(),
+                types: guard_types,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn suite_start_line(source: &str, suite: &[Stmt]) -> usize {
+    suite_start_line_optional(source, suite).unwrap_or(0)
+}
+
+fn suite_end_line(source: &str, suite: &[Stmt]) -> usize {
+    suite_end_line_optional(source, suite).unwrap_or(0)
+}
+
+fn suite_start_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
+    suite.first().map(|stmt| offset_to_line_column(source, stmt.range().start().to_usize()).0)
+}
+
+fn suite_end_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
+    suite.last().map(|stmt| offset_to_line_column(source, stmt.range().end().to_usize()).0)
+}
+
+fn if_false_start_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
+    stmt.elif_else_clauses
+        .first()
+        .and_then(|clause| suite_start_line_optional(source, &clause.body))
+}
+
+fn if_false_end_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
+    stmt.elif_else_clauses
+        .last()
+        .and_then(|clause| suite_end_line_optional(source, &clause.body))
+}
+
+fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl FnMut(&[Stmt])) {
+    for clause in &stmt.elif_else_clauses {
+        callback(&clause.body);
     }
 }
 
@@ -1412,6 +1548,14 @@ fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut
                 collect_calls_from_suite(source, &class_def.body, statements);
                 collect_nested_call_statements(source, &class_def.body, statements);
             }
+            Stmt::If(if_stmt) => {
+                collect_calls_from_suite(source, &if_stmt.body, statements);
+                collect_nested_call_statements(source, &if_stmt.body, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_calls_from_suite(source, suite, statements);
+                    collect_nested_call_statements(source, suite, statements);
+                });
+            }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
                     collect_calls_from_suite(source, &case.body, statements);
@@ -1446,6 +1590,12 @@ fn collect_return_statements(
                 }
                 collect_return_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
                 collect_return_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            Stmt::If(if_stmt) => {
+                collect_return_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_return_statements(source, suite, owner_name, owner_type_name, statements);
+                });
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
@@ -1487,9 +1637,119 @@ fn collect_yield_statements(
             Stmt::ClassDef(class_def) => {
                 collect_yield_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
             }
+            Stmt::If(if_stmt) => {
+                collect_yield_statements(source, &if_stmt.body, owner_type_name, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_yield_statements(source, suite, owner_type_name, statements);
+                });
+            }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
                     collect_yield_statements(source, &case.body, owner_type_name, statements);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_if_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_if_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_if_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Try(try_stmt) => {
+                collect_if_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_if_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_if_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_if_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            Stmt::If(if_stmt) => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if !statements.iter().any(|statement| statement_line(statement) == line) {
+                    statements.push(SyntaxStatement::If(IfStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        guard: extract_guard_condition(source, &if_stmt.test),
+                        line,
+                        true_start_line: suite_start_line(source, &if_stmt.body),
+                        true_end_line: suite_end_line(source, &if_stmt.body),
+                        false_start_line: if_false_start_line(source, if_stmt),
+                        false_end_line: if_false_end_line(source, if_stmt),
+                    }));
+                }
+                collect_if_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_if_statements(source, suite, owner_name, owner_type_name, statements);
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_if_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_assert_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_assert_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_assert_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Try(try_stmt) => {
+                collect_assert_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_assert_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_assert_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_assert_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            Stmt::If(if_stmt) => {
+                collect_assert_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_assert_statements(source, suite, owner_name, owner_type_name, statements);
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_assert_statements(source, &case.body, owner_name, owner_type_name, statements);
+                }
+            }
+            Stmt::Assert(assert_stmt) => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if !statements.iter().any(|statement| statement_line(statement) == line) {
+                    statements.push(SyntaxStatement::Assert(AssertStatement {
+                        owner_name: owner_name.map(str::to_owned),
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        guard: extract_guard_condition(source, &assert_stmt.test),
+                        line,
+                    }));
                 }
             }
             _ => {}
@@ -2938,8 +3198,9 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        ExceptionHandlerStatement, ForStatement, ImportStatement, MatchCaseStatement, MatchPattern,
-        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
+        AssertStatement, ExceptionHandlerStatement, ForStatement, GuardCondition, IfStatement,
+        ImportStatement, MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
+        MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
         YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
@@ -5593,5 +5854,41 @@ line: 12,
                 line: 1,
             })]
         );
+    }
+
+    #[test]
+    fn parse_retains_if_and_assert_guard_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("guards.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(value: str | None) -> str:\n    if value is not None:\n        return value\n    assert value is None\n    return \"fallback\"\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(tree.statements[1], SyntaxStatement::If(IfStatement {
+            owner_name: Some(String::from("build")),
+            owner_type_name: None,
+            guard: Some(GuardCondition::IsNone {
+                name: String::from("value"),
+                negated: true,
+            }),
+            line: 2,
+            true_start_line: 3,
+            true_end_line: 3,
+            false_start_line: None,
+            false_end_line: None,
+        }));
+        assert_eq!(tree.statements[3], SyntaxStatement::Assert(AssertStatement {
+            owner_name: Some(String::from("build")),
+            owner_type_name: None,
+            guard: Some(GuardCondition::IsNone {
+                name: String::from("value"),
+                negated: false,
+            }),
+            line: 4,
+        }));
     }
 }
