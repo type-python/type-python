@@ -427,7 +427,11 @@ fn run_build_like_command(
     let snapshot = run_pipeline(config)?;
     let diagnostics = build_diagnostics(config, &snapshot.diagnostics);
     if should_emit_build_outputs(config, &snapshot.diagnostics) {
-        let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
+        let runtime_summary = write_runtime_outputs(
+            &snapshot.emit_plan,
+            &snapshot.lowered_modules,
+            config.config.emit.runtime_validators,
+        )
             .with_context(|| {
                 format!(
                     "unable to write runtime artifacts under {}",
