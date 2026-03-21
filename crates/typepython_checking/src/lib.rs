@@ -14306,6 +14306,254 @@ line: 5,
     }
 
     #[test]
+    fn check_accepts_typeguard_true_branch_narrowing() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("is_text"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->TypeGuard[str]"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::PredicateCall {
+                        name: String::from("value"),
+                        callee: String::from("is_text"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_typeis_false_branch_narrowing() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("is_text"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->TypeIs[str]"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:Union[str, int])->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 5,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::PredicateCall {
+                        name: String::from("value"),
+                        callee: String::from("is_text"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: Some(5),
+                    false_end_line: Some(5),
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_boolean_composition_narrowing() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:str | None)->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::And(vec![
+                        typepython_binding::GuardConditionSite::Not(Box::new(
+                            typepython_binding::GuardConditionSite::IsNone {
+                                name: String::from("value"),
+                                negated: false,
+                            },
+                        )),
+                        typepython_binding::GuardConditionSite::IsInstance {
+                            name: String::from("value"),
+                            types: vec![String::from("str")],
+                        },
+                    ])),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
     fn check_accepts_with_without_target() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
