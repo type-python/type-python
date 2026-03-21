@@ -5,11 +5,14 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
+    sync::mpsc::{self, RecvTimeoutError},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use glob::Pattern;
+use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
@@ -170,12 +173,7 @@ fn run() -> Result<ExitCode> {
         Command::Init(args) => init_project(args),
         Command::Check(args) => run_with_pipeline("check", args, false, Vec::new()),
         Command::Build(args) => run_build(args),
-        Command::Watch(args) => run_with_pipeline(
-            "watch",
-            args,
-            false,
-            vec![String::from("watch invalidation and filesystem events are not implemented yet")],
-        ),
+        Command::Watch(args) => run_watch(args),
         Command::Clean(args) => clean_project(args),
         Command::Lsp(args) => run_lsp(args),
         Command::Verify(args) => run_verify(args),
@@ -219,67 +217,64 @@ fn init_project(args: InitArgs) -> Result<ExitCode> {
 
 fn run_build(args: RunArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
-    fs::create_dir_all(config.resolve_relative_path(&config.config.project.out_dir)).with_context(
-        || {
-            format!(
-                "unable to create output directory {}",
-                config.resolve_relative_path(&config.config.project.out_dir).display()
-            )
-        },
-    )?;
-    fs::create_dir_all(config.resolve_relative_path(&config.config.project.cache_dir))
-        .with_context(|| {
-            format!(
-                "unable to create cache directory {}",
-                config.resolve_relative_path(&config.config.project.cache_dir).display()
-            )
-        })?;
+    run_build_like_command(&config, args.format, "build", Vec::new())
+}
 
-    let snapshot = run_pipeline(&config)?;
-    let diagnostics = build_diagnostics(&config, &snapshot.diagnostics);
-    let mut notes = Vec::new();
-    if should_emit_build_outputs(&config, &snapshot.diagnostics) {
-        let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
-            .with_context(|| {
-                format!(
-                    "unable to write runtime artifacts under {}",
-                    config.resolve_relative_path(&config.config.project.out_dir).display()
-                )
-            })?;
-        notes.push(format!(
-            "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
-            runtime_summary.runtime_files_written,
-            runtime_summary.stub_files_written,
-            runtime_summary.py_typed_written
-        ));
-        if config.config.emit.emit_pyc {
-            let compiled_pyc = compile_runtime_bytecode(&config, &snapshot.emit_plan)?;
-            notes.push(format!("compiled {} runtime artifact(s) to bytecode", compiled_pyc));
-        }
-        let snapshot_path = write_incremental_snapshot(
-            &config.resolve_relative_path(&config.config.project.cache_dir),
-            &snapshot.incremental,
-        )?;
-        notes.push(format!(
-            "cached {} module fingerprint(s) at {}",
-            snapshot.incremental.fingerprints.len(),
-            snapshot_path.display()
-        ));
+fn run_watch(args: RunArgs) -> Result<ExitCode> {
+    let config = load_project(args.project.as_ref())?;
+    let watch_targets = watch_targets(&config);
+    let mut last_exit = run_build_like_command(
+        &config,
+        args.format,
+        "watch",
+        vec![format!(
+            "watching {} path(s) with {}ms debounce",
+            watch_targets.len(),
+            config.config.watch.debounce_ms
+        )],
+    )?;
+
+    let (sender, receiver) = mpsc::channel();
+    let mut watcher = RecommendedWatcher::new(
+        move |result| {
+            let _ = sender.send(result);
+        },
+        NotifyConfig::default(),
+    )
+    .context("unable to start filesystem watcher")?;
+
+    for (path, mode) in &watch_targets {
+        watcher.watch(path, *mode).with_context(|| format!("unable to watch {}", path.display()))?;
     }
 
-    let summary = CommandSummary {
-        command: String::from("build"),
-        config_path: config.config_path.display().to_string(),
-        config_source: config.source,
-        discovered_sources: snapshot.discovered_sources,
-        lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan.len(),
-        tracked_modules: snapshot.tracked_modules,
-        notes,
-    };
+    let debounce = Duration::from_millis(config.config.watch.debounce_ms);
+    loop {
+        let mut changed_paths = BTreeSet::new();
+        match receiver.recv() {
+            Ok(Ok(event)) => collect_watch_event_paths(&mut changed_paths, event.paths),
+            Ok(Err(error)) => {
+                eprintln!("watch error: {error}");
+                continue;
+            }
+            Err(_) => return Ok(last_exit),
+        }
 
-    print_summary(args.format, &summary, &diagnostics)?;
-    Ok(exit_code(&diagnostics))
+        loop {
+            match receiver.recv_timeout(debounce) {
+                Ok(Ok(event)) => collect_watch_event_paths(&mut changed_paths, event.paths),
+                Ok(Err(error)) => eprintln!("watch error: {error}"),
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return Ok(last_exit),
+            }
+        }
+
+        last_exit = run_build_like_command(
+            &config,
+            args.format,
+            "watch",
+            vec![format_watch_rebuild_note(&changed_paths)],
+        )?;
+    }
 }
 
 fn should_emit_build_outputs(config: &ConfigHandle, diagnostics: &DiagnosticReport) -> bool {
@@ -365,6 +360,113 @@ fn run_verify(args: RunArgs) -> Result<ExitCode> {
 
     print_summary(args.format, &summary, &diagnostics)?;
     Ok(exit_code(&diagnostics))
+}
+
+fn run_build_like_command(
+    config: &ConfigHandle,
+    format: OutputFormat,
+    command: &str,
+    mut notes: Vec<String>,
+) -> Result<ExitCode> {
+    ensure_output_dirs(config)?;
+
+    let snapshot = run_pipeline(config)?;
+    let diagnostics = build_diagnostics(config, &snapshot.diagnostics);
+    if should_emit_build_outputs(config, &snapshot.diagnostics) {
+        let runtime_summary = write_runtime_outputs(&snapshot.emit_plan, &snapshot.lowered_modules)
+            .with_context(|| {
+                format!(
+                    "unable to write runtime artifacts under {}",
+                    config.resolve_relative_path(&config.config.project.out_dir).display()
+                )
+            })?;
+        notes.push(format!(
+            "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
+            runtime_summary.runtime_files_written,
+            runtime_summary.stub_files_written,
+            runtime_summary.py_typed_written
+        ));
+        if config.config.emit.emit_pyc {
+            let compiled_pyc = compile_runtime_bytecode(config, &snapshot.emit_plan)?;
+            notes.push(format!("compiled {} runtime artifact(s) to bytecode", compiled_pyc));
+        }
+        let snapshot_path = write_incremental_snapshot(
+            &config.resolve_relative_path(&config.config.project.cache_dir),
+            &snapshot.incremental,
+        )?;
+        notes.push(format!(
+            "cached {} module fingerprint(s) at {}",
+            snapshot.incremental.fingerprints.len(),
+            snapshot_path.display()
+        ));
+    }
+
+    let summary = CommandSummary {
+        command: String::from(command),
+        config_path: config.config_path.display().to_string(),
+        config_source: config.source,
+        discovered_sources: snapshot.discovered_sources,
+        lowered_modules: snapshot.lowered_modules.len(),
+        planned_artifacts: snapshot.emit_plan.len(),
+        tracked_modules: snapshot.tracked_modules,
+        notes,
+    };
+
+    print_summary(format, &summary, &diagnostics)?;
+    Ok(exit_code(&diagnostics))
+}
+
+fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
+    fs::create_dir_all(config.resolve_relative_path(&config.config.project.out_dir)).with_context(|| {
+        format!(
+            "unable to create output directory {}",
+            config.resolve_relative_path(&config.config.project.out_dir).display()
+        )
+    })?;
+    fs::create_dir_all(config.resolve_relative_path(&config.config.project.cache_dir)).with_context(|| {
+        format!(
+            "unable to create cache directory {}",
+            config.resolve_relative_path(&config.config.project.cache_dir).display()
+        )
+    })?;
+    Ok(())
+}
+
+fn watch_targets(config: &ConfigHandle) -> Vec<(PathBuf, RecursiveMode)> {
+    let mut targets = BTreeMap::new();
+    targets.insert(config.config_path.clone(), RecursiveMode::NonRecursive);
+    for src in &config.config.project.src {
+        let path = config.resolve_relative_path(src);
+        if path.exists() {
+            targets.insert(path, RecursiveMode::Recursive);
+        }
+    }
+    targets.into_iter().collect()
+}
+
+fn collect_watch_event_paths(changed_paths: &mut BTreeSet<PathBuf>, paths: Vec<PathBuf>) {
+    changed_paths.extend(paths);
+}
+
+fn format_watch_rebuild_note(changed_paths: &BTreeSet<PathBuf>) -> String {
+    if changed_paths.is_empty() {
+        return String::from("rebuild triggered by filesystem changes");
+    }
+
+    let preview = changed_paths
+        .iter()
+        .take(3)
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if changed_paths.len() <= 3 {
+        format!("rebuild triggered by {preview}")
+    } else {
+        format!(
+            "rebuild triggered by {preview} and {} more path(s)",
+            changed_paths.len() - 3
+        )
+    }
 }
 
 fn run_with_pipeline(
@@ -1140,10 +1242,12 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 mod tests {
     use super::{
         build_diagnostics, collect_source_paths, compile_runtime_bytecode,
-        run_pipeline, should_emit_build_outputs,
+        format_watch_rebuild_note, run_pipeline, should_emit_build_outputs, watch_targets,
         verify_build_artifacts, write_incremental_snapshot,
     };
+    use notify::RecursiveMode;
     use std::{
+        collections::BTreeSet,
         env, fs,
         path::MAIN_SEPARATOR,
         path::{Path, PathBuf},
@@ -1643,6 +1747,38 @@ mod tests {
         assert!(log.contains("py_compile.compile"));
         assert!(log.contains("__init__.py"));
         assert!(log.contains("__pycache__"));
+    }
+
+    #[test]
+    fn watch_targets_include_config_and_existing_source_roots() {
+        let project_dir = temp_project_dir("watch_targets_include_config_and_existing_source_roots");
+        let targets = (|| {
+            fs::create_dir_all(project_dir.join("src/app")).unwrap();
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            let config = load(&project_dir).unwrap();
+            watch_targets(&config)
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|(path, mode)| {
+            path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
+        }));
+        assert!(targets.iter().any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive));
+    }
+
+    #[test]
+    fn format_watch_rebuild_note_summarizes_changed_paths() {
+        let changed = BTreeSet::from([
+            PathBuf::from("src/app/__init__.tpy"),
+            PathBuf::from("src/app/models.tpy"),
+            PathBuf::from("src/app/views.tpy"),
+            PathBuf::from("src/app/more.tpy"),
+        ]);
+
+        let note = format_watch_rebuild_note(&changed);
+        assert!(note.contains("rebuild triggered by"));
+        assert!(note.contains("and 1 more path(s)"));
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
