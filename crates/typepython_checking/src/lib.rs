@@ -1186,8 +1186,8 @@ fn apply_guard_condition(
         typepython_binding::GuardConditionSite::PredicateCall { name, callee } if name == value_name => {
             apply_predicate_guard(node, nodes, base_type, callee, branch_true)
         }
-        typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name && branch_true => {
-            apply_truthy_narrowing(base_type)
+        typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name => {
+            apply_truthy_narrowing(base_type, branch_true)
         }
         typepython_binding::GuardConditionSite::Not(inner) => {
             apply_guard_condition(node, nodes, base_type, value_name, inner, !branch_true)
@@ -1321,8 +1321,47 @@ fn join_type_candidates(candidates: Vec<String>) -> String {
     join_union_branches(branches)
 }
 
-fn apply_truthy_narrowing(base_type: &str) -> String {
-    remove_none_branch(base_type).unwrap_or_else(|| normalize_type_text(base_type))
+fn apply_truthy_narrowing(base_type: &str, branch_true: bool) -> String {
+    let normalized = normalize_type_text(base_type);
+    if normalized == "Literal[True]" {
+        return if branch_true { normalized } else { String::from("Literal[False]") };
+    }
+    if normalized == "Literal[False]" {
+        return if branch_true { String::from("Literal[True]") } else { normalized };
+    }
+    if normalized == "bool" {
+        return normalized;
+    }
+
+    let Some(branches) = union_branches(&normalized) else {
+        return normalized;
+    };
+    let non_none = branches.iter().filter(|branch| branch.as_str() != "None").cloned().collect::<Vec<_>>();
+    if branches.iter().any(|branch| branch == "None") && non_none.iter().all(|branch| is_definitely_truthy_branch(branch)) {
+        return if branch_true {
+            join_union_branches(non_none)
+        } else {
+            String::from("None")
+        };
+    }
+
+    normalized
+}
+
+fn is_definitely_truthy_branch(branch: &str) -> bool {
+    let normalized = normalize_type_text(branch);
+    if normalized == "Literal[True]" {
+        return true;
+    }
+    if normalized == "Literal[False]" || normalized == "None" || normalized == "bool" {
+        return false;
+    }
+    matches!(
+        normalized.as_str(),
+        "bytes" | "str" | "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple"
+    )
+        .then_some(false)
+        .unwrap_or(true)
 }
 
 fn resolve_exception_binding_type(
@@ -14698,6 +14737,142 @@ line: 5,
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_truthiness_narrowing_for_bool_optional() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(flag:Optional[Literal[True]])->Literal[True]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("flag")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::TruthyName {
+                        name: String::from("flag"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_does_not_over_narrow_truthiness_for_int_optional() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:Optional[int])->int"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: vec![typepython_binding::IfGuardSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    guard: Some(typepython_binding::GuardConditionSite::TruthyName {
+                        name: String::from("value"),
+                    }),
+                    line: 2,
+                    true_start_line: 3,
+                    true_end_line: 3,
+                    false_start_line: None,
+                    false_end_line: None,
+                }],
+                asserts: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("returns `Optional[int]` where `build` expects `int`"));
     }
 
     #[test]
