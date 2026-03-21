@@ -135,6 +135,12 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             _ => None,
         })
         .collect();
+    // TypedDict classes are class defs with "TypedDict" in their bases.
+    let typed_dicts_by_name: std::collections::BTreeMap<_, _> = class_defs
+        .values()
+        .filter(|statement| statement.bases.iter().any(|b| b == "TypedDict"))
+        .map(|statement| (statement.name.as_str(), *statement))
+        .collect();
     let function_defs: std::collections::BTreeMap<_, _> = tree
         .statements
         .iter()
@@ -190,11 +196,35 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         lowered_lines.push(String::from("from typing import overload"));
         lowered_line_number += 1;
     }
+    // Check if any type alias uses a transform that generates NotRequired
+    let needs_notrequired_import = type_aliases.values().any(|stmt| {
+        let v = stmt.value.trim();
+        v == "Partial[User]" || v == "Required_[UserUpdate]" || v.starts_with("Partial[") || v.starts_with("Required_[")
+    });
+    if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing_extensions import NotRequired"));
+        lowered_line_number += 1;
+    }
+    // Check if any type alias uses a transform that generates ReadOnly
+    let needs_readonly_import = type_aliases.values().any(|stmt| {
+        let v = stmt.value.trim();
+        v == "Readonly[Config]" || v == "Mutable[Config]" || v.starts_with("Readonly[") || v.starts_with("Mutable[")
+    });
+    if needs_readonly_import && !has_readonly_import(&tree.source.text) {
+        lowered_lines.push(String::from("from typing_extensions import ReadOnly"));
+        lowered_line_number += 1;
+    }
 
     for (index, line) in tree.source.text.lines().enumerate() {
         let line_number = index + 1;
         let replacement_lines = if let Some(statement) = type_aliases.get(&line_number) {
-            vec![rewrite_typealias_line(line, statement)]
+            if let Some(expanded) =
+                try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
+            {
+                expanded
+            } else {
+                vec![rewrite_typealias_line(line, statement)]
+            }
         } else if let Some(statement) = interfaces.get(&line_number) {
             vec![rewrite_interface_line(line, statement)]
         } else if let Some(statement) = data_classes.get(&line_number) {
@@ -545,6 +575,296 @@ fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) 
         || (statement.header_suffix.starts_with('(')
             && statement.header_suffix.ends_with(')'))
 }
+// ─── TypedDict utility transform expansion ───────────────────────────────────
+
+/// Known TypedDict utility transforms.
+const TYPEDICT_TRANSFORMS: &[&str] =
+    &["Partial", "Required_", "Readonly", "Mutable", "Pick", "Omit"];
+
+/// If `value` is a TypedDict utility transform, returns the expanded class lines.
+/// Otherwise returns None.
+fn try_expand_typeddict_transform(
+    value: &str,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+    source_line: &str,
+) -> Option<Vec<String>> {
+    let value = value.trim();
+    let Some((transform, args)) = parse_transform_expr(value) else {
+        return None;
+    };
+    if !TYPEDICT_TRANSFORMS.contains(&transform) {
+        return None;
+    }
+
+    // args = [transform_name, target_or_key, key2, ...]
+    // For Partial[T]: target_name = T, key_args = []
+    // For Pick[T, "k1", "k2"]: target_name = T, key_args = ["k1", "k2"]
+    // args = [transform_name, target_or_key, key2, ...]
+    // For Partial[T]: target_name = T, key_args = []
+    // For Pick[T, "k1", "k2"]: target_name = T, key_args = ["k1", "k2"]
+    let (transform, target_arg, key_args) = if args.len() < 2 {
+        return None;
+    } else {
+        (&*args[0], &*args[1], &args[2..])
+    };
+
+    // Handle nested transforms: if target_arg is itself a transform, recursively expand it
+    // inner_args[0]=transform name, [1]=target TypedDict, [2..]=key args
+    let base_members = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg) {
+        if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
+            // Recursively expand the inner transform
+            let inner_target_name = &*inner_args[1]; // [1] is the target TypedDict name
+            let inner_key_args = &inner_args[2..];   // [2..] are the key args
+            let inner_target = typed_dicts.get(inner_target_name)?;
+            // inner_target is &&NamedBlockStatement, dereference to &
+            apply_transform_to_members(inner_transform, &inner_target.members, inner_key_args)
+        } else {
+            return None;
+        }
+    } else {
+        // target_arg is a regular TypedDict name
+        let target = typed_dicts.get(target_arg)?;
+        target.members.iter().map(|m| m.clone()).collect()
+    };
+
+    let indentation = source_line.len() - source_line.trim_start().len();
+    let indent = &source_line[..indentation];
+
+    let members = apply_transform_to_members(transform, &base_members, key_args);
+    // Extract alias name from source line: "typealias Name = ..."
+    let alias_name = source_line
+        .trim_start()
+        .trim_end()
+        .strip_prefix("typealias")?
+        .split('=')
+        .next()?
+        .trim()
+        .to_owned();
+
+    let mut lines = Vec::with_capacity(2 + members.len());
+    lines.push(format!("{}class {}(TypedDict):", indent, alias_name));
+    for member in members {
+        let ann = member.annotation.as_deref().unwrap_or("object");
+        lines.push(format!("{}    {}: {}", indent, member.name, ann));
+    }
+
+    Some(lines)
+}
+
+/// Parse "TransformName[T]" or "TransformName[T, 'k1', 'k2', ...]"
+/// Returns (transform_name, vec![target_type, "k1", "k2", ...])
+/// Handles nested transforms and quoted key names like "id".
+fn parse_transform_expr(value: &str) -> Option<(&str, Vec<&str>)> {
+    let value = value.trim();
+    let bracket_start = value.find('[')?;
+    let transform = value[..bracket_start].trim();
+
+    // Find the matching closing bracket using depth counting,
+    // respecting quoted strings so ["id"] doesn't confuse the parser.
+    let rest = &value[bracket_start + 1..];
+    let closing_pos = find_matching_bracket(rest)?;
+
+    // inner: everything between the opening '[' and its matching ']'
+    let inner = &rest[..closing_pos];
+
+    // Split on top-level commas only (inside nested brackets)
+    let mut args = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    for (i, c) in inner.char_indices() {
+        if !in_string && (c == '"' || c == '\'') {
+            in_string = true;
+            string_char = c;
+        } else if in_string && c == string_char && (i == 0 || !inner[..i].ends_with('\\')) {
+            in_string = false;
+        } else if !in_string {
+            match c {
+                '[' | '<' | '(' => depth += 1,
+                ']' | '>' | ')' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    args.push(inner[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    args.push(inner[start..].trim());
+
+    if args.len() < 1 {
+        return None;
+    }
+    // Prepend transform name so args = [transform_name, target_or_key, key2, ...]
+    let mut full_args = Vec::with_capacity(1 + args.len());
+    full_args.push(transform);
+    full_args.extend(args);
+    Some((transform, full_args))
+}
+
+/// Find the position of the matching closing bracket for a string
+/// that starts with '['. Returns the position of the closing ']' (exclusive).
+/// Returns None if no matching bracket is found.
+fn find_matching_bracket(s: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut string_char = ' ';
+    for (i, c) in s.char_indices() {
+        if in_string {
+            if c == '\\' && i + 1 < s.len() {
+                // Skip escaped character
+                continue;
+            }
+            if c == string_char {
+                in_string = false;
+            }
+        } else {
+            match c {
+                '"' | '\'' => {
+                    in_string = true;
+                    string_char = c;
+                }
+                '[' => depth += 1,
+                ']' => {
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Apply a TypedDict utility transform to TypedDict field members.
+fn apply_transform_to_members<'a>(
+    transform: &str,
+    members: &'a [typepython_syntax::ClassMember],
+    key_args: &[&str],
+) -> Vec<typepython_syntax::ClassMember> {
+    let fields: Vec<&'a typepython_syntax::ClassMember> = members
+        .iter()
+        .filter(|m| m.kind == typepython_syntax::ClassMemberKind::Field)
+        .collect();
+
+    match transform {
+        "Partial" => fields
+            .into_iter()
+            .map(|m| {
+                let ann = m.annotation.as_deref().unwrap_or("object");
+                let new_ann = if ann.contains("NotRequired[") {
+                    ann.to_owned()
+                } else if ann.starts_with("Required_[") {
+                    ann.replace("Required_[", "NotRequired[").to_owned()
+                } else {
+                    format!("NotRequired[{}]", ann)
+                };
+                let mut m = m.clone();
+                m.annotation = Some(new_ann);
+                m
+            })
+            .collect(),
+        "Required_" => fields
+            .into_iter()
+            .map(|m| {
+                let ann = m.annotation.as_deref().unwrap_or("object");
+                let new_ann = if ann.starts_with("NotRequired[") {
+                    ann.strip_prefix("NotRequired[")
+                        .unwrap()
+                        .trim_end_matches(']')
+                        .trim()
+                        .to_owned()
+                } else {
+                    ann.to_owned()
+                };
+                let mut m = m.clone();
+                m.annotation = Some(new_ann);
+                m
+            })
+            .collect(),
+        "Readonly" => fields
+            .into_iter()
+            .map(|m| {
+                let ann = m.annotation.as_deref().unwrap_or("object");
+                let new_ann = if ann.contains("ReadOnly[") {
+                    ann.to_owned()
+                } else {
+                    format!("ReadOnly[{}]", ann)
+                };
+                let mut m = m.clone();
+                m.annotation = Some(new_ann);
+                m
+            })
+            .collect(),
+        "Mutable" => fields
+            .into_iter()
+            .map(|m| {
+                let ann = m.annotation.as_deref().unwrap_or("object");
+                let new_ann = strip_readonly(ann);
+                let mut m = m.clone();
+                m.annotation = Some(new_ann);
+                m
+            })
+            .collect(),
+        "Pick" => {
+            let keys: std::collections::BTreeSet<_> = key_args
+                .iter()
+                .map(|s| s.trim_matches('"').trim_matches('\'').trim_end_matches(']').trim_end_matches(')').trim_end_matches('>').to_owned())
+                .collect();
+            fields
+                .into_iter()
+                .filter(|m| keys.contains(&m.name))
+                .map(|m| m.clone())
+                .collect()
+        }
+        "Omit" => {
+            let keys: std::collections::BTreeSet<_> = key_args
+                .iter()
+                .map(|s| s.trim_matches('"').trim_matches('\'').trim_end_matches(']').trim_end_matches(')').trim_end_matches('>').to_owned())
+                .collect();
+            fields
+                .into_iter()
+                .filter(|m| !keys.contains(&m.name))
+                .map(|m| m.clone())
+                .collect()
+        }
+        _ => fields.into_iter().map(|m| m.clone()).collect(),
+    }
+}
+
+/// Strip ReadOnly[...] wrappers from a type string (one level).
+fn strip_readonly(ann: &str) -> String {
+    let ann = ann.trim();
+    if let Some(inner) = ann.strip_prefix("ReadOnly[").and_then(|s| s.strip_suffix(']')) {
+        return inner.to_owned();
+    }
+    ann.to_owned()
+}
+
+fn has_notrequired_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing_extensions import NotRequired"
+            || (trimmed.starts_with("from typing_extensions import ")
+                && trimmed.contains("NotRequired"))
+            || (trimmed.starts_with("from typing import ")
+                && trimmed.contains("NotRequired"))
+    })
+}
+
+fn has_readonly_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing_extensions import ReadOnly"
+            || (trimmed.starts_with("from typing_extensions import ")
+                && trimmed.contains("ReadOnly"))
+            || (trimmed.starts_with("from typing import ")
+                && trimmed.contains("ReadOnly"))
+    })
+}
 
 fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
@@ -604,8 +924,8 @@ mod tests {
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-        TypeAliasStatement, TypeParam, UnsafeStatement,
+        ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind,
+        SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam, UnsafeStatement,
     };
 
     #[test]
@@ -622,6 +942,8 @@ mod tests {
         });
 
         println!("{}", lowered.module.python_source);
+        println!("OUTPUT:\n{}", lowered.module.python_source);
+        println!("DIAGNOSTICS: {:?}", lowered.diagnostics);
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(lowered.module.python_source, "if True:\n    x = 1\n");
         assert_eq!(
@@ -652,6 +974,8 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
+        eprintln!("DIAGNOSTICS: {:?}", lowered.diagnostics);
+        eprintln!("OUTPUT:\n{}", lowered.module.python_source);
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(lowered.module.python_source, "def update():\n    if True:\n        x = 1\n");
     }
@@ -1129,5 +1453,599 @@ mod tests {
                 },
             ]
         );
+    }    // ─── TypedDict utility transform tests ───────────────────────────────────
+
+    #[test]
+    fn lower_expands_partial_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("partial.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class User(TypedDict):\n    id: int\n    name: str\n\ntypealias UserCreate = Partial[User]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("User"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![
+                        ClassMember {
+                            name: String::from("id"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("int")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 2,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("str")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 3,
+                        },
+                    ],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserCreate"),
+                    type_params: Vec::new(),
+                    value: String::from("Partial[User]"),
+                    line: 5,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("class UserCreate(TypedDict):")
+        );
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("id: NotRequired[int]")
+        );
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("name: NotRequired[str]")
+        );
+        assert!(lowered
+            .module
+            .python_source
+            .contains("from typing_extensions import NotRequired"));
     }
+
+    #[test]
+    fn lower_expands_pick_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("pick.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class User(TypedDict):\n    id: int\n    name: str\n    email: str\n\ntypealias UserPublic = Pick[User, \"id\", \"name\"]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("User"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![
+                        ClassMember {
+                            name: String::from("id"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("int")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 2,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("str")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 3,
+                        },
+                        ClassMember {
+                            name: String::from("email"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("str")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 4,
+                        },
+                    ],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserPublic"),
+                    type_params: Vec::new(),
+                    value: String::from("Pick[User, \"id\", \"name\"]"),
+                    line: 6,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        println!("OUTPUT:
+{}", lowered.module.python_source);
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("class UserPublic(TypedDict):")
+        );
+        assert!(lowered
+            .module
+            .python_source
+            .contains("id: int"));
+        assert!(lowered
+            .module
+            .python_source
+            .contains("name: str"));
+        // email should NOT appear in the UserPublic transform (it's in the original User class)
+        let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
+        let user_public_start = all_lines.iter().position(|l| l.contains("class UserPublic"));
+        assert!(user_public_start.is_some());
+        let mut section = String::new();
+        for l in &all_lines[user_public_start.unwrap()..] {
+            if l.trim().is_empty() || l.trim().starts_with("class ") {
+                break;
+            }
+            section.push_str(l);
+            section.push('\n');
+        }
+        assert!(!section.contains("email"), "email should not appear in UserPublic Pick transform");
+    }
+
+    #[test]
+    fn lower_expands_omit_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("omit.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class User(TypedDict):\n    id: int\n    name: str\n\ntypealias UserUpdate = Omit[User, \"id\"]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("User"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![
+                        ClassMember {
+                            name: String::from("id"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("int")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 2,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("str")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 3,
+                        },
+                    ],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserUpdate"),
+                    type_params: Vec::new(),
+                    value: String::from("Omit[User, \"id\"]"),
+                    line: 5,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("class UserUpdate(TypedDict):")
+        );
+        assert!(lowered
+            .module
+            .python_source
+            .contains("name: str"));
+        // id should NOT appear in the UserUpdate transform (it's in the original User class)
+        let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
+        let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
+        assert!(user_update_start.is_some());
+        let mut section = String::new();
+        for l in &all_lines[user_update_start.unwrap()..] {
+            if l.trim().is_empty() || l.trim().starts_with("class ") {
+                break;
+            }
+            section.push_str(l);
+            section.push('\n');
+        }
+        assert!(!section.contains("id:"), "id should not appear in UserUpdate Omit transform");
+    }
+
+    #[test]
+    fn lower_expands_readonly_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("readonly.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class Config(TypedDict):\n    debug: bool\n\ntypealias ImmutableConfig = Readonly[Config]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Config"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![ClassMember {
+                        name: String::from("debug"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("bool")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    }],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("ImmutableConfig"),
+                    type_params: Vec::new(),
+                    value: String::from("Readonly[Config]"),
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered
+            .module
+            .python_source
+            .contains("class ImmutableConfig(TypedDict):"));
+        assert!(lowered
+            .module
+            .python_source
+            .contains("debug: ReadOnly[bool]"));
+        assert!(lowered
+            .module
+            .python_source
+            .contains("from typing_extensions import ReadOnly"));
+    }
+
+    #[test]
+    fn lower_expands_required_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("required.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class UserUpdate(TypedDict):\n    name: NotRequired[str]\n\ntypealias RequiredUpdate = Required_[UserUpdate]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("UserUpdate"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![ClassMember {
+                        name: String::from("name"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("NotRequired[str]")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    }],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("RequiredUpdate"),
+                    type_params: Vec::new(),
+                    value: String::from("Required_[UserUpdate]"),
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered
+            .module
+            .python_source
+            .contains("class RequiredUpdate(TypedDict):"));
+        assert!(lowered
+            .module
+            .python_source
+            .contains("name: str"));
+    }
+
+    #[test]
+    fn lower_expands_composed_typeddict_transform() {
+        // Partial[Omit[User, "id"]]: Omit removes "id", Partial makes rest optional
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("composed.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class User(TypedDict):\n    id: int\n    name: str\n\ntypealias UserUpdate = Partial[Omit[User, \"id\"]]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("User"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![
+                        ClassMember {
+                            name: String::from("id"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("int")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 2,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Field,
+                            method_kind: None,
+                            annotation: Some(String::from("str")),
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 3,
+                        },
+                    ],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserUpdate"),
+                    type_params: Vec::new(),
+                    value: String::from("Partial[Omit[User, \"id\"]]"),
+                    line: 5,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("class UserUpdate(TypedDict):")
+        );
+        // Omit removes id, then Partial makes name optional
+        assert!(lowered
+            .module
+            .python_source
+            .contains("name: NotRequired[str]"));
+        // id should NOT appear in the UserUpdate transform
+        let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
+        let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
+        assert!(user_update_start.is_some());
+        let mut section = String::new();
+        for l in &all_lines[user_update_start.unwrap()..] {
+            if l.trim().is_empty() || l.trim().starts_with("class ") {
+                break;
+            }
+            section.push_str(l);
+            section.push('\n');
+        }
+        assert!(!section.contains("id:"), "id should not appear in composed transform");
+    }
+
+    #[test]
+    fn lower_expands_mutable_typeddict_transform() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("mutable.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class Config(TypedDict):\n    debug: ReadOnly[bool]\n\ntypealias MutableConfig = Mutable[Config]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Config"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_abstract_class: false,
+                    members: vec![ClassMember {
+                        name: String::from("debug"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("ReadOnly[bool]")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    }],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("MutableConfig"),
+                    type_params: Vec::new(),
+                    value: String::from("Mutable[Config]"),
+                    line: 4,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered
+            .module
+            .python_source
+            .contains("class MutableConfig(TypedDict):"));
+        // ReadOnly wrapper should be stripped
+        assert!(lowered.module.python_source.contains("debug: bool"));
+    }
+
+    #[test]
+    fn lower_non_transform_typealias_unchanged() {
+        // Regular type alias (not a transform) should still work as before
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("regular.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from("typealias UserId = int\n"),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("UserId"),
+                type_params: Vec::new(),
+                value: String::from("int"),
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered
+            .module
+            .python_source
+            .contains("from typing import TypeAlias"));
+        assert!(lowered
+            .module
+            .python_source
+            .contains("UserId: TypeAlias = int"));
+    }
+
 }
