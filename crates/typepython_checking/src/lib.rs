@@ -942,6 +942,7 @@ fn resolve_direct_name_reference_type(
 
     Some(apply_guard_narrowing(
         node,
+        nodes,
         current_owner_name,
         current_owner_type_name,
         current_line,
@@ -1046,6 +1047,7 @@ fn resolve_unnarrowed_name_reference_type(
 
 fn apply_guard_narrowing(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     current_line: usize,
@@ -1076,7 +1078,7 @@ fn apply_guard_narrowing(
         .collect::<Vec<_>>();
     if_guards.sort_by_key(|(line, _, _)| *line);
     for (_, branch_true, guard) in if_guards {
-        narrowed = apply_guard_condition(&narrowed, value_name, guard, branch_true);
+        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, branch_true);
     }
 
     let mut asserts = node
@@ -1092,7 +1094,7 @@ fn apply_guard_narrowing(
         .collect::<Vec<_>>();
     asserts.sort_by_key(|(line, _)| *line);
     for (_, guard) in asserts {
-        narrowed = apply_guard_condition(&narrowed, value_name, guard, true);
+        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, true);
     }
 
     narrowed
@@ -1116,6 +1118,8 @@ fn name_reassigned_after_line(
 }
 
 fn apply_guard_condition(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     base_type: &str,
     value_name: &str,
     guard: &typepython_binding::GuardConditionSite,
@@ -1135,11 +1139,80 @@ fn apply_guard_condition(
                 remove_instance_types(base_type, types)
             }
         }
+        typepython_binding::GuardConditionSite::PredicateCall { name, callee } if name == value_name => {
+            apply_predicate_guard(node, nodes, base_type, callee, branch_true)
+        }
         typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name && branch_true => {
             apply_truthy_narrowing(base_type)
         }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            apply_guard_condition(node, nodes, base_type, value_name, inner, !branch_true)
+        }
+        typepython_binding::GuardConditionSite::And(parts) => {
+            if branch_true {
+                parts.iter().fold(normalize_type_text(base_type), |current, part| {
+                    apply_guard_condition(node, nodes, &current, value_name, part, true)
+                })
+            } else {
+                let mut joined = Vec::new();
+                let mut current_true = normalize_type_text(base_type);
+                for part in parts {
+                    joined.push(apply_guard_condition(node, nodes, &current_true, value_name, part, false));
+                    current_true = apply_guard_condition(node, nodes, &current_true, value_name, part, true);
+                }
+                join_type_candidates(joined)
+            }
+        }
+        typepython_binding::GuardConditionSite::Or(parts) => {
+            if branch_true {
+                let mut joined = Vec::new();
+                let mut current_false = normalize_type_text(base_type);
+                for part in parts {
+                    joined.push(apply_guard_condition(node, nodes, &current_false, value_name, part, true));
+                    current_false = apply_guard_condition(node, nodes, &current_false, value_name, part, false);
+                }
+                join_type_candidates(joined)
+            } else {
+                parts.iter().fold(normalize_type_text(base_type), |current, part| {
+                    apply_guard_condition(node, nodes, &current, value_name, part, false)
+                })
+            }
+        }
         _ => normalize_type_text(base_type),
     }
+}
+
+fn apply_predicate_guard(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &str,
+    callee: &str,
+    branch_true: bool,
+) -> String {
+    let Some((kind, guarded_type)) = parse_guard_return_kind(node, nodes, callee) else {
+        return normalize_type_text(base_type);
+    };
+    match (kind.as_str(), branch_true) {
+        ("TypeGuard", true) | ("TypeIs", true) => narrow_to_instance_types(base_type, &[guarded_type]),
+        ("TypeIs", false) => remove_instance_types(base_type, &[guarded_type]),
+        _ => normalize_type_text(base_type),
+    }
+}
+
+fn parse_guard_return_kind(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(String, String)> {
+    let function = resolve_direct_function(node, nodes, callee)?;
+    let returns = normalized_direct_return_annotation(function.detail.split_once("->")?.1.trim())?;
+    if let Some(inner) = returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some((String::from("TypeGuard"), normalize_type_text(inner)));
+    }
+    if let Some(inner) = returns.strip_prefix("TypeIs[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some((String::from("TypeIs"), normalize_type_text(inner)));
+    }
+    None
 }
 
 fn narrow_to_instance_types(base_type: &str, types: &[String]) -> String {
@@ -1186,6 +1259,22 @@ fn join_union_branches(branches: Vec<String>) -> String {
     } else {
         format!("Union[{}]", branches.join(", "))
     }
+}
+
+fn join_type_candidates(candidates: Vec<String>) -> String {
+    let mut branches = Vec::new();
+    for candidate in candidates {
+        if let Some(candidate_branches) = union_branches(&candidate) {
+            for branch in candidate_branches {
+                if !branches.contains(&branch) {
+                    branches.push(branch);
+                }
+            }
+        } else if !branches.contains(&candidate) {
+            branches.push(candidate);
+        }
+    }
+    join_union_branches(branches)
 }
 
 fn apply_truthy_narrowing(base_type: &str) -> String {

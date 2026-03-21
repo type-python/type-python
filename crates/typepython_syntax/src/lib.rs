@@ -258,7 +258,11 @@ pub struct AssertStatement {
 pub enum GuardCondition {
     IsNone { name: String, negated: bool },
     IsInstance { name: String, types: Vec<String> },
+    PredicateCall { name: String, callee: String },
     TruthyName { name: String },
+    Not(Box<GuardCondition>),
+    And(Vec<GuardCondition>),
+    Or(Vec<GuardCondition>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1319,6 +1323,20 @@ fn extract_ast_backed_statement(
 
 fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> {
     match expr {
+        Expr::UnaryOp(expr) if expr.op == ruff_python_ast::UnaryOp::Not => {
+            extract_guard_condition(source, &expr.operand).map(|guard| GuardCondition::Not(Box::new(guard)))
+        }
+        Expr::BoolOp(expr) => {
+            let conditions = expr
+                .values
+                .iter()
+                .map(|value| extract_guard_condition(source, value))
+                .collect::<Option<Vec<_>>>()?;
+            match expr.op {
+                ruff_python_ast::BoolOp::And => Some(GuardCondition::And(conditions)),
+                ruff_python_ast::BoolOp::Or => Some(GuardCondition::Or(conditions)),
+            }
+        }
         Expr::Name(name) => Some(GuardCondition::TruthyName {
             name: name.id.as_str().to_owned(),
         }),
@@ -1343,12 +1361,21 @@ fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> 
             let Expr::Name(callee) = call.func.as_ref() else {
                 return None;
             };
-            if callee.id.as_str() != "isinstance" || call.arguments.args.len() != 2 {
+            if call.arguments.args.is_empty() {
                 return None;
             }
             let Expr::Name(name) = &call.arguments.args[0] else {
                 return None;
             };
+            if callee.id.as_str() != "isinstance" {
+                return Some(GuardCondition::PredicateCall {
+                    name: name.id.as_str().to_owned(),
+                    callee: callee.id.as_str().to_owned(),
+                });
+            }
+            if call.arguments.args.len() != 2 {
+                return None;
+            }
             let guard_types = match &call.arguments.args[1] {
                 Expr::Tuple(tuple) => tuple
                     .elts

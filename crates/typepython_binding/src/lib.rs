@@ -130,7 +130,11 @@ pub struct AssertGuardSite {
 pub enum GuardConditionSite {
     IsNone { name: String, negated: bool },
     IsInstance { name: String, types: Vec<String> },
+    PredicateCall { name: String, callee: String },
     TruthyName { name: String },
+    Not(Box<GuardConditionSite>),
+    And(Vec<GuardConditionSite>),
+    Or(Vec<GuardConditionSite>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -661,9 +665,22 @@ fn map_guard_condition(condition: &typepython_syntax::GuardCondition) -> GuardCo
             name: name.clone(),
             types: types.clone(),
         },
+        typepython_syntax::GuardCondition::PredicateCall { name, callee } => GuardConditionSite::PredicateCall {
+            name: name.clone(),
+            callee: callee.clone(),
+        },
         typepython_syntax::GuardCondition::TruthyName { name } => GuardConditionSite::TruthyName {
             name: name.clone(),
         },
+        typepython_syntax::GuardCondition::Not(condition) => {
+            GuardConditionSite::Not(Box::new(map_guard_condition(condition)))
+        }
+        typepython_syntax::GuardCondition::And(conditions) => {
+            GuardConditionSite::And(conditions.iter().map(map_guard_condition).collect())
+        }
+        typepython_syntax::GuardCondition::Or(conditions) => {
+            GuardConditionSite::Or(conditions.iter().map(map_guard_condition).collect())
+        }
     }
 }
 
