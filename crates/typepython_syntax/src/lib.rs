@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam};
+use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -90,7 +90,12 @@ pub enum SyntaxStatement {
     Value(ValueStatement),
     Call(CallStatement),
     MemberAccess(MemberAccessStatement),
+    MethodCall(MethodCallStatement),
     Return(ReturnStatement),
+    Yield(YieldStatement),
+    For(ForStatement),
+    With(WithStatement),
+    ExceptHandler(ExceptionHandlerStatement),
     Unsafe(UnsafeStatement),
 }
 
@@ -120,6 +125,7 @@ pub struct FunctionStatement {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub is_async: bool,
     pub is_override: bool,
     pub line: usize,
 }
@@ -147,6 +153,17 @@ pub struct ValueStatement {
     pub names: Vec<String>,
     pub annotation: Option<String>,
     pub value_type: Option<String>,
+    pub is_awaited: bool,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -170,11 +187,95 @@ pub struct MemberAccessStatement {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MethodCallStatement {
+    pub owner_name: String,
+    pub method: String,
+    pub through_instance: bool,
+    pub arg_count: usize,
+    pub arg_types: Vec<String>,
+    pub keyword_names: Vec<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReturnStatement {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
     pub value_type: Option<String>,
+    pub is_awaited: bool,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct YieldStatement {
+    pub owner_name: String,
+    pub owner_type_name: Option<String>,
+    pub value_type: Option<String>,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+    pub is_yield_from: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ForStatement {
+    pub target_name: String,
+    pub target_names: Vec<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub iter_type: Option<String>,
+    pub iter_is_awaited: bool,
+    pub iter_callee: Option<String>,
+    pub iter_name: Option<String>,
+    pub iter_member_owner_name: Option<String>,
+    pub iter_member_name: Option<String>,
+    pub iter_member_through_instance: bool,
+    pub iter_method_owner_name: Option<String>,
+    pub iter_method_name: Option<String>,
+    pub iter_method_through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct WithStatement {
+    pub target_name: Option<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub context_type: Option<String>,
+    pub context_is_awaited: bool,
+    pub context_callee: Option<String>,
+    pub context_name: Option<String>,
+    pub context_member_owner_name: Option<String>,
+    pub context_member_name: Option<String>,
+    pub context_member_through_instance: bool,
+    pub context_method_owner_name: Option<String>,
+    pub context_method_name: Option<String>,
+    pub context_method_through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ExceptionHandlerStatement {
+    pub exception_type: String,
+    pub binding_name: Option<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+    pub end_line: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -186,6 +287,7 @@ pub struct ClassMember {
     pub value_type: Option<String>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub is_async: bool,
     pub is_override: bool,
     pub is_abstract_method: bool,
     pub is_final_decorator: bool,
@@ -225,6 +327,19 @@ struct ParsedTypeParams<'source> {
     remainder: &'source str,
 }
 
+struct DirectExprMetadata {
+    value_type: Option<String>,
+    is_awaited: bool,
+    value_callee: Option<String>,
+    value_name: Option<String>,
+    value_member_owner_name: Option<String>,
+    value_member_name: Option<String>,
+    value_member_through_instance: bool,
+    value_method_owner_name: Option<String>,
+    value_method_name: Option<String>,
+    value_method_through_instance: bool,
+}
+
 /// Parses a source file into a syntax tree.
 #[must_use]
 pub fn parse(source: SourceFile) -> SyntaxTree {
@@ -256,8 +371,14 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 &[],
                 &mut diagnostics,
             ));
-            collect_return_statements(&source.text, parsed.suite(), None, &mut statements);
+            collect_return_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
+            collect_for_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_with_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_except_handler_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
+            collect_function_body_assignments(&source.text, parsed.suite(), None, &mut statements);
+            collect_function_body_bare_assignments(&source.text, parsed.suite(), None, &mut statements);
             statements.sort_by_key(statement_line);
         }
         Err(error) => {
@@ -303,6 +424,12 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     false,
                     &mut diagnostics,
                 );
+                collect_deferred_async_construct_diagnostics(
+                    &source.path,
+                    &normalized,
+                    parsed.suite(),
+                    &mut diagnostics,
+                );
                 refresh_custom_statements_from_ast(
                     &source.path,
                     &normalized,
@@ -319,8 +446,13 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                     &statements,
                     &mut diagnostics,
                 ));
-                collect_return_statements(&normalized, parsed.suite(), None, &mut statements);
+                collect_return_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_except_handler_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
+                collect_function_body_assignments(&normalized, parsed.suite(), None, &mut statements);
+                collect_function_body_bare_assignments(&normalized, parsed.suite(), None, &mut statements);
                 statements.sort_by_key(statement_line);
             }
             Err(error) => {
@@ -368,6 +500,69 @@ fn collect_invalid_annotation_placement_diagnostics(
             }
             _ => {}
         }
+    }
+}
+
+fn collect_deferred_async_construct_diagnostics(
+    path: &Path,
+    source: &str,
+    suite: &[Stmt],
+    diagnostics: &mut DiagnosticReport,
+) {
+    let mut visitor = DeferredAsyncConstructVisitor {
+        path,
+        source,
+        diagnostics,
+    };
+    visitor.visit_body(suite);
+}
+
+struct DeferredAsyncConstructVisitor<'a> {
+    path: &'a Path,
+    source: &'a str,
+    diagnostics: &'a mut DiagnosticReport,
+}
+
+impl<'a> DeferredAsyncConstructVisitor<'a> {
+    fn push_deferred(&mut self, range: ruff_text_size::TextRange, construct: &str) {
+        let line = offset_to_line_column(self.source, range.start().to_usize()).0;
+        self.diagnostics.push(
+            Diagnostic::error(
+                "TPY4010",
+                format!("{construct} in .tpy source is deferred beyond v1"),
+            )
+            .with_span(Span::new(self.path.display().to_string(), line, 1, line, 1)),
+        );
+    }
+}
+
+impl<'a> visitor::Visitor<'a> for DeferredAsyncConstructVisitor<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::FunctionDef(function) if function.is_async => {
+                self.push_deferred(function.range(), "`async def`");
+            }
+            Stmt::For(for_stmt) if for_stmt.is_async => {
+                self.push_deferred(for_stmt.range(), "`async for`");
+            }
+            Stmt::With(with_stmt) if with_stmt.is_async => {
+                self.push_deferred(with_stmt.range(), "`async with`");
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Await(await_expr) => self.push_deferred(await_expr.range(), "`await`"),
+            Expr::Yield(yield_expr) => self.push_deferred(yield_expr.range(), "`yield`"),
+            Expr::YieldFrom(yield_from_expr) => {
+                self.push_deferred(yield_from_expr.range(), "`yield from`");
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expr);
     }
 }
 
@@ -573,6 +768,7 @@ fn refresh_custom_statements_from_ast(
                             .as_ref()
                             .and_then(|returns| slice_range(normalized, returns.range()))
                             .map(str::to_owned);
+                        existing.is_async = ast_statement.is_async;
                         existing.is_override = ast_statement.decorator_list.iter().any(is_override_decorator);
                     }
                 }
@@ -621,6 +817,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     .as_ref()
                     .and_then(|returns| slice_range(normalized, returns.range()))
                     .map(str::to_owned),
+                is_async: function.is_async,
                 is_override: function.decorator_list.iter().any(is_override_decorator),
                 is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
                 is_final_decorator: function.decorator_list.iter().any(is_final_decorator),
@@ -639,6 +836,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     value_type: assign.value.as_deref().map(infer_literal_arg_type),
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -657,6 +855,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     value_type: None,
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -730,8 +929,13 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
         SyntaxStatement::Import(statement) => statement.line,
         SyntaxStatement::Value(statement) => statement.line,
         SyntaxStatement::Call(statement) => statement.line,
+        SyntaxStatement::MethodCall(statement) => statement.line,
         SyntaxStatement::MemberAccess(statement) => statement.line,
         SyntaxStatement::Return(statement) => statement.line,
+        SyntaxStatement::Yield(statement) => statement.line,
+        SyntaxStatement::For(statement) => statement.line,
+        SyntaxStatement::With(statement) => statement.line,
+        SyntaxStatement::ExceptHandler(statement) => statement.line,
         SyntaxStatement::Unsafe(statement) => statement.line,
     }
 }
@@ -761,7 +965,7 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) => line.to_owned(),
+        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -819,6 +1023,9 @@ fn extract_ast_backed_statements(
         }
         if let Some(call_statement) = extract_supplemental_call_statement(stmt, line) {
             statements.push(call_statement);
+        }
+        if let Some(method_call) = extract_method_call_statement(stmt, line) {
+            statements.push(method_call);
         }
         if let Some(member_access) = extract_member_access_statement(stmt, line) {
             statements.push(member_access);
@@ -890,6 +1097,7 @@ fn extract_ast_backed_statement(
                     .as_ref()
                     .and_then(|returns| slice_range(source, returns.range()))
                     .map(str::to_owned),
+                is_async: stmt.is_async,
                 is_override: stmt.decorator_list.iter().any(is_override_decorator),
                 line,
             };
@@ -950,10 +1158,22 @@ fn extract_ast_backed_statement(
                 .flat_map(extract_assignment_names)
                 .collect::<Vec<_>>();
             if !names.is_empty() {
+                let value = extract_direct_expr_metadata(&stmt.value);
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: None,
-                    value_type: None,
+                    value_type: value.value_type,
+                    is_awaited: value.is_awaited,
+                    value_callee: value.value_callee,
+                    value_name: value.value_name,
+                    value_member_owner_name: value.value_member_owner_name,
+                    value_member_name: value.value_member_name,
+                    value_member_through_instance: value.value_member_through_instance,
+                    value_method_owner_name: value.value_method_owner_name,
+                    value_method_name: value.value_method_name,
+                    value_method_through_instance: value.value_method_through_instance,
+                    owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -965,10 +1185,37 @@ fn extract_ast_backed_statement(
         Stmt::AnnAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
             if !names.is_empty() {
+                let value = stmt
+                    .value
+                    .as_deref()
+                    .map(extract_direct_expr_metadata)
+                    .unwrap_or(DirectExprMetadata {
+                        value_type: None,
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
-                    value_type: stmt.value.as_deref().map(infer_literal_arg_type),
+                    value_type: value.value_type,
+                    is_awaited: value.is_awaited,
+                    value_callee: value.value_callee,
+                    value_name: value.value_name,
+                    value_member_owner_name: value.value_member_owner_name,
+                    value_member_name: value.value_member_name,
+                    value_member_through_instance: value.value_member_through_instance,
+                    value_method_owner_name: value.value_method_owner_name,
+                    value_method_name: value.value_method_name,
+                    value_method_through_instance: value.value_method_through_instance,
+                    owner_name: None,
+                    owner_type_name: None,
                     is_final: is_final_annotation(&stmt.annotation),
                     is_class_var: is_classvar_annotation(&stmt.annotation),
                     line,
@@ -1004,10 +1251,65 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     }))
 }
 
+fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+    let expr = match stmt {
+        Stmt::Expr(expr) => expr.value.as_ref(),
+        Stmt::Assign(assign) => &assign.value,
+        Stmt::AnnAssign(assign) => assign.value.as_deref()?,
+        _ => return None,
+    };
+
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Attribute(attribute) = call.func.as_ref() else {
+        return None;
+    };
+
+    match attribute.value.as_ref() {
+        Expr::Name(name) => Some(SyntaxStatement::MethodCall(MethodCallStatement {
+            owner_name: name.id.as_str().to_owned(),
+            method: attribute.attr.as_str().to_owned(),
+            through_instance: false,
+            arg_count: call.arguments.args.len(),
+            arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+            keyword_names: call
+                .arguments
+                .keywords
+                .iter()
+                .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
+                .collect(),
+            line,
+        })),
+        Expr::Call(inner_call) => {
+            let Expr::Name(name) = inner_call.func.as_ref() else {
+                return None;
+            };
+            Some(SyntaxStatement::MethodCall(MethodCallStatement {
+                owner_name: name.id.as_str().to_owned(),
+                method: attribute.attr.as_str().to_owned(),
+                through_instance: true,
+                arg_count: call.arguments.args.len(),
+                arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+                keyword_names: call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
+                    .collect(),
+                line,
+            }))
+        }
+        _ => None,
+    }
+}
+
 fn infer_literal_arg_type(expr: &Expr) -> String {
     match expr {
         Expr::NumberLiteral(_) => String::from("int"),
         Expr::StringLiteral(_) => String::from("str"),
+        Expr::BooleanLiteral(_) => String::from("bool"),
+        Expr::NoneLiteral(_) => String::from("None"),
         _ => String::new(),
     }
 }
@@ -1081,6 +1383,43 @@ fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut
 fn collect_return_statements(
     source: &str,
     suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_return_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_return_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            Stmt::Try(try_stmt) => {
+                collect_return_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_return_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_return_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_return_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            _ => {
+                let Some(owner_name) = owner_name else {
+                    continue;
+                };
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if let Some(return_statement) = extract_return_statement(stmt, line, owner_name, owner_type_name) {
+                    statements.push(return_statement);
+                }
+            }
+        }
+    }
+}
+
+fn collect_yield_statements(
+    source: &str,
+    suite: &[Stmt],
     owner_type_name: Option<&str>,
     statements: &mut Vec<SyntaxStatement>,
 ) {
@@ -1089,20 +1428,427 @@ fn collect_return_statements(
             Stmt::FunctionDef(function) => {
                 for body_stmt in &function.body {
                     let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
-                    if let Some(return_statement) =
-                        extract_return_statement(body_stmt, line, function.name.as_str(), owner_type_name)
+                    if let Some(yield_statement) =
+                        extract_yield_statement(body_stmt, line, function.name.as_str(), owner_type_name)
                     {
-                        statements.push(return_statement);
+                        statements.push(yield_statement);
                     }
                 }
-                collect_return_statements(source, &function.body, owner_type_name, statements);
+                collect_yield_statements(source, &function.body, owner_type_name, statements);
             }
             Stmt::ClassDef(class_def) => {
-                collect_return_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
+                collect_yield_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
             }
             _ => {}
         }
     }
+}
+
+fn collect_for_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_for_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_for_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            _ => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if let Some(for_statement) = extract_for_statement(stmt, line, owner_name, owner_type_name) {
+                    statements.push(for_statement);
+                }
+            }
+        }
+    }
+}
+
+fn collect_with_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_with_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_with_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+            }
+            _ => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                statements.extend(extract_with_statements(stmt, line, owner_name, owner_type_name));
+            }
+        }
+    }
+}
+
+fn collect_except_handler_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_except_handler_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_except_handler_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                for handler in &try_stmt.handlers {
+                    let line = offset_to_line_column(source, handler.range().start().to_usize()).0;
+                    if let Some(statement) =
+                        extract_except_handler_statement(source, handler, line, owner_name, owner_type_name)
+                    {
+                        statements.push(statement);
+                    }
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_except_handler_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                }
+                collect_except_handler_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_except_handler_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
+                collect_except_handler_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_function_body_assignments(
+    source: &str,
+    suite: &[Stmt],
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                for body_stmt in &function.body {
+                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    if let Some(assignment) = extract_function_body_assignment_statement(
+                        source,
+                        body_stmt,
+                        line,
+                        function.name.as_str(),
+                        owner_type_name,
+                    ) {
+                        statements.push(assignment);
+                    }
+                }
+                collect_function_body_assignments(source, &function.body, owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_function_body_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_function_body_bare_assignments(
+    source: &str,
+    suite: &[Stmt],
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                for body_stmt in &function.body {
+                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    if let Some(assignment) = extract_function_body_bare_assignment_statement(
+                        body_stmt,
+                        line,
+                        function.name.as_str(),
+                        owner_type_name,
+                    ) {
+                        statements.push(assignment);
+                    }
+                }
+                collect_function_body_bare_assignments(source, &function.body, owner_type_name, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_function_body_bare_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_function_body_assignment_statement(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+    owner_name: &str,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::AnnAssign(assign) = stmt else {
+        return None;
+    };
+    let names = extract_assignment_names(&assign.target);
+    if names.is_empty() {
+        return None;
+    }
+    let value = assign
+        .value
+        .as_deref()
+        .map(extract_direct_expr_metadata)
+        .unwrap_or(DirectExprMetadata {
+            value_type: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+});
+    Some(SyntaxStatement::Value(ValueStatement {
+        names,
+        annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
+        value_type: value.value_type,
+        is_awaited: value.is_awaited,
+        value_callee: value.value_callee,
+        value_name: value.value_name,
+        value_member_owner_name: value.value_member_owner_name,
+        value_member_name: value.value_member_name,
+        value_member_through_instance: value.value_member_through_instance,
+        value_method_owner_name: value.value_method_owner_name,
+        value_method_name: value.value_method_name,
+        value_method_through_instance: value.value_method_through_instance,
+        owner_name: Some(owner_name.to_owned()),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        is_final: is_final_annotation(&assign.annotation),
+        is_class_var: is_classvar_annotation(&assign.annotation),
+        line,
+    }))
+}
+
+fn extract_function_body_bare_assignment_statement(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: &str,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::Assign(assign) = stmt else {
+        return None;
+    };
+    let names = assign.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+    if names.is_empty() {
+        return None;
+    }
+    let value = extract_direct_expr_metadata(&assign.value);
+    Some(SyntaxStatement::Value(ValueStatement {
+        names,
+        annotation: None,
+        value_type: value.value_type,
+        is_awaited: value.is_awaited,
+        value_callee: value.value_callee,
+        value_name: value.value_name,
+        value_member_owner_name: value.value_member_owner_name,
+        value_member_name: value.value_member_name,
+        value_member_through_instance: value.value_member_through_instance,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+owner_name: Some(owner_name.to_owned()),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        is_final: false,
+        is_class_var: false,
+        line,
+    }))
+}
+
+fn extract_yield_statement(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: &str,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::Expr(expr_stmt) = stmt else {
+        return None;
+    };
+
+    let (value, is_yield_from) = match expr_stmt.value.as_ref() {
+        Expr::Yield(yield_expr) => (
+            yield_expr
+                .value
+                .as_deref()
+                .map(extract_direct_expr_metadata)
+                .unwrap_or(DirectExprMetadata {
+                    value_type: None,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                }),
+            false,
+        ),
+        Expr::YieldFrom(yield_expr) => (extract_direct_expr_metadata(&yield_expr.value), true),
+        _ => return None,
+    };
+
+    Some(SyntaxStatement::Yield(YieldStatement {
+        owner_name: owner_name.to_owned(),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        value_type: value.value_type,
+        value_callee: value.value_callee,
+        value_name: value.value_name,
+        value_member_owner_name: value.value_member_owner_name,
+        value_member_name: value.value_member_name,
+        value_member_through_instance: value.value_member_through_instance,
+        value_method_owner_name: value.value_method_owner_name,
+        value_method_name: value.value_method_name,
+        value_method_through_instance: value.value_method_through_instance,
+        is_yield_from,
+        line,
+    }))
+}
+
+fn extract_for_statement(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let Stmt::For(for_stmt) = stmt else {
+        return None;
+    };
+    if for_stmt.is_async {
+        return None;
+    }
+    let (target_name, target_names) = match &*for_stmt.target {
+        Expr::Name(name) => (name.id.as_str().to_owned(), Vec::new()),
+        Expr::Tuple(tuple) => {
+            let names = tuple
+                .elts
+                .iter()
+                .map(|elt| {
+                    let Expr::Name(name) = elt else {
+                        return None;
+                    };
+                    Some(name.id.as_str().to_owned())
+                })
+                .collect::<Option<Vec<_>>>()?;
+            (String::new(), names)
+        }
+        _ => return None,
+    };
+    let iter = extract_direct_expr_metadata(&for_stmt.iter);
+    Some(SyntaxStatement::For(ForStatement {
+        target_name,
+        target_names,
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        iter_type: iter.value_type,
+        iter_is_awaited: iter.is_awaited,
+        iter_callee: iter.value_callee,
+        iter_name: iter.value_name,
+        iter_member_owner_name: iter.value_member_owner_name,
+        iter_member_name: iter.value_member_name,
+        iter_member_through_instance: iter.value_member_through_instance,
+        iter_method_owner_name: iter.value_method_owner_name,
+        iter_method_name: iter.value_method_name,
+        iter_method_through_instance: iter.value_method_through_instance,
+        line,
+    }))
+}
+
+fn extract_with_statements(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Vec<SyntaxStatement> {
+    let Stmt::With(with_stmt) = stmt else {
+        return Vec::new();
+    };
+    if with_stmt.is_async {
+        return Vec::new();
+    }
+    with_stmt
+        .items
+        .iter()
+        .filter_map(|item| {
+            let target_name = match item.optional_vars.as_deref() {
+                Some(Expr::Name(name)) => Some(name.id.as_str().to_owned()),
+                Some(_) => return None,
+                None => None,
+            };
+            let context = extract_direct_expr_metadata(&item.context_expr);
+            Some(SyntaxStatement::With(WithStatement {
+                target_name,
+                owner_name: owner_name.map(str::to_owned),
+                owner_type_name: owner_type_name.map(str::to_owned),
+                context_type: context.value_type,
+                context_is_awaited: context.is_awaited,
+                context_callee: context.value_callee,
+                context_name: context.value_name,
+                context_member_owner_name: context.value_member_owner_name,
+                context_member_name: context.value_member_name,
+                context_member_through_instance: context.value_member_through_instance,
+                context_method_owner_name: context.value_method_owner_name,
+                context_method_name: context.value_method_name,
+                context_method_through_instance: context.value_method_through_instance,
+                line,
+            }))
+        })
+        .collect()
+}
+
+fn extract_except_handler_statement(
+    source: &str,
+    handler: &ruff_python_ast::ExceptHandler,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<SyntaxStatement> {
+    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+    Some(SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {
+        exception_type: handler
+            .type_
+            .as_ref()
+            .and_then(|expr| slice_range(source, expr.range()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| String::from("BaseException")),
+        binding_name: handler.name.as_ref().map(|name| name.as_str().to_owned()),
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        line,
+        end_line: offset_to_line_column(source, handler.range.end().to_usize()).0,
+    }))
 }
 
 fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
@@ -1129,12 +1875,148 @@ fn extract_return_statement(
         return None;
     };
 
+    let value = return_stmt
+        .value
+        .as_deref()
+        .map(extract_direct_expr_metadata)
+        .unwrap_or(DirectExprMetadata {
+            value_type: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+        });
+
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
         owner_type_name: owner_type_name.map(str::to_owned),
-        value_type: return_stmt.value.as_deref().map(infer_literal_arg_type),
+        value_type: value.value_type,
+        is_awaited: value.is_awaited,
+        value_callee: value.value_callee,
+        value_name: value.value_name,
+        value_member_owner_name: value.value_member_owner_name,
+        value_member_name: value.value_member_name,
+        value_member_through_instance: value.value_member_through_instance,
+        value_method_owner_name: value.value_method_owner_name,
+        value_method_name: value.value_method_name,
+        value_method_through_instance: value.value_method_through_instance,
         line,
     }))
+}
+
+fn extract_direct_expr_metadata(expr: &Expr) -> DirectExprMetadata {
+    if let Expr::Await(await_expr) = expr {
+        let mut metadata = extract_direct_expr_metadata(&await_expr.value);
+        metadata.is_awaited = true;
+        return metadata;
+    }
+
+    if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: Some(owner_name),
+            value_method_name: Some(method_name),
+            value_method_through_instance: through_instance,
+        };
+    }
+
+    let member = extract_direct_member_access(expr);
+    DirectExprMetadata {
+        value_type: Some(infer_literal_arg_type(expr)),
+        is_awaited: false,
+        value_callee: extract_direct_callee(expr),
+        value_name: extract_direct_name(expr),
+        value_member_owner_name: member.as_ref().map(|(owner_name, _, _)| owner_name.clone()),
+        value_member_name: member.as_ref().map(|(_, member, _)| member.clone()),
+        value_member_through_instance: member
+            .as_ref()
+            .map(|(_, _, through_instance)| *through_instance)
+            .unwrap_or(false),
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+    }
+}
+
+fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Attribute(attribute) = call.func.as_ref() else {
+        return None;
+    };
+
+    match attribute.value.as_ref() {
+        Expr::Name(name) => Some((
+            name.id.as_str().to_owned(),
+            attribute.attr.as_str().to_owned(),
+            false,
+        )),
+        Expr::Call(inner_call) => {
+            let Expr::Name(name) = inner_call.func.as_ref() else {
+                return None;
+            };
+            Some((
+                name.id.as_str().to_owned(),
+                attribute.attr.as_str().to_owned(),
+                true,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn extract_direct_callee(expr: &Expr) -> Option<String> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Name(name) = call.func.as_ref() else {
+        return None;
+    };
+    Some(name.id.as_str().to_owned())
+}
+
+fn extract_direct_name(expr: &Expr) -> Option<String> {
+    let Expr::Name(name) = expr else {
+        return None;
+    };
+    Some(name.id.as_str().to_owned())
+}
+
+fn extract_direct_member_access(expr: &Expr) -> Option<(String, String, bool)> {
+    let Expr::Attribute(attribute) = expr else {
+        return None;
+    };
+
+    match attribute.value.as_ref() {
+        Expr::Name(name) => Some((
+            name.id.as_str().to_owned(),
+            attribute.attr.as_str().to_owned(),
+            false,
+        )),
+        Expr::Call(call) => {
+            let Expr::Name(name) = call.func.as_ref() else {
+                return None;
+            };
+            Some((
+                name.id.as_str().to_owned(),
+                attribute.attr.as_str().to_owned(),
+                true,
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn extract_ast_type_params(
@@ -1577,6 +2459,7 @@ fn parse_function(
         type_params: parsed_type_params.type_params,
         params: Vec::new(),
         returns: None,
+        is_async: false,
         is_override: false,
         line: line_number,
     }))
@@ -1880,8 +2763,8 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        ImportStatement, MemberAccessStatement, MethodKind, ReturnStatement,
-        NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
+        ExceptionHandlerStatement, ForStatement, ImportStatement, MemberAccessStatement, MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
+        YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
         TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
@@ -1959,6 +2842,7 @@ mod tests {
                         annotation: None,
                     }],
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 8,
                 }),
@@ -2050,6 +2934,7 @@ mod tests {
                         annotation: None,
                     }],
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 8,
                 }),
@@ -2177,6 +3062,7 @@ mod tests {
                     annotation: Some(String::from("str")),
                 }],
                 returns: Some(String::from("int")),
+                is_async: false,
                 is_override: false,
                 line: 1,
             })]
@@ -2218,15 +3104,25 @@ mod tests {
                     annotation: None,
                 }],
                 returns: None,
+                is_async: false,
                 is_override: false,
                 line: 1,
             }),
-            SyntaxStatement::Return(ReturnStatement {
-                owner_name: String::from("unsafe"),
-                owner_type_name: None,
-                value_type: Some(String::new()),
-                line: 2,
-            })]
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("unsafe"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                })]
         );
     }
 
@@ -2285,6 +3181,7 @@ mod tests {
                         annotation: Some(String::from("str")),
                     }],
                     returns: Some(String::from("int")),
+                    is_async: false,
                     is_override: false,
                     line: 3,
                 }),
@@ -2344,6 +3241,7 @@ mod tests {
                         annotation: Some(String::from("T")),
                     }],
                     returns: Some(String::from("T")),
+                    is_async: false,
                     is_override: false,
                     line: 4,
                 }),
@@ -2351,7 +3249,16 @@ mod tests {
                     owner_name: String::from("first"),
                     owner_type_name: None,
                     value_type: Some(String::new()),
-                    line: 5,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 5,
                 }),
             ]
         );
@@ -2403,6 +3310,17 @@ mod tests {
                     names: vec![String::from("value")],
                     annotation: Some(String::from("int")),
                     value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
                     line: 3,
@@ -2410,10 +3328,259 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("a"), String::from("b")],
                     annotation: None,
-                    value_type: None,
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
                     line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_annotated_assignment_direct_rhs_forms() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "value: int = helper()\ncopy: str = source\nfield: str = box.value\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("value")],
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("helper"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: Vec::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("copy")],
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("source")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("field")],
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("value")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 3,
+                }),
+                SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    owner_name: String::from("box"),
+                    member: String::from("value"),
+                    through_instance: false,
+                    line: 3,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_function_body_annotated_assignments() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(value: str) -> None:\n    result: int = value\n    item: str = helper()\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("str")),
+                    }],
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("result")],
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("helper"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: Vec::new(),
+                    line: 3,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("item")],
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 3,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_function_body_bare_assignments() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("module.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build() -> None:\n    value = helper()\n    field = box.item\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("helper"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: Vec::new(),
+                    line: 2,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("value")],
+                    annotation: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("field")],
+                    annotation: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("item")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 3,
                 }),
             ]
         );
@@ -2464,7 +3631,18 @@ mod tests {
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
                     annotation: None,
-                    value_type: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("Factory")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
                     line: 2,
@@ -2542,6 +3720,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    is_async: false,
                     is_override: false,
                     line: 1,
                 }),
@@ -2574,6 +3753,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    is_async: false,
                     is_override: false,
                     line: 1,
                 }),
@@ -2581,7 +3761,168 @@ mod tests {
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value_type: Some(String::from("str")),
-                    line: 2,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_direct_bool_and_none_return_literals() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("returns.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def truthy() -> bool:\n    return True\n\ndef missing() -> None:\n    return None\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("truthy"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("bool")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("truthy"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("bool")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("missing"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 4,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("missing"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("None")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 5,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_direct_return_call_callee() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("returns.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def build() -> int:\n    return helper()\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("int")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_direct_return_member_access() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("returns.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def build(box: Box) -> str:\n    return box.value\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("box"),
+                        annotation: Some(String::from("Box")),
+                    }],
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("value")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
                 }),
             ]
         );
@@ -2610,6 +3951,41 @@ mod tests {
                     owner_name: String::from("Box"),
                     member: String::from("value"),
                     through_instance: true,
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_extracts_direct_method_calls() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("method-call.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("Box.run(1)\nBox().build(x=1)\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::MethodCall(MethodCallStatement {
+                    owner_name: String::from("Box"),
+                    method: String::from("run"),
+                    through_instance: false,
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    keyword_names: Vec::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::MethodCall(MethodCallStatement {
+                    owner_name: String::from("Box"),
+                    method: String::from("build"),
+                    through_instance: true,
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: vec![String::from("x")],
                     line: 2,
                 }),
             ]
@@ -2647,6 +4023,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -2662,6 +4039,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -2680,6 +4058,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("int")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -2740,6 +4119,7 @@ mod tests {
                                 },
                             ],
                             returns: Some(String::from("int")),
+                            is_async: false,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
@@ -2764,6 +4144,7 @@ mod tests {
                                 },
                             ],
                             returns: None,
+                            is_async: false,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
@@ -2778,7 +4159,16 @@ mod tests {
                     owner_name: String::from("parse"),
                     owner_type_name: Some(String::from("Parser")),
                     value_type: Some(String::from("int")),
-                    line: 8,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 8,
                 }),
             ]
         );
@@ -2810,6 +4200,17 @@ mod tests {
                     names: vec![String::from("MAX_SIZE")],
                     annotation: Some(String::from("Final")),
                     value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: true,
                     is_class_var: false,
                     line: 2,
@@ -2829,6 +4230,7 @@ mod tests {
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -2882,6 +4284,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("None")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
@@ -2921,6 +4324,17 @@ mod tests {
                     names: vec![String::from("VALUE")],
                     annotation: Some(String::from("ClassVar[int]")),
                     value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: true,
                     line: 2,
@@ -2940,6 +4354,7 @@ mod tests {
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -3001,6 +4416,678 @@ mod tests {
     }
 
     #[test]
+    fn parse_rejects_deferred_async_constructs_in_typepython_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("async-deferred.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "async def fetch() -> int:\n    await work()\n    async for item in stream:\n        pass\n    async with manager:\n        pass\n\ndef produce():\n    yield 1\n\ndef relay():\n    yield from produce()\n",
+            ),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4010"));
+        assert!(rendered.contains("`async def` in .tpy source is deferred beyond v1"));
+        assert!(rendered.contains("`await` in .tpy source is deferred beyond v1"));
+        assert!(rendered.contains("`async for` in .tpy source is deferred beyond v1"));
+        assert!(rendered.contains("`async with` in .tpy source is deferred beyond v1"));
+        assert!(rendered.contains("`yield` in .tpy source is deferred beyond v1"));
+        assert!(rendered.contains("`yield from` in .tpy source is deferred beyond v1"));
+    }
+
+    #[test]
+    fn parse_allows_async_constructs_in_python_passthrough_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("async.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("async def fetch() -> int:\n    return 1\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(!rendered.contains("TPY4010"));
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("fetch"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("int")),
+                    is_async: true,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("fetch"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_await_in_python_passthrough_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("await.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "async def fetch() -> int:\n    return 1\n\nasync def build() -> int:\n    return await fetch()\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("fetch"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("int")),
+                    is_async: true,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("fetch"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 2,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("int")),
+                    is_async: true,
+                    is_override: false,
+                    line: 4,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: true,
+                    value_callee: Some(String::from("fetch")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 5,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_yield_in_python_passthrough_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("yield.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def produce() -> Generator[int, None, None]:\n    yield 1\n\ndef relay() -> Generator[int, None, None]:\n    yield from values\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("produce"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("Generator[int, None, None]")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Yield(YieldStatement {
+                    owner_name: String::from("produce"),
+                    owner_type_name: None,
+                    value_type: Some(String::from("int")),
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+is_yield_from: false,
+                    line: 2,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("relay"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("Generator[int, None, None]")),
+                    is_async: false,
+                    is_override: false,
+                    line: 4,
+                }),
+                SyntaxStatement::Yield(YieldStatement {
+                    owner_name: String::from("relay"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    value_callee: None,
+                    value_name: Some(String::from("values")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+is_yield_from: true,
+                    line: 5,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_method_call_result_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("methods.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(box: Box) -> str:\n    result: str = box.get()\n    return box.get()\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("box"),
+                        annotation: Some(String::from("Box")),
+                    }],
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("result")],
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: Some(String::from("box")),
+                    value_method_name: Some(String::from("get")),
+                    value_method_through_instance: false,
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: Some(String::from("box")),
+                    value_method_name: Some(String::from("get")),
+                    value_method_through_instance: false,
+                    line: 3,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_method_call_result_metadata_through_instance() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("methods.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build() -> str:\n    return make_box().get()\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: Some(String::from("make_box")),
+                    value_method_name: Some(String::from("get")),
+                    value_method_through_instance: true,
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_simple_for_loop_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("for_loop.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(values: list[int]) -> int:\n    for item in values:\n        pass\n    return item\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("values"),
+                        annotation: Some(String::from("list[int]")),
+                    }],
+                    returns: Some(String::from("int")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::For(ForStatement {
+                    target_name: String::from("item"),
+                    target_names: Vec::new(),
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    iter_type: Some(String::new()),
+                    iter_is_awaited: false,
+                    iter_callee: None,
+                    iter_name: Some(String::from("values")),
+                    iter_member_owner_name: None,
+                    iter_member_name: None,
+                    iter_member_through_instance: false,
+                    iter_method_owner_name: None,
+                    iter_method_name: None,
+                    iter_method_through_instance: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("item")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_tuple_for_loop_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("for_loop.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def build(pairs: tuple[tuple[int, str]]) -> str:\n    for a, b in pairs:\n        pass\n    return b\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("pairs"),
+                        annotation: Some(String::from("tuple[tuple[int, str]]")),
+                    }],
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::For(ForStatement {
+                    target_name: String::new(),
+                    target_names: vec![String::from("a"), String::from("b")],
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    iter_type: Some(String::new()),
+                    iter_is_awaited: false,
+                    iter_callee: None,
+                    iter_name: Some(String::from("pairs")),
+                    iter_member_owner_name: None,
+                    iter_member_name: None,
+                    iter_member_through_instance: false,
+                    iter_method_owner_name: None,
+                    iter_method_name: None,
+                    iter_method_through_instance: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("b")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_simple_with_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("with_stmt.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(manager: Manager) -> str:\n    with manager as value:\n        pass\n    return value\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("manager"),
+                        annotation: Some(String::from("Manager")),
+                    }],
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::With(WithStatement {
+                    target_name: Some(String::from("value")),
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    context_type: Some(String::new()),
+                    context_is_awaited: false,
+                    context_callee: None,
+                    context_name: Some(String::from("manager")),
+                    context_member_owner_name: None,
+                    context_member_name: None,
+                    context_member_through_instance: false,
+                    context_method_owner_name: None,
+                    context_method_name: None,
+                    context_method_through_instance: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_with_item_without_target() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("with_stmt.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def build(manager: Manager) -> None:\n    with manager:\n        pass\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam {
+                        name: String::from("manager"),
+                        annotation: Some(String::from("Manager")),
+                    }],
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::With(WithStatement {
+                    target_name: None,
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    context_type: Some(String::new()),
+                    context_is_awaited: false,
+                    context_callee: None,
+                    context_name: Some(String::from("manager")),
+                    context_member_owner_name: None,
+                    context_member_name: None,
+                    context_member_through_instance: false,
+                    context_method_owner_name: None,
+                    context_method_name: None,
+                    context_method_through_instance: false,
+                    line: 2,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_multiple_with_items() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("with_stmt.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(a: A, b: B) -> str:\n    with a as x, b as y:\n        pass\n    return y\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![
+                        FunctionParam {
+                            name: String::from("a"),
+                            annotation: Some(String::from("A")),
+                        },
+                        FunctionParam {
+                            name: String::from("b"),
+                            annotation: Some(String::from("B")),
+                        },
+                    ],
+                    returns: Some(String::from("str")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::With(WithStatement {
+                    target_name: Some(String::from("x")),
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    context_type: Some(String::new()),
+                    context_is_awaited: false,
+                    context_callee: None,
+                    context_name: Some(String::from("a")),
+                    context_member_owner_name: None,
+                    context_member_name: None,
+                    context_member_through_instance: false,
+                    context_method_owner_name: None,
+                    context_method_name: None,
+                    context_method_through_instance: false,
+                    line: 2,
+                }),
+                SyntaxStatement::With(WithStatement {
+                    target_name: Some(String::from("y")),
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    context_type: Some(String::new()),
+                    context_is_awaited: false,
+                    context_callee: None,
+                    context_name: Some(String::from("b")),
+                    context_member_owner_name: None,
+                    context_member_name: None,
+                    context_member_through_instance: false,
+                    context_method_owner_name: None,
+                    context_method_name: None,
+                    context_method_through_instance: false,
+                    line: 2,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("y")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_except_handler_binding() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("try_stmt.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build() -> ValueError:\n    try:\n        risky()\n    except ValueError as e:\n        return e\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("ValueError")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {
+                    exception_type: String::from("ValueError"),
+                    binding_name: Some(String::from("e")),
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    line: 4,
+                    end_line: 5,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("e")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 5,
+                }),
+            ]
+        );
+    }
+
+    #[test]
     fn parse_retains_function_signature_shapes() {
         let tree = parse(SourceFile {
             path: PathBuf::from("signatures.py"),
@@ -3031,6 +5118,7 @@ mod tests {
                         annotation: Some(String::from("str")),
                     }],
                     returns: Some(String::from("int")),
+                    is_async: false,
                     is_override: false,
                     line: 3,
                 }),
@@ -3042,6 +5130,7 @@ mod tests {
                         annotation: Some(String::from("int")),
                     }],
                     returns: Some(String::from("str")),
+                    is_async: false,
                     is_override: false,
                     line: 6,
                 }),
@@ -3049,7 +5138,16 @@ mod tests {
                     owner_name: String::from("build"),
                     owner_type_name: None,
                     value_type: Some(String::from("str")),
-                    line: 7,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+line: 7,
                 }),
             ]
         );
@@ -3082,6 +5180,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    is_async: false,
                     is_override: true,
                     line: 3,
                 }),
@@ -3103,6 +5202,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("None")),
+                        is_async: false,
                         is_override: true,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -3156,6 +5256,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("None")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: true,
                         is_final_decorator: false,
@@ -3202,6 +5303,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("None")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -3217,6 +5319,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: Some(String::from("None")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -3235,6 +5338,7 @@ mod tests {
                             annotation: None,
                         }],
                         returns: Some(String::from("str")),
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -3249,7 +5353,16 @@ mod tests {
                 owner_name: String::from("name"),
                 owner_type_name: Some(String::from("Box")),
                 value_type: Some(String::from("str")),
-                line: 12,
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+line: 12,
             })]
         );
     }

@@ -11,8 +11,14 @@ pub struct BindingTable {
     pub module_kind: SourceKind,
     pub declarations: Vec<Declaration>,
     pub calls: Vec<CallSite>,
+    pub method_calls: Vec<MethodCallSite>,
     pub member_accesses: Vec<MemberAccessSite>,
     pub returns: Vec<ReturnSite>,
+    pub yields: Vec<YieldSite>,
+    pub for_loops: Vec<ForSite>,
+    pub with_statements: Vec<WithSite>,
+    pub except_handlers: Vec<ExceptHandlerSite>,
+    pub assignments: Vec<AssignmentSite>,
 }
 
 impl Default for BindingTable {
@@ -23,8 +29,14 @@ impl Default for BindingTable {
             module_kind: SourceKind::TypePython,
             declarations: Vec::new(),
             calls: Vec::new(),
+            method_calls: Vec::new(),
             member_accesses: Vec::new(),
             returns: Vec::new(),
+            yields: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
         }
     }
 }
@@ -45,10 +57,113 @@ pub struct MemberAccessSite {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct MethodCallSite {
+    pub owner_name: String,
+    pub method: String,
+    pub through_instance: bool,
+    pub arg_count: usize,
+    pub arg_types: Vec<String>,
+    pub keyword_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ReturnSite {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
     pub value_type: Option<String>,
+    pub is_awaited: bool,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct YieldSite {
+    pub owner_name: String,
+    pub owner_type_name: Option<String>,
+    pub value_type: Option<String>,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+    pub is_yield_from: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ForSite {
+    pub target_name: String,
+    pub target_names: Vec<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub iter_type: Option<String>,
+    pub iter_is_awaited: bool,
+    pub iter_callee: Option<String>,
+    pub iter_name: Option<String>,
+    pub iter_member_owner_name: Option<String>,
+    pub iter_member_name: Option<String>,
+    pub iter_member_through_instance: bool,
+    pub iter_method_owner_name: Option<String>,
+    pub iter_method_name: Option<String>,
+    pub iter_method_through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct WithSite {
+    pub target_name: Option<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub context_type: Option<String>,
+    pub context_is_awaited: bool,
+    pub context_callee: Option<String>,
+    pub context_name: Option<String>,
+    pub context_member_owner_name: Option<String>,
+    pub context_member_name: Option<String>,
+    pub context_member_through_instance: bool,
+    pub context_method_owner_name: Option<String>,
+    pub context_method_name: Option<String>,
+    pub context_method_through_instance: bool,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ExceptHandlerSite {
+    pub exception_type: String,
+    pub binding_name: Option<String>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AssignmentSite {
+    pub name: String,
+    pub annotation: Option<String>,
+    pub value_type: Option<String>,
+    pub is_awaited: bool,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -60,6 +175,7 @@ pub struct Declaration {
     pub method_kind: Option<MethodKind>,
     pub class_kind: Option<DeclarationOwnerKind>,
     pub owner: Option<DeclarationOwner>,
+    pub is_async: bool,
     pub is_override: bool,
     pub is_abstract_method: bool,
     pub is_final_decorator: bool,
@@ -116,6 +232,21 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 _ => None,
             })
             .collect(),
+        method_calls: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::MethodCall(statement) => Some(MethodCallSite {
+                    owner_name: statement.owner_name.clone(),
+                    method: statement.method.clone(),
+                    through_instance: statement.through_instance,
+                    arg_count: statement.arg_count,
+                    arg_types: statement.arg_types.clone(),
+                    keyword_names: statement.keyword_names.clone(),
+                }),
+                _ => None,
+            })
+            .collect(),
         member_accesses: tree
             .statements
             .iter()
@@ -136,8 +267,131 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     value_type: statement.value_type.clone(),
+                    is_awaited: statement.is_awaited,
+                    value_callee: statement.value_callee.clone(),
+                    value_name: statement.value_name.clone(),
+                    value_member_owner_name: statement.value_member_owner_name.clone(),
+                    value_member_name: statement.value_member_name.clone(),
+                    value_member_through_instance: statement.value_member_through_instance,
+                    value_method_owner_name: statement.value_method_owner_name.clone(),
+                    value_method_name: statement.value_method_name.clone(),
+                    value_method_through_instance: statement.value_method_through_instance,
+                    line: statement.line,
                 }),
                 _ => None,
+            })
+            .collect(),
+        yields: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Yield(statement) => Some(YieldSite {
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    value_type: statement.value_type.clone(),
+                    value_callee: statement.value_callee.clone(),
+                    value_name: statement.value_name.clone(),
+                    value_member_owner_name: statement.value_member_owner_name.clone(),
+                    value_member_name: statement.value_member_name.clone(),
+                    value_member_through_instance: statement.value_member_through_instance,
+                    value_method_owner_name: statement.value_method_owner_name.clone(),
+                    value_method_name: statement.value_method_name.clone(),
+                    value_method_through_instance: statement.value_method_through_instance,
+                    is_yield_from: statement.is_yield_from,
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        for_loops: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::For(statement) => Some(ForSite {
+                    target_name: statement.target_name.clone(),
+                    target_names: statement.target_names.clone(),
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    iter_type: statement.iter_type.clone(),
+                    iter_is_awaited: statement.iter_is_awaited,
+                    iter_callee: statement.iter_callee.clone(),
+                    iter_name: statement.iter_name.clone(),
+                    iter_member_owner_name: statement.iter_member_owner_name.clone(),
+                    iter_member_name: statement.iter_member_name.clone(),
+                    iter_member_through_instance: statement.iter_member_through_instance,
+                    iter_method_owner_name: statement.iter_method_owner_name.clone(),
+                    iter_method_name: statement.iter_method_name.clone(),
+                    iter_method_through_instance: statement.iter_method_through_instance,
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        with_statements: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::With(statement) => Some(WithSite {
+                    target_name: statement.target_name.clone(),
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    context_type: statement.context_type.clone(),
+                    context_is_awaited: statement.context_is_awaited,
+                    context_callee: statement.context_callee.clone(),
+                    context_name: statement.context_name.clone(),
+                    context_member_owner_name: statement.context_member_owner_name.clone(),
+                    context_member_name: statement.context_member_name.clone(),
+                    context_member_through_instance: statement.context_member_through_instance,
+                    context_method_owner_name: statement.context_method_owner_name.clone(),
+                    context_method_name: statement.context_method_name.clone(),
+                    context_method_through_instance: statement.context_method_through_instance,
+                    line: statement.line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        except_handlers: tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::ExceptHandler(statement) => Some(ExceptHandlerSite {
+                    exception_type: statement.exception_type.clone(),
+                    binding_name: statement.binding_name.clone(),
+                    owner_name: statement.owner_name.clone(),
+                    owner_type_name: statement.owner_type_name.clone(),
+                    line: statement.line,
+                    end_line: statement.end_line,
+                }),
+                _ => None,
+            })
+            .collect(),
+        assignments: tree
+            .statements
+            .iter()
+            .flat_map(|statement| match statement {
+                SyntaxStatement::Value(statement) => statement
+                    .names
+                    .iter()
+                    .cloned()
+                    .map(|name| AssignmentSite {
+                        name,
+                        annotation: statement.annotation.clone(),
+                        value_type: statement.value_type.clone(),
+                        is_awaited: statement.is_awaited,
+                        value_callee: statement.value_callee.clone(),
+                        value_name: statement.value_name.clone(),
+                        value_member_owner_name: statement.value_member_owner_name.clone(),
+                        value_member_name: statement.value_member_name.clone(),
+                        value_member_through_instance: statement.value_member_through_instance,
+                        value_method_owner_name: statement.value_method_owner_name.clone(),
+                        value_method_name: statement.value_method_name.clone(),
+                        value_method_through_instance: statement.value_method_through_instance,
+                        owner_name: statement.owner_name.clone(),
+                        owner_type_name: statement.owner_type_name.clone(),
+                        line: statement.line,
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
             })
             .collect(),
     }
@@ -153,6 +407,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             method_kind: None,
             class_kind: None,
             owner: None,
+            is_async: false,
             is_override: false,
             is_abstract_method: false,
             is_final_decorator: false,
@@ -172,6 +427,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             method_kind: None,
             class_kind: None,
             owner: None,
+            is_async: statement.is_async,
             is_override: false,
             is_abstract_method: false,
             is_final_decorator: false,
@@ -187,6 +443,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             method_kind: None,
             class_kind: None,
             owner: None,
+            is_async: statement.is_async,
             is_override: statement.is_override,
             is_abstract_method: false,
             is_final_decorator: false,
@@ -205,6 +462,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 method_kind: None,
                 class_kind: None,
                 owner: None,
+                is_async: false,
                 is_override: false,
                 is_abstract_method: false,
                 is_final_decorator: false,
@@ -214,6 +472,12 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             })
             .collect(),
         SyntaxStatement::Value(statement) => statement
+            .owner_name
+            .is_none()
+            .then_some(statement)
+            .into_iter()
+            .flat_map(|statement| {
+                statement
             .names
             .iter()
             .cloned()
@@ -225,6 +489,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 method_kind: None,
                 class_kind: None,
                 owner: None,
+                is_async: false,
                 is_override: false,
                 is_abstract_method: false,
                 is_final_decorator: false,
@@ -232,10 +497,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 is_class_var: statement.is_class_var,
                 bases: Vec::new(),
             })
+            .collect::<Vec<_>>()
+            })
             .collect(),
         SyntaxStatement::Call(_) => Vec::new(),
+        SyntaxStatement::MethodCall(_) => Vec::new(),
         SyntaxStatement::MemberAccess(_) => Vec::new(),
         SyntaxStatement::Return(_) => Vec::new(),
+        SyntaxStatement::Yield(_) => Vec::new(),
+        SyntaxStatement::For(_) => Vec::new(),
+        SyntaxStatement::With(_) => Vec::new(),
+        SyntaxStatement::ExceptHandler(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
 }
@@ -256,6 +528,7 @@ fn bind_named_block(
         method_kind: None,
         class_kind: Some(owner_kind),
         owner: None,
+        is_async: false,
         is_override: false,
         is_abstract_method: false,
         is_final_decorator: statement.is_final_decorator,
@@ -280,6 +553,7 @@ fn bind_named_block(
         method_kind: member.method_kind,
         class_kind: None,
         owner: Some(owner.clone()),
+        is_async: member.is_async,
         is_override: member.is_override,
         is_abstract_method: member.is_abstract_method,
         is_final_decorator: member.is_final_decorator,
@@ -307,7 +581,7 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
 
 #[cfg(test)]
 mod tests {
-    use super::{Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind};
+    use super::{AssignmentSite, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, ExceptHandlerSite, ForSite, WithSite, YieldSite, bind};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -348,6 +622,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 3,
                 }),
@@ -368,6 +643,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -383,6 +659,7 @@ mod tests {
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -398,6 +675,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -407,6 +685,32 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn bind_marks_async_functions() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/fetch.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("fetch"),
+                type_params: Vec::new(),
+                params: Vec::new(),
+                returns: Some(String::from("int")),
+                is_async: true,
+                is_override: false,
+                line: 1,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert!(table.declarations[0].is_async);
+        assert_eq!(table.declarations[0].detail, String::from("()->int"));
     }
 
     #[test]
@@ -427,6 +731,7 @@ mod tests {
                     }],
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 1,
                 }),
@@ -435,6 +740,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: false,
                     line: 2,
                 }),
@@ -453,6 +759,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -468,6 +775,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -506,6 +814,17 @@ mod tests {
                     names: vec![String::from("value"), String::from("count")],
                     annotation: None,
                     value_type: None,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
                     line: 2,
@@ -525,6 +844,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -540,6 +860,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -555,6 +876,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -570,6 +892,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -578,6 +901,414 @@ mod tests {
                     bases: Vec::new(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn bind_collects_assignment_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/helpers.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("value")],
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("copy")],
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("source")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.assignments,
+            vec![
+                AssignmentSite {
+                    name: String::from("value"),
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+owner_name: None,
+                owner_type_name: None,
+                line: 1,
+                },
+                AssignmentSite {
+                    name: String::from("copy"),
+                    annotation: Some(String::from("str")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("source")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
+                    line: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_keeps_local_assignments_out_of_declarations() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/helpers.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: vec![typepython_syntax::FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("str")),
+                    }],
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("result")],
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(table.declarations[0].name, "build");
+        assert_eq!(
+            table.assignments,
+            vec![AssignmentSite {
+                name: String::from("result"),
+                annotation: Some(String::from("int")),
+                value_type: Some(String::new()),
+                is_awaited: false,
+                value_callee: None,
+                value_name: Some(String::from("value")),
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_local_bare_assignments() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/helpers.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("build"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: Some(String::from("None")),
+                    is_async: false,
+                    is_override: false,
+                    line: 1,
+                }),
+                SyntaxStatement::Value(ValueStatement {
+                    names: vec![String::from("result")],
+                    annotation: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }),
+            ],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(table.declarations[0].name, "build");
+        assert_eq!(
+            table.assignments,
+            vec![AssignmentSite {
+                name: String::from("result"),
+                annotation: None,
+                value_type: Some(String::new()),
+                is_awaited: false,
+                value_callee: Some(String::from("helper")),
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_yield_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/gen.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
+                owner_name: String::from("produce"),
+                owner_type_name: None,
+                value_type: Some(String::from("int")),
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+is_yield_from: false,
+                line: 2,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.yields,
+            vec![YieldSite {
+                owner_name: String::from("produce"),
+                owner_type_name: None,
+                value_type: Some(String::from("int")),
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+is_yield_from: false,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_for_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/loop.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::For(typepython_syntax::ForStatement {
+                target_name: String::from("item"),
+                target_names: Vec::new(),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                iter_type: Some(String::new()),
+                iter_is_awaited: false,
+                iter_callee: None,
+                iter_name: Some(String::from("values")),
+                iter_member_owner_name: None,
+                iter_member_name: None,
+                iter_member_through_instance: false,
+                iter_method_owner_name: None,
+                iter_method_name: None,
+                iter_method_through_instance: false,
+                line: 2,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.for_loops,
+            vec![ForSite {
+                target_name: String::from("item"),
+                target_names: Vec::new(),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                iter_type: Some(String::new()),
+                iter_is_awaited: false,
+                iter_callee: None,
+                iter_name: Some(String::from("values")),
+                iter_member_owner_name: None,
+                iter_member_name: None,
+                iter_member_through_instance: false,
+                iter_method_owner_name: None,
+                iter_method_name: None,
+                iter_method_through_instance: false,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_with_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/with.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::With(typepython_syntax::WithStatement {
+                target_name: Some(String::from("value")),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                context_type: Some(String::new()),
+                context_is_awaited: false,
+                context_callee: None,
+                context_name: Some(String::from("manager")),
+                context_member_owner_name: None,
+                context_member_name: None,
+                context_member_through_instance: false,
+                context_method_owner_name: None,
+                context_method_name: None,
+                context_method_through_instance: false,
+                line: 2,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.with_statements,
+            vec![WithSite {
+                target_name: Some(String::from("value")),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                context_type: Some(String::new()),
+                context_is_awaited: false,
+                context_callee: None,
+                context_name: Some(String::from("manager")),
+                context_member_owner_name: None,
+                context_member_name: None,
+                context_member_through_instance: false,
+                context_method_owner_name: None,
+                context_method_name: None,
+                context_method_through_instance: false,
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_except_handler_sites_from_syntax_tree() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/try.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::ExceptHandler(typepython_syntax::ExceptionHandlerStatement {
+                exception_type: String::from("ValueError"),
+                binding_name: Some(String::from("e")),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                line: 4,
+                end_line: 5,
+            })],
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.except_handlers,
+            vec![ExceptHandlerSite {
+                exception_type: String::from("ValueError"),
+                binding_name: Some(String::from("e")),
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                line: 4,
+                end_line: 5,
+            }]
         );
     }
 
@@ -606,6 +1337,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -621,6 +1353,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -636,6 +1369,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -660,6 +1394,7 @@ mod tests {
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -678,6 +1413,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
                     }),
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -696,6 +1432,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
                     }),
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -714,6 +1451,7 @@ mod tests {
                         name: String::from("SupportsClose"),
                         kind: DeclarationOwnerKind::Interface,
                     }),
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -739,6 +1477,17 @@ mod tests {
                     names: vec![String::from("MAX_SIZE")],
                     annotation: Some(String::from("Final")),
                     value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: true,
                     is_class_var: false,
                     line: 1,
@@ -758,6 +1507,7 @@ mod tests {
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -782,6 +1532,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -797,6 +1548,7 @@ mod tests {
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -815,6 +1567,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationOwnerKind::Class,
                     }),
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -840,6 +1593,17 @@ mod tests {
                     names: vec![String::from("VALUE")],
                     annotation: Some(String::from("ClassVar[int]")),
                     value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+owner_name: None,
+                    owner_type_name: None,
                     is_final: false,
                     is_class_var: true,
                     line: 1,
@@ -859,6 +1623,7 @@ mod tests {
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -883,6 +1648,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -898,6 +1664,7 @@ mod tests {
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -916,6 +1683,7 @@ mod tests {
                         name: String::from("Box"),
                         kind: DeclarationOwnerKind::Class,
                     }),
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -942,6 +1710,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    is_async: false,
                     is_override: true,
                     line: 1,
                 }),
@@ -960,6 +1729,7 @@ mod tests {
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        is_async: false,
                         is_override: true,
                         is_abstract_method: false,
                         is_final_decorator: false,
@@ -984,6 +1754,7 @@ mod tests {
                     method_kind: None,
                     class_kind: None,
                     owner: None,
+                    is_async: false,
                     is_override: true,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -999,6 +1770,7 @@ mod tests {
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
                     owner: None,
+                    is_async: false,
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
@@ -1017,6 +1789,7 @@ mod tests {
                         name: String::from("Child"),
                         kind: DeclarationOwnerKind::Class,
                     }),
+                    is_async: false,
                     is_override: true,
                     is_abstract_method: false,
                     is_final_decorator: false,
