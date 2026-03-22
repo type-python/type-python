@@ -63,6 +63,9 @@ pub fn check_with_options(
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
+        for alias_diagnostic in recursive_type_alias_diagnostics(node, &graph.nodes) {
+            diagnostics.push(alias_diagnostic);
+        }
         for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
             diagnostics.push(resolution_diagnostic);
         }
@@ -133,6 +136,154 @@ pub fn check_with_options(
     }
 
     CheckResult { diagnostics }
+}
+
+fn recursive_type_alias_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut seen_cycles = BTreeSet::new();
+
+    for declaration in node.declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::TypeAlias && declaration.owner.is_none()
+    }) {
+        let alias_id = format!("{}::{}", node.module_key, declaration.name);
+        let mut stack = Vec::new();
+        let mut visiting = BTreeSet::new();
+        collect_recursive_type_alias_diagnostics(
+            nodes,
+            node,
+            declaration,
+            &alias_id,
+            &mut stack,
+            &mut visiting,
+            &mut seen_cycles,
+            &mut diagnostics,
+        );
+    }
+
+    diagnostics
+}
+
+fn collect_recursive_type_alias_diagnostics(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    alias_id: &str,
+    stack: &mut Vec<String>,
+    visiting: &mut BTreeSet<String>,
+    seen_cycles: &mut BTreeSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(index) = stack.iter().position(|entry| entry == alias_id) {
+        let cycle = stack[index..].iter().cloned().chain(std::iter::once(alias_id.to_owned())).collect::<Vec<_>>();
+        let mut cycle_key_parts = cycle.clone();
+        cycle_key_parts.sort();
+        cycle_key_parts.dedup();
+        let cycle_key = cycle_key_parts.join("|");
+        if seen_cycles.insert(cycle_key) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "type alias `{}` in module `{}` is recursively defined: {}",
+                    declaration.name,
+                    node.module_path.display(),
+                    cycle
+                        .iter()
+                        .map(|entry| entry.rsplit_once("::").map(|(_, name)| name).unwrap_or(entry.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
+                ),
+            ));
+        }
+        return;
+    }
+
+    if !visiting.insert(alias_id.to_owned()) {
+        return;
+    }
+    stack.push(alias_id.to_owned());
+
+    for reference in referenced_type_aliases(nodes, node, declaration) {
+        let next_id = format!("{}::{}", reference.0.module_key, reference.1.name);
+        collect_recursive_type_alias_diagnostics(
+            nodes,
+            reference.0,
+            reference.1,
+            &next_id,
+            stack,
+            visiting,
+            seen_cycles,
+            diagnostics,
+        );
+    }
+
+    stack.pop();
+    visiting.remove(alias_id);
+}
+
+fn referenced_type_aliases<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    node: &'a typepython_graph::ModuleNode,
+    declaration: &'a Declaration,
+) -> Vec<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+    referenced_type_identifiers(&declaration.detail)
+        .into_iter()
+        .filter_map(|name| resolve_type_alias_reference(nodes, node, &name))
+        .collect()
+}
+
+fn referenced_type_identifiers(text: &str) -> Vec<String> {
+    let mut identifiers = Vec::new();
+    let mut token = String::new();
+
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+            continue;
+        }
+        if !token.is_empty() {
+            identifiers.push(std::mem::take(&mut token));
+        }
+    }
+    if !token.is_empty() {
+        identifiers.push(token);
+    }
+
+    identifiers
+}
+
+fn resolve_type_alias_reference<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    node: &'a typepython_graph::ModuleNode,
+    name: &str,
+) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+    if let Some(local) = node.declarations.iter().find(|declaration| {
+        declaration.name == name && declaration.owner.is_none() && declaration.kind == DeclarationKind::TypeAlias
+    }) {
+        return Some((node, local));
+    }
+
+    let import = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    let target_decl = target_node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == symbol_name
+                && declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::TypeAlias
+        })?;
+    Some((target_node, target_decl))
 }
 
 fn direct_return_type_diagnostics(
@@ -15300,6 +15451,116 @@ line: 5,
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_direct_recursive_type_alias() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("Tree"),
+                    kind: DeclarationKind::TypeAlias,
+                    detail: String::from("list[Tree]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("type alias `Tree`"));
+        assert!(rendered.contains("Tree -> Tree"));
+    }
+
+    #[test]
+    fn check_reports_mutual_recursive_type_aliases() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Left"),
+                        kind: DeclarationKind::TypeAlias,
+                        detail: String::from("Right"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Right"),
+                        kind: DeclarationKind::TypeAlias,
+                        detail: String::from("Left"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("type alias `Left`"));
+        assert!(rendered.contains("Left -> Right -> Left"));
     }
 
     #[test]
