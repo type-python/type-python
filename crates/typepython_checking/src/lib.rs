@@ -2627,8 +2627,7 @@ fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     }) {
-                    if base_member.detail != member.detail
-                        || base_member.method_kind != member.method_kind
+                    if !methods_are_compatible_for_override(member, base_member)
                     {
                         diagnostics.push(Diagnostic::error(
                             "TPY4005",
@@ -2648,6 +2647,24 @@ fn override_compatibility_diagnostics<'a>(
     }
 
     diagnostics
+}
+
+fn methods_are_compatible_for_override(member: &Declaration, base_member: &Declaration) -> bool {
+    if base_member.detail == member.detail && base_member.method_kind == member.method_kind {
+        return true;
+    }
+
+    if matches!(member.name.as_str(), "__enter__" | "__exit__")
+        && base_member.owner.as_ref().is_some_and(|owner| {
+            matches!(owner.name.as_str(), "ContextManager" | "AbstractContextManager")
+        })
+        && member.method_kind == Some(typepython_syntax::MethodKind::Instance)
+        && base_member.method_kind == Some(typepython_syntax::MethodKind::Instance)
+    {
+        return direct_param_count(&member.detail) == direct_param_count(&base_member.detail);
+    }
+
+    false
 }
 
 fn missing_override_diagnostics<'a>(

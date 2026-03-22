@@ -19,6 +19,13 @@ class Iterator:
 class Awaitable(Protocol):
     def __await__(self) -> Iterator: ...
 
+class ContextManager(Protocol):
+    def __enter__(self) -> Any: ...
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool: ...
+
+class AbstractContextManager(ContextManager):
+    pass
+
 class AsyncIterable(Protocol):
     def __aiter__(self) -> AsyncIterator: ...
 
