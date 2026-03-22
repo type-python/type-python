@@ -889,6 +889,11 @@ fn collect_source_paths(
         walk_directory(config, root, &include_patterns, &exclude_patterns, &mut sources)?;
     }
 
+    let stdlib_root = bundled_stdlib_root();
+    if stdlib_root.exists() {
+        walk_bundled_stdlib_directory(&stdlib_root, &mut sources)?;
+    }
+
     for path in overlays.keys() {
         let Some(kind) = SourceKind::from_path(path) else {
             continue;
@@ -913,6 +918,42 @@ fn collect_source_paths(
 
     sources.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(sources)
+}
+
+fn bundled_stdlib_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")
+}
+
+fn walk_bundled_stdlib_directory(directory: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(directory)
+        .with_context(|| format!("unable to read directory {}", directory.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_bundled_stdlib_directory(&path, sources)?;
+            continue;
+        }
+
+        let Some(kind) = SourceKind::from_path(&path) else {
+            continue;
+        };
+        if kind != SourceKind::Stub {
+            continue;
+        }
+
+        let root = bundled_stdlib_root();
+        let Some(logical_module) = logical_module_path(&root, &path) else {
+            continue;
+        };
+        if !sources.iter().any(|source| source.path == path) {
+            sources.push(DiscoveredSource { path, kind, logical_module });
+        }
+    }
+    Ok(())
 }
 
 fn compile_patterns(config: &ConfigHandle, patterns: &[String]) -> Result<Vec<Pattern>> {
@@ -1124,7 +1165,10 @@ mod tests {
         assert!(responses.iter().any(|response| response["method"] == json!("textDocument/publishDiagnostics")));
         let payload = responses
             .iter()
-            .find(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+            .find(|response| {
+                response["method"] == json!("textDocument/publishDiagnostics")
+                    && response["params"]["uri"] == json!(uri)
+            })
             .unwrap();
         let diagnostics = payload["params"]["diagnostics"].as_array().unwrap();
         assert!(!diagnostics.is_empty());

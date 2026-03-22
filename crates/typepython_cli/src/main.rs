@@ -385,7 +385,9 @@ fn run_verify(args: RunArgs) -> Result<ExitCode> {
 fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
     let discovery = collect_source_paths(&config)?;
-    let syntax_trees = load_syntax_trees(&discovery.sources)?;
+    let mut syntax_trees = load_syntax_trees(&discovery.sources)?;
+    let bundled_sources = bundled_stdlib_sources()?;
+    syntax_trees.extend(load_syntax_trees(&bundled_sources)?);
     let mut diagnostics = discovery.diagnostics.clone();
     diagnostics
         .diagnostics
@@ -1432,6 +1434,53 @@ fn collect_source_paths(config: &ConfigHandle) -> Result<SourceDiscovery> {
     let diagnostics = detect_module_collisions(&sources, &source_roots);
 
     Ok(SourceDiscovery { sources, diagnostics })
+}
+
+fn bundled_stdlib_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")
+}
+
+fn walk_bundled_stdlib_directory(directory: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("unable to read directory {}", directory.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            walk_bundled_stdlib_directory(&path, sources)?;
+            continue;
+        }
+
+        let Some(kind) = SourceKind::from_path(&path) else {
+            continue;
+        };
+        if kind != SourceKind::Stub {
+            continue;
+        }
+
+        let root = bundled_stdlib_root();
+        let Some(logical_module) = logical_module_path(&root, &path) else {
+            continue;
+        };
+        sources.push(DiscoveredSource { path, root, kind, logical_module });
+    }
+
+    Ok(())
+}
+
+fn bundled_stdlib_sources() -> Result<Vec<DiscoveredSource>> {
+    let root = bundled_stdlib_root();
+    let mut sources = Vec::new();
+    if root.exists() {
+        walk_bundled_stdlib_directory(&root, &mut sources)?;
+    }
+    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(sources)
 }
 
 fn compile_patterns(
