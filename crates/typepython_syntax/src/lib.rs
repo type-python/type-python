@@ -529,6 +529,23 @@ pub struct DataclassTransformModuleInfo {
     pub classes: Vec<DataclassTransformClassSite>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum FrozenFieldMutationKind {
+    Assignment,
+    AugmentedAssignment,
+    Delete,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FrozenFieldMutationSite {
+    pub kind: FrozenFieldMutationKind,
+    pub field_name: String,
+    pub target: DirectExprMetadata,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+}
+
 /// Parses a source file into a syntax tree.
 #[must_use]
 pub fn parse(source: SourceFile) -> SyntaxTree {
@@ -623,6 +640,226 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
     }
 
     DataclassTransformModuleInfo { providers, classes }
+}
+
+#[must_use]
+pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutationSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    let mut sites = Vec::new();
+    collect_frozen_field_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    sites
+}
+
+fn collect_frozen_field_mutation_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<FrozenFieldMutationSite>,
+) {
+    for stmt in suite {
+        let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+        sites.extend(extract_frozen_field_mutation_sites_from_stmt(
+            stmt,
+            line,
+            owner_name,
+            owner_type_name,
+        ));
+
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_frozen_field_mutation_sites_in_suite(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::If(if_stmt) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_frozen_field_mutation_sites_in_suite(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_frozen_field_mutation_sites_in_suite(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &for_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &for_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::While(while_stmt) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &while_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &while_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::With(with_stmt) => {
+                collect_frozen_field_mutation_sites_in_suite(
+                    source,
+                    &with_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_frozen_field_mutation_sites_from_stmt(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Vec<FrozenFieldMutationSite> {
+    match stmt {
+        Stmt::Assign(assign) => assign
+            .targets
+            .iter()
+            .filter_map(|target| {
+                extract_frozen_field_mutation_site(
+                    target,
+                    FrozenFieldMutationKind::Assignment,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                )
+            })
+            .collect(),
+        Stmt::AugAssign(assign) => extract_frozen_field_mutation_site(
+            &assign.target,
+            FrozenFieldMutationKind::AugmentedAssignment,
+            line,
+            owner_name,
+            owner_type_name,
+        )
+        .into_iter()
+        .collect(),
+        Stmt::Delete(delete) => delete
+            .targets
+            .iter()
+            .filter_map(|target| {
+                extract_frozen_field_mutation_site(
+                    target,
+                    FrozenFieldMutationKind::Delete,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn extract_frozen_field_mutation_site(
+    expr: &Expr,
+    kind: FrozenFieldMutationKind,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<FrozenFieldMutationSite> {
+    let Expr::Attribute(attribute) = expr else {
+        return None;
+    };
+    Some(FrozenFieldMutationSite {
+        kind,
+        field_name: attribute.attr.as_str().to_owned(),
+        target: extract_direct_expr_metadata(&attribute.value),
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        line,
+    })
 }
 
 fn collect_dataclass_transform_class_site(

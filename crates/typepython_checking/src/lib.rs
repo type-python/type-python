@@ -122,6 +122,9 @@ pub fn check_with_options(
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
+        for dataclass_diagnostic in frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes) {
+            diagnostics.push(dataclass_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -1170,6 +1173,78 @@ fn typed_dict_readonly_mutation_diagnostics(
                     1,
                 ))
             })
+        })
+        .collect()
+}
+
+fn frozen_dataclass_transform_mutation_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            let signature = resolve_scope_owner_signature(
+                node,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+            );
+            let target_type = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &site.target,
+            )?;
+            let shape = resolve_known_dataclass_transform_shape_from_type(node, nodes, &target_type)?;
+            if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
+                return None;
+            }
+
+            let in_initializer = site.owner_name.as_deref() == Some("__init__")
+                && site.owner_type_name.as_deref() == Some(target_type.as_str())
+                && site.target.value_name.as_deref() == Some("self");
+            if in_initializer {
+                return None;
+            }
+
+            let message = match site.kind {
+                typepython_syntax::FrozenFieldMutationKind::Assignment => format!(
+                    "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be assigned after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+                typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => format!(
+                    "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be updated with augmented assignment after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+                typepython_syntax::FrozenFieldMutationKind::Delete => format!(
+                    "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be deleted after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+            };
+            Some(Diagnostic::error("TPY4001", message).with_span(Span::new(
+                node.module_path.display().to_string(),
+                site.line,
+                1,
+                site.line,
+                1,
+            )))
         })
         .collect()
 }
@@ -3537,6 +3612,15 @@ fn resolve_dataclass_transform_class_shape(
     resolve_dataclass_transform_class_shape_from_decl(nodes, class_node, class_decl, &mut BTreeSet::new())
 }
 
+fn resolve_known_dataclass_transform_shape_from_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<DataclassTransformClassShape> {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    resolve_dataclass_transform_class_shape(node, nodes, &type_name)
+}
+
 fn resolve_dataclass_transform_class_shape_from_decl(
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,
@@ -5117,6 +5201,38 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_frozen_dataclass_transform_assignment_in_init() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\n    def __init__(self, name: str):\n        self.name = name\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!rendered.contains("frozen dataclass-transform field"), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_frozen_dataclass_transform_field_assignment_after_init() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("frozen dataclass-transform field `name`"));
+    }
+
+    #[test]
+    fn check_reports_frozen_dataclass_transform_augmented_assignment_after_init() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    count: int\n\nuser: User = User(1)\nuser.count += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("augmented assignment after initialization"));
     }
 
     #[test]
