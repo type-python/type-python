@@ -5,12 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "type-python"
 version = "0.0.1"
-description = "Minimal package for the PyPI name type-python"
+description = "Python package surface for the TypePython Rust compiler"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
   { name = "unadlib" }
 ]
 
+[project.scripts]
+typepython = "typepython.__main__:main"
+
 [tool.setuptools]
-py-modules = ["type_python"]
+packages = ["typepython"]
