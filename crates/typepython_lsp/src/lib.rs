@@ -15,7 +15,7 @@ use typepython_checking::check_with_options;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{DiagnosticReport, Severity};
 use typepython_graph::build;
-use typepython_syntax::{SourceFile, SourceKind, SyntaxStatement, SyntaxTree, parse};
+use typepython_syntax::{SourceFile, SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse};
 
 #[derive(Debug, Error)]
 pub enum LspError {
@@ -432,7 +432,8 @@ impl Server {
         let sources = collect_source_paths(&self.config, &self.overlays)?;
         let syntax_trees = load_syntax_trees(&sources, &self.overlays)?;
 
-        let parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
+        let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
+        apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
         let mut diagnostics = parse_diagnostics.clone();
         if !parse_diagnostics.has_errors() {
             let bindings = syntax_trees.iter().map(bind).collect::<Vec<_>>();
@@ -447,6 +448,7 @@ impl Server {
                 .diagnostics
                 .diagnostics,
             );
+            apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
         }
 
         let mut documents = syntax_trees

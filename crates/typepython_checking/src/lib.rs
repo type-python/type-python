@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::DiagnosticLevel;
-use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 use typepython_graph::ModuleGraph;
 use typepython_syntax::SourceKind;
 
@@ -360,6 +360,13 @@ fn direct_return_type_diagnostics(
                         ),
                     },
                 )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    return_site.line,
+                    1,
+                    return_site.line,
+                    1,
+                ))
             })
         })
         .collect()
@@ -431,6 +438,13 @@ fn direct_yield_type_diagnostics(
                         ),
                     },
                 )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    yield_site.line,
+                    1,
+                    yield_site.line,
+                    1,
+                ))
             })
         })
         .collect()

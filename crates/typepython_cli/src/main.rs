@@ -23,7 +23,7 @@ use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, snapshot};
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
-use typepython_syntax::{SourceFile, SourceKind, parse};
+use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives, parse};
 
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
@@ -389,9 +389,9 @@ fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let bundled_sources = bundled_stdlib_sources()?;
     syntax_trees.extend(load_syntax_trees(&bundled_sources)?);
     let mut diagnostics = discovery.diagnostics.clone();
-    diagnostics
-        .diagnostics
-        .extend(collect_parse_diagnostics(&syntax_trees).diagnostics.into_iter());
+    let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
+    apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
+    diagnostics.diagnostics.extend(parse_diagnostics.diagnostics.into_iter());
 
     let report = build_migration_report(&config, &syntax_trees);
     let mut notes = vec![String::from(
@@ -917,7 +917,8 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let checking_support_syntax = load_syntax_trees(&checking_sources)?;
     let mut all_syntax_trees = syntax_trees.clone();
     all_syntax_trees.extend(checking_support_syntax);
-    let parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
+    let mut parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
+    apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
     if parse_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
@@ -952,6 +953,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         config.config.typing.report_deprecated,
     )
     .diagnostics;
+    apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
     diagnostics.diagnostics.extend(
         public_surface_completeness_diagnostics(config, &syntax_trees)
             .diagnostics

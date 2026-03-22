@@ -74,7 +74,14 @@ pub struct SyntaxTree {
     /// Original source file.
     pub source: SourceFile,
     pub statements: Vec<SyntaxStatement>,
+    pub type_ignore_directives: Vec<TypeIgnoreDirective>,
     pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypeIgnoreDirective {
+    pub line: usize,
+    pub codes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -434,6 +441,7 @@ pub fn parse(source: SourceFile) -> SyntaxTree {
 fn parse_python_source(source: SourceFile) -> SyntaxTree {
     let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
+    let type_ignore_directives = parse_type_ignore_directives(&source.text);
 
     match parse_module(&source.text) {
         Ok(parsed) => {
@@ -480,12 +488,13 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
         }
     }
 
-    SyntaxTree { source, statements, diagnostics }
+    SyntaxTree { source, statements, type_ignore_directives, diagnostics }
 }
 
 fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
+    let type_ignore_directives = parse_type_ignore_directives(&source.text);
 
     for (index, line) in source.text.lines().enumerate() {
         let line_number = index + 1;
@@ -560,7 +569,60 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
         }
     }
 
-    SyntaxTree { source, statements, diagnostics }
+    SyntaxTree { source, statements, type_ignore_directives, diagnostics }
+}
+
+pub fn apply_type_ignore_directives(
+    syntax_trees: &[SyntaxTree],
+    diagnostics: &mut DiagnosticReport,
+) {
+    let directives_by_path = syntax_trees
+        .iter()
+        .map(|tree| (tree.source.path.to_string_lossy().into_owned(), tree.type_ignore_directives.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    diagnostics.diagnostics.retain(|diagnostic| {
+        let Some(span) = &diagnostic.span else {
+            return true;
+        };
+        let Some(directives) = directives_by_path.get(&span.path) else {
+            return true;
+        };
+        !directives.iter().any(|directive| {
+            directive.line == span.line
+                && match &directive.codes {
+                    None => true,
+                    Some(codes) => codes.iter().any(|code| code == &diagnostic.code),
+                }
+        })
+    });
+}
+
+fn parse_type_ignore_directives(text: &str) -> Vec<TypeIgnoreDirective> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| parse_type_ignore_directive_line(index + 1, line))
+        .collect()
+}
+
+fn parse_type_ignore_directive_line(line_number: usize, line: &str) -> Option<TypeIgnoreDirective> {
+    let (_, comment) = line.split_once('#')?;
+    let comment = comment.trim();
+    let remainder = comment.strip_prefix("type: ignore")?.trim();
+    let codes = if remainder.is_empty() {
+        None
+    } else {
+        let inner = remainder.strip_prefix('[')?.strip_suffix(']')?;
+        Some(
+            inner
+                .split(',')
+                .map(str::trim)
+                .filter(|code| !code.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        )
+    };
+    Some(TypeIgnoreDirective { line: line_number, codes })
 }
 
 fn collect_invalid_annotation_placement_diagnostics(
@@ -3435,7 +3497,7 @@ mod tests {
         ImportStatement, MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
         MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
         YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
-        TypeAliasStatement, TypeParam, UnsafeStatement, ValueStatement, parse,
+        TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, parse,
     };
     use std::path::PathBuf;
 
@@ -6286,6 +6348,32 @@ line: 12,
                     names: vec![String::from("value")],
                     line: 6,
                 }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_retains_type_ignore_directives() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("ignore.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "x = 1  # type: ignore[TPY4001]\ny = 2  # type: ignore\n",
+            ),
+        });
+
+        assert_eq!(
+            tree.type_ignore_directives,
+            vec![
+                TypeIgnoreDirective {
+                    line: 1,
+                    codes: Some(vec![String::from("TPY4001")]),
+                },
+                TypeIgnoreDirective {
+                    line: 2,
+                    codes: None,
+                },
             ]
         );
     }

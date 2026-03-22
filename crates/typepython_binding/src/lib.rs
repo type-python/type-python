@@ -842,6 +842,7 @@ mod tests {
                     line: 3,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -928,6 +929,7 @@ mod tests {
                 deprecation_message: None,
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -972,6 +974,7 @@ mod tests {
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1061,6 +1064,7 @@ owner_name: None,
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1192,6 +1196,7 @@ owner_name: None,
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1280,6 +1285,7 @@ owner_name: Some(String::from("build")),
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1348,6 +1354,7 @@ owner_name: Some(String::from("build")),
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1399,6 +1406,7 @@ owner_name: Some(String::from("build")),
 is_yield_from: false,
                 line: 2,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1448,6 +1456,7 @@ is_yield_from: false,
                 iter_method_through_instance: false,
                 line: 2,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1502,6 +1511,7 @@ is_yield_from: false,
                 }],
                 line: 2,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1562,6 +1572,7 @@ is_yield_from: false,
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1609,6 +1620,7 @@ is_yield_from: false,
                 names: vec![String::from("value")],
                 line: 3,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1648,6 +1660,7 @@ is_yield_from: false,
                 context_method_through_instance: false,
                 line: 2,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1689,6 +1702,7 @@ is_yield_from: false,
                 line: 4,
                 end_line: 5,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1781,6 +1795,7 @@ is_yield_from: false,
                 ],
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1931,6 +1946,7 @@ owner_name: None,
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -2057,6 +2073,7 @@ owner_name: None,
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -2175,6 +2192,7 @@ owner_name: None,
                     line: 2,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 

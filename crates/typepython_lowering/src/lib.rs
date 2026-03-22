@@ -942,6 +942,7 @@ mod tests {
                 text: String::from("unsafe:\n    x = 1\n"),
             },
             statements: vec![SyntaxStatement::Unsafe(UnsafeStatement { line: 1 })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -975,6 +976,7 @@ mod tests {
                 text: String::from("def update():\n    unsafe:\n        x = 1\n"),
             },
             statements: vec![SyntaxStatement::Unsafe(UnsafeStatement { line: 2 })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -994,6 +996,7 @@ mod tests {
                 text: String::from("unknown feature\n"),
             },
             statements: vec![],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1015,6 +1018,7 @@ mod tests {
                 value: String::from("int"),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1044,6 +1048,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1076,6 +1081,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1110,6 +1116,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1141,6 +1148,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1190,6 +1198,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1241,6 +1250,7 @@ mod tests {
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1272,6 +1282,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1301,6 +1312,7 @@ mod tests {
                 members: Vec::new(),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1328,6 +1340,7 @@ mod tests {
                 deprecation_message: None,
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1364,6 +1377,7 @@ mod tests {
                 value: String::from("tuple[T, T]"),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1397,6 +1411,7 @@ mod tests {
                 deprecation_message: None,
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1449,6 +1464,7 @@ mod tests {
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1553,6 +1569,7 @@ mod tests {
                     line: 5,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1667,6 +1684,7 @@ mod tests {
                     line: 6,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1770,6 +1788,7 @@ mod tests {
                     line: 5,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1847,6 +1866,7 @@ mod tests {
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1913,6 +1933,7 @@ mod tests {
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -1996,6 +2017,7 @@ mod tests {
                     line: 5,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -2074,6 +2096,7 @@ mod tests {
                     line: 4,
                 }),
             ],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
@@ -2102,6 +2125,7 @@ mod tests {
                 value: String::from("int"),
                 line: 1,
             })],
+            type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
 
