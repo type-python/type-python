@@ -2130,6 +2130,9 @@ fn resolve_direct_member_reference_type(
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let member = find_owned_value_declaration(nodes, class_node, class_decl, member_name)?;
+    if is_enum_like_class(nodes, class_node, class_decl) {
+        return Some(class_decl.name.clone());
+    }
     let detail = substitute_self_annotation(&member.detail, Some(&owner_type_name));
     normalized_direct_return_annotation(&detail)
         .map(normalize_type_text)
@@ -2139,6 +2142,20 @@ fn resolve_direct_member_reference_type(
                 .as_deref()
                 .map(|value| normalize_type_text(&substitute_self_annotation(value, Some(&owner_type_name))))
         })
+}
+
+fn is_enum_like_class(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> bool {
+    declaration.bases.iter().any(|base| {
+        matches!(
+            base.as_str(),
+            "Enum" | "IntEnum" | "Flag" | "IntFlag" | "enum.Enum" | "enum.IntEnum" | "enum.Flag" | "enum.IntFlag"
+        ) || resolve_direct_base(nodes, node, base)
+            .is_some_and(|(base_node, base_decl)| is_enum_like_class(nodes, base_node, base_decl))
+    })
 }
 
 fn resolve_direct_method_return_type(
@@ -17154,6 +17171,124 @@ line: 5,
                     value_method_name: None,
                     value_method_through_instance: false,
                     line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_enum_member_access_as_enum_type() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Enum"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("enum.Enum"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Color"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Enum")],
+                    },
+                    Declaration {
+                        name: String::from("RED"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Color"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("()->Color"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("Color")),
+                    value_member_name: Some(String::from("RED")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 2,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
