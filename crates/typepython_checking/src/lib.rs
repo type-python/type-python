@@ -68,6 +68,9 @@ pub fn check_with_options(
         for alias_diagnostic in recursive_type_alias_diagnostics(node, &graph.nodes) {
             diagnostics.push(alias_diagnostic);
         }
+        for unknown_diagnostic in direct_unknown_operation_diagnostics(node, &graph.nodes) {
+            diagnostics.push(unknown_diagnostic);
+        }
         for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
             diagnostics.push(resolution_diagnostic);
         }
@@ -141,6 +144,83 @@ pub fn check_with_options(
     }
 
     CheckResult { diagnostics }
+}
+
+fn direct_unknown_operation_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for access in &node.member_accesses {
+        if name_is_unknown_boundary(node, nodes, &access.owner_name) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4003",
+                format!(
+                    "member access `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    access.member,
+                    node.module_path.display(),
+                    access.owner_name
+                ),
+            ));
+        }
+    }
+
+    for call in &node.method_calls {
+        if name_is_unknown_boundary(node, nodes, &call.owner_name) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4003",
+                format!(
+                    "method call `{}.{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    call.owner_name,
+                    call.method,
+                    node.module_path.display(),
+                    call.owner_name
+                ),
+            ));
+        }
+    }
+
+    for call in &node.calls {
+        if name_is_unknown_boundary(node, nodes, &call.callee) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4003",
+                format!(
+                    "call to `{}` in module `{}` is unsupported because `{}` has type `unknown`",
+                    call.callee,
+                    node.module_path.display(),
+                    call.callee
+                ),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn name_is_unknown_boundary(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    name: &str,
+) -> bool {
+    if resolve_typing_callable_signature(name).is_some()
+        || resolve_builtin_return_type(name).is_some()
+        || resolve_direct_function(node, nodes, name).is_some()
+        || resolve_direct_base(nodes, node, name).is_some()
+    {
+        return false;
+    }
+
+    if resolve_direct_name_reference_type(node, nodes, None, None, None, None, usize::MAX, name)
+        .is_some_and(|resolved| normalize_type_text(&resolved) == "unknown")
+    {
+        return true;
+    }
+
+    node.declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)
+        .is_some_and(|import| resolve_import_target(node, nodes, import).is_none())
 }
 
 fn recursive_type_alias_diagnostics(
@@ -12452,6 +12532,163 @@ line: 5,
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("unknown keyword `z`"));
+    }
+
+    #[test]
+    fn check_reports_unknown_member_access() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("value"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("unknown"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: vec![typepython_binding::MemberAccessSite {
+                    owner_name: String::from("value"),
+                    member: String::from("name"),
+                    through_instance: false,
+                }],
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("unsupported because `value` has type `unknown`"));
+    }
+
+    #[test]
+    fn check_reports_unknown_method_call() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("value"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("unknown"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: vec![typepython_binding::MethodCallSite {
+                    owner_name: String::from("value"),
+                    method: String::from("run"),
+                    through_instance: false,
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("method call `value.run`"));
+    }
+
+    #[test]
+    fn check_reports_unknown_direct_call_on_import() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("external"),
+                    kind: DeclarationKind::Import,
+                    detail: String::from("pkg.external"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("external"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    keyword_names: Vec::new(),
+                }],
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("call to `external`"));
     }
 
     #[test]
