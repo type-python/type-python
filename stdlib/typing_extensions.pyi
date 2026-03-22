@@ -71,6 +71,12 @@ class Unpack:
 class Concatenate:
     pass
 
+class TypeGuard:
+    pass
+
+class TypeIs:
+    pass
+
 def cast(t, value) -> Any: ...
 def NewType(name: str, typ) -> Any: ...
 def TypeVar(name: str) -> Any: ...

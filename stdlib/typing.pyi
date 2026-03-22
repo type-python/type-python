@@ -37,6 +37,12 @@ class Unpack:
 class Concatenate:
     pass
 
+class TypeGuard:
+    pass
+
+class TypeIs:
+    pass
+
 class TypedDict:
     pass
 
