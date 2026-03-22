@@ -33,14 +33,14 @@ pub struct ModuleNode {
     pub summary_fingerprint: u64,
 }
 
-/// Module graph placeholder.
+/// Module graph assembled from bound modules.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleGraph {
     /// Collected module nodes.
     pub nodes: Vec<ModuleNode>,
 }
 
-/// Builds a placeholder module graph from bound modules.
+/// Builds a module graph from bound modules.
 #[must_use]
 pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
     let mut nodes = bindings

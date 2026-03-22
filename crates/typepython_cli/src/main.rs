@@ -34,7 +34,7 @@ const INIT_SOURCE_TEMPLATE: &str =
 #[command(
     name = "typepython",
     version,
-    about = "Rust workspace skeleton for the TypePython compiler"
+    about = "Rust compiler and tooling for TypePython"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -45,19 +45,19 @@ struct Cli {
 enum Command {
     /// Create a starter TypePython config and source tree.
     Init(InitArgs),
-    /// Load the project and execute the placeholder compile pipeline.
+    /// Load the project and run the TypePython checking pipeline.
     Check(RunArgs),
-    /// Create output/cache directories and execute the placeholder pipeline.
+    /// Build Python output, stubs, and cache artifacts for the project.
     Build(RunArgs),
-    /// Execute the placeholder pipeline and report watch-mode status.
+    /// Watch project inputs and rebuild/check when files change.
     Watch(RunArgs),
     /// Remove configured build and cache directories.
     Clean(CleanArgs),
-    /// Start the placeholder language server.
+    /// Start the TypePython language server.
     Lsp(RunArgs),
-    /// Execute the placeholder verification flow.
+    /// Verify emitted artifacts and incremental state.
     Verify(RunArgs),
-    /// Execute the placeholder migration flow.
+    /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
 }
 
@@ -100,7 +100,7 @@ struct CleanArgs {
 struct MigrateArgs {
     #[command(flatten)]
     run: RunArgs,
-    /// Emit the migration report placeholder.
+    /// Emit the migration coverage report.
     #[arg(long)]
     report: bool,
 }
@@ -239,7 +239,7 @@ fn init_project(args: InitArgs) -> Result<ExitCode> {
     write_file(&config_path, CONFIG_TEMPLATE, args.force)?;
     write_file(&source_path, INIT_SOURCE_TEMPLATE, args.force)?;
 
-    println!("initialized TypePython project skeleton at {}", root.display());
+    println!("initialized TypePython project at {}", root.display());
     println!("  config: {}", config_path.display());
     println!("  source: {}", source_path.display());
 
@@ -897,7 +897,7 @@ fn run_with_pipeline(
     }
 
     notes.push(String::from(
-        "parser extensions are still incomplete in this milestone",
+        "compiler pipeline, artifact planning, and verification completed for the loaded project",
     ));
 
     let snapshot = run_pipeline(&config)?;

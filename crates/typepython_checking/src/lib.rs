@@ -52,7 +52,7 @@ pub struct CheckResult {
     pub diagnostics: DiagnosticReport,
 }
 
-/// Runs the placeholder checker over the module graph.
+/// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
     check_with_options(graph, false, true, DiagnosticLevel::Warning)

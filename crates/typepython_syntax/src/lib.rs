@@ -68,7 +68,7 @@ impl SourceFile {
     }
 }
 
-/// Parser output placeholder.
+/// Parser output for a source file.
 #[derive(Debug, Clone)]
 pub struct SyntaxTree {
     /// Original source file.
