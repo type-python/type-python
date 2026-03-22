@@ -416,17 +416,117 @@ struct ParsedTypeParams<'source> {
     remainder: &'source str,
 }
 
-struct DirectExprMetadata {
-    value_type: Option<String>,
-    is_awaited: bool,
-    value_callee: Option<String>,
-    value_name: Option<String>,
-    value_member_owner_name: Option<String>,
-    value_member_name: Option<String>,
-    value_member_through_instance: bool,
-    value_method_owner_name: Option<String>,
-    value_method_name: Option<String>,
-    value_method_through_instance: bool,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectExprMetadata {
+    pub value_type: Option<String>,
+    pub is_awaited: bool,
+    pub value_callee: Option<String>,
+    pub value_name: Option<String>,
+    pub value_member_owner_name: Option<String>,
+    pub value_member_name: Option<String>,
+    pub value_member_through_instance: bool,
+    pub value_method_owner_name: Option<String>,
+    pub value_method_name: Option<String>,
+    pub value_method_through_instance: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypedDictLiteralEntry {
+    pub key: Option<String>,
+    pub is_expansion: bool,
+    pub value: DirectExprMetadata,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypedDictLiteralSite {
+    pub annotation: String,
+    pub entries: Vec<TypedDictLiteralEntry>,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectCallContextSite {
+    pub callee: String,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum TypedDictMutationKind {
+    Assignment,
+    AugmentedAssignment,
+    Delete,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypedDictMutationSite {
+    pub kind: TypedDictMutationKind,
+    pub key: Option<String>,
+    pub target: DirectExprMetadata,
+    pub owner_name: Option<String>,
+    pub owner_type_name: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ConditionalReturnSite {
+    pub function_name: String,
+    pub target_name: String,
+    pub target_type: String,
+    pub case_input_types: Vec<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct DataclassTransformMetadata {
+    pub field_specifiers: Vec<String>,
+    pub kw_only_default: bool,
+    pub frozen_default: bool,
+    pub eq_default: bool,
+    pub order_default: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DataclassTransformProviderSite {
+    pub name: String,
+    pub metadata: DataclassTransformMetadata,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DataclassTransformFieldSite {
+    pub name: String,
+    pub annotation: String,
+    pub value_type: Option<String>,
+    pub has_default: bool,
+    pub is_class_var: bool,
+    pub field_specifier_name: Option<String>,
+    pub field_specifier_has_default: bool,
+    pub field_specifier_has_default_factory: bool,
+    pub field_specifier_init: Option<bool>,
+    pub field_specifier_kw_only: Option<bool>,
+    pub field_specifier_alias: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DataclassTransformClassSite {
+    pub name: String,
+    pub decorators: Vec<String>,
+    pub bases: Vec<String>,
+    pub metaclass: Option<String>,
+    pub methods: Vec<String>,
+    pub fields: Vec<DataclassTransformFieldSite>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct DataclassTransformModuleInfo {
+    pub providers: Vec<DataclassTransformProviderSite>,
+    pub classes: Vec<DataclassTransformClassSite>,
 }
 
 /// Parses a source file into a syntax tree.
@@ -436,6 +536,1014 @@ pub fn parse(source: SourceFile) -> SyntaxTree {
         SourceKind::TypePython => parse_typepython_source(source),
         SourceKind::Python | SourceKind::Stub => parse_python_source(source),
     }
+}
+
+#[must_use]
+pub fn collect_typed_dict_literal_sites(source: &str) -> Vec<TypedDictLiteralSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    let mut sites = Vec::new();
+    collect_typed_dict_literal_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    sites
+}
+
+#[must_use]
+pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    let mut sites = Vec::new();
+    collect_direct_call_context_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    sites
+}
+
+#[must_use]
+pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    let mut sites = Vec::new();
+    collect_typed_dict_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    sites
+}
+
+#[must_use]
+pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSite> {
+    conditional_return_blocks(source)
+        .into_iter()
+        .filter_map(|block| {
+            let params = block.header.split_once('(')?.1.rsplit_once(')')?.0;
+            let target_type = parameter_annotation(params, &block.target_name)?;
+            Some(ConditionalReturnSite {
+                function_name: block.function_name,
+                target_name: block.target_name,
+                target_type,
+                case_input_types: block.case_input_types,
+                line: block.line,
+            })
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransformModuleInfo {
+    let Ok(parsed) = parse_module(source) else {
+        return DataclassTransformModuleInfo::default();
+    };
+
+    let mut providers = Vec::new();
+    let mut classes = Vec::new();
+    for stmt in parsed.suite() {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                if let Some(metadata) = dataclass_transform_metadata(source, &function.decorator_list) {
+                    providers.push(DataclassTransformProviderSite {
+                        name: function.name.as_str().to_owned(),
+                        metadata,
+                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                    });
+                }
+            }
+            Stmt::ClassDef(class_def) => {
+                if let Some(metadata) = dataclass_transform_metadata(source, &class_def.decorator_list) {
+                    providers.push(DataclassTransformProviderSite {
+                        name: class_def.name.as_str().to_owned(),
+                        metadata,
+                        line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
+                    });
+                }
+                classes.push(collect_dataclass_transform_class_site(source, class_def));
+            }
+            _ => {}
+        }
+    }
+
+    DataclassTransformModuleInfo { providers, classes }
+}
+
+fn collect_dataclass_transform_class_site(
+    source: &str,
+    class_def: &ruff_python_ast::StmtClassDef,
+) -> DataclassTransformClassSite {
+    DataclassTransformClassSite {
+        name: class_def.name.as_str().to_owned(),
+        decorators: class_def
+            .decorator_list
+            .iter()
+            .filter_map(|decorator| decorator_target_name(&decorator.expression))
+            .collect(),
+        bases: class_def
+            .arguments
+            .as_ref()
+            .map(|arguments| {
+                arguments
+                    .args
+                    .iter()
+                    .filter_map(decorator_target_name)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        metaclass: class_def
+            .arguments
+            .as_ref()
+            .and_then(|arguments| {
+                arguments.keywords.iter().find_map(|keyword| {
+                    (keyword.arg.as_ref().map(|arg| arg.as_str()) == Some("metaclass"))
+                        .then(|| decorator_target_name(&keyword.value))
+                        .flatten()
+                })
+            }),
+        methods: class_def
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                Stmt::FunctionDef(function) => Some(function.name.as_str().to_owned()),
+                _ => None,
+            })
+            .collect(),
+        fields: class_def
+            .body
+            .iter()
+            .filter_map(|stmt| extract_dataclass_transform_field(source, stmt))
+            .collect(),
+        line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
+    }
+}
+
+fn extract_dataclass_transform_field(
+    source: &str,
+    stmt: &Stmt,
+) -> Option<DataclassTransformFieldSite> {
+    let Stmt::AnnAssign(assign) = stmt else {
+        return None;
+    };
+    let Expr::Name(name) = assign.target.as_ref() else {
+        return None;
+    };
+    let value = assign.value.as_deref();
+    let field_specifier = value.and_then(|expr| extract_field_specifier_site(source, expr));
+    Some(DataclassTransformFieldSite {
+        name: name.id.as_str().to_owned(),
+        annotation: slice_range(source, assign.annotation.range())?.to_owned(),
+        value_type: value.map(infer_literal_arg_type),
+        has_default: value.is_some(),
+        is_class_var: is_classvar_annotation(&assign.annotation),
+        field_specifier_name: field_specifier.as_ref().and_then(|site| site.name.clone()),
+        field_specifier_has_default: field_specifier.as_ref().is_some_and(|site| site.has_default),
+        field_specifier_has_default_factory: field_specifier
+            .as_ref()
+            .is_some_and(|site| site.has_default_factory),
+        field_specifier_init: field_specifier.as_ref().and_then(|site| site.init),
+        field_specifier_kw_only: field_specifier.as_ref().and_then(|site| site.kw_only),
+        field_specifier_alias: field_specifier.as_ref().and_then(|site| site.alias.clone()),
+        line: offset_to_line_column(source, assign.range.start().to_usize()).0,
+    })
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FieldSpecifierSite {
+    name: Option<String>,
+    has_default: bool,
+    has_default_factory: bool,
+    init: Option<bool>,
+    kw_only: Option<bool>,
+    alias: Option<String>,
+}
+
+fn extract_field_specifier_site(source: &str, expr: &Expr) -> Option<FieldSpecifierSite> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let mut result = FieldSpecifierSite {
+        name: decorator_target_name(call.func.as_ref()),
+        has_default: false,
+        has_default_factory: false,
+        init: None,
+        kw_only: None,
+        alias: None,
+    };
+    for keyword in &call.arguments.keywords {
+        let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
+            continue;
+        };
+        match name {
+            "default" => result.has_default = true,
+            "default_factory" => result.has_default_factory = true,
+            "init" => result.init = expr_static_bool(&keyword.value),
+            "kw_only" => result.kw_only = expr_static_bool(&keyword.value),
+            "alias" => result.alias = extract_string_literal_value(source, &keyword.value),
+            _ => {}
+        }
+    }
+    Some(result)
+}
+
+fn dataclass_transform_metadata(
+    source: &str,
+    decorators: &[ruff_python_ast::Decorator],
+) -> Option<DataclassTransformMetadata> {
+    decorators.iter().find_map(|decorator| {
+        let expression = &decorator.expression;
+        if is_dataclass_transform_expr(expression) {
+            return Some(dataclass_transform_metadata_from_call(source, expression));
+        }
+        None
+    })
+}
+
+fn dataclass_transform_metadata_from_call(
+    source: &str,
+    expr: &Expr,
+) -> DataclassTransformMetadata {
+    let Expr::Call(call) = expr else {
+        return DataclassTransformMetadata::default();
+    };
+    let mut metadata = DataclassTransformMetadata {
+        eq_default: true,
+        ..DataclassTransformMetadata::default()
+    };
+    for keyword in &call.arguments.keywords {
+        let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
+            continue;
+        };
+        match name {
+            "kw_only_default" => metadata.kw_only_default = expr_static_bool(&keyword.value).unwrap_or(false),
+            "frozen_default" => metadata.frozen_default = expr_static_bool(&keyword.value).unwrap_or(false),
+            "eq_default" => metadata.eq_default = expr_static_bool(&keyword.value).unwrap_or(true),
+            "order_default" => metadata.order_default = expr_static_bool(&keyword.value).unwrap_or(false),
+            "field_specifiers" => {
+                metadata.field_specifiers = expr_name_list(&keyword.value, source);
+            }
+            _ => {}
+        }
+    }
+    metadata
+}
+
+fn is_dataclass_transform_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(call) => is_dataclass_transform_expr(call.func.as_ref()),
+        Expr::Name(name) => name.id.as_str() == "dataclass_transform",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "dataclass_transform"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
+        }
+        _ => false,
+    }
+}
+
+fn decorator_target_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Name(name) => Some(name.id.as_str().to_owned()),
+        Expr::Attribute(attribute) => {
+            Some(format!("{}.{}", decorator_target_name(attribute.value.as_ref())?, attribute.attr.as_str()))
+        }
+        Expr::Call(call) => decorator_target_name(call.func.as_ref()),
+        _ => None,
+    }
+}
+
+fn expr_static_bool(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::BooleanLiteral(boolean) => Some(boolean.value),
+        Expr::Name(name) if name.id.as_str() == "True" => Some(true),
+        Expr::Name(name) if name.id.as_str() == "False" => Some(false),
+        _ => None,
+    }
+}
+
+fn expr_name_list(expr: &Expr, source: &str) -> Vec<String> {
+    match expr {
+        Expr::Tuple(tuple) => tuple.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect(),
+        Expr::List(list) => list.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect(),
+        _ => decorator_target_name(expr)
+            .or_else(|| extract_string_literal_value(source, expr))
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
+    split_top_level_commas(params)
+        .into_iter()
+        .find_map(|param| {
+            let (name, annotation) = param.split_once(':')?;
+            let name = name.split('=').next()?.trim();
+            (name == target_name).then(|| {
+                annotation
+                    .split('=')
+                    .next()
+                    .unwrap_or(annotation)
+                    .trim()
+                    .to_owned()
+            })
+        })
+}
+
+fn normalize_conditional_return_source(source: &str) -> String {
+    let blocks = conditional_return_blocks(source);
+    if blocks.is_empty() {
+        return source.to_owned();
+    }
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut line_number = 1usize;
+    let mut blocks = blocks.into_iter().peekable();
+    while line_number <= lines.len() {
+        if let Some(block) = blocks.peek() {
+            if block.line == line_number {
+                let original = lines[line_number - 1];
+                let indent = &original[..original.len() - original.trim_start().len()];
+                output.push(format!("{indent}{}:", block.header));
+                let case_indent = format!("{indent}    ");
+                output.push(format!("{case_indent}pass"));
+                for _ in block.line + 1..=block.end_line {
+                    output.push(String::new());
+                }
+                line_number = block.end_line + 1;
+                blocks.next();
+                continue;
+            }
+        }
+        output.push(lines[line_number - 1].to_owned());
+        line_number += 1;
+    }
+
+    let mut normalized = output.join("\n");
+    if source.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
+}
+
+#[derive(Debug, Clone)]
+struct ConditionalReturnBlock {
+    function_name: String,
+    header: String,
+    target_name: String,
+    case_input_types: Vec<String>,
+    line: usize,
+    end_line: usize,
+}
+
+fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut blocks = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("def ") || !trimmed.contains("-> match ") || !trimmed.ends_with(':') {
+            index += 1;
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        let Some((header, rest)) = trimmed.split_once("-> match ") else {
+            index += 1;
+            continue;
+        };
+        let Some(target_name) = rest.strip_suffix(':').map(str::trim).filter(|name| !name.is_empty()) else {
+            index += 1;
+            continue;
+        };
+        let Some(function_name) = header
+            .strip_prefix("def ")
+            .and_then(|rest| rest.split('(').next())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            index += 1;
+            continue;
+        };
+
+        let mut case_input_types = Vec::new();
+        let mut cursor = index + 1;
+        while cursor < lines.len() {
+            let case_line = lines[cursor];
+            let case_trimmed = case_line.trim_start();
+            if case_trimmed.is_empty() {
+                cursor += 1;
+                continue;
+            }
+            let case_indent = case_line.len() - case_trimmed.len();
+            if case_indent <= indent || !case_trimmed.starts_with("case ") {
+                break;
+            }
+            if let Some((case_type, _)) = case_trimmed
+                .strip_prefix("case ")
+                .and_then(|rest| rest.split_once(':'))
+            {
+                case_input_types.push(case_type.trim().to_owned());
+            }
+            cursor += 1;
+        }
+
+        if !case_input_types.is_empty() {
+            blocks.push(ConditionalReturnBlock {
+                function_name: function_name.to_owned(),
+                header: header.trim_end().to_owned(),
+                target_name: target_name.to_owned(),
+                case_input_types,
+                line: index + 1,
+                end_line: cursor,
+            });
+            index = cursor;
+        } else {
+            index += 1;
+        }
+    }
+    blocks
+}
+
+fn collect_typed_dict_mutation_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<TypedDictMutationSite>,
+) {
+    for stmt in suite {
+        let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+        sites.extend(extract_typed_dict_mutation_sites_from_stmt(
+            source,
+            stmt,
+            line,
+            owner_name,
+            owner_type_name,
+        ));
+
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_typed_dict_mutation_sites_in_suite(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::If(if_stmt) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_typed_dict_mutation_sites_in_suite(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_typed_dict_mutation_sites_in_suite(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &for_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &for_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::While(while_stmt) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &while_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &while_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::With(with_stmt) => {
+                collect_typed_dict_mutation_sites_in_suite(
+                    source,
+                    &with_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_typed_dict_mutation_sites_from_stmt(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Vec<TypedDictMutationSite> {
+    match stmt {
+        Stmt::Assign(assign) => assign
+            .targets
+            .iter()
+            .filter_map(|target| {
+                extract_typed_dict_mutation_site(
+                    source,
+                    target,
+                    TypedDictMutationKind::Assignment,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                )
+            })
+            .collect(),
+        Stmt::AugAssign(assign) => extract_typed_dict_mutation_site(
+            source,
+            &assign.target,
+            TypedDictMutationKind::AugmentedAssignment,
+            line,
+            owner_name,
+            owner_type_name,
+        )
+        .into_iter()
+        .collect(),
+        Stmt::Delete(delete) => delete
+            .targets
+            .iter()
+            .filter_map(|target| {
+                extract_typed_dict_mutation_site(
+                    source,
+                    target,
+                    TypedDictMutationKind::Delete,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn extract_typed_dict_mutation_site(
+    source: &str,
+    expr: &Expr,
+    kind: TypedDictMutationKind,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<TypedDictMutationSite> {
+    let Expr::Subscript(subscript) = expr else {
+        return None;
+    };
+    Some(TypedDictMutationSite {
+        kind,
+        key: extract_string_literal_value(source, &subscript.slice),
+        target: extract_direct_expr_metadata(&subscript.value),
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        line,
+    })
+}
+
+fn collect_direct_call_context_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<DirectCallContextSite>,
+) {
+    for stmt in suite {
+        let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+        if let Some(site) = extract_direct_call_context_site(stmt, line, owner_name, owner_type_name) {
+            sites.push(site);
+        }
+
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_direct_call_context_sites_in_suite(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::If(if_stmt) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_direct_call_context_sites_in_suite(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_direct_call_context_sites_in_suite(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &for_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &for_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::While(while_stmt) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &while_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &while_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::With(with_stmt) => {
+                collect_direct_call_context_sites_in_suite(
+                    source,
+                    &with_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_direct_call_context_site(
+    stmt: &Stmt,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<DirectCallContextSite> {
+    let expr = match stmt {
+        Stmt::Expr(expr) => Some(expr.value.as_ref()),
+        Stmt::Assign(assign) => Some(assign.value.as_ref()),
+        Stmt::AnnAssign(assign) => assign.value.as_deref(),
+        Stmt::Return(return_stmt) => return_stmt.value.as_deref(),
+        _ => None,
+    }?;
+
+    Some(DirectCallContextSite {
+        callee: extract_direct_call_context_callee(expr)?,
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        line,
+    })
+}
+
+fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {
+    if let Expr::Await(await_expr) = expr {
+        return extract_direct_call_context_callee(&await_expr.value);
+    }
+
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    let Expr::Name(name) = call.func.as_ref() else {
+        return None;
+    };
+    Some(name.id.as_str().to_owned())
+}
+
+fn collect_typed_dict_literal_sites_in_suite(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    sites: &mut Vec<TypedDictLiteralSite>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    sites,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_typed_dict_literal_sites_in_suite(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::If(if_stmt) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                for_each_if_false_suite(if_stmt, |suite| {
+                    collect_typed_dict_literal_sites_in_suite(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                });
+            }
+            Stmt::Match(match_stmt) => {
+                for case in &match_stmt.cases {
+                    collect_typed_dict_literal_sites_in_suite(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        sites,
+                    );
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &for_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &for_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::While(while_stmt) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &while_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &while_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::With(with_stmt) => {
+                collect_typed_dict_literal_sites_in_suite(
+                    source,
+                    &with_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    sites,
+                );
+            }
+            Stmt::AnnAssign(assign) => {
+                let line = offset_to_line_column(source, assign.range.start().to_usize()).0;
+                if let Some(site) = extract_typed_dict_literal_site(
+                    source,
+                    assign,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                ) {
+                    sites.push(site);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_typed_dict_literal_site(
+    source: &str,
+    assign: &ruff_python_ast::StmtAnnAssign,
+    line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<TypedDictLiteralSite> {
+    let annotation = slice_range(source, assign.annotation.range())?.to_owned();
+    let value = assign.value.as_deref()?.as_dict_expr()?;
+    let entries = value
+        .iter()
+        .map(|item| TypedDictLiteralEntry {
+            key: item.key.as_ref().and_then(|key| extract_string_literal_value(source, key)),
+            is_expansion: item.key.is_none(),
+            value: extract_direct_expr_metadata(&item.value),
+        })
+        .collect::<Vec<_>>();
+    Some(TypedDictLiteralSite {
+        annotation,
+        entries,
+        owner_name: owner_name.map(str::to_owned),
+        owner_type_name: owner_type_name.map(str::to_owned),
+        line,
+    })
+}
+
+fn extract_string_literal_value(source: &str, expr: &Expr) -> Option<String> {
+    let Expr::StringLiteral(_) = expr else {
+        return None;
+    };
+    let raw = slice_range(source, expr.range())?.trim();
+    let quote_start = raw.find(['\'', '"'])?;
+    let quoted = &raw[quote_start..];
+    if let Some(inner) = quoted.strip_prefix("\"\"\"").and_then(|inner| inner.strip_suffix("\"\"\"")) {
+        return Some(inner.to_owned());
+    }
+    if let Some(inner) = quoted.strip_prefix("'''").and_then(|inner| inner.strip_suffix("'''")).map(str::to_owned) {
+        return Some(inner);
+    }
+    if let Some(inner) = quoted.strip_prefix('"').and_then(|inner| inner.strip_suffix('"')) {
+        return Some(inner.to_owned());
+    }
+    quoted
+        .strip_prefix('\'')
+        .and_then(|inner| inner.strip_suffix('\''))
+        .map(str::to_owned)
 }
 
 fn parse_python_source(source: SourceFile) -> SyntaxTree {
@@ -510,7 +1618,7 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     }
 
     if !diagnostics.has_errors() {
-        let normalized = normalize_typepython_source(&source.text, &statements);
+        let normalized = normalize_conditional_return_source(&normalize_typepython_source(&source.text, &statements));
         match parse_module(&normalized) {
             Ok(parsed) => {
                 collect_invalid_annotation_placement_diagnostics(
@@ -3335,6 +4443,35 @@ fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
     }
 
     None
+}
+
+fn split_top_level_commas(input: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut start = 0usize;
+
+    for (index, character) in input.char_indices() {
+        if character == ',' && bracket_depth == 0 && paren_depth == 0 {
+            parts.push(input[start..index].trim());
+            start = index + character.len_utf8();
+            continue;
+        }
+
+        match character {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    let tail = input[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+    parts
 }
 
 fn parse_type_param(
@@ -6415,6 +7552,35 @@ line: 12,
                     codes: None,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn parse_accepts_conditional_return_syntax() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("conditional-return.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let sites = crate::collect_conditional_return_sites(&tree.source.text);
+        assert_eq!(
+            sites,
+            vec![crate::ConditionalReturnSite {
+                function_name: String::from("decode"),
+                target_name: String::from("x"),
+                target_type: String::from("str | bytes | None"),
+                case_input_types: vec![
+                    String::from("str"),
+                    String::from("bytes"),
+                    String::from("None"),
+                ],
+                line: 1,
+            }]
         );
     }
 }

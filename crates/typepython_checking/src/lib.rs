@@ -1,6 +1,9 @@
 //! Type-checking boundary for TypePython.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+};
 
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::DiagnosticLevel;
@@ -107,9 +110,18 @@ pub fn check_with_options(
         for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
             diagnostics.push(call_diagnostic);
         }
-    for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
-        diagnostics.push(assignment_diagnostic);
-    }
+        for call_diagnostic in direct_unresolved_paramspec_call_diagnostics(node, &graph.nodes) {
+            diagnostics.push(call_diagnostic);
+        }
+        for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
+            diagnostics.push(assignment_diagnostic);
+        }
+        for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
+            diagnostics.push(typed_dict_diagnostic);
+        }
+        for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
+            diagnostics.push(typed_dict_diagnostic);
+        }
         for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
             diagnostics.push(duplicate);
         }
@@ -143,6 +155,9 @@ pub fn check_with_options(
             for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
                 diagnostics.push(match_violation);
             }
+        }
+        for conditional_return_diagnostic in conditional_return_coverage_diagnostics(node) {
+            diagnostics.push(conditional_return_diagnostic);
         }
     }
 
@@ -296,6 +311,58 @@ fn direct_unknown_operation_diagnostics(
     }
 
     diagnostics
+}
+
+fn conditional_return_coverage_diagnostics(
+    node: &typepython_graph::ModuleNode,
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_conditional_return_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            let expected = normalize_type_text(&site.target_type);
+            let expected_branches = union_branches(&expected).unwrap_or_else(|| vec![expected.clone()]);
+            let covered = site
+                .case_input_types
+                .iter()
+                .map(|case_type| normalize_type_text(case_type))
+                .collect::<Vec<_>>();
+            let missing = expected_branches
+                .into_iter()
+                .filter(|branch| {
+                    !covered
+                        .iter()
+                        .any(|covered_branch| direct_type_matches(branch, covered_branch))
+                })
+                .collect::<Vec<_>>();
+            (!missing.is_empty()).then(|| {
+                Diagnostic::error(
+                    "TPY4018",
+                    format!(
+                        "conditional return for `{}` in module `{}` does not cover parameter `{}`; missing: {}",
+                        site.function_name,
+                        node.module_path.display(),
+                        site.target_name,
+                        missing.join(", ")
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    site.line,
+                    1,
+                    site.line,
+                    1,
+                ))
+            })
+        })
+        .collect()
 }
 
 fn name_is_unknown_boundary(
@@ -809,6 +876,444 @@ fn annotated_assignment_type_diagnostics(
         .collect()
 }
 
+#[derive(Debug, Clone)]
+struct TypedDictFieldShape {
+    value_type: String,
+    required: bool,
+    readonly: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TypedDictShape {
+    name: String,
+    fields: BTreeMap<String, TypedDictFieldShape>,
+}
+
+#[derive(Debug, Clone)]
+struct DataclassTransformFieldShape {
+    name: String,
+    keyword_name: String,
+    annotation: String,
+    required: bool,
+    kw_only: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DataclassTransformClassShape {
+    fields: Vec<DataclassTransformFieldShape>,
+    frozen: bool,
+}
+
+fn typed_dict_literal_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    let mut diagnostics = Vec::new();
+    for site in typepython_syntax::collect_typed_dict_literal_sites(&source) {
+        let Some(annotation) = normalized_assignment_annotation(&site.annotation) else {
+            continue;
+        };
+        let annotation = rewrite_imported_typing_aliases(node, annotation);
+        let Some(target_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &annotation) else {
+            continue;
+        };
+
+        let signature = resolve_scope_owner_signature(
+            node,
+            site.owner_name.as_deref(),
+            site.owner_type_name.as_deref(),
+        );
+        let mut guaranteed_keys = BTreeSet::new();
+
+        for entry in &site.entries {
+            if entry.is_expansion {
+                let Some(expansion_type) = resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    site.owner_name.as_deref(),
+                    site.owner_type_name.as_deref(),
+                    site.line,
+                    &entry.value,
+                ) else {
+                    diagnostics.push(
+                        typed_dict_literal_diagnostic(
+                            node,
+                            site.line,
+                            format!(
+                                "TypedDict literal for `{}` uses invalid `**` expansion",
+                                target_shape.name
+                            ),
+                        ),
+                    );
+                    continue;
+                };
+
+                let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type) else {
+                    diagnostics.push(
+                        typed_dict_literal_diagnostic(
+                            node,
+                            site.line,
+                            format!(
+                                "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
+                                target_shape.name,
+                                expansion_type
+                            ),
+                        ),
+                    );
+                    continue;
+                };
+
+                for (key, field) in &expansion_shape.fields {
+                    let Some(target_field) = target_shape.fields.get(key) else {
+                        diagnostics.push(
+                            typed_dict_literal_diagnostic(
+                                node,
+                                site.line,
+                                format!(
+                                    "TypedDict literal for `{}` expands unknown key `{}`",
+                                    target_shape.name,
+                                    key
+                                ),
+                            ),
+                        );
+                        continue;
+                    };
+
+                    if !direct_type_matches(&target_field.value_type, &field.value_type) {
+                        diagnostics.push(
+                            typed_dict_literal_diagnostic(
+                                node,
+                                site.line,
+                                format!(
+                                    "TypedDict literal for `{}` expands `{}` with `{}` where `{}` expects `{}`",
+                                    target_shape.name,
+                                    key,
+                                    field.value_type,
+                                    key,
+                                    target_field.value_type
+                                ),
+                            ),
+                        );
+                    }
+
+                    if field.required {
+                        guaranteed_keys.insert(key.clone());
+                    }
+                }
+
+                continue;
+            }
+
+            let Some(key) = entry.key.as_deref() else {
+                diagnostics.push(
+                    typed_dict_literal_diagnostic(
+                        node,
+                        site.line,
+                        format!(
+                            "TypedDict literal for `{}` uses a non-literal key",
+                            target_shape.name
+                        ),
+                    ),
+                );
+                continue;
+            };
+
+            let Some(target_field) = target_shape.fields.get(key) else {
+                diagnostics.push(
+                    typed_dict_literal_diagnostic(
+                        node,
+                        site.line,
+                        format!(
+                            "TypedDict literal for `{}` uses unknown key `{}`",
+                            target_shape.name,
+                            key
+                        ),
+                    ),
+                );
+                continue;
+            };
+
+            if let Some(actual_type) = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &entry.value,
+            ) {
+                if !direct_type_matches(&target_field.value_type, &actual_type) {
+                    diagnostics.push(
+                        typed_dict_literal_diagnostic(
+                            node,
+                            site.line,
+                            format!(
+                                "TypedDict literal for `{}` assigns `{}` to key `{}` where `{}` expects `{}`",
+                                target_shape.name,
+                                actual_type,
+                                key,
+                                key,
+                                target_field.value_type
+                            ),
+                        ),
+                    );
+                }
+            }
+
+            guaranteed_keys.insert(key.to_owned());
+        }
+
+        for (key, field) in &target_shape.fields {
+            if field.required && !guaranteed_keys.contains(key) {
+                diagnostics.push(
+                    typed_dict_literal_diagnostic(
+                        node,
+                        site.line,
+                        format!(
+                            "TypedDict literal for `{}` is missing required key `{}`",
+                            target_shape.name,
+                            key
+                        ),
+                    ),
+                );
+            }
+        }
+    }
+
+    diagnostics
+}
+
+fn typed_dict_literal_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    message: String,
+) -> Diagnostic {
+    Diagnostic::error("TPY4013", message).with_span(Span::new(
+        node.module_path.display().to_string(),
+        line,
+        1,
+        line,
+        1,
+    ))
+}
+
+fn typed_dict_readonly_mutation_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_typed_dict_mutation_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            let signature = resolve_scope_owner_signature(
+                node,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+            );
+            let owner_type = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &site.target,
+            )?;
+            let key = site.key.as_deref()?;
+            let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type)?;
+            let field = target_shape.fields.get(key)?;
+            field.readonly.then(|| {
+                Diagnostic::error(
+                    "TPY4016",
+                    match site.kind {
+                        typepython_syntax::TypedDictMutationKind::Assignment => format!(
+                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be assigned",
+                            key,
+                            target_shape.name,
+                            node.module_path.display()
+                        ),
+                        typepython_syntax::TypedDictMutationKind::AugmentedAssignment => format!(
+                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be updated with augmented assignment",
+                            key,
+                            target_shape.name,
+                            node.module_path.display()
+                        ),
+                        typepython_syntax::TypedDictMutationKind::Delete => format!(
+                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be deleted",
+                            key,
+                            target_shape.name,
+                            node.module_path.display()
+                        ),
+                    },
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    site.line,
+                    1,
+                    site.line,
+                    1,
+                ))
+            })
+        })
+        .collect()
+}
+
+fn resolve_direct_expression_type_from_metadata(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+) -> Option<String> {
+    resolve_direct_expression_type(
+        node,
+        nodes,
+        signature,
+        None,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata.value_type.as_deref(),
+        metadata.is_awaited,
+        metadata.value_callee.as_deref(),
+        metadata.value_name.as_deref(),
+        metadata.value_member_owner_name.as_deref(),
+        metadata.value_member_name.as_deref(),
+        metadata.value_member_through_instance,
+        metadata.value_method_owner_name.as_deref(),
+        metadata.value_method_name.as_deref(),
+        metadata.value_method_through_instance,
+    )
+}
+
+fn resolve_known_typed_dict_shape_from_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<TypedDictShape> {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    resolve_known_typed_dict_shape(node, nodes, &type_name)
+}
+
+fn resolve_known_typed_dict_shape(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<TypedDictShape> {
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, type_name)?;
+    if !is_typed_dict_class(nodes, class_node, class_decl, &mut BTreeSet::new()) {
+        return None;
+    }
+
+    let mut fields = BTreeMap::new();
+    collect_typed_dict_fields(nodes, class_node, class_decl, &mut BTreeSet::new(), &mut fields);
+    Some(TypedDictShape {
+        name: class_decl.name.clone(),
+        fields,
+    })
+}
+
+fn is_typed_dict_class(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visited: &mut BTreeSet<(String, String)>,
+) -> bool {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return false;
+    }
+
+    class_decl.name == "TypedDict"
+        || class_decl.bases.iter().any(|base| {
+            base == "TypedDict"
+                || resolve_direct_base(nodes, class_node, base).is_some_and(|(base_node, base_decl)| {
+                    is_typed_dict_class(nodes, base_node, base_decl, visited)
+                })
+        })
+}
+
+fn collect_typed_dict_fields(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visited: &mut BTreeSet<(String, String)>,
+    fields: &mut BTreeMap<String, TypedDictFieldShape>,
+) {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return;
+    }
+
+    for base in &class_decl.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+            if is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
+                collect_typed_dict_fields(nodes, base_node, base_decl, visited, fields);
+            }
+        }
+    }
+
+    for declaration in class_node.declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::Value
+            && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && !declaration.detail.is_empty()
+    }) {
+        fields.insert(
+            declaration.name.clone(),
+            parse_typed_dict_field_shape(&rewrite_imported_typing_aliases(class_node, &declaration.detail)),
+        );
+    }
+}
+
+fn parse_typed_dict_field_shape(annotation: &str) -> TypedDictFieldShape {
+    let mut value_type = normalize_type_text(annotation);
+    let mut required = true;
+    let mut readonly = false;
+
+    loop {
+        if let Some(inner) = value_type.strip_prefix("Required[").and_then(|inner| inner.strip_suffix(']')) {
+            value_type = normalize_type_text(inner);
+            required = true;
+            continue;
+        }
+        if let Some(inner) = value_type.strip_prefix("NotRequired[").and_then(|inner| inner.strip_suffix(']')) {
+            value_type = normalize_type_text(inner);
+            required = false;
+            continue;
+        }
+        if let Some(inner) = value_type.strip_prefix("ReadOnly[").and_then(|inner| inner.strip_suffix(']')) {
+            value_type = normalize_type_text(inner);
+            readonly = true;
+            continue;
+        }
+        break;
+    }
+
+    TypedDictFieldShape {
+        value_type,
+        required,
+        readonly,
+    }
+}
+
 fn callable_assignment_result(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -970,13 +1475,25 @@ fn resolve_assignment_owner_signature<'a>(
     node: &'a typepython_graph::ModuleNode,
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<&'a str> {
-    let owner_name = assignment.owner_name.as_deref()?;
+    resolve_scope_owner_signature(
+        node,
+        assignment.owner_name.as_deref(),
+        assignment.owner_type_name.as_deref(),
+    )
+}
+
+fn resolve_scope_owner_signature<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<&'a str> {
+    let owner_name = owner_name?;
     node.declarations
         .iter()
         .find(|declaration| {
             declaration.kind == DeclarationKind::Function
                 && declaration.name == owner_name
-                && match (&assignment.owner_type_name, &declaration.owner) {
+                && match (owner_type_name, &declaration.owner) {
                     (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
                     (None, None) => true,
                     _ => false,
@@ -2554,6 +3071,9 @@ fn direct_call_arity_diagnostics(
     node.calls
         .iter()
         .filter_map(|call| {
+            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+                return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
+            }
             let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
             (call.arg_count != expected).then(|| {
                 Diagnostic::error(
@@ -2615,6 +3135,9 @@ fn direct_call_type_diagnostics(
     node.calls
         .iter()
         .flat_map(|call| {
+            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+                return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
+            }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee) else {
                 return Vec::new();
             };
@@ -2648,6 +3171,10 @@ fn direct_call_keyword_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.calls {
+        if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+            diagnostics.extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
+            continue;
+        }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee) else {
             continue;
         };
@@ -2669,6 +3196,200 @@ fn direct_call_keyword_diagnostics(
     diagnostics
 }
 
+fn dataclass_transform_constructor_arity_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    shape: &DataclassTransformClassShape,
+) -> Option<Diagnostic> {
+    let positional_fields = shape
+        .fields
+        .iter()
+        .filter(|field| !field.kw_only)
+        .collect::<Vec<_>>();
+    if call.arg_count > positional_fields.len() {
+        return Some(Diagnostic::error(
+            "TPY4001",
+            format!(
+                "call to `{}` in module `{}` expects at most {} positional argument(s) but received {}",
+                call.callee,
+                node.module_path.display(),
+                positional_fields.len(),
+                call.arg_count
+            ),
+        ));
+    }
+
+    let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    let missing_required = shape
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(index, field)| {
+            field.required
+                && if field.kw_only {
+                    !provided_keywords.contains(&field.keyword_name)
+                } else {
+                    *index >= call.arg_count && !provided_keywords.contains(&field.keyword_name)
+                }
+        })
+        .map(|(_, field)| field.keyword_name.clone())
+        .collect::<Vec<_>>();
+    (!missing_required.is_empty()).then(|| {
+        Diagnostic::error(
+            "TPY4001",
+            format!(
+                "call to `{}` in module `{}` is missing required synthesized dataclass-transform field(s): {}",
+                call.callee,
+                node.module_path.display(),
+                missing_required.join(", ")
+            ),
+        )
+    })
+}
+
+fn dataclass_transform_constructor_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    shape: &DataclassTransformClassShape,
+) -> Vec<Diagnostic> {
+    shape
+        .fields
+        .iter()
+        .filter(|field| !field.kw_only)
+        .take(call.arg_count)
+        .zip(call.arg_types.iter())
+        .filter(|(field, arg_ty)| {
+            !arg_ty.is_empty() && !field.annotation.is_empty() && !direct_type_matches(&field.annotation, arg_ty)
+        })
+        .map(|(field, arg_ty)| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` passes `{}` where synthesized dataclass-transform field `{}` expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    field.name,
+                    field.annotation
+                ),
+            )
+        })
+        .collect()
+}
+
+fn dataclass_transform_constructor_keyword_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    shape: &DataclassTransformClassShape,
+) -> Vec<Diagnostic> {
+    let valid_names = shape
+        .fields
+        .iter()
+        .map(|field| field.keyword_name.as_str())
+        .collect::<BTreeSet<_>>();
+    call.keyword_names
+        .iter()
+        .filter(|keyword| !valid_names.contains(keyword.as_str()))
+        .map(|keyword| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` uses unknown synthesized dataclass-transform keyword `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    keyword
+                ),
+            )
+        })
+        .collect()
+}
+
+fn direct_unresolved_paramspec_call_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_direct_call_context_sites(&source)
+        .into_iter()
+        .filter_map(|call_site| {
+            let signature = resolve_scope_owner_signature(
+                node,
+                call_site.owner_name.as_deref(),
+                call_site.owner_type_name.as_deref(),
+            );
+            let callable_type = resolve_direct_name_reference_type(
+                node,
+                nodes,
+                signature,
+                None,
+                call_site.owner_name.as_deref(),
+                call_site.owner_type_name.as_deref(),
+                call_site.line,
+                &call_site.callee,
+            )?;
+            let callable_type = rewrite_imported_typing_aliases(node, &callable_type);
+            callable_has_unresolved_paramlist(&callable_type).then(|| {
+                Diagnostic::error(
+                    "TPY4014",
+                    format!(
+                        "call to `{}` in module `{}` is invalid because callable type `{}` still contains an unresolved ParamSpec or Concatenate tail",
+                        call_site.callee,
+                        node.module_path.display(),
+                        callable_type
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    call_site.line,
+                    1,
+                    call_site.line,
+                    1,
+                ))
+            })
+        })
+        .collect()
+}
+
+fn callable_has_unresolved_paramlist(text: &str) -> bool {
+    let text = normalize_type_text(text);
+    let Some(inner) = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']')) else {
+        return false;
+    };
+    let parts = split_top_level_type_args(inner);
+    if parts.len() != 2 {
+        return false;
+    }
+
+    callable_params_are_unresolved(parts[0])
+}
+
+fn callable_params_are_unresolved(params: &str) -> bool {
+    let params = params.trim();
+    if params == "..." || params.is_empty() {
+        return false;
+    }
+    if params.starts_with('[') && params.ends_with(']') {
+        return false;
+    }
+    if let Some(inner) = params
+        .strip_prefix("Concatenate[")
+        .and_then(|inner| inner.strip_suffix(']'))
+    {
+        return split_top_level_type_args(inner)
+            .last()
+            .is_some_and(|tail| callable_params_are_unresolved(tail));
+    }
+
+    true
+}
+
 fn resolve_direct_callable_param_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2676,6 +3397,17 @@ fn resolve_direct_callable_param_types(
 ) -> Option<Vec<String>> {
     if let Some(local) = resolve_direct_function(node, nodes, callee) {
         return Some(direct_param_types(&local.detail).unwrap_or_default());
+    }
+
+    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee) {
+        return Some(
+            shape
+                .fields
+                .iter()
+                .filter(|field| !field.kw_only)
+                .map(|field| field.annotation.clone())
+                .collect(),
+        );
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
@@ -2762,6 +3494,13 @@ fn resolve_direct_callable_signature(
         ));
     }
 
+    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee) {
+        return Some((
+            shape.fields.iter().filter(|field| !field.kw_only).count(),
+            shape.fields.iter().map(|field| field.keyword_name.clone()).collect(),
+        ));
+    }
+
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
         let init = class_node.declarations.iter().find(|declaration| {
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
@@ -2787,6 +3526,189 @@ fn resolve_direct_callable_signature(
         direct_param_count(&function.detail).unwrap_or_default(),
         direct_param_names(&function.detail).unwrap_or_default(),
     ))
+}
+
+fn resolve_dataclass_transform_class_shape(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<DataclassTransformClassShape> {
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
+    resolve_dataclass_transform_class_shape_from_decl(nodes, class_node, class_decl, &mut BTreeSet::new())
+}
+
+fn resolve_dataclass_transform_class_shape_from_decl(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> Option<DataclassTransformClassShape> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visiting.insert(key) {
+        return None;
+    }
+
+    if class_node.declarations.iter().any(|declaration| {
+        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && declaration.name == "__init__"
+            && declaration.kind == DeclarationKind::Function
+    }) {
+        return None;
+    }
+
+    let info = load_dataclass_transform_module_info(class_node)?;
+    let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
+
+    let mut metadata = None;
+    for decorator in &class_site.decorators {
+        if let Some(provider) = resolve_dataclass_transform_provider(nodes, class_node, decorator) {
+            metadata = Some(provider.metadata.clone());
+            break;
+        }
+    }
+    if metadata.is_none() {
+        if let Some(provider_name) = class_site
+            .bases
+            .iter()
+            .find(|base| resolve_dataclass_transform_provider(nodes, class_node, base).is_some())
+        {
+            metadata = resolve_dataclass_transform_provider(nodes, class_node, provider_name)
+                .map(|provider| provider.metadata.clone());
+        }
+    }
+    if metadata.is_none() {
+        metadata = class_site
+            .metaclass
+            .as_deref()
+            .and_then(|metaclass| resolve_dataclass_transform_provider(nodes, class_node, metaclass))
+            .map(|provider| provider.metadata.clone());
+    }
+    if metadata.is_none() {
+        metadata = class_site.bases.iter().find_map(|base| {
+            let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
+            let mut branch_visiting = visiting.clone();
+            resolve_dataclass_transform_class_shape_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
+                .map(|shape| typepython_syntax::DataclassTransformMetadata {
+                    frozen_default: shape.frozen,
+                    ..typepython_syntax::DataclassTransformMetadata::default()
+                })
+        });
+    }
+    let metadata = metadata?;
+
+    let mut fields = Vec::new();
+    for base in &class_site.bases {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+            continue;
+        };
+        let mut branch_visiting = visiting.clone();
+        let Some(base_shape) = resolve_dataclass_transform_class_shape_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
+        else {
+            continue;
+        };
+        for field in base_shape.fields {
+            if let Some(index) = fields.iter().position(|existing: &DataclassTransformFieldShape| existing.name == field.name) {
+                fields.remove(index);
+            }
+            fields.push(field);
+        }
+    }
+
+    for field in &class_site.fields {
+        if field.is_class_var {
+            continue;
+        }
+        let recognized_specifier = field
+            .field_specifier_name
+            .as_ref()
+            .is_some_and(|name| metadata.field_specifiers.iter().any(|candidate| candidate == name || candidate.ends_with(&format!(".{name}"))));
+        let init = if recognized_specifier {
+            field.field_specifier_init.unwrap_or(true)
+        } else {
+            true
+        };
+        if !init {
+            continue;
+        }
+        let required = if recognized_specifier {
+            !(field.field_specifier_has_default
+                || field.field_specifier_has_default_factory
+                || (field.has_default && field.field_specifier_name.is_none()))
+        } else {
+            !field.has_default
+        };
+        let kw_only = if recognized_specifier {
+            field.field_specifier_kw_only.unwrap_or(metadata.kw_only_default)
+        } else {
+            metadata.kw_only_default
+        };
+        let synthesized = DataclassTransformFieldShape {
+            name: field.name.clone(),
+            keyword_name: field.field_specifier_alias.clone().unwrap_or_else(|| field.name.clone()),
+            annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
+            required,
+            kw_only,
+        };
+        if let Some(index) = fields.iter().position(|existing| existing.name == synthesized.name) {
+            fields.remove(index);
+        }
+        fields.push(synthesized);
+    }
+
+    Some(DataclassTransformClassShape {
+        fields,
+        frozen: metadata.frozen_default,
+    })
+}
+
+fn load_dataclass_transform_module_info(
+    node: &typepython_graph::ModuleNode,
+) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return None;
+    }
+    let source = fs::read_to_string(&node.module_path).ok()?;
+    Some(typepython_syntax::collect_dataclass_transform_module_info(&source))
+}
+
+fn resolve_dataclass_transform_provider<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    node: &'a typepython_graph::ModuleNode,
+    name: &str,
+) -> Option<typepython_syntax::DataclassTransformProviderSite> {
+    if let Some(local) = load_dataclass_transform_module_info(node)?
+        .providers
+        .into_iter()
+        .find(|provider| provider.name == name)
+    {
+        return Some(local);
+    }
+
+    if let Some((module_alias, symbol_name)) = name.rsplit_once('.') {
+        if let Some(import) = node
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == module_alias)
+        {
+            if let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == import.detail) {
+                return load_dataclass_transform_module_info(target_node)?
+                    .providers
+                    .into_iter()
+                    .find(|provider| provider.name == symbol_name);
+            }
+        }
+    }
+
+    let import = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    load_dataclass_transform_module_info(target_node)?
+        .providers
+        .into_iter()
+        .find(|provider| provider.name == symbol_name)
 }
 
 fn unresolved_import_diagnostics(
@@ -2954,7 +3876,7 @@ fn deprecated_diagnostic(
 }
 
 fn resolve_import_target<'a>(
-    node: &'a typepython_graph::ModuleNode,
+    _node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
     declaration: &'a Declaration,
 ) -> Option<&'a Declaration> {
@@ -3929,11 +4851,43 @@ fn overload_shape_message(
 #[cfg(test)]
 mod tests {
     use super::{check, check_with_options};
-    use std::path::PathBuf;
-    use typepython_binding::{Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use typepython_binding::{bind, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind};
     use typepython_config::DiagnosticLevel;
-    use typepython_graph::{ModuleGraph, ModuleNode};
-    use typepython_syntax::SourceKind;
+    use typepython_graph::{build, ModuleGraph, ModuleNode};
+    use typepython_syntax::{parse, SourceFile, SourceKind};
+
+    fn check_temp_typepython_source(source_text: &str) -> super::CheckResult {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "typepython-checking-{unique}-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("temp directory should be created");
+        let path = root.join("app.tpy");
+        fs::write(&path, source_text).expect("temp source should be written");
+
+        let source = SourceFile {
+            path: path.clone(),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        };
+        let tree = parse(source);
+        let binding = bind(&tree);
+        let graph = build(&[binding]);
+        let result = check(&graph);
+
+        let _ = fs::remove_dir_all(&root);
+        result
+    }
 
     #[test]
     fn check_reports_duplicate_module_symbols() {
@@ -4003,6 +4957,199 @@ mod tests {
         assert!(result.diagnostics.has_errors());
         assert!(rendered.contains("TPY4004"));
         assert!(rendered.contains("`User`"));
+    }
+
+    #[test]
+    fn check_reports_missing_required_typed_dict_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\npayload: User = {\"id\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_reports_unknown_typed_dict_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\npayload: User = {\"id\": 1, \"name\": \"Ada\"}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("unknown key `name`"));
+    }
+
+    #[test]
+    fn check_reports_incompatible_typed_dict_value() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\npayload: User = {\"id\": \"oops\"}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("assigns `str` to key `id`"));
+    }
+
+    #[test]
+    fn check_reports_invalid_typed_dict_expansion() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\nclass Extra(TypedDict):\n    name: str\n\nextra: Extra = {\"name\": \"Ada\"}\npayload: User = {**extra}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("expands unknown key `name`"));
+    }
+
+    #[test]
+    fn check_reports_unresolved_paramspec_call() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4014"));
+        assert!(rendered.contains("Callable[P, int]"));
+    }
+
+    #[test]
+    fn check_reports_unresolved_concatenate_call() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable, Concatenate, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[Concatenate[int, P], int]) -> int:\n    return cb(1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4014"));
+        assert!(rendered.contains("Concatenate[int, P]"));
+    }
+
+    #[test]
+    fn check_reports_incomplete_conditional_return_coverage() {
+        let result = check_temp_typepython_source(
+            "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4018"));
+        assert!(rendered.contains("missing: None"));
+    }
+
+    #[test]
+    fn check_accepts_complete_conditional_return_coverage() {
+        let result = check_temp_typepython_source(
+            "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!rendered.contains("TPY4018"));
+        assert!(!result.diagnostics.has_errors());
+    }
+
+    #[test]
+    fn check_accepts_dataclass_transform_decorator_constructor_call() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser: User = User(\"Ada\", 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_dataclass_transform_base_class_constructor_call() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\nclass ModelBase:\n    pass\n\nclass User(ModelBase):\n    name: str\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_dataclass_transform_metaclass_constructor_call() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\nclass ModelMeta:\n    pass\n\nclass User(metaclass=ModelMeta):\n    name: str\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_dataclass_transform_constructor_arity_mismatch() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n    age: int\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("missing required synthesized dataclass-transform field(s): age"));
+    }
+
+    #[test]
+    fn check_reports_dataclass_transform_constructor_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("synthesized dataclass-transform field `age` expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_dataclass_transform_default_and_classvar_fields() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    role: ClassVar[str]\n    name: str\n    age: int = 1\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_dataclass_transform_inherited_fields() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass Base:\n    name: str\n\nclass User(Base):\n    age: int\n\nuser: User = User(\"Ada\", 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_readonly_typed_dict_item_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict):\n    name: ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4016"));
+        assert!(rendered.contains("cannot be assigned"));
+    }
+
+    #[test]
+    fn check_reports_readonly_typed_dict_item_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict):\n    name: ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    user[\"name\"] += \"!\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4016"));
+        assert!(rendered.contains("augmented assignment"));
+    }
+
+    #[test]
+    fn check_reports_readonly_typed_dict_item_delete() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict):\n    name: ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    del user[\"name\"]\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4016"));
+        assert!(rendered.contains("cannot be deleted"));
     }
 
     #[test]
