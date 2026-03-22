@@ -4,6 +4,12 @@ class Any:
 class TypedDict:
     pass
 
+class ClassVar:
+    pass
+
+class Final:
+    pass
+
 class Protocol:
     pass
 
@@ -41,6 +47,21 @@ class Literal:
     pass
 
 class Annotated:
+    pass
+
+class Required:
+    pass
+
+class NotRequired:
+    pass
+
+class ReadOnly:
+    pass
+
+class Unpack:
+    pass
+
+class Concatenate:
     pass
 
 def cast(t, value) -> Any: ...

@@ -7,6 +7,12 @@ class Optional:
 class Union:
     pass
 
+class ClassVar:
+    pass
+
+class Final:
+    pass
+
 class Callable:
     pass
 
@@ -14,6 +20,21 @@ class Literal:
     pass
 
 class Annotated:
+    pass
+
+class Required:
+    pass
+
+class NotRequired:
+    pass
+
+class ReadOnly:
+    pass
+
+class Unpack:
+    pass
+
+class Concatenate:
     pass
 
 class TypedDict:
