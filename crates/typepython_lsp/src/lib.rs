@@ -44,6 +44,7 @@ pub fn serve(config: &ConfigHandle) -> Result<(), LspError> {
 struct OverlayDocument {
     uri: String,
     text: String,
+    version: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -237,11 +238,16 @@ impl Server {
             .get("text")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didOpen missing text")))?;
+        let version = text_document
+            .get("version")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| LspError::Other(String::from("TPY6002: didOpen missing document version")))?;
         self.overlays.insert(
             uri_to_path(uri)?,
             OverlayDocument {
                 uri: uri.to_owned(),
                 text: text.to_owned(),
+                version,
             },
         );
         Ok(())
@@ -255,6 +261,25 @@ impl Server {
             .get("uri")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing uri")))?;
+        let version = text_document
+            .get("version")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| LspError::Other(String::from("TPY6002: didChange missing document version")))?;
+        let path = uri_to_path(uri)?;
+        let current = self.overlays.get(&path).ok_or_else(|| {
+            LspError::Other(format!(
+                "TPY6002: didChange received for unopened overlay `{}`",
+                uri
+            ))
+        })?;
+        if version <= current.version {
+            return Err(LspError::Other(format!(
+                "TPY6002: didChange version {} is out of sync with overlay version {} for `{}`",
+                version,
+                current.version,
+                uri
+            )));
+        }
         let content_changes = params
             .get("contentChanges")
             .and_then(Value::as_array)
@@ -265,10 +290,11 @@ impl Server {
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
         self.overlays.insert(
-            uri_to_path(uri)?,
+            path,
             OverlayDocument {
                 uri: uri.to_owned(),
                 text: text.to_owned(),
+                version,
             },
         );
         Ok(())
@@ -280,7 +306,13 @@ impl Server {
             .and_then(|document| document.get("uri"))
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didClose missing uri")))?;
-        self.overlays.remove(&uri_to_path(uri)?);
+        let path = uri_to_path(uri)?;
+        if self.overlays.remove(&path).is_none() {
+            return Err(LspError::Other(format!(
+                "TPY6002: didClose received for unopened overlay `{}`",
+                uri
+            )));
+        }
         Ok(vec![publish_diagnostics_notification(uri, Vec::new())])
     }
 
@@ -1372,6 +1404,61 @@ mod tests {
             }))
             .unwrap();
         assert!(members["items"].as_array().unwrap().iter().any(|item| item["label"] == json!("method")));
+    }
+
+    #[test]
+    fn did_change_reports_overlay_sync_failure_for_unopened_document() {
+        let config = temp_config(
+            "did_change_reports_overlay_sync_failure_for_unopened_document",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let error = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [{"text": "def changed() -> int:\n    return 2\n"}]
+                }
+            }))
+            .expect_err("didChange without prior didOpen should fail");
+
+        assert!(error.to_string().contains("TPY6002"));
+        assert!(error.to_string().contains("unopened overlay"));
+    }
+
+    #[test]
+    fn did_change_reports_overlay_sync_failure_for_stale_version() {
+        let config = temp_config(
+            "did_change_reports_overlay_sync_failure_for_stale_version",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 3}}
+            }))
+            .unwrap();
+
+        let error = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [{"text": "def stale() -> int:\n    return 0\n"}]
+                }
+            }))
+            .expect_err("stale didChange version should fail");
+
+        assert!(error.to_string().contains("TPY6002"));
+        assert!(error.to_string().contains("out of sync"));
     }
 
     fn temp_config(test_name: &str, source: &str) -> ConfigHandle {
