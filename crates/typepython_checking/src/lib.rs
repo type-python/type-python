@@ -905,6 +905,7 @@ struct DataclassTransformFieldShape {
 struct DataclassTransformClassShape {
     fields: Vec<DataclassTransformFieldShape>,
     frozen: bool,
+    has_explicit_init: bool,
 }
 
 fn typed_dict_literal_diagnostics(
@@ -3146,7 +3147,9 @@ fn direct_call_arity_diagnostics(
     node.calls
         .iter()
         .filter_map(|call| {
-            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+                && !shape.has_explicit_init
+            {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
             }
             let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
@@ -3210,7 +3213,9 @@ fn direct_call_type_diagnostics(
     node.calls
         .iter()
         .flat_map(|call| {
-            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+                && !shape.has_explicit_init
+            {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
             }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee) else {
@@ -3246,7 +3251,9 @@ fn direct_call_keyword_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.calls {
-        if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee) {
+        if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+            && !shape.has_explicit_init
+        {
             diagnostics.extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
             continue;
         }
@@ -3474,7 +3481,9 @@ fn resolve_direct_callable_param_types(
         return Some(direct_param_types(&local.detail).unwrap_or_default());
     }
 
-    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee) {
+    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee)
+        && !shape.has_explicit_init
+    {
         return Some(
             shape
                 .fields
@@ -3569,7 +3578,9 @@ fn resolve_direct_callable_signature(
         ));
     }
 
-    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee) {
+    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee)
+        && !shape.has_explicit_init
+    {
         return Some((
             shape.fields.iter().filter(|field| !field.kw_only).count(),
             shape.fields.iter().map(|field| field.keyword_name.clone()).collect(),
@@ -3632,13 +3643,11 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         return None;
     }
 
-    if class_node.declarations.iter().any(|declaration| {
+    let has_explicit_init = class_node.declarations.iter().any(|declaration| {
         declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
             && declaration.name == "__init__"
             && declaration.kind == DeclarationKind::Function
-    }) {
-        return None;
-    }
+    });
 
     let info = load_dataclass_transform_module_info(class_node)?;
     let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
@@ -3742,6 +3751,7 @@ fn resolve_dataclass_transform_class_shape_from_decl(
     Some(DataclassTransformClassShape {
         fields,
         frozen: metadata.frozen_default,
+        has_explicit_init,
     })
 }
 
@@ -5217,6 +5227,17 @@ mod tests {
     fn check_reports_frozen_dataclass_transform_field_assignment_after_init() {
         let result = check_temp_typepython_source(
             "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("frozen dataclass-transform field `name`"));
+    }
+
+    #[test]
+    fn check_reports_frozen_dataclass_transform_field_assignment_after_init_with_explicit_init() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\n    def __init__(self, name: str):\n        self.name = name\n\nuser: User = User(\"Ada\")\nuser.name = \"Grace\"\n",
         );
 
         let rendered = result.diagnostics.as_text();
