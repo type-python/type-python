@@ -868,11 +868,32 @@ fn has_readonly_import(source: &str) -> bool {
 
 fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
+    let typed_dicts_by_name: std::collections::BTreeMap<_, _> = tree
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::ClassDef(statement)
+                if statement.bases.iter().any(|base| base == "TypedDict") =>
+            {
+                Some((statement.name.as_str(), statement))
+            }
+            _ => None,
+        })
+        .collect();
 
     for statement in &tree.statements {
         match statement {
             SyntaxStatement::Unsafe(_) => {}
-            SyntaxStatement::TypeAlias(_) => {}
+            SyntaxStatement::TypeAlias(statement) => {
+                for diagnostic in collect_typed_dict_transform_diagnostics(
+                    &tree.source.path,
+                    statement.line,
+                    &statement.value,
+                    &typed_dicts_by_name,
+                ) {
+                    diagnostics.push(diagnostic);
+                }
+            }
             SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {}
             SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
                 &tree.source.path,
@@ -912,6 +933,99 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
     }
 
     diagnostics
+}
+
+fn collect_typed_dict_transform_diagnostics(
+    path: &std::path::Path,
+    line: usize,
+    value: &str,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
+) -> Vec<Diagnostic> {
+    let Some((transform, args)) = parse_transform_expr(value.trim()) else {
+        return Vec::new();
+    };
+    if !TYPEDICT_TRANSFORMS.contains(&transform) || args.len() < 2 {
+        return Vec::new();
+    }
+
+    let target_arg = args[1];
+    let key_args = &args[2..];
+    let (target_name, members) = match resolve_transform_members(target_arg, typed_dicts) {
+        Some(result) => result,
+        None => {
+            return vec![typed_dict_transform_error(
+                path,
+                line,
+                format!(
+                    "type transform `{}` targets `{}` which is not a known TypedDict",
+                    transform,
+                    target_arg.trim()
+                ),
+            )]
+        }
+    };
+
+    if !matches!(transform, "Pick" | "Omit") {
+        return Vec::new();
+    }
+
+    let field_names: BTreeSet<_> = members
+        .iter()
+        .filter(|member| member.kind == typepython_syntax::ClassMemberKind::Field)
+        .map(|member| member.name.as_str())
+        .collect();
+    key_args
+        .iter()
+        .filter_map(|key_arg| {
+            let key = transform_key_name(key_arg);
+            (!field_names.contains(key.as_str())).then(|| {
+                typed_dict_transform_error(
+                    path,
+                    line,
+                    format!(
+                        "type transform `{}` references unknown key `{}` on TypedDict `{}`",
+                        transform,
+                        key,
+                        target_name
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn resolve_transform_members<'a>(
+    value: &str,
+    typed_dicts: &std::collections::BTreeMap<&str, &'a typepython_syntax::NamedBlockStatement>,
+) -> Option<(String, Vec<typepython_syntax::ClassMember>)> {
+    if let Some((transform, args)) = parse_transform_expr(value.trim()) {
+        if TYPEDICT_TRANSFORMS.contains(&transform) && args.len() >= 2 {
+            let target_arg = args[1];
+            let key_args = &args[2..];
+            let (target_name, base_members) = resolve_transform_members(target_arg, typed_dicts)?;
+            return Some((target_name, apply_transform_to_members(transform, &base_members, key_args)));
+        }
+    }
+
+    let target = typed_dicts.get(value.trim())?;
+    Some((
+        target.name.clone(),
+        target.members.iter().cloned().collect(),
+    ))
+}
+
+fn transform_key_name(key: &str) -> String {
+    key.trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(']')
+        .trim_end_matches(')')
+        .trim_end_matches('>')
+        .to_owned()
+}
+
+fn typed_dict_transform_error(path: &std::path::Path, line: usize, message: String) -> Diagnostic {
+    Diagnostic::error("TPY4017", message)
+        .with_span(Span::new(path.display().to_string(), line, 1, line, 1))
 }
 
 fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagnostic {
@@ -2107,6 +2221,87 @@ mod tests {
             .contains("class MutableConfig(TypedDict):"));
         // ReadOnly wrapper should be stripped
         assert!(lowered.module.python_source.contains("debug: bool"));
+    }
+
+    #[test]
+    fn lower_reports_unknown_pick_key_as_tpy4017() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("pick-invalid-key.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class User(TypedDict):\n    id: int\n\ntypealias UserPublic = Pick[User, \"name\"]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("User"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: vec![ClassMember {
+                        name: String::from("id"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("int")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    }],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("UserPublic"),
+                    type_params: Vec::new(),
+                    value: String::from("Pick[User, \"name\"]"),
+                    line: 4,
+                }),
+            ],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let rendered = lowered.diagnostics.as_text();
+        assert!(rendered.contains("TPY4017"));
+        assert!(rendered.contains("unknown key `name`"));
+    }
+
+    #[test]
+    fn lower_reports_non_typeddict_transform_target_as_tpy4017() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("pick-invalid-target.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from("typealias UserPublic = Pick[Config, \"name\"]\n"),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("UserPublic"),
+                type_params: Vec::new(),
+                value: String::from("Pick[Config, \"name\"]"),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let rendered = lowered.diagnostics.as_text();
+        assert!(rendered.contains("TPY4017"));
+        assert!(rendered.contains("not a known TypedDict"));
     }
 
     #[test]
