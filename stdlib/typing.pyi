@@ -7,6 +7,9 @@ class Optional:
 class Union:
     pass
 
+class TypeAlias:
+    pass
+
 class ClassVar:
     pass
 
