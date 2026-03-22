@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
 };
 
 use anyhow::{Context, Result};
@@ -894,6 +895,10 @@ fn collect_source_paths(
         walk_bundled_stdlib_directory(&stdlib_root, &mut sources)?;
     }
 
+    for root in configured_external_type_roots(config) {
+        walk_external_type_root(&root, &mut sources)?;
+    }
+
     for path in overlays.keys() {
         let Some(kind) = SourceKind::from_path(path) else {
             continue;
@@ -954,6 +959,114 @@ fn walk_bundled_stdlib_directory(directory: &Path, sources: &mut Vec<DiscoveredS
         }
     }
     Ok(())
+}
+
+fn configured_external_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
+    let mut roots = config
+        .config
+        .resolution
+        .type_roots
+        .iter()
+        .map(|root| config.resolve_relative_path(root))
+        .collect::<Vec<_>>();
+    roots.extend(discovered_python_type_roots(config));
+    roots.retain(|root| root.exists());
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
+    if config.config.resolution.python_executable.is_none() {
+        return Vec::new();
+    }
+    let interpreter = resolve_python_executable(config);
+    let output = ProcessCommand::new(&interpreter)
+        .args([
+            "-c",
+            "import json, site, sysconfig; roots=[]; roots.extend(filter(None, [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); roots.extend(site.getsitepackages()); usersite = site.getusersitepackages(); roots.extend(usersite if isinstance(usersite, list) else [usersite]); print(json.dumps(sorted({r for r in roots if r})))",
+        ])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(roots) = serde_json::from_slice::<Vec<String>>(&output.stdout) else {
+        return Vec::new();
+    };
+    roots.into_iter().map(PathBuf::from).collect()
+}
+
+fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
+    match config.config.resolution.python_executable.as_deref() {
+        Some(executable) => {
+            let path = Path::new(executable);
+            if path.is_absolute() || !executable.contains(std::path::MAIN_SEPARATOR) {
+                path.to_path_buf()
+            } else {
+                config.config_dir.join(path)
+            }
+        }
+        None => PathBuf::from("python3"),
+    }
+}
+
+fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root)
+        .with_context(|| format!("unable to read directory {}", root.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_external_type_root(&path, sources)?;
+            continue;
+        }
+
+        let Some(kind) = SourceKind::from_path(&path) else {
+            continue;
+        };
+        if !external_source_allowed(root, &path, kind) {
+            continue;
+        }
+        let Some(logical_module) = logical_module_path(root, &path) else {
+            continue;
+        };
+        if !sources.iter().any(|source| source.path == path) {
+            sources.push(DiscoveredSource { path, kind, logical_module });
+        }
+    }
+    Ok(())
+}
+
+fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
+    match kind {
+        SourceKind::Stub => true,
+        SourceKind::Python => external_runtime_is_typed(root, path),
+        SourceKind::TypePython => false,
+    }
+}
+
+fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
+    let Ok(relative_parent) = path
+        .parent()
+        .unwrap_or(root)
+        .strip_prefix(root)
+    else {
+        return false;
+    };
+    let mut current = PathBuf::new();
+    for component in relative_parent.components() {
+        current.push(component.as_os_str());
+        if root.join(&current).join("py.typed").is_file() {
+            return true;
+        }
+    }
+    false
 }
 
 fn compile_patterns(config: &ConfigHandle, patterns: &[String]) -> Result<Vec<Pattern>> {
