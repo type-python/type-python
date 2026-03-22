@@ -3715,6 +3715,25 @@ fn resolve_dataclass_transform_class_shape_from_decl(
             .field_specifier_name
             .as_ref()
             .is_some_and(|name| metadata.field_specifiers.iter().any(|candidate| candidate == name || candidate.ends_with(&format!(".{name}"))));
+        if !recognized_specifier
+            && field
+                .value_metadata
+                .as_ref()
+                .and_then(|metadata| {
+                    resolve_direct_expression_type_from_metadata(
+                        class_node,
+                        nodes,
+                        None,
+                        None,
+                        Some(&class_decl.name),
+                        field.line,
+                        metadata,
+                    )
+                })
+                .is_some_and(|value_type| is_descriptor_type(nodes, class_node, &value_type))
+        {
+            continue;
+        }
         let init = if recognized_specifier {
             field.field_specifier_init.unwrap_or(true)
         } else {
@@ -3752,6 +3771,24 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         fields,
         frozen: metadata.frozen_default,
         has_explicit_init,
+    })
+}
+
+fn is_descriptor_type(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    type_name: &str,
+) -> bool {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &type_name) else {
+        return false;
+    };
+
+    ["__get__", "__set__", "__delete__"].iter().any(|member_name| {
+        find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+            matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+        })
+        .is_some()
     })
 }
 
@@ -5207,6 +5244,16 @@ mod tests {
     fn check_accepts_dataclass_transform_inherited_fields() {
         let result = check_temp_typepython_source(
             "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass Base:\n    name: str\n\nclass User(Base):\n    age: int\n\nuser: User = User(\"Ada\", 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_excludes_descriptor_defaults_from_dataclass_transform_fields() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\nclass Descriptor:\n    def __get__(self, instance, owner):\n        return 0\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: int = Descriptor()\n\nuser: User = User()\n",
         );
 
         let rendered = result.diagnostics.as_text();
