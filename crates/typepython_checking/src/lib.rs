@@ -68,6 +68,9 @@ pub fn check_with_options(
         for alias_diagnostic in recursive_type_alias_diagnostics(node, &graph.nodes) {
             diagnostics.push(alias_diagnostic);
         }
+        for overload_diagnostic in ambiguous_overload_call_diagnostics(node, &graph.nodes) {
+            diagnostics.push(overload_diagnostic);
+        }
         for unknown_diagnostic in direct_unknown_operation_diagnostics(node, &graph.nodes) {
             diagnostics.push(unknown_diagnostic);
         }
@@ -144,6 +147,103 @@ pub fn check_with_options(
     }
 
     CheckResult { diagnostics }
+}
+
+fn ambiguous_overload_call_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.calls
+        .iter()
+        .filter_map(|call| {
+            let overloads = resolve_direct_overloads(node, nodes, &call.callee);
+            if overloads.len() < 2 {
+                return None;
+            }
+
+            let applicable = overloads
+                .into_iter()
+                .filter(|declaration| overload_is_applicable(call, declaration))
+                .collect::<Vec<_>>();
+            if applicable.len() < 2 {
+                return None;
+            }
+
+            Some(Diagnostic::error(
+                "TPY4012",
+                format!(
+                    "call to `{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                    call.callee,
+                    node.module_path.display(),
+                    applicable.len()
+                ),
+            ))
+        })
+        .collect()
+}
+
+fn resolve_direct_overloads<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    callee: &str,
+) -> Vec<&'a Declaration> {
+    let local = node
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.name == callee
+                && declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Overload
+        })
+        .collect::<Vec<_>>();
+    if !local.is_empty() {
+        return local;
+    }
+
+    let Some(import) = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)
+    else {
+        return Vec::new();
+    };
+    let Some((module_key, symbol_name)) = import.detail.rsplit_once('.') else {
+        return Vec::new();
+    };
+    let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key) else {
+        return Vec::new();
+    };
+    target_node
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.name == symbol_name
+                && declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Overload
+        })
+        .collect()
+}
+
+fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Declaration) -> bool {
+    let param_names = direct_param_names(&declaration.detail).unwrap_or_default();
+    if call.arg_count != param_names.len() {
+        return false;
+    }
+    if call.keyword_names.iter().any(|keyword| !param_names.iter().any(|param| param == keyword)) {
+        return false;
+    }
+
+    let param_types = direct_param_types(&declaration.detail).unwrap_or_default();
+    call.arg_types
+        .iter()
+        .zip(param_types.iter())
+        .all(|(arg_ty, param_ty)| {
+            if arg_ty.is_empty() || param_ty.is_empty() {
+                true
+            } else {
+                direct_type_matches(arg_ty, param_ty)
+            }
+        })
 }
 
 fn direct_unknown_operation_diagnostics(
@@ -4203,6 +4303,96 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4004"));
         assert!(rendered.contains("more than one concrete implementation"));
+    }
+
+    #[test]
+    fn check_reports_ambiguous_overload_resolution() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::new(),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(value:int)->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(value:int)->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:int)->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("parse"),
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    keyword_names: Vec::new(),
+                }],
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4012"));
+        assert!(rendered.contains("ambiguous across 2 overloads"));
     }
 
     #[test]
