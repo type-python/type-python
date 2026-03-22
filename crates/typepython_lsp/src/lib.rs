@@ -442,6 +442,7 @@ impl Server {
                     &graph,
                     self.config.config.typing.require_explicit_overrides,
                     self.config.config.typing.enable_sealed_exhaustiveness,
+                    self.config.config.typing.report_deprecated,
                 )
                 .diagnostics
                 .diagnostics,

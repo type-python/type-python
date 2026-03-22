@@ -118,6 +118,8 @@ pub struct NamedBlockStatement {
     pub header_suffix: String,
     pub bases: Vec<String>,
     pub is_final_decorator: bool,
+    pub is_deprecated: bool,
+    pub deprecation_message: Option<String>,
     pub is_abstract_class: bool,
     pub members: Vec<ClassMember>,
     pub line: usize,
@@ -131,6 +133,8 @@ pub struct FunctionStatement {
     pub returns: Option<String>,
     pub is_async: bool,
     pub is_override: bool,
+    pub is_deprecated: bool,
+    pub deprecation_message: Option<String>,
     pub line: usize,
 }
 
@@ -367,6 +371,8 @@ pub struct ClassMember {
     pub is_override: bool,
     pub is_abstract_method: bool,
     pub is_final_decorator: bool,
+    pub is_deprecated: bool,
+    pub deprecation_message: Option<String>,
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
@@ -735,6 +741,8 @@ fn refresh_custom_statements_from_ast(
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
                         existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -764,6 +772,8 @@ fn refresh_custom_statements_from_ast(
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
                         existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -793,6 +803,8 @@ fn refresh_custom_statements_from_ast(
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
                         existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
                             .as_ref()
@@ -855,6 +867,8 @@ fn refresh_custom_statements_from_ast(
                             .map(str::to_owned);
                         existing.is_async = ast_statement.is_async;
                         existing.is_override = ast_statement.decorator_list.iter().any(is_override_decorator);
+                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_deprecated = existing.deprecation_message.is_some();
                     }
                 }
             }
@@ -906,6 +920,8 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 is_override: function.decorator_list.iter().any(is_override_decorator),
                 is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
                 is_final_decorator: function.decorator_list.iter().any(is_final_decorator),
+                deprecation_message: deprecated_decorator_message(&function.decorator_list),
+                is_deprecated: deprecated_decorator_message(&function.decorator_list).is_some(),
                 is_final: false,
                 is_class_var: false,
                 line: offset_to_line_column(normalized, function.range.start().to_usize()).0,
@@ -925,6 +941,8 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final,
                     is_class_var,
                     line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
@@ -944,6 +962,8 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     line,
@@ -1135,6 +1155,7 @@ fn extract_ast_backed_statement(
 ) -> Option<SyntaxStatement> {
     match stmt {
         Stmt::ClassDef(stmt) => {
+            let deprecation_message = deprecated_decorator_message(&stmt.decorator_list);
             let mut statement = NamedBlockStatement {
                 name: stmt.name.as_str().to_owned(),
                 type_params: extract_ast_type_params(
@@ -1157,6 +1178,8 @@ fn extract_ast_backed_statement(
                     .map(|arguments| extract_class_bases(source, arguments))
                     .unwrap_or_default(),
                 is_final_decorator: stmt.decorator_list.iter().any(is_final_decorator),
+                is_deprecated: deprecation_message.is_some(),
+                deprecation_message,
                 members: extract_class_members(normalized, &stmt.body),
                 is_abstract_class: false,
                 line,
@@ -1166,6 +1189,7 @@ fn extract_ast_backed_statement(
         }
         Stmt::FunctionDef(stmt) => {
             let is_overload = stmt.decorator_list.iter().any(is_overload_decorator);
+            let deprecation_message = deprecated_decorator_message(&stmt.decorator_list);
             let statement = FunctionStatement {
                 name: stmt.name.as_str().to_owned(),
                 type_params: extract_ast_type_params(
@@ -1188,6 +1212,8 @@ fn extract_ast_backed_statement(
                     .map(str::to_owned),
                 is_async: stmt.is_async,
                 is_override: stmt.decorator_list.iter().any(is_override_decorator),
+                is_deprecated: deprecation_message.is_some(),
+                deprecation_message,
                 line,
             };
 
@@ -2758,6 +2784,44 @@ fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
+fn deprecated_decorator_message(decorators: &[ruff_python_ast::Decorator]) -> Option<String> {
+    decorators.iter().find_map(deprecated_decorator_arg)
+}
+
+fn deprecated_decorator_arg(decorator: &ruff_python_ast::Decorator) -> Option<String> {
+    match &decorator.expression {
+        Expr::Name(name) if name.id.as_str() == "deprecated" => Some(String::new()),
+        Expr::Attribute(attribute)
+            if attribute.attr.as_str() == "deprecated"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing_extensions" | "warnings")) =>
+        {
+            Some(String::new())
+        }
+        Expr::Call(call) => {
+            let target = match &*call.func {
+                Expr::Name(name) => name.id.as_str() == "deprecated",
+                Expr::Attribute(attribute) => {
+                    attribute.attr.as_str() == "deprecated"
+                        && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing_extensions" | "warnings"))
+                }
+                _ => false,
+            };
+            if !target {
+                return None;
+            }
+            call.arguments
+                .args
+                .first()
+                .and_then(|arg| match arg {
+                    Expr::StringLiteral(string) => Some(string.value.to_str().to_owned()),
+                    _ => None,
+                })
+                .or(Some(String::new()))
+        }
+        _ => None,
+    }
+}
+
 fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> MethodKind {
     for decorator in decorators {
         match &decorator.expression {
@@ -2981,6 +3045,8 @@ fn parse_named_block(
         header_suffix: parsed_type_params.remainder.trim().to_owned(),
         bases: Vec::new(),
         is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
         is_abstract_class: false,
         members: Vec::new(),
         line: line_number,
@@ -3060,6 +3126,8 @@ fn parse_function(
         returns: None,
         is_async: false,
         is_override: false,
+        is_deprecated: false,
+        deprecation_message: None,
         line: line_number,
     }))
 }
@@ -3412,6 +3480,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
@@ -3422,6 +3492,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
@@ -3432,6 +3504,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
@@ -3446,6 +3520,8 @@ mod tests {
                     returns: None,
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 8,
                 }),
                 SyntaxStatement::Unsafe(UnsafeStatement { line: 10 }),
@@ -3495,6 +3571,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
@@ -3508,6 +3586,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
@@ -3521,6 +3601,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
@@ -3538,6 +3620,8 @@ mod tests {
                     returns: None,
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 8,
                 }),
             ]
@@ -3622,6 +3706,8 @@ mod tests {
                 header_suffix: String::from("(Closable)"),
                 bases: vec![String::from("Closable")],
                 is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -3666,6 +3752,8 @@ mod tests {
                 returns: Some(String::from("int")),
                 is_async: false,
                 is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
                 line: 1,
             })]
         );
@@ -3708,6 +3796,8 @@ mod tests {
                 returns: None,
                 is_async: false,
                 is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
                 line: 1,
             }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -3785,6 +3875,8 @@ line: 2,
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 3,
                 }),
             ]
@@ -3828,6 +3920,8 @@ line: 2,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
@@ -3845,6 +3939,8 @@ line: 2,
                     returns: Some(String::from("T")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 4,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4064,6 +4160,8 @@ owner_name: None,
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -4137,6 +4235,8 @@ owner_name: Some(String::from("build")),
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Call(CallStatement {
@@ -4324,6 +4424,8 @@ owner_name: None,
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Call(CallStatement {
@@ -4357,6 +4459,8 @@ owner_name: None,
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4400,6 +4504,8 @@ line: 2,
                     returns: Some(String::from("bool")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4424,6 +4530,8 @@ line: 2,
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 4,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4465,6 +4573,8 @@ line: 5,
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4509,6 +4619,8 @@ line: 2,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -4615,6 +4727,8 @@ line: 2,
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: vec![
                     ClassMember {
@@ -4629,6 +4743,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -4645,6 +4761,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -4664,6 +4782,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -4702,6 +4822,8 @@ line: 2,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -4725,6 +4847,8 @@ line: 2,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -4750,6 +4874,8 @@ line: 2,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -4823,6 +4949,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("limit"),
@@ -4836,6 +4964,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
@@ -4874,6 +5004,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: true,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -4890,6 +5022,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 5,
@@ -4947,6 +5081,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("cache"),
@@ -4960,6 +5096,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: true,
                         line: 4,
@@ -5060,6 +5198,8 @@ owner_name: None,
                     returns: Some(String::from("int")),
                     is_async: true,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -5103,6 +5243,8 @@ line: 2,
                     returns: Some(String::from("int")),
                     is_async: true,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -5127,6 +5269,8 @@ line: 2,
                     returns: Some(String::from("int")),
                     is_async: true,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 4,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -5170,6 +5314,8 @@ line: 5,
                     returns: Some(String::from("Generator[int, None, None]")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Yield(YieldStatement {
@@ -5194,6 +5340,8 @@ is_yield_from: false,
                     returns: Some(String::from("Generator[int, None, None]")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 4,
                 }),
                 SyntaxStatement::Yield(YieldStatement {
@@ -5240,6 +5388,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -5302,6 +5452,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -5348,6 +5500,8 @@ is_yield_from: true,
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::For(ForStatement {
@@ -5409,6 +5563,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::For(ForStatement {
@@ -5472,6 +5628,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::With(WithStatement {
@@ -5532,6 +5690,8 @@ is_yield_from: true,
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::With(WithStatement {
@@ -5585,6 +5745,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::With(WithStatement {
@@ -5660,6 +5822,8 @@ is_yield_from: true,
                     returns: Some(String::from("ValueError")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 1,
                 }),
                 SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {
@@ -5722,6 +5886,8 @@ is_yield_from: true,
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 3,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -5734,6 +5900,8 @@ is_yield_from: true,
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 6,
                 }),
                 SyntaxStatement::Return(ReturnStatement {
@@ -5784,6 +5952,8 @@ line: 7,
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: true,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     line: 3,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -5792,6 +5962,8 @@ line: 7,
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -5808,6 +5980,8 @@ line: 7,
                         is_override: true,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 8,
@@ -5846,6 +6020,8 @@ line: 7,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                     is_abstract_class: true,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -5862,6 +6038,8 @@ line: 7,
                         is_override: false,
                         is_abstract_method: true,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -5892,6 +6070,8 @@ line: 7,
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: vec![
                     ClassMember {
@@ -5909,6 +6089,8 @@ line: 7,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -5925,6 +6107,8 @@ line: 7,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 6,
@@ -5944,6 +6128,8 @@ line: 7,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 10,

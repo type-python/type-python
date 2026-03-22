@@ -949,6 +949,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         &graph,
         config.config.typing.require_explicit_overrides,
         config.config.typing.enable_sealed_exhaustiveness,
+        config.config.typing.report_deprecated,
     )
     .diagnostics;
     diagnostics.diagnostics.extend(

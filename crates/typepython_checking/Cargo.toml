@@ -10,6 +10,7 @@ version.workspace = true
 
 [dependencies]
 typepython-binding = { path = "../typepython_binding" }
+typepython-config = { path = "../typepython_config" }
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-graph = { path = "../typepython_graph" }
 typepython-syntax = { path = "../typepython_syntax" }
