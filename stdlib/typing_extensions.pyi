@@ -40,6 +40,9 @@ class Callable:
 class Literal:
     pass
 
+class Annotated:
+    pass
+
 def cast(t, value) -> Any: ...
 def NewType(name: str, typ) -> Any: ...
 def TypeVar(name: str) -> Any: ...

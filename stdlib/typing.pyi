@@ -13,6 +13,9 @@ class Callable:
 class Literal:
     pass
 
+class Annotated:
+    pass
+
 class TypedDict:
     pass
 

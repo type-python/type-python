@@ -832,6 +832,72 @@ fn substitute_self_annotation(text: &str, owner_type_name: Option<&str>) -> Stri
     output
 }
 
+fn rewrite_imported_typing_aliases(node: &typepython_graph::ModuleNode, text: &str) -> String {
+    let mut output = String::new();
+    let mut token = String::new();
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+            continue;
+        }
+        if !token.is_empty() {
+            output.push_str(&rewrite_imported_typing_token(node, &token));
+            token.clear();
+        }
+        output.push(character);
+    }
+    if !token.is_empty() {
+        output.push_str(&rewrite_imported_typing_token(node, &token));
+    }
+    output
+}
+
+fn rewrite_imported_typing_token(node: &typepython_graph::ModuleNode, token: &str) -> String {
+    let Some(import_decl) = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == token
+    }) else {
+        return token.to_owned();
+    };
+
+    let Some((module_name, symbol_name)) = import_decl.detail.rsplit_once('.') else {
+        return token.to_owned();
+    };
+    if matches!(module_name, "typing" | "typing_extensions" | "collections.abc")
+        && matches!(
+            symbol_name,
+            "Annotated"
+                | "Any"
+                | "Awaitable"
+                | "Callable"
+                | "ClassVar"
+                | "Concatenate"
+                | "Coroutine"
+                | "Final"
+                | "Generator"
+                | "Literal"
+                | "NewType"
+                | "NotRequired"
+                | "Optional"
+                | "ParamSpec"
+                | "Protocol"
+                | "ReadOnly"
+                | "Required"
+                | "Sequence"
+                | "TypeGuard"
+                | "TypeIs"
+                | "TypeVar"
+                | "TypeVarTuple"
+                | "TypedDict"
+                | "Union"
+                | "Unpack"
+        )
+    {
+        return symbol_name.to_owned();
+    }
+
+    token.to_owned()
+}
+
 fn normalized_assignment_annotation<'a>(annotation: &'a str) -> Option<&'a str> {
     let annotation = annotation.trim();
     if annotation.is_empty() {
@@ -876,6 +942,13 @@ fn direct_type_matches(expected: &str, actual: &str) -> bool {
 }
 
 fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
+    if let Some(inner) = annotated_inner(expected) {
+        return direct_type_matches_normalized(&inner, actual);
+    }
+    if let Some(inner) = annotated_inner(actual) {
+        return direct_type_matches_normalized(expected, &inner);
+    }
+
     if expected == actual || expected == "Any" || actual == "Any" {
         return true;
     }
@@ -910,6 +983,9 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
 
 fn union_branches(text: &str) -> Option<Vec<String>> {
     let text = text.trim();
+    if let Some(inner) = annotated_inner(text) {
+        return union_branches(&inner).or(Some(vec![inner]));
+    }
     if let Some(inner) = text.strip_prefix("Optional[").and_then(|inner| inner.strip_suffix(']')) {
         return Some(vec![normalize_type_text(inner), String::from("None")]);
     }
@@ -940,6 +1016,14 @@ fn split_top_level_union_branches(text: &str) -> Vec<&str> {
     }
     parts.push(text[start..].trim());
     parts
+}
+
+fn annotated_inner(text: &str) -> Option<String> {
+    let text = text.trim();
+    let inner = text.strip_prefix("Annotated[").and_then(|inner| inner.strip_suffix(']'))?;
+    let mut args = split_top_level_type_args(inner).into_iter();
+    let first = args.next()?;
+    Some(normalize_type_text(first))
 }
 
 fn split_generic_type(text: &str) -> Option<(&str, Vec<String>)> {
@@ -1245,7 +1329,10 @@ fn resolve_unnarrowed_name_reference_type(
     value_name: &str,
 ) -> Option<String> {
     if let Some(signature) = signature {
-        let signature = substitute_self_annotation(signature, current_owner_type_name);
+        let signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(signature, current_owner_type_name),
+        );
         if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
             return Some(param_type);
         }
@@ -1319,7 +1406,10 @@ fn resolve_unnarrowed_name_reference_type(
             && declaration.name == value_name
             && !declaration.detail.is_empty()
     }) {
-        let detail = substitute_self_annotation(&local_value.detail, current_owner_type_name);
+        let detail = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&local_value.detail, current_owner_type_name),
+        );
         return normalized_direct_return_annotation(&detail).map(normalize_type_text);
     }
 
@@ -7963,6 +8053,63 @@ owner_name: None,
                     line: 1,
                 }],
                 summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_annotated_type_equivalence() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:Annotated[str, tag])->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
             }],
         });
 
