@@ -303,9 +303,11 @@ fn direct_return_type_diagnostics(
                     }
             })?;
 
-            let expected = normalized_direct_return_annotation(
+            let expected_text = substitute_self_annotation(
                 target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
-            )
+                return_site.owner_type_name.as_deref(),
+            );
+            let expected = normalized_direct_return_annotation(&expected_text)
             .map(normalize_type_text)?;
 
             let actual = resolve_direct_expression_type(
@@ -716,19 +718,18 @@ fn resolve_direct_member_callable_signature(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let method = class_node.declarations.iter().find(|declaration| {
-        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-            && declaration.name == member_name
-            && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+    let method = find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
     })?;
 
-    let actual_params = direct_param_types(&method.detail).unwrap_or_default();
+    let actual_params = direct_param_types(&substitute_self_annotation(&method.detail, Some(&owner_type_name))).unwrap_or_default();
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,
         _ => actual_params.into_iter().skip(1).collect(),
     };
-    let actual_return = normalized_direct_return_annotation(method.detail.split_once("->")?.1.trim())
+    let return_text = substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name));
+    let actual_return = normalized_direct_return_annotation(&return_text)
         .map(normalize_type_text)?;
     Some((bound_params, actual_return))
 }
@@ -797,6 +798,38 @@ fn resolve_for_owner_signature<'a>(
 fn normalized_direct_return_annotation(annotation: &str) -> Option<&str> {
     let annotation = annotation.trim();
     (!annotation.is_empty()).then_some(annotation)
+}
+
+fn substitute_self_annotation(text: &str, owner_type_name: Option<&str>) -> String {
+    let Some(owner_type_name) = owner_type_name else {
+        return text.trim().to_owned();
+    };
+
+    let mut output = String::new();
+    let mut token = String::new();
+    for character in text.trim().chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+            continue;
+        }
+        if !token.is_empty() {
+            if token == "Self" {
+                output.push_str(owner_type_name);
+            } else {
+                output.push_str(&token);
+            }
+            token.clear();
+        }
+        output.push(character);
+    }
+    if !token.is_empty() {
+        if token == "Self" {
+            output.push_str(owner_type_name);
+        } else {
+            output.push_str(&token);
+        }
+    }
+    output
 }
 
 fn normalized_assignment_annotation<'a>(annotation: &'a str) -> Option<&'a str> {
@@ -1080,10 +1113,20 @@ fn resolve_direct_name_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    if let Some(receiver_type) = resolve_receiver_name_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+    ) {
+        return Some(receiver_type);
+    }
+
+    let signature = signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
     let base_type = resolve_unnarrowed_name_reference_type(
         node,
         nodes,
-        signature,
+        signature.as_deref(),
         exclude_name,
         current_owner_name,
         current_owner_type_name,
@@ -1102,6 +1145,95 @@ fn resolve_direct_name_reference_type(
     ))
 }
 
+fn resolve_receiver_name_type(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+) -> Option<String> {
+    let owner_type_name = current_owner_type_name?;
+    let owner_name = current_owner_name?;
+    let declaration = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Function
+            && declaration.name == owner_name
+            && declaration.owner.as_ref().is_some_and(|owner| owner.name == owner_type_name)
+    })?;
+
+    match (declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance), value_name) {
+        (typepython_syntax::MethodKind::Instance, "self")
+        | (typepython_syntax::MethodKind::Property, "self") => Some(String::from(owner_type_name)),
+        (typepython_syntax::MethodKind::Class, "cls") => Some(format!("type[{owner_type_name}]")),
+        _ => None,
+    }
+}
+
+fn find_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+) -> Option<&'a Declaration> {
+    let mut visited = BTreeSet::new();
+    find_member_declaration_with_visited(nodes, class_node, class_decl, member_name, predicate, &mut visited)
+}
+
+fn find_member_declaration_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<&'a Declaration> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return None;
+    }
+
+    if let Some(member) = class_node.declarations.iter().find(|declaration| {
+        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && declaration.name == member_name
+            && predicate(declaration)
+    }) {
+        return Some(member);
+    }
+
+    for base in &class_decl.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+            if let Some(member) =
+                find_member_declaration_with_visited(nodes, base_node, base_decl, member_name, predicate, visited)
+            {
+                return Some(member);
+            }
+        }
+    }
+
+    None
+}
+
+fn find_owned_value_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+    })
+}
+
+fn find_owned_callable_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+    })
+}
+
 fn resolve_unnarrowed_name_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1113,7 +1245,8 @@ fn resolve_unnarrowed_name_reference_type(
     value_name: &str,
 ) -> Option<String> {
     if let Some(signature) = signature {
-        if let Some(param_type) = resolve_direct_return_name_type(signature, value_name) {
+        let signature = substitute_self_annotation(signature, current_owner_type_name);
+        if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
             return Some(param_type);
         }
     }
@@ -1186,11 +1319,16 @@ fn resolve_unnarrowed_name_reference_type(
             && declaration.name == value_name
             && !declaration.detail.is_empty()
     }) {
-        return normalized_direct_return_annotation(&local_value.detail).map(normalize_type_text);
+        let detail = substitute_self_annotation(&local_value.detail, current_owner_type_name);
+        return normalized_direct_return_annotation(&detail).map(normalize_type_text);
     }
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
-        return normalized_direct_return_annotation(function.detail.split_once("->")?.1).map(normalize_type_text);
+        let return_text = substitute_self_annotation(
+            function.detail.split_once("->")?.1,
+            function.owner.as_ref().map(|owner| owner.name.as_str()),
+        );
+        return normalized_direct_return_annotation(&return_text).map(normalize_type_text);
     }
 
     None
@@ -1896,15 +2034,16 @@ fn resolve_direct_member_reference_type(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let member = class_node.declarations.iter().find(|declaration| {
-        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-            && declaration.name == member_name
-            && declaration.kind == DeclarationKind::Value
-    })?;
-
-    normalized_direct_return_annotation(&member.detail)
+    let member = find_owned_value_declaration(nodes, class_node, class_decl, member_name)?;
+    let detail = substitute_self_annotation(&member.detail, Some(&owner_type_name));
+    normalized_direct_return_annotation(&detail)
         .map(normalize_type_text)
-        .or_else(|| member.value_type.as_deref().map(normalize_type_text))
+        .or_else(|| {
+            member
+                .value_type
+                .as_deref()
+                .map(|value| normalize_type_text(&substitute_self_annotation(value, Some(&owner_type_name))))
+        })
 }
 
 fn resolve_direct_method_return_type(
@@ -1938,13 +2077,9 @@ fn resolve_direct_method_return_type(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let method = class_node.declarations.iter().find(|declaration| {
-        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-            && declaration.name == method_name
-            && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-    })?;
-
-    normalized_direct_return_annotation(method.detail.split_once("->")?.1.trim()).map(normalize_type_text)
+    let method = find_owned_callable_declaration(nodes, class_node, class_decl, method_name)?;
+    let return_text = substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name));
+    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
 }
 
 fn unwrap_awaitable_type(text: &str) -> Option<String> {
@@ -2018,10 +2153,7 @@ fn direct_member_access_diagnostics(
         .iter()
         .filter_map(|access| {
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &access.owner_name)?;
-            let has_member = class_node.declarations.iter().any(|declaration| {
-                declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-                    && declaration.name == access.member
-            });
+            let has_member = find_owned_value_declaration(nodes, class_node, class_decl, &access.member).is_some();
 
             (!has_member).then(|| {
                 Diagnostic::error(
@@ -2048,15 +2180,12 @@ fn direct_method_call_diagnostics(
         let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name) else {
             continue;
         };
-        let Some(target) = class_node.declarations.iter().find(|declaration| {
-            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-                && declaration.name == call.method
-                && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-        }) else {
+        let Some(target) = find_owned_callable_declaration(nodes, class_node, class_decl, &call.method) else {
             continue;
         };
 
-        let param_names = direct_param_names(&target.detail).unwrap_or_default();
+        let method_signature = substitute_self_annotation(&target.detail, Some(&class_decl.name));
+        let param_names = direct_param_names(&method_signature).unwrap_or_default();
         let expected = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
             typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => param_names.len(),
             _ => param_names.len().saturating_sub(1),
@@ -2255,11 +2384,14 @@ fn resolve_direct_callable_return_type<'a>(
     callee: &str,
 ) -> Option<String> {
     if let Some(function) = resolve_direct_function(node, nodes, callee) {
-        let return_type = function.detail.split_once("->")?.1.trim();
+        let return_type = substitute_self_annotation(
+            function.detail.split_once("->")?.1.trim(),
+            function.owner.as_ref().map(|owner| owner.name.as_str()),
+        );
         return Some(if function.is_async && !return_type.is_empty() {
             format!("Awaitable[{return_type}]")
         } else {
-            return_type.to_owned()
+            return_type
         });
     }
 
@@ -15561,6 +15693,281 @@ line: 5,
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("type alias `Left`"));
         assert!(rendered.contains("Left -> Right -> Left"));
+    }
+
+    #[test]
+    fn check_accepts_self_return_through_inherited_method_call() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("clone"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->Self"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("SubBox"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Box")],
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(box:SubBox)->SubBox"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: Some(String::from("box")),
+                    value_method_name: Some(String::from("clone")),
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_self_parameter_annotation_in_method_call() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("merge"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,other:Self)->Self"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: vec![typepython_binding::MethodCallSite {
+                    owner_name: String::from("Box"),
+                    method: String::from("merge"),
+                    through_instance: true,
+                    arg_count: 1,
+                    arg_types: vec![String::from("Box")],
+                    keyword_names: Vec::new(),
+                }],
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_self_typed_attribute_access() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Node"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("next"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("Self"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Node"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(node:Node)->Node"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("node")),
+                    value_member_name: Some(String::from("next")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 3,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
     }
 
     #[test]
