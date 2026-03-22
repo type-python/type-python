@@ -308,9 +308,12 @@ fn direct_return_type_diagnostics(
                     }
             })?;
 
-            let expected_text = substitute_self_annotation(
+            let expected_text = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(
                 target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
                 return_site.owner_type_name.as_deref(),
+            ),
             );
             let expected = normalized_direct_return_annotation(&expected_text)
             .map(normalize_type_text)?;
@@ -727,13 +730,20 @@ fn resolve_direct_member_callable_signature(
         matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
     })?;
 
-    let actual_params = direct_param_types(&substitute_self_annotation(&method.detail, Some(&owner_type_name))).unwrap_or_default();
+        let method_signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
+        );
+        let actual_params = direct_param_types(&method_signature).unwrap_or_default();
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,
         _ => actual_params.into_iter().skip(1).collect(),
     };
-    let return_text = substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name));
+    let return_text = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name)),
+    );
     let actual_return = normalized_direct_return_annotation(&return_text)
         .map(normalize_type_text)?;
     Some((bound_params, actual_return))
@@ -1411,17 +1421,17 @@ fn resolve_unnarrowed_name_reference_type(
             && declaration.name == value_name
             && !declaration.detail.is_empty()
     }) {
-        let detail = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(&local_value.detail, current_owner_type_name),
-        );
+        let detail = rewrite_imported_typing_aliases(node, &substitute_self_annotation(&local_value.detail, current_owner_type_name));
         return normalized_direct_return_annotation(&detail).map(normalize_type_text);
     }
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
-        let return_text = substitute_self_annotation(
-            function.detail.split_once("->")?.1,
-            function.owner.as_ref().map(|owner| owner.name.as_str()),
+        let return_text = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(
+                function.detail.split_once("->")?.1,
+                function.owner.as_ref().map(|owner| owner.name.as_str()),
+            ),
         );
         return normalized_direct_return_annotation(&return_text).map(normalize_type_text);
     }
@@ -2133,14 +2143,14 @@ fn resolve_direct_member_reference_type(
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(class_decl.name.clone());
     }
-    let detail = substitute_self_annotation(&member.detail, Some(&owner_type_name));
+    let detail = rewrite_imported_typing_aliases(node, &substitute_self_annotation(&member.detail, Some(&owner_type_name)));
     normalized_direct_return_annotation(&detail)
         .map(normalize_type_text)
         .or_else(|| {
             member
                 .value_type
                 .as_deref()
-                .map(|value| normalize_type_text(&substitute_self_annotation(value, Some(&owner_type_name))))
+                .map(|value| normalize_type_text(&rewrite_imported_typing_aliases(node, &substitute_self_annotation(value, Some(&owner_type_name)))))
         })
 }
 
@@ -2190,7 +2200,10 @@ fn resolve_direct_method_return_type(
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let method = find_owned_callable_declaration(nodes, class_node, class_decl, method_name)?;
-    let return_text = substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name));
+    let return_text = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name)),
+    );
     normalized_direct_return_annotation(&return_text).map(normalize_type_text)
 }
 

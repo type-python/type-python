@@ -26,7 +26,7 @@ class staticmethod:
     pass
 
 class Literal:
-    pass
+    def __class_getitem__(cls, item) -> Any: ...
 
 class Annotated:
     pass
