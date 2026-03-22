@@ -14,7 +14,7 @@ class Final:
     pass
 
 class Callable:
-    pass
+    def __class_getitem__(cls, item) -> Any: ...
 
 class property:
     pass
