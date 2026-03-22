@@ -16,6 +16,15 @@ class Final:
 class Callable:
     pass
 
+class property:
+    pass
+
+class classmethod:
+    pass
+
+class staticmethod:
+    pass
+
 class Literal:
     pass
 
