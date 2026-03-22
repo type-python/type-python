@@ -1,6 +1,6 @@
 # type-python
 
-Rust workspace for the TypePython compiler, CLI, and future LSP.
+Rust workspace for the TypePython compiler, CLI, and LSP.
 
 The Rust workspace rooted at `Cargo.toml` contains the current TypePython
 implementation. The Python packaging layer exposes the requested PyPI package
