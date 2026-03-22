@@ -476,8 +476,9 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             statements.sort_by_key(statement_line);
         }
         Err(error) => {
+            let code = parse_error_code(&error.error.to_string());
             diagnostics.push(
-                Diagnostic::error("TPY2001", format!("Python syntax error: {}", error.error))
+                Diagnostic::error(code, format!("Python syntax error: {}", error.error))
                     .with_span(parse_error_span(
                         &source.path,
                         &source.text,
@@ -556,8 +557,9 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                 statements.sort_by_key(statement_line);
             }
             Err(error) => {
+                let code = parse_error_code(&error.error.to_string());
                 diagnostics.push(
-                    Diagnostic::error("TPY2001", format!("TypePython syntax error: {}", error.error))
+                    Diagnostic::error(code, format!("TypePython syntax error: {}", error.error))
                         .with_span(parse_error_span(
                             &source.path,
                             &source.text,
@@ -570,6 +572,14 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     }
 
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
+}
+
+fn parse_error_code(message: &str) -> &'static str {
+    if matches!(message, "Invalid assignment target" | "Invalid delete target") {
+        "TPY4011"
+    } else {
+        "TPY2001"
+    }
 }
 
 pub fn apply_type_ignore_directives(
@@ -3958,6 +3968,36 @@ line: 2,
         assert!(tree.diagnostics.has_errors());
         assert!(rendered.contains("TPY2001"));
         assert!(rendered.contains("TypePython syntax error"));
+    }
+
+    #[test]
+    fn parse_reports_invalid_assignment_target_as_tpy4011() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("invalid_assign.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("def build() -> None:\n    (x + 1) = 2\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4011"));
+        assert!(rendered.contains("Invalid assignment target"));
+    }
+
+    #[test]
+    fn parse_reports_invalid_delete_target_as_tpy4011() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("invalid_del.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("def build() -> None:\n    del (x + 1)\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(tree.diagnostics.has_errors());
+        assert!(rendered.contains("TPY4011"));
+        assert!(rendered.contains("Invalid delete target"));
     }
 
     #[test]
