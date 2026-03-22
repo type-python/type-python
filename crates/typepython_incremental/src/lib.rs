@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use typepython_graph::ModuleGraph;
+
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
 /// Fingerprint of one summary-bearing module.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14,10 +17,34 @@ pub struct Fingerprint {
 }
 
 /// Current incremental snapshot.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IncrementalState {
     /// Tracked fingerprints by module key.
     pub fingerprints: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct SnapshotFile {
+    schema_version: u32,
+    fingerprints: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SnapshotDecodeError {
+    InvalidJson(String),
+    IncompatibleSchemaVersion(u32),
+}
+
+impl std::fmt::Display for SnapshotDecodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidJson(error) => write!(formatter, "invalid incremental snapshot JSON: {error}"),
+            Self::IncompatibleSchemaVersion(version) => write!(
+                formatter,
+                "incremental snapshot schema version {version} is incompatible with expected version {SNAPSHOT_SCHEMA_VERSION}"
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -71,9 +98,29 @@ pub fn diff(previous: &IncrementalState, current: &IncrementalState) -> Snapshot
     snapshot_diff
 }
 
+pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(&SnapshotFile {
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
+        fingerprints: state.fingerprints.clone(),
+    })
+}
+
+pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecodeError> {
+    let snapshot: SnapshotFile = serde_json::from_str(contents)
+        .map_err(|error| SnapshotDecodeError::InvalidJson(error.to_string()))?;
+    if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION {
+        return Err(SnapshotDecodeError::IncompatibleSchemaVersion(
+            snapshot.schema_version,
+        ));
+    }
+    Ok(IncrementalState {
+        fingerprints: snapshot.fingerprints,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Fingerprint, IncrementalState, SnapshotDiff, diff};
+    use super::{Fingerprint, IncrementalState, SNAPSHOT_SCHEMA_VERSION, SnapshotDecodeError, SnapshotDiff, decode_snapshot, diff, encode_snapshot};
     use std::collections::BTreeMap;
 
     #[test]
@@ -122,5 +169,28 @@ mod tests {
         assert!(snapshot_diff.added.is_empty());
         assert!(snapshot_diff.removed.is_empty());
         assert!(snapshot_diff.changed.is_empty());
+    }
+
+    #[test]
+    fn encode_snapshot_includes_schema_version() {
+        let rendered = encode_snapshot(&IncrementalState {
+            fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
+        })
+        .unwrap();
+
+        assert!(rendered.contains("schema_version"));
+        assert!(rendered.contains(&SNAPSHOT_SCHEMA_VERSION.to_string()));
+        assert!(rendered.contains("pkg.a"));
+    }
+
+    #[test]
+    fn decode_snapshot_rejects_incompatible_schema_version() {
+        let error = decode_snapshot("{\"schema_version\":999,\"fingerprints\":{}}")
+            .expect_err("unexpected schema version should be rejected");
+
+        assert_eq!(
+            error,
+            SnapshotDecodeError::IncompatibleSchemaVersion(999)
+        );
     }
 }

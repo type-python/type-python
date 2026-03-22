@@ -99,7 +99,16 @@ pub fn write_runtime_outputs(
                 fs::create_dir_all(parent)?;
             }
             let stub_source = if module.source_kind == SourceKind::TypePython {
-                rewrite_to_stub_source(&module.python_source)?
+                rewrite_to_stub_source(&module.python_source).map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "TPY5001: unable to generate `.pyi` for `{}`: {}",
+                            module.source_path.display(),
+                            error
+                        ),
+                    )
+                })?
             } else {
                 module.python_source.clone()
             };
@@ -863,6 +872,31 @@ mod tests {
         remove_temp_dir(&temp_dir);
 
         assert!(!runtime.contains("__tpy_validate__"));
+    }
+
+    #[test]
+    fn write_runtime_outputs_reports_pyi_generation_failure() {
+        let temp_dir = temp_dir("write_runtime_outputs_reports_pyi_generation_failure");
+        let result = (|| {
+            let modules = vec![LoweredModule {
+                source_path: PathBuf::from("src/app/__init__.tpy"),
+                source_kind: SourceKind::TypePython,
+                python_source: String::from("def broken(:\n"),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            }];
+            let artifacts = vec![EmitArtifact {
+                source_path: PathBuf::from("src/app/__init__.tpy"),
+                runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+                stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+            }];
+
+            write_runtime_outputs(&artifacts, &modules, false)
+        })();
+        remove_temp_dir(&temp_dir);
+
+        let error = result.expect_err("invalid lowered python should fail stub generation");
+        assert!(error.to_string().contains("TPY5001"));
+        assert!(error.to_string().contains("unable to generate `.pyi`"));
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {

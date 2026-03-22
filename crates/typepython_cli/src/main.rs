@@ -21,7 +21,7 @@ use typepython_config::{ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
-use typepython_incremental::{IncrementalState, snapshot};
+use typepython_incremental::{IncrementalState, decode_snapshot, encode_snapshot, snapshot};
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives, parse};
 
@@ -427,19 +427,38 @@ fn run_build_like_command(
     ensure_output_dirs(config)?;
 
     let snapshot = run_pipeline(config)?;
-    let diagnostics = build_diagnostics(config, &snapshot.diagnostics);
+    let mut diagnostics = build_diagnostics(config, &snapshot.diagnostics);
     if should_emit_build_outputs(config, &snapshot.diagnostics) {
-        let runtime_summary = write_runtime_outputs(
+        let runtime_summary = match write_runtime_outputs(
             &snapshot.emit_plan,
             &snapshot.lowered_modules,
             config.config.emit.runtime_validators,
-        )
-            .with_context(|| {
-                format!(
-                    "unable to write runtime artifacts under {}",
-                    config.resolve_relative_path(&config.config.project.out_dir).display()
-                )
-            })?;
+        ) {
+            Ok(runtime_summary) => runtime_summary,
+            Err(error) if error.to_string().contains("TPY5001") => {
+                diagnostics.push(Diagnostic::error("TPY5001", error.to_string()));
+                let summary = CommandSummary {
+                    command: String::from(command),
+                    config_path: config.config_path.display().to_string(),
+                    config_source: config.source,
+                    discovered_sources: snapshot.discovered_sources,
+                    lowered_modules: snapshot.lowered_modules.len(),
+                    planned_artifacts: snapshot.emit_plan.len(),
+                    tracked_modules: snapshot.tracked_modules,
+                    notes,
+                };
+                print_summary(format, &summary, &diagnostics)?;
+                return Ok(exit_code(&diagnostics));
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "unable to write runtime artifacts under {}",
+                        config.resolve_relative_path(&config.config.project.out_dir).display()
+                    )
+                });
+            }
+        };
         notes.push(format!(
             "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
             runtime_summary.runtime_files_written,
@@ -1075,9 +1094,26 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
             "TPY5003",
             format!("missing incremental snapshot `{}`", snapshot_path.display()),
         ));
+    } else if let Err(error) = verify_incremental_snapshot(&snapshot_path) {
+        diagnostics.push(Diagnostic::error(
+            "TPY6001",
+            format!(
+                "incremental snapshot `{}` is incompatible or corrupt: {}",
+                snapshot_path.display(),
+                error
+            ),
+        ));
     }
 
     diagnostics
+}
+
+fn verify_incremental_snapshot(path: &Path) -> Result<(), String> {
+    let rendered = fs::read_to_string(path)
+        .map_err(|error| format!("unable to read incremental snapshot: {error}"))?;
+    decode_snapshot(&rendered)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
@@ -1337,10 +1373,7 @@ fn write_incremental_snapshot(cache_dir: &Path, snapshot: &IncrementalState) -> 
     fs::create_dir_all(cache_dir)
         .with_context(|| format!("unable to create cache directory {}", cache_dir.display()))?;
     let snapshot_path = cache_dir.join("snapshot.json");
-    let payload = serde_json::to_string_pretty(&serde_json::json!({
-        "fingerprints": snapshot.fingerprints,
-    }))
-    .context("unable to serialize incremental snapshot")?;
+    let payload = encode_snapshot(snapshot).context("unable to serialize incremental snapshot")?;
     fs::write(&snapshot_path, payload)
         .with_context(|| format!("unable to write {}", snapshot_path.display()))?;
     Ok(snapshot_path)
@@ -1976,7 +2009,7 @@ mod tests {
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").unwrap();
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2064,7 +2097,7 @@ mod tests {
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2093,7 +2126,7 @@ mod tests {
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def build_user() -> int:\n    return 1\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2130,7 +2163,7 @@ mod tests {
             )
             .unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{}\n").unwrap();
+            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2147,6 +2180,35 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("declaration surfaces differ"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_corrupt_incremental_snapshot() {
+        let project_dir = temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
+        let rendered = (|| {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
+            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{not-json\n").unwrap();
+            let config = load(&project_dir).unwrap();
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        })();
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY6001"));
+        assert!(rendered.contains("incompatible or corrupt"));
     }
 
     #[test]
