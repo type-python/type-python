@@ -83,7 +83,9 @@ pub fn check_with_options(
         for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
             diagnostics.push(access_diagnostic);
         }
-        for deprecated_diagnostic in deprecated_use_diagnostics(node, &graph.nodes, report_deprecated) {
+        for deprecated_diagnostic in
+            deprecated_use_diagnostics(node, &graph.nodes, report_deprecated)
+        {
             diagnostics.push(deprecated_diagnostic);
         }
         for call_diagnostic in direct_method_call_diagnostics(node, &graph.nodes) {
@@ -122,10 +124,14 @@ pub fn check_with_options(
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
-        for dataclass_diagnostic in frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes) {
+        for dataclass_diagnostic in
+            frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes)
+        {
             diagnostics.push(dataclass_diagnostic);
         }
-        for duplicate in duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations) {
+        for duplicate in
+            duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
+        {
             diagnostics.push(duplicate);
         }
         for override_violation in override_diagnostics(node, &graph.nodes) {
@@ -218,17 +224,16 @@ fn resolve_direct_overloads<'a>(
         return local;
     }
 
-    let Some(import) = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)
-    else {
+    let Some(import) = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == callee
+    }) else {
         return Vec::new();
     };
     let Some((module_key, symbol_name)) = import.detail.rsplit_once('.') else {
         return Vec::new();
     };
-    let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key) else {
+    let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key)
+    else {
         return Vec::new();
     };
     target_node
@@ -252,16 +257,13 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
     }
 
     let param_types = direct_param_types(&declaration.detail).unwrap_or_default();
-    call.arg_types
-        .iter()
-        .zip(param_types.iter())
-        .all(|(arg_ty, param_ty)| {
-            if arg_ty.is_empty() || param_ty.is_empty() {
-                true
-            } else {
-                direct_type_matches(arg_ty, param_ty)
-            }
-        })
+    call.arg_types.iter().zip(param_types.iter()).all(|(arg_ty, param_ty)| {
+        if arg_ty.is_empty() || param_ty.is_empty() {
+            true
+        } else {
+            direct_type_matches(arg_ty, param_ty)
+        }
+    })
 }
 
 fn direct_unknown_operation_diagnostics(
@@ -316,9 +318,7 @@ fn direct_unknown_operation_diagnostics(
     diagnostics
 }
 
-fn conditional_return_coverage_diagnostics(
-    node: &typepython_graph::ModuleNode,
-) -> Vec<Diagnostic> {
+fn conditional_return_coverage_diagnostics(node: &typepython_graph::ModuleNode) -> Vec<Diagnostic> {
     if node.module_path.to_string_lossy().starts_with('<') {
         return Vec::new();
     }
@@ -436,7 +436,11 @@ fn collect_recursive_type_alias_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(index) = stack.iter().position(|entry| entry == alias_id) {
-        let cycle = stack[index..].iter().cloned().chain(std::iter::once(alias_id.to_owned())).collect::<Vec<_>>();
+        let cycle = stack[index..]
+            .iter()
+            .cloned()
+            .chain(std::iter::once(alias_id.to_owned()))
+            .collect::<Vec<_>>();
         let mut cycle_key_parts = cycle.clone();
         cycle_key_parts.sort();
         cycle_key_parts.dedup();
@@ -450,7 +454,10 @@ fn collect_recursive_type_alias_diagnostics(
                     node.module_path.display(),
                     cycle
                         .iter()
-                        .map(|entry| entry.rsplit_once("::").map(|(_, name)| name).unwrap_or(entry.as_str()))
+                        .map(|entry| entry
+                            .rsplit_once("::")
+                            .map(|(_, name)| name)
+                            .unwrap_or(entry.as_str()))
                         .collect::<Vec<_>>()
                         .join(" -> ")
                 ),
@@ -519,25 +526,23 @@ fn resolve_type_alias_reference<'a>(
     name: &str,
 ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
     if let Some(local) = node.declarations.iter().find(|declaration| {
-        declaration.name == name && declaration.owner.is_none() && declaration.kind == DeclarationKind::TypeAlias
+        declaration.name == name
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::TypeAlias
     }) {
         return Some((node, local));
     }
 
-    let import = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)?;
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == name
+    })?;
     let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
     let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    let target_decl = target_node
-        .declarations
-        .iter()
-        .find(|declaration| {
-            declaration.name == symbol_name
-                && declaration.owner.is_none()
-                && declaration.kind == DeclarationKind::TypeAlias
-        })?;
+    let target_decl = target_node.declarations.iter().find(|declaration| {
+        declaration.name == symbol_name
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::TypeAlias
+    })?;
     Some((target_node, target_decl))
 }
 
@@ -561,12 +566,12 @@ fn direct_return_type_diagnostics(
             let expected_text = rewrite_imported_typing_aliases(
                 node,
                 &substitute_self_annotation(
-                target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
-                return_site.owner_type_name.as_deref(),
-            ),
+                    target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
+                    return_site.owner_type_name.as_deref(),
+                ),
             );
-            let expected = normalized_direct_return_annotation(&expected_text)
-            .map(normalize_type_text)?;
+            let expected =
+                normalized_direct_return_annotation(&expected_text).map(normalize_type_text)?;
 
             let actual = resolve_direct_expression_type(
                 node,
@@ -926,7 +931,8 @@ fn typed_dict_literal_diagnostics(
             continue;
         };
         let annotation = rewrite_imported_typing_aliases(node, annotation);
-        let Some(target_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &annotation) else {
+        let Some(target_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &annotation)
+        else {
             continue;
         };
 
@@ -948,47 +954,41 @@ fn typed_dict_literal_diagnostics(
                     site.line,
                     &entry.value,
                 ) else {
-                    diagnostics.push(
-                        typed_dict_literal_diagnostic(
-                            node,
-                            site.line,
-                            format!(
-                                "TypedDict literal for `{}` uses invalid `**` expansion",
-                                target_shape.name
-                            ),
+                    diagnostics.push(typed_dict_literal_diagnostic(
+                        node,
+                        site.line,
+                        format!(
+                            "TypedDict literal for `{}` uses invalid `**` expansion",
+                            target_shape.name
                         ),
-                    );
+                    ));
                     continue;
                 };
 
-                let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type) else {
-                    diagnostics.push(
-                        typed_dict_literal_diagnostic(
-                            node,
-                            site.line,
-                            format!(
-                                "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
-                                target_shape.name,
-                                expansion_type
-                            ),
+                let Some(expansion_shape) =
+                    resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
+                else {
+                    diagnostics.push(typed_dict_literal_diagnostic(
+                        node,
+                        site.line,
+                        format!(
+                            "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
+                            target_shape.name, expansion_type
                         ),
-                    );
+                    ));
                     continue;
                 };
 
                 for (key, field) in &expansion_shape.fields {
                     let Some(target_field) = target_shape.fields.get(key) else {
-                        diagnostics.push(
-                            typed_dict_literal_diagnostic(
-                                node,
-                                site.line,
-                                format!(
-                                    "TypedDict literal for `{}` expands unknown key `{}`",
-                                    target_shape.name,
-                                    key
-                                ),
+                        diagnostics.push(typed_dict_literal_diagnostic(
+                            node,
+                            site.line,
+                            format!(
+                                "TypedDict literal for `{}` expands unknown key `{}`",
+                                target_shape.name, key
                             ),
-                        );
+                        ));
                         continue;
                     };
 
@@ -1018,31 +1018,23 @@ fn typed_dict_literal_diagnostics(
             }
 
             let Some(key) = entry.key.as_deref() else {
-                diagnostics.push(
-                    typed_dict_literal_diagnostic(
-                        node,
-                        site.line,
-                        format!(
-                            "TypedDict literal for `{}` uses a non-literal key",
-                            target_shape.name
-                        ),
-                    ),
-                );
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    site.line,
+                    format!("TypedDict literal for `{}` uses a non-literal key", target_shape.name),
+                ));
                 continue;
             };
 
             let Some(target_field) = target_shape.fields.get(key) else {
-                diagnostics.push(
-                    typed_dict_literal_diagnostic(
-                        node,
-                        site.line,
-                        format!(
-                            "TypedDict literal for `{}` uses unknown key `{}`",
-                            target_shape.name,
-                            key
-                        ),
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    site.line,
+                    format!(
+                        "TypedDict literal for `{}` uses unknown key `{}`",
+                        target_shape.name, key
                     ),
-                );
+                ));
                 continue;
             };
 
@@ -1078,17 +1070,14 @@ fn typed_dict_literal_diagnostics(
 
         for (key, field) in &target_shape.fields {
             if field.required && !guaranteed_keys.contains(key) {
-                diagnostics.push(
-                    typed_dict_literal_diagnostic(
-                        node,
-                        site.line,
-                        format!(
-                            "TypedDict literal for `{}` is missing required key `{}`",
-                            target_shape.name,
-                            key
-                        ),
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    site.line,
+                    format!(
+                        "TypedDict literal for `{}` is missing required key `{}`",
+                        target_shape.name, key
                     ),
-                );
+                ));
             }
         }
     }
@@ -1301,10 +1290,7 @@ fn resolve_known_typed_dict_shape(
 
     let mut fields = BTreeMap::new();
     collect_typed_dict_fields(nodes, class_node, class_decl, &mut BTreeSet::new(), &mut fields);
-    Some(TypedDictShape {
-        name: class_decl.name.clone(),
-        fields,
-    })
+    Some(TypedDictShape { name: class_decl.name.clone(), fields })
 }
 
 fn is_typed_dict_class(
@@ -1321,9 +1307,11 @@ fn is_typed_dict_class(
     class_decl.name == "TypedDict"
         || class_decl.bases.iter().any(|base| {
             base == "TypedDict"
-                || resolve_direct_base(nodes, class_node, base).is_some_and(|(base_node, base_decl)| {
-                    is_typed_dict_class(nodes, base_node, base_decl, visited)
-                })
+                || resolve_direct_base(nodes, class_node, base).is_some_and(
+                    |(base_node, base_decl)| {
+                        is_typed_dict_class(nodes, base_node, base_decl, visited)
+                    },
+                )
         })
 }
 
@@ -1354,7 +1342,10 @@ fn collect_typed_dict_fields(
     }) {
         fields.insert(
             declaration.name.clone(),
-            parse_typed_dict_field_shape(&rewrite_imported_typing_aliases(class_node, &declaration.detail)),
+            parse_typed_dict_field_shape(&rewrite_imported_typing_aliases(
+                class_node,
+                &declaration.detail,
+            )),
         );
     }
 }
@@ -1365,17 +1356,23 @@ fn parse_typed_dict_field_shape(annotation: &str) -> TypedDictFieldShape {
     let mut readonly = false;
 
     loop {
-        if let Some(inner) = value_type.strip_prefix("Required[").and_then(|inner| inner.strip_suffix(']')) {
+        if let Some(inner) =
+            value_type.strip_prefix("Required[").and_then(|inner| inner.strip_suffix(']'))
+        {
             value_type = normalize_type_text(inner);
             required = true;
             continue;
         }
-        if let Some(inner) = value_type.strip_prefix("NotRequired[").and_then(|inner| inner.strip_suffix(']')) {
+        if let Some(inner) =
+            value_type.strip_prefix("NotRequired[").and_then(|inner| inner.strip_suffix(']'))
+        {
             value_type = normalize_type_text(inner);
             required = false;
             continue;
         }
-        if let Some(inner) = value_type.strip_prefix("ReadOnly[").and_then(|inner| inner.strip_suffix(']')) {
+        if let Some(inner) =
+            value_type.strip_prefix("ReadOnly[").and_then(|inner| inner.strip_suffix(']'))
+        {
             value_type = normalize_type_text(inner);
             readonly = true;
             continue;
@@ -1383,11 +1380,7 @@ fn parse_typed_dict_field_shape(annotation: &str) -> TypedDictFieldShape {
         break;
     }
 
-    TypedDictFieldShape {
-        value_type,
-        required,
-        readonly,
-    }
+    TypedDictFieldShape { value_type, required, readonly }
 }
 
 fn callable_assignment_result(
@@ -1397,20 +1390,20 @@ fn callable_assignment_result(
     expected: &str,
 ) -> Option<Option<Diagnostic>> {
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
-    let Some((actual_params, actual_return)) = resolve_callable_assignment_signature(node, nodes, assignment) else {
+    let Some((actual_params, actual_return)) =
+        resolve_callable_assignment_signature(node, nodes, assignment)
+    else {
         return None;
     };
 
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
-            && expected_params
-                .iter()
-                .zip(actual_params.iter())
-                .all(|(expected_param, actual_param)| direct_type_matches(expected_param, actual_param))
+            && expected_params.iter().zip(actual_params.iter()).all(
+                |(expected_param, actual_param)| direct_type_matches(expected_param, actual_param),
+            )
     });
 
-    let matches = params_match
-        && direct_type_matches(&expected_return, &actual_return);
+    let matches = params_match && direct_type_matches(&expected_return, &actual_return);
 
     Some((!matches).then(|| {
         let actual_signature = format!("({})->{}", actual_params.join(","), actual_return);
@@ -1501,15 +1494,16 @@ fn resolve_direct_member_callable_signature(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let method = find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
-        matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-    })?;
+    let method =
+        find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+            matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+        })?;
 
-        let method_signature = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
-        );
-        let actual_params = direct_param_types(&method_signature).unwrap_or_default();
+    let method_signature = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
+    );
+    let actual_params = direct_param_types(&method_signature).unwrap_or_default();
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,
@@ -1517,10 +1511,13 @@ fn resolve_direct_member_callable_signature(
     };
     let return_text = rewrite_imported_typing_aliases(
         node,
-        &substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name)),
+        &substitute_self_annotation(
+            method.detail.split_once("->")?.1.trim(),
+            Some(&owner_type_name),
+        ),
     );
-    let actual_return = normalized_direct_return_annotation(&return_text)
-        .map(normalize_type_text)?;
+    let actual_return =
+        normalized_direct_return_annotation(&return_text).map(normalize_type_text)?;
     Some((bound_params, actual_return))
 }
 
@@ -1539,10 +1536,7 @@ fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)
     let param_types = if params.trim().is_empty() {
         Vec::new()
     } else {
-        split_top_level_type_args(params)
-            .into_iter()
-            .map(normalize_type_text)
-            .collect()
+        split_top_level_type_args(params).into_iter().map(normalize_type_text).collect()
     };
     Some((Some(param_types), normalize_type_text(parts[1])))
 }
@@ -1705,10 +1699,13 @@ fn normalized_assignment_annotation<'a>(annotation: &'a str) -> Option<&'a str> 
     if annotation.is_empty() {
         return None;
     }
-    if let Some(inner) = annotation.strip_prefix("Final[").and_then(|inner| inner.strip_suffix(']')) {
+    if let Some(inner) = annotation.strip_prefix("Final[").and_then(|inner| inner.strip_suffix(']'))
+    {
         return normalized_assignment_annotation(inner);
     }
-    if let Some(inner) = annotation.strip_prefix("ClassVar[").and_then(|inner| inner.strip_suffix(']')) {
+    if let Some(inner) =
+        annotation.strip_prefix("ClassVar[").and_then(|inner| inner.strip_suffix(']'))
+    {
         return normalized_assignment_annotation(inner);
     }
     match annotation {
@@ -1758,13 +1755,13 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
     if let Some(branches) = union_branches(expected) {
         if let Some(actual_branches) = union_branches(actual) {
             return actual_branches.iter().all(|actual_branch| {
-                branches
-                    .iter()
-                    .any(|expected_branch| direct_type_matches_normalized(expected_branch, actual_branch))
+                branches.iter().any(|expected_branch| {
+                    direct_type_matches_normalized(expected_branch, actual_branch)
+                })
             }) && branches.iter().all(|expected_branch| {
-                actual_branches
-                    .iter()
-                    .any(|actual_branch| direct_type_matches_normalized(expected_branch, actual_branch))
+                actual_branches.iter().any(|actual_branch| {
+                    direct_type_matches_normalized(expected_branch, actual_branch)
+                })
             });
         }
         return branches.into_iter().any(|branch| direct_type_matches_normalized(&branch, actual));
@@ -1774,10 +1771,9 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
             if expected_head == actual_head && expected_args.len() == actual_args.len() =>
         {
-            expected_args
-                .iter()
-                .zip(actual_args.iter())
-                .all(|(expected_arg, actual_arg)| direct_type_matches_normalized(expected_arg, actual_arg))
+            expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
+                direct_type_matches_normalized(expected_arg, actual_arg)
+            })
         }
         _ => false,
     }
@@ -1792,7 +1788,9 @@ fn union_branches(text: &str) -> Option<Vec<String>> {
         return Some(vec![normalize_type_text(inner), String::from("None")]);
     }
     if let Some(inner) = text.strip_prefix("Union[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(split_top_level_type_args(inner).into_iter().map(normalize_type_text).collect());
+        return Some(
+            split_top_level_type_args(inner).into_iter().map(normalize_type_text).collect(),
+        );
     }
     let pipe_branches = split_top_level_union_branches(text);
     if pipe_branches.len() > 1 {
@@ -1971,22 +1969,19 @@ fn resolve_direct_expression_type(
             })
         });
 
-    resolved.and_then(|resolved| {
-        if is_awaited {
-            unwrap_awaitable_type(&resolved)
-        } else {
-            Some(resolved)
-        }
-    })
+    resolved.and_then(
+        |resolved| {
+            if is_awaited { unwrap_awaitable_type(&resolved) } else { Some(resolved) }
+        },
+    )
 }
 
 fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
     let param_names = direct_param_names(signature)?;
     let param_types = direct_param_types(signature)?;
-    param_names
-        .iter()
-        .zip(param_types.iter())
-        .find_map(|(param_name, param_type)| (param_name == value_name).then_some(normalize_type_text(param_type)))
+    param_names.iter().zip(param_types.iter()).find_map(|(param_name, param_type)| {
+        (param_name == value_name).then_some(normalize_type_text(param_type))
+    })
 }
 
 fn resolve_direct_name_reference_type(
@@ -1999,16 +1994,14 @@ fn resolve_direct_name_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
-    if let Some(receiver_type) = resolve_receiver_name_type(
-        node,
-        current_owner_name,
-        current_owner_type_name,
-        value_name,
-    ) {
+    if let Some(receiver_type) =
+        resolve_receiver_name_type(node, current_owner_name, current_owner_type_name, value_name)
+    {
         return Some(receiver_type);
     }
 
-    let signature = signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
+    let signature =
+        signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
     let base_type = resolve_unnarrowed_name_reference_type(
         node,
         nodes,
@@ -2061,7 +2054,14 @@ fn find_member_declaration<'a>(
     predicate: impl Fn(&Declaration) -> bool + Copy,
 ) -> Option<&'a Declaration> {
     let mut visited = BTreeSet::new();
-    find_member_declaration_with_visited(nodes, class_node, class_decl, member_name, predicate, &mut visited)
+    find_member_declaration_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        predicate,
+        &mut visited,
+    )
 }
 
 fn find_member_declaration_with_visited<'a>(
@@ -2087,9 +2087,14 @@ fn find_member_declaration_with_visited<'a>(
 
     for base in &class_decl.bases {
         if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
-            if let Some(member) =
-                find_member_declaration_with_visited(nodes, base_node, base_decl, member_name, predicate, visited)
-            {
+            if let Some(member) = find_member_declaration_with_visited(
+                nodes,
+                base_node,
+                base_decl,
+                member_name,
+                predicate,
+                visited,
+            ) {
                 return Some(member);
             }
         }
@@ -2208,7 +2213,10 @@ fn resolve_unnarrowed_name_reference_type(
             && declaration.name == value_name
             && !declaration.detail.is_empty()
     }) {
-        let detail = rewrite_imported_typing_aliases(node, &substitute_self_annotation(&local_value.detail, current_owner_type_name));
+        let detail = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&local_value.detail, current_owner_type_name),
+        );
         return normalized_direct_return_annotation(&detail).map(normalize_type_text);
     }
 
@@ -2244,12 +2252,22 @@ fn apply_guard_narrowing(
             guard.owner_name.as_deref() == current_owner_name
                 && guard.owner_type_name.as_deref() == current_owner_type_name
                 && guard.line < current_line
-                && !name_reassigned_after_line(node, current_owner_name, current_owner_type_name, value_name, guard.line, current_line)
+                && !name_reassigned_after_line(
+                    node,
+                    current_owner_name,
+                    current_owner_type_name,
+                    value_name,
+                    guard.line,
+                    current_line,
+                )
         })
         .filter_map(|guard| {
-            let branch_true = if current_line >= guard.true_start_line && current_line <= guard.true_end_line {
+            let branch_true = if current_line >= guard.true_start_line
+                && current_line <= guard.true_end_line
+            {
                 Some(true)
-            } else if let (Some(start), Some(end)) = (guard.false_start_line, guard.false_end_line) {
+            } else if let (Some(start), Some(end)) = (guard.false_start_line, guard.false_end_line)
+            {
                 (current_line >= start && current_line <= end).then_some(false)
             } else {
                 None
@@ -2269,20 +2287,34 @@ fn apply_guard_narrowing(
             guard.owner_name.as_deref() == current_owner_name
                 && guard.owner_type_name.as_deref() == current_owner_type_name
                 && guard.line < current_line
-                && !name_reassigned_after_line(node, current_owner_name, current_owner_type_name, value_name, guard.line, current_line)
+                && !name_reassigned_after_line(
+                    node,
+                    current_owner_name,
+                    current_owner_type_name,
+                    value_name,
+                    guard.line,
+                    current_line,
+                )
                 && current_line > guard.false_end_line.unwrap_or(guard.true_end_line)
         })
         .filter_map(|guard| {
-            let true_terminal = branch_has_return(node, current_owner_name, current_owner_type_name, guard.true_start_line, guard.true_end_line);
-            let false_terminal = guard
-                .false_start_line
-                .zip(guard.false_end_line)
-                .is_some_and(|(start, end)| branch_has_return(node, current_owner_name, current_owner_type_name, start, end));
-            let branch_true = match (true_terminal, false_terminal, guard.false_start_line.is_some()) {
-                (true, false, _) => Some(false),
-                (false, true, true) => Some(true),
-                _ => None,
-            }?;
+            let true_terminal = branch_has_return(
+                node,
+                current_owner_name,
+                current_owner_type_name,
+                guard.true_start_line,
+                guard.true_end_line,
+            );
+            let false_terminal =
+                guard.false_start_line.zip(guard.false_end_line).is_some_and(|(start, end)| {
+                    branch_has_return(node, current_owner_name, current_owner_type_name, start, end)
+                });
+            let branch_true =
+                match (true_terminal, false_terminal, guard.false_start_line.is_some()) {
+                    (true, false, _) => Some(false),
+                    (false, true, true) => Some(true),
+                    _ => None,
+                }?;
             Some((guard.line, branch_true, guard.guard.as_ref()?))
         })
         .collect::<Vec<_>>();
@@ -2298,7 +2330,14 @@ fn apply_guard_narrowing(
             guard.owner_name.as_deref() == current_owner_name
                 && guard.owner_type_name.as_deref() == current_owner_type_name
                 && guard.line < current_line
-                && !name_reassigned_after_line(node, current_owner_name, current_owner_type_name, value_name, guard.line, current_line)
+                && !name_reassigned_after_line(
+                    node,
+                    current_owner_name,
+                    current_owner_type_name,
+                    value_name,
+                    guard.line,
+                    current_line,
+                )
         })
         .filter_map(|guard| Some((guard.line, guard.guard.as_ref()?)))
         .collect::<Vec<_>>();
@@ -2360,17 +2399,23 @@ fn apply_guard_condition(
         typepython_binding::GuardConditionSite::IsNone { name, negated } if name == value_name => {
             match (branch_true, negated) {
                 (true, false) | (false, true) => String::from("None"),
-                (false, false) | (true, true) => remove_none_branch(base_type).unwrap_or_else(|| normalize_type_text(base_type)),
+                (false, false) | (true, true) => {
+                    remove_none_branch(base_type).unwrap_or_else(|| normalize_type_text(base_type))
+                }
             }
         }
-        typepython_binding::GuardConditionSite::IsInstance { name, types } if name == value_name => {
+        typepython_binding::GuardConditionSite::IsInstance { name, types }
+            if name == value_name =>
+        {
             if branch_true {
                 narrow_to_instance_types(base_type, types)
             } else {
                 remove_instance_types(base_type, types)
             }
         }
-        typepython_binding::GuardConditionSite::PredicateCall { name, callee } if name == value_name => {
+        typepython_binding::GuardConditionSite::PredicateCall { name, callee }
+            if name == value_name =>
+        {
             apply_predicate_guard(node, nodes, base_type, callee, branch_true)
         }
         typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name => {
@@ -2388,8 +2433,16 @@ fn apply_guard_condition(
                 let mut joined = Vec::new();
                 let mut current_true = normalize_type_text(base_type);
                 for part in parts {
-                    joined.push(apply_guard_condition(node, nodes, &current_true, value_name, part, false));
-                    current_true = apply_guard_condition(node, nodes, &current_true, value_name, part, true);
+                    joined.push(apply_guard_condition(
+                        node,
+                        nodes,
+                        &current_true,
+                        value_name,
+                        part,
+                        false,
+                    ));
+                    current_true =
+                        apply_guard_condition(node, nodes, &current_true, value_name, part, true);
                 }
                 join_type_candidates(joined)
             }
@@ -2399,8 +2452,16 @@ fn apply_guard_condition(
                 let mut joined = Vec::new();
                 let mut current_false = normalize_type_text(base_type);
                 for part in parts {
-                    joined.push(apply_guard_condition(node, nodes, &current_false, value_name, part, true));
-                    current_false = apply_guard_condition(node, nodes, &current_false, value_name, part, false);
+                    joined.push(apply_guard_condition(
+                        node,
+                        nodes,
+                        &current_false,
+                        value_name,
+                        part,
+                        true,
+                    ));
+                    current_false =
+                        apply_guard_condition(node, nodes, &current_false, value_name, part, false);
                 }
                 join_type_candidates(joined)
             } else {
@@ -2424,7 +2485,9 @@ fn apply_predicate_guard(
         return normalize_type_text(base_type);
     };
     match (kind.as_str(), branch_true) {
-        ("TypeGuard", true) | ("TypeIs", true) => narrow_to_instance_types(base_type, &[guarded_type]),
+        ("TypeGuard", true) | ("TypeIs", true) => {
+            narrow_to_instance_types(base_type, &[guarded_type])
+        }
         ("TypeIs", false) => remove_instance_types(base_type, &[guarded_type]),
         _ => normalize_type_text(base_type),
     }
@@ -2437,7 +2500,9 @@ fn parse_guard_return_kind(
 ) -> Option<(String, String)> {
     let function = resolve_direct_function(node, nodes, callee)?;
     let returns = normalized_direct_return_annotation(function.detail.split_once("->")?.1.trim())?;
-    if let Some(inner) = returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']')) {
+    if let Some(inner) =
+        returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']'))
+    {
         return Some((String::from("TypeGuard"), normalize_type_text(inner)));
     }
     if let Some(inner) = returns.strip_prefix("TypeIs[").and_then(|inner| inner.strip_suffix(']')) {
@@ -2451,7 +2516,9 @@ fn narrow_to_instance_types(base_type: &str, types: &[String]) -> String {
     if let Some(branches) = union_branches(base_type) {
         let kept = branches
             .into_iter()
-            .filter(|branch| normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch)))
+            .filter(|branch| {
+                normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch))
+            })
             .collect::<Vec<_>>();
         if !kept.is_empty() {
             return join_union_branches(kept);
@@ -2468,13 +2535,11 @@ fn remove_instance_types(base_type: &str, types: &[String]) -> String {
     let normalized_types = types.iter().map(|ty| normalize_type_text(ty)).collect::<Vec<_>>();
     let kept = branches
         .into_iter()
-        .filter(|branch| !normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch)))
+        .filter(|branch| {
+            !normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch))
+        })
         .collect::<Vec<_>>();
-    if kept.is_empty() {
-        normalized
-    } else {
-        join_union_branches(kept)
-    }
+    if kept.is_empty() { normalized } else { join_union_branches(kept) }
 }
 
 fn remove_none_branch(base_type: &str) -> Option<String> {
@@ -2523,13 +2588,12 @@ fn apply_truthy_narrowing(base_type: &str, branch_true: bool) -> String {
     let Some(branches) = union_branches(&normalized) else {
         return normalized;
     };
-    let non_none = branches.iter().filter(|branch| branch.as_str() != "None").cloned().collect::<Vec<_>>();
-    if branches.iter().any(|branch| branch == "None") && non_none.iter().all(|branch| is_definitely_truthy_branch(branch)) {
-        return if branch_true {
-            join_union_branches(non_none)
-        } else {
-            String::from("None")
-        };
+    let non_none =
+        branches.iter().filter(|branch| branch.as_str() != "None").cloned().collect::<Vec<_>>();
+    if branches.iter().any(|branch| branch == "None")
+        && non_none.iter().all(|branch| is_definitely_truthy_branch(branch))
+    {
+        return if branch_true { join_union_branches(non_none) } else { String::from("None") };
     }
 
     normalized
@@ -2547,8 +2611,8 @@ fn is_definitely_truthy_branch(branch: &str) -> bool {
         normalized.as_str(),
         "bytes" | "str" | "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple"
     )
-        .then_some(false)
-        .unwrap_or(true)
+    .then_some(false)
+    .unwrap_or(true)
 }
 
 fn resolve_exception_binding_type(
@@ -2591,7 +2655,8 @@ fn resolve_for_loop_target_type(
     value_name: &str,
 ) -> Option<String> {
     let loop_site = node.for_loops.iter().rev().find(|for_loop| {
-        (for_loop.target_name == value_name || for_loop.target_names.iter().any(|name| name == value_name))
+        (for_loop.target_name == value_name
+            || for_loop.target_names.iter().any(|name| name == value_name))
             && for_loop.owner_name.as_deref() == current_owner_name
             && for_loop.owner_type_name.as_deref() == current_owner_type_name
             && for_loop.line < current_line
@@ -2719,7 +2784,8 @@ fn resolve_with_target_type_for_signature(
     })?;
     let _ = exit;
 
-    normalized_direct_return_annotation(enter.detail.split_once("->")?.1.trim()).map(normalize_type_text)
+    normalized_direct_return_annotation(enter.detail.split_once("->")?.1.trim())
+        .map(normalize_type_text)
 }
 
 fn resolve_local_assignment_reference_type(
@@ -2771,7 +2837,9 @@ fn resolve_module_level_assignment_reference_type(
         return Some(joined);
     }
     let assignment = node.assignments.iter().rev().find(|assignment| {
-        assignment.name == value_name && assignment.owner_name.is_none() && assignment.line < current_line
+        assignment.name == value_name
+            && assignment.owner_name.is_none()
+            && assignment.line < current_line
     })?;
     resolve_assignment_site_type(node, nodes, signature, assignment)
 }
@@ -2922,7 +2990,7 @@ fn resolve_direct_member_reference_type(
             current_line,
             owner_name,
         )
-            .or_else(|| Some(owner_name.to_owned()))
+        .or_else(|| Some(owner_name.to_owned()))
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
@@ -2930,15 +2998,18 @@ fn resolve_direct_member_reference_type(
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(class_decl.name.clone());
     }
-    let detail = rewrite_imported_typing_aliases(node, &substitute_self_annotation(&member.detail, Some(&owner_type_name)));
-    normalized_direct_return_annotation(&detail)
-        .map(normalize_type_text)
-        .or_else(|| {
-            member
-                .value_type
-                .as_deref()
-                .map(|value| normalize_type_text(&rewrite_imported_typing_aliases(node, &substitute_self_annotation(value, Some(&owner_type_name)))))
+    let detail = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(&member.detail, Some(&owner_type_name)),
+    );
+    normalized_direct_return_annotation(&detail).map(normalize_type_text).or_else(|| {
+        member.value_type.as_deref().map(|value| {
+            normalize_type_text(&rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(value, Some(&owner_type_name)),
+            ))
         })
+    })
 }
 
 fn is_enum_like_class(
@@ -2949,7 +3020,14 @@ fn is_enum_like_class(
     declaration.bases.iter().any(|base| {
         matches!(
             base.as_str(),
-            "Enum" | "IntEnum" | "Flag" | "IntFlag" | "enum.Enum" | "enum.IntEnum" | "enum.Flag" | "enum.IntFlag"
+            "Enum"
+                | "IntEnum"
+                | "Flag"
+                | "IntFlag"
+                | "enum.Enum"
+                | "enum.IntEnum"
+                | "enum.Flag"
+                | "enum.IntFlag"
         ) || resolve_direct_base(nodes, node, base)
             .is_some_and(|(base_node, base_decl)| is_enum_like_class(nodes, base_node, base_decl))
     })
@@ -2989,7 +3067,10 @@ fn resolve_direct_method_return_type(
     let method = find_owned_callable_declaration(nodes, class_node, class_decl, method_name)?;
     let return_text = rewrite_imported_typing_aliases(
         node,
-        &substitute_self_annotation(method.detail.split_once("->")?.1.trim(), Some(&owner_type_name)),
+        &substitute_self_annotation(
+            method.detail.split_once("->")?.1.trim(),
+            Some(&owner_type_name),
+        ),
     );
     normalized_direct_return_annotation(&return_text).map(normalize_type_text)
 }
@@ -3036,8 +3117,8 @@ fn unwrap_yield_from_type(text: &str) -> Option<String> {
     }
 
     for head in ["list", "tuple", "set", "frozenset"] {
-        if let Some(inner) = text.strip_prefix(&format!("{head}["))
-            .and_then(|inner| inner.strip_suffix(']'))
+        if let Some(inner) =
+            text.strip_prefix(&format!("{head}[")).and_then(|inner| inner.strip_suffix(']'))
         {
             let args = split_top_level_type_args(inner);
             return args.first().map(|arg| normalize_type_text(arg));
@@ -3065,7 +3146,9 @@ fn direct_member_access_diagnostics(
         .iter()
         .filter_map(|access| {
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &access.owner_name)?;
-            let has_member = find_owned_value_declaration(nodes, class_node, class_decl, &access.member).is_some();
+            let has_member =
+                find_owned_value_declaration(nodes, class_node, class_decl, &access.member)
+                    .is_some();
 
             (!has_member).then(|| {
                 Diagnostic::error(
@@ -3089,17 +3172,22 @@ fn direct_method_call_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.method_calls {
-        let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name) else {
+        let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name)
+        else {
             continue;
         };
-        let Some(target) = find_owned_callable_declaration(nodes, class_node, class_decl, &call.method) else {
+        let Some(target) =
+            find_owned_callable_declaration(nodes, class_node, class_decl, &call.method)
+        else {
             continue;
         };
 
         let method_signature = substitute_self_annotation(&target.detail, Some(&class_decl.name));
         let param_names = direct_param_names(&method_signature).unwrap_or_default();
         let expected = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => param_names.len(),
+            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                param_names.len()
+            }
             _ => param_names.len().saturating_sub(1),
         };
 
@@ -3117,10 +3205,13 @@ fn direct_method_call_diagnostics(
             ));
         }
 
-        let expected_names: Vec<String> = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => param_names,
-            _ => param_names.into_iter().skip(1).collect(),
-        };
+        let expected_names: Vec<String> =
+            match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    param_names
+                }
+                _ => param_names.into_iter().skip(1).collect(),
+            };
         for keyword in &call.keyword_names {
             if !expected_names.iter().any(|param| param == keyword) {
                 diagnostics.push(Diagnostic::error(
@@ -3175,11 +3266,7 @@ fn direct_call_arity_diagnostics(
 
 fn direct_param_count(signature: &str) -> Option<usize> {
     let inner = signature.strip_prefix('(')?.split_once(')')?.0;
-    if inner.is_empty() {
-        Some(0)
-    } else {
-        Some(split_top_level_type_args(inner).len())
-    }
+    if inner.is_empty() { Some(0) } else { Some(split_top_level_type_args(inner).len()) }
 }
 
 fn direct_param_names(signature: &str) -> Option<Vec<String>> {
@@ -3205,7 +3292,11 @@ fn direct_param_types(signature: &str) -> Option<Vec<String>> {
     Some(
         split_top_level_type_args(inner)
             .into_iter()
-            .map(|part| part.split_once(':').map(|(_, annotation)| annotation.trim().to_owned()).unwrap_or_default())
+            .map(|part| {
+                part.split_once(':')
+                    .map(|(_, annotation)| annotation.trim().to_owned())
+                    .unwrap_or_default()
+            })
             .collect(),
     )
 }
@@ -3222,14 +3313,17 @@ fn direct_call_type_diagnostics(
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
             }
-            let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee) else {
+            let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee)
+            else {
                 return Vec::new();
             };
             call.arg_types
                 .iter()
                 .zip(param_types.iter())
                 .filter(|(arg_ty, param_ty)| {
-                    !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+                    !arg_ty.is_empty()
+                        && !param_ty.is_empty()
+                        && arg_ty.as_str() != param_ty.as_str()
                 })
                 .map(|(arg_ty, param_ty)| {
                     Diagnostic::error(
@@ -3259,14 +3353,16 @@ fn direct_call_keyword_diagnostics(
         if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
             && !shape.has_explicit_init
         {
-            diagnostics.extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
+            diagnostics
+                .extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
             continue;
         }
         if let Some(signature) = direct_function_signatures.get(&call.callee) {
             diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, signature));
             continue;
         }
-        let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee) else {
+        let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee)
+        else {
             continue;
         };
         for keyword in &call.keyword_names {
@@ -3292,10 +3388,8 @@ fn direct_source_function_arity_diagnostic(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
-    let positional_params = signature
-        .iter()
-        .filter(|param| !param.keyword_only)
-        .collect::<Vec<_>>();
+    let positional_params =
+        signature.iter().filter(|param| !param.keyword_only).collect::<Vec<_>>();
     if call.arg_count > positional_params.len() {
         return Some(Diagnostic::error(
             "TPY4001",
@@ -3381,11 +3475,7 @@ fn dataclass_transform_constructor_arity_diagnostic(
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
 ) -> Option<Diagnostic> {
-    let positional_fields = shape
-        .fields
-        .iter()
-        .filter(|field| !field.kw_only)
-        .collect::<Vec<_>>();
+    let positional_fields = shape.fields.iter().filter(|field| !field.kw_only).collect::<Vec<_>>();
     if call.arg_count > positional_fields.len() {
         return Some(Diagnostic::error(
             "TPY4001",
@@ -3462,11 +3552,8 @@ fn dataclass_transform_constructor_keyword_diagnostics(
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
 ) -> Vec<Diagnostic> {
-    let valid_names = shape
-        .fields
-        .iter()
-        .map(|field| field.keyword_name.as_str())
-        .collect::<BTreeSet<_>>();
+    let valid_names =
+        shape.fields.iter().map(|field| field.keyword_name.as_str()).collect::<BTreeSet<_>>();
     call.keyword_names
         .iter()
         .filter(|keyword| !valid_names.contains(keyword.as_str()))
@@ -3539,7 +3626,8 @@ fn direct_unresolved_paramspec_call_diagnostics(
 
 fn callable_has_unresolved_paramlist(text: &str) -> bool {
     let text = normalize_type_text(text);
-    let Some(inner) = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']')) else {
+    let Some(inner) = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']'))
+    else {
         return false;
     };
     let parts = split_top_level_type_args(inner);
@@ -3558,9 +3646,8 @@ fn callable_params_are_unresolved(params: &str) -> bool {
     if params.starts_with('[') && params.ends_with(']') {
         return false;
     }
-    if let Some(inner) = params
-        .strip_prefix("Concatenate[")
-        .and_then(|inner| inner.strip_suffix(']'))
+    if let Some(inner) =
+        params.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
     {
         return split_top_level_type_args(inner)
             .last()
@@ -3644,24 +3731,24 @@ fn resolve_direct_function<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<&'a Declaration> {
-    if let Some(local) = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.name == callee && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
-    {
+    if let Some(local) = node.declarations.iter().find(|declaration| {
+        declaration.name == callee
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Function
+    }) {
         return Some(local);
     }
 
-    let import = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == callee)?;
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == callee
+    })?;
     let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
     let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    target_node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+    target_node.declarations.iter().find(|declaration| {
+        declaration.name == symbol_name
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Function
+    })
 }
 
 fn resolve_direct_callable_signature(
@@ -3718,7 +3805,12 @@ fn resolve_dataclass_transform_class_shape(
     callee: &str,
 ) -> Option<DataclassTransformClassShape> {
     let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
-    resolve_dataclass_transform_class_shape_from_decl(nodes, class_node, class_decl, &mut BTreeSet::new())
+    resolve_dataclass_transform_class_shape_from_decl(
+        nodes,
+        class_node,
+        class_decl,
+        &mut BTreeSet::new(),
+    )
 }
 
 fn resolve_known_dataclass_transform_shape_from_type(
@@ -3771,18 +3863,25 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         metadata = class_site
             .metaclass
             .as_deref()
-            .and_then(|metaclass| resolve_dataclass_transform_provider(nodes, class_node, metaclass))
+            .and_then(|metaclass| {
+                resolve_dataclass_transform_provider(nodes, class_node, metaclass)
+            })
             .map(|provider| provider.metadata.clone());
     }
     if metadata.is_none() {
         metadata = class_site.bases.iter().find_map(|base| {
             let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
             let mut branch_visiting = visiting.clone();
-            resolve_dataclass_transform_class_shape_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
-                .map(|shape| typepython_syntax::DataclassTransformMetadata {
-                    frozen_default: shape.frozen,
-                    ..typepython_syntax::DataclassTransformMetadata::default()
-                })
+            resolve_dataclass_transform_class_shape_from_decl(
+                nodes,
+                base_node,
+                base_decl,
+                &mut branch_visiting,
+            )
+            .map(|shape| typepython_syntax::DataclassTransformMetadata {
+                frozen_default: shape.frozen,
+                ..typepython_syntax::DataclassTransformMetadata::default()
+            })
         });
     }
     let metadata = metadata?;
@@ -3793,12 +3892,19 @@ fn resolve_dataclass_transform_class_shape_from_decl(
             continue;
         };
         let mut branch_visiting = visiting.clone();
-        let Some(base_shape) = resolve_dataclass_transform_class_shape_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
-        else {
+        let Some(base_shape) = resolve_dataclass_transform_class_shape_from_decl(
+            nodes,
+            base_node,
+            base_decl,
+            &mut branch_visiting,
+        ) else {
             continue;
         };
         for field in base_shape.fields {
-            if let Some(index) = fields.iter().position(|existing: &DataclassTransformFieldShape| existing.name == field.name) {
+            if let Some(index) = fields
+                .iter()
+                .position(|existing: &DataclassTransformFieldShape| existing.name == field.name)
+            {
                 fields.remove(index);
             }
             fields.push(field);
@@ -3809,10 +3915,12 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         if field.is_class_var {
             continue;
         }
-        let recognized_specifier = field
-            .field_specifier_name
-            .as_ref()
-            .is_some_and(|name| metadata.field_specifiers.iter().any(|candidate| candidate == name || candidate.ends_with(&format!(".{name}"))));
+        let recognized_specifier = field.field_specifier_name.as_ref().is_some_and(|name| {
+            metadata
+                .field_specifiers
+                .iter()
+                .any(|candidate| candidate == name || candidate.ends_with(&format!(".{name}")))
+        });
         if !recognized_specifier
             && field
                 .value_metadata
@@ -3832,11 +3940,8 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         {
             continue;
         }
-        let init = if recognized_specifier {
-            field.field_specifier_init.unwrap_or(true)
-        } else {
-            true
-        };
+        let init =
+            if recognized_specifier { field.field_specifier_init.unwrap_or(true) } else { true };
         if !init {
             continue;
         }
@@ -3914,12 +4019,12 @@ fn resolve_dataclass_transform_provider<'a>(
     }
 
     if let Some((module_alias, symbol_name)) = name.rsplit_once('.') {
-        if let Some(import) = node
-            .declarations
-            .iter()
-            .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == module_alias)
-        {
-            if let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == import.detail) {
+        if let Some(import) = node.declarations.iter().find(|declaration| {
+            declaration.kind == DeclarationKind::Import && declaration.name == module_alias
+        }) {
+            if let Some(target_node) =
+                nodes.iter().find(|candidate| candidate.module_key == import.detail)
+            {
                 return load_dataclass_transform_module_info(target_node)?
                     .providers
                     .into_iter()
@@ -3928,10 +4033,9 @@ fn resolve_dataclass_transform_provider<'a>(
         }
     }
 
-    let import = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)?;
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == name
+    })?;
     let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
     let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
     load_dataclass_transform_module_info(target_node)?
@@ -3964,11 +4068,13 @@ fn unresolved_import_diagnostics(
                     .detail
                     .rsplit_once('.')
                     .and_then(|(module_key, symbol_name)| {
-                        nodes.iter().find(|candidate| candidate.module_key == module_key).map(|target| {
-                            target.declarations.iter().any(|declaration| {
-                                declaration.owner.is_none() && declaration.name == symbol_name
-                            })
-                        })
+                        nodes.iter().find(|candidate| candidate.module_key == module_key).map(
+                            |target| {
+                                target.declarations.iter().any(|declaration| {
+                                    declaration.owner.is_none() && declaration.name == symbol_name
+                                })
+                            },
+                        )
                     })
                     .unwrap_or(false);
 
@@ -3993,7 +4099,9 @@ fn deprecated_use_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    for declaration in node.declarations.iter().filter(|declaration| declaration.kind == DeclarationKind::Import) {
+    for declaration in
+        node.declarations.iter().filter(|declaration| declaration.kind == DeclarationKind::Import)
+    {
         if let Some(target) = resolve_import_target(node, nodes, declaration) {
             if target.is_deprecated {
                 if let Some(diagnostic) = deprecated_diagnostic(
@@ -4044,8 +4152,11 @@ fn deprecated_use_diagnostics(
     }
 
     for access in &node.member_accesses {
-        if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &access.owner_name) {
-            if let Some(member) = find_owned_value_declaration(nodes, class_node, class_decl, &access.member) {
+        if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &access.owner_name)
+        {
+            if let Some(member) =
+                find_owned_value_declaration(nodes, class_node, class_decl, &access.member)
+            {
                 if member.is_deprecated {
                     if let Some(diagnostic) = deprecated_diagnostic(
                         report_deprecated,
@@ -4066,7 +4177,9 @@ fn deprecated_use_diagnostics(
 
     for call in &node.method_calls {
         if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name) {
-            if let Some(method) = find_owned_callable_declaration(nodes, class_node, class_decl, &call.method) {
+            if let Some(method) =
+                find_owned_callable_declaration(nodes, class_node, class_decl, &call.method)
+            {
                 if method.is_deprecated {
                     if let Some(diagnostic) = deprecated_diagnostic(
                         report_deprecated,
@@ -4124,10 +4237,9 @@ fn override_compatibility_diagnostics<'a>(
     let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
-    for class_declaration in declarations
-        .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
-    {
+    for class_declaration in declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
+    }) {
         for member in declarations.iter().filter(|declaration| {
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
         }) {
@@ -4138,9 +4250,8 @@ fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     }) {
-                    if !methods_are_compatible_for_override(member, base_member)
-                    {
-                        diagnostics.push(Diagnostic::error(
+                        if !methods_are_compatible_for_override(member, base_member) {
+                            diagnostics.push(Diagnostic::error(
                             "TPY4005",
                             format!(
                                 "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
@@ -4150,7 +4261,7 @@ fn override_compatibility_diagnostics<'a>(
                                 base_decl.name
                             ),
                         ));
-                    }
+                        }
                     }
                 }
             }
@@ -4203,7 +4314,9 @@ fn missing_override_diagnostics<'a>(
                 resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
                     base_node.declarations.iter().any(|candidate| {
                         candidate.name == declaration.name
-                            && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == base_decl.name)
+                            && candidate.owner.as_ref().is_some_and(|candidate_owner| {
+                                candidate_owner.name == base_decl.name
+                            })
                     })
                 })
             })
@@ -4233,33 +4346,35 @@ fn final_decorator_diagnostics<'a>(
 
     let mut diagnostics = Vec::new();
 
-    for class_declaration in declarations
-        .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
-    {
+    for class_declaration in declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
+    }) {
         for base in &class_declaration.bases {
             if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) {
                 if base_decl.is_final_decorator {
-                diagnostics.push(Diagnostic::error(
-                    "TPY4005",
-                    format!(
-                        "type `{}` in module `{}` subclasses final class `{}`",
-                        class_declaration.name,
-                        node.module_path.display(),
-                        base_decl.name
-                    ),
-                ));
-            }
-
-            for member in declarations.iter().filter(|declaration| {
-                declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
-            }) {
-                if base_node.declarations.iter().any(|declaration| {
-                    declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
-                        && declaration.name == member.name
-                        && declaration.is_final_decorator
-                }) {
                     diagnostics.push(Diagnostic::error(
+                        "TPY4005",
+                        format!(
+                            "type `{}` in module `{}` subclasses final class `{}`",
+                            class_declaration.name,
+                            node.module_path.display(),
+                            base_decl.name
+                        ),
+                    ));
+                }
+
+                for member in declarations.iter().filter(|declaration| {
+                    declaration
+                        .owner
+                        .as_ref()
+                        .is_some_and(|owner| owner.name == class_declaration.name)
+                }) {
+                    if base_node.declarations.iter().any(|declaration| {
+                        declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
+                            && declaration.name == member.name
+                            && declaration.is_final_decorator
+                    }) {
+                        diagnostics.push(Diagnostic::error(
                         "TPY4005",
                         format!(
                             "type `{}` in module `{}` overrides final member `{}` from base `{}`",
@@ -4269,8 +4384,8 @@ fn final_decorator_diagnostics<'a>(
                             base_decl.name
                         ),
                     ));
+                    }
                 }
-            }
             }
         }
     }
@@ -4303,13 +4418,18 @@ fn abstract_member_diagnostics<'a>(
             let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
                 continue;
             };
-            for ((abstract_owner, member_name), member_kind) in abstract_member_index(&base_node.declarations) {
+            for ((abstract_owner, member_name), member_kind) in
+                abstract_member_index(&base_node.declarations)
+            {
                 if abstract_owner != base_decl.name {
                     continue;
                 }
 
                 let implemented = declarations.iter().any(|declaration| {
-                    declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                    declaration
+                        .owner
+                        .as_ref()
+                        .is_some_and(|owner| owner.name == class_declaration.name)
                         && declaration.name == *member_name
                         && declaration.kind == member_kind
                         && !declaration.is_abstract_method
@@ -4341,7 +4461,9 @@ fn abstract_instantiation_diagnostics<'a>(
 
     let abstract_classes: BTreeSet<_> = declarations
         .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
+        .filter(|declaration| {
+            declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
+        })
         .filter_map(|class_declaration| {
             let own_abstract = declarations.iter().any(|declaration| {
                 declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
@@ -4351,15 +4473,20 @@ fn abstract_instantiation_diagnostics<'a>(
                 let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
                     return false;
                 };
-                abstract_member_index(&base_node.declarations).iter().any(|((abstract_owner, member_name), member_kind)| {
-                    abstract_owner == &base_decl.name
-                        && !declarations.iter().any(|declaration| {
-                            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
-                                && declaration.name == *member_name
-                                && declaration.kind == *member_kind
-                                && !declaration.is_abstract_method
-                        })
-                })
+                abstract_member_index(&base_node.declarations).iter().any(
+                    |((abstract_owner, member_name), member_kind)| {
+                        abstract_owner == &base_decl.name
+                            && !declarations.iter().any(|declaration| {
+                                declaration
+                                    .owner
+                                    .as_ref()
+                                    .is_some_and(|owner| owner.name == class_declaration.name)
+                                    && declaration.name == *member_name
+                                    && declaration.kind == *member_kind
+                                    && !declaration.is_abstract_method
+                            })
+                    },
+                )
             });
 
             (own_abstract || inherited_abstract).then(|| class_declaration.name.clone())
@@ -4372,29 +4499,41 @@ fn abstract_instantiation_diagnostics<'a>(
             let abstract_name = if abstract_classes.contains(&call.callee) {
                 Some(call.callee.as_str())
             } else {
-                resolve_direct_base(nodes, node, &call.callee)
-                    .and_then(|(base_node, declaration)| {
-                        let own_abstract = base_node.declarations.iter().any(|declaration_member| {
-                            declaration_member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
-                                && declaration_member.is_abstract_method
-                        });
+                resolve_direct_base(nodes, node, &call.callee).and_then(
+                    |(base_node, declaration)| {
+                        let own_abstract =
+                            base_node.declarations.iter().any(|declaration_member| {
+                                declaration_member
+                                    .owner
+                                    .as_ref()
+                                    .is_some_and(|owner| owner.name == declaration.name)
+                                    && declaration_member.is_abstract_method
+                            });
                         let inherited_abstract = declaration.bases.iter().any(|base| {
-                            let Some((resolved_node, resolved_decl)) = resolve_direct_base(nodes, base_node, base) else {
+                            let Some((resolved_node, resolved_decl)) =
+                                resolve_direct_base(nodes, base_node, base)
+                            else {
                                 return false;
                             };
-                            abstract_member_index(&resolved_node.declarations).iter().any(|((abstract_owner, member_name), member_kind)| {
-                                abstract_owner == &resolved_decl.name
-                                    && !base_node.declarations.iter().any(|declaration_member| {
-                                        declaration_member.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
-                                            && declaration_member.name == *member_name
-                                            && declaration_member.kind == *member_kind
-                                            && !declaration_member.is_abstract_method
-                                    })
-                            })
+                            abstract_member_index(&resolved_node.declarations).iter().any(
+                                |((abstract_owner, member_name), member_kind)| {
+                                    abstract_owner == &resolved_decl.name
+                                        && !base_node.declarations.iter().any(
+                                            |declaration_member| {
+                                                declaration_member.owner.as_ref().is_some_and(
+                                                    |owner| owner.name == declaration.name,
+                                                ) && declaration_member.name == *member_name
+                                                    && declaration_member.kind == *member_kind
+                                                    && !declaration_member.is_abstract_method
+                                            },
+                                        )
+                                },
+                            )
                         });
 
                         (own_abstract || inherited_abstract).then_some(declaration.name.as_str())
-                    })
+                    },
+                )
             }?;
 
             Some(Diagnostic::error(
@@ -4409,12 +4548,17 @@ fn abstract_instantiation_diagnostics<'a>(
         .collect()
 }
 
-fn abstract_member_index(declarations: &[Declaration]) -> BTreeMap<(String, String), DeclarationKind> {
+fn abstract_member_index(
+    declarations: &[Declaration],
+) -> BTreeMap<(String, String), DeclarationKind> {
     declarations
         .iter()
         .filter(|declaration| declaration.owner.is_some() && declaration.is_abstract_method)
         .filter_map(|declaration| {
-            declaration.owner.as_ref().map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
+            declaration
+                .owner
+                .as_ref()
+                .map(|owner| ((owner.name.clone(), declaration.name.clone()), declaration.kind))
         })
         .collect()
 }
@@ -4424,24 +4568,24 @@ fn resolve_direct_base<'a>(
     node: &'a typepython_graph::ModuleNode,
     base_name: &str,
 ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
-    if let Some(local) = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.name == base_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Class)
-    {
+    if let Some(local) = node.declarations.iter().find(|declaration| {
+        declaration.name == base_name
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Class
+    }) {
         return Some((node, local));
     }
 
-    let import = node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == base_name)?;
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == base_name
+    })?;
     let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
     let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    let target_decl = target_node
-        .declarations
-        .iter()
-        .find(|declaration| declaration.name == symbol_name && declaration.owner.is_none() && declaration.kind == DeclarationKind::Class)?;
+    let target_decl = target_node.declarations.iter().find(|declaration| {
+        declaration.name == symbol_name
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Class
+    })?;
     Some((target_node, target_decl))
 }
 
@@ -4576,7 +4720,10 @@ fn resolve_sealed_root_with_visited<'a>(
         .find_map(|base| resolve_sealed_root_with_visited(nodes, resolved_node, base, visited))
 }
 
-fn collect_sealed_descendants(node: &typepython_graph::ModuleNode, root_name: &str) -> BTreeSet<String> {
+fn collect_sealed_descendants(
+    node: &typepython_graph::ModuleNode,
+    root_name: &str,
+) -> BTreeSet<String> {
     let mut descendants = BTreeSet::new();
     let mut stack = vec![root_name.to_owned()];
     while let Some(current) = stack.pop() {
@@ -4618,8 +4765,9 @@ fn sealed_descends_from_with_visited(
         if base == root_name {
             return true;
         }
-        resolve_direct_base(nodes, node, base)
-            .is_some_and(|(base_node, base_decl)| sealed_descends_from_with_visited(nodes, base_node, base_decl, root_name, visited))
+        resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+            sealed_descends_from_with_visited(nodes, base_node, base_decl, root_name, visited)
+        })
     })
 }
 
@@ -4655,8 +4803,9 @@ fn is_interface_like_declaration_with_visited(
     }
 
     declaration.bases.iter().any(|base| {
-        resolve_direct_base(nodes, node, base)
-            .is_some_and(|(base_node, base_decl)| is_interface_like_declaration_with_visited(base_node, base_decl, nodes, visited))
+        resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+            is_interface_like_declaration_with_visited(base_node, base_decl, nodes, visited)
+        })
     })
 }
 
@@ -4682,12 +4831,16 @@ fn override_diagnostics<'a>(
                 });
                 let overrides_any = owner_decl.is_some_and(|owner_decl| {
                     owner_decl.bases.iter().any(|base| {
-                        resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
-                            base_node.declarations.iter().any(|candidate| {
-                                candidate.name == declaration.name
-                                    && candidate.owner.as_ref().is_some_and(|candidate_owner| candidate_owner.name == base_decl.name)
-                            })
-                        })
+                        resolve_direct_base(nodes, node, base).is_some_and(
+                            |(base_node, base_decl)| {
+                                base_node.declarations.iter().any(|candidate| {
+                                    candidate.name == declaration.name
+                                        && candidate.owner.as_ref().is_some_and(|candidate_owner| {
+                                            candidate_owner.name == base_decl.name
+                                        })
+                                })
+                            },
+                        )
                     })
                 });
 
@@ -4717,10 +4870,9 @@ fn final_override_diagnostics<'a>(
     let declarations = &node.declarations;
     let mut diagnostics = Vec::new();
 
-    for class_declaration in declarations
-        .iter()
-        .filter(|declaration| declaration.kind == DeclarationKind::Class && declaration.owner.is_none())
-    {
+    for class_declaration in declarations.iter().filter(|declaration| {
+        declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
+    }) {
         for base in &class_declaration.bases {
             let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
                 continue;
@@ -4778,22 +4930,33 @@ fn interface_implementation_diagnostics<'a>(
             let interface_members: BTreeMap<_, _> = base_node
                 .declarations
                 .iter()
-                .filter(|declaration| declaration.kind == DeclarationKind::Value || declaration.kind == DeclarationKind::Function)
+                .filter(|declaration| {
+                    declaration.kind == DeclarationKind::Value
+                        || declaration.kind == DeclarationKind::Function
+                })
                 .filter_map(|declaration| {
                     let owner = declaration.owner.as_ref()?;
                     (owner.name == base_decl.name).then(|| {
-                        ((owner.name.clone(), declaration.name.clone()), (declaration.kind, declaration.method_kind, declaration.detail.clone()))
+                        (
+                            (owner.name.clone(), declaration.name.clone()),
+                            (declaration.kind, declaration.method_kind, declaration.detail.clone()),
+                        )
                     })
                 })
                 .collect::<BTreeMap<_, _>>();
 
-            for ((interface_name, member_name), (member_kind, member_method_kind, member_detail)) in &interface_members {
+            for ((interface_name, member_name), (member_kind, member_method_kind, member_detail)) in
+                &interface_members
+            {
                 if interface_name != &base_decl.name {
                     continue;
                 }
 
                 let implemented = declarations.iter().find(|declaration| {
-                    declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
+                    declaration
+                        .owner
+                        .as_ref()
+                        .is_some_and(|owner| owner.name == class_declaration.name)
                         && declaration.name == *member_name
                         && declaration.kind == *member_kind
                 });
@@ -4844,11 +5007,9 @@ fn duplicate_diagnostics(
 
     for (owner_name, owner_kind, space_declarations) in declaration_spaces(declarations) {
         for declaration in &space_declarations {
-            if let Some(diagnostic) = classvar_placement_diagnostic(
-                module_path,
-                owner_name.as_deref(),
-                declaration,
-            ) {
+            if let Some(diagnostic) =
+                classvar_placement_diagnostic(module_path, owner_name.as_deref(), declaration)
+            {
                 diagnostics.push(diagnostic);
             }
         }
@@ -4870,7 +5031,11 @@ fn duplicate_diagnostics(
                 &space_declarations,
             ) {
                 diagnostics.push(diagnostic);
-            } else if is_permitted_external_overload_group(module_kind, duplicate, &space_declarations) {
+            } else if is_permitted_external_overload_group(
+                module_kind,
+                duplicate,
+                &space_declarations,
+            ) {
                 continue;
             } else {
                 diagnostics.push(Diagnostic::error(
@@ -4917,10 +5082,8 @@ fn final_reassignment_diagnostic(
         return None;
     }
 
-    let total_count = declarations
-        .iter()
-        .filter(|declaration| declaration.name == duplicate)
-        .count();
+    let total_count =
+        declarations.iter().filter(|declaration| declaration.name == duplicate).count();
     if total_count <= 1 {
         return None;
     }
@@ -4932,10 +5095,9 @@ fn final_reassignment_diagnostic(
                 "type `{owner_name}` in module `{}` reassigns Final binding `{duplicate}`",
                 module_path.display()
             ),
-            None => format!(
-                "module `{}` reassigns Final binding `{duplicate}`",
-                module_path.display()
-            ),
+            None => {
+                format!("module `{}` reassigns Final binding `{duplicate}`", module_path.display())
+            }
         },
     ))
 }
@@ -4949,10 +5111,7 @@ fn declaration_spaces(
     for declaration in declarations {
         let key = declaration.owner.as_ref().map(|owner| owner.name.clone());
         let owner_kind = declaration.owner.as_ref().map(|owner| owner.kind);
-        spaces
-            .entry((key, owner_kind))
-            .or_default()
-            .push(declaration.clone());
+        spaces.entry((key, owner_kind)).or_default().push(declaration.clone());
     }
 
     spaces
@@ -4961,7 +5120,11 @@ fn declaration_spaces(
         .collect()
 }
 
-fn duplicate_message(module_path: &std::path::Path, owner_name: Option<&str>, duplicate: &str) -> String {
+fn duplicate_message(
+    module_path: &std::path::Path,
+    owner_name: Option<&str>,
+    duplicate: &str,
+) -> String {
     match owner_name {
         Some(owner_name) => format!(
             "type `{owner_name}` in module `{}` declares member `{duplicate}` more than once in the same declaration space",
@@ -5010,7 +5173,8 @@ fn is_invalid_duplicate_group(kinds: &[DeclarationKind]) -> bool {
     let overload_count = kinds.iter().filter(|kind| **kind == DeclarationKind::Overload).count();
     let function_count = kinds.iter().filter(|kind| **kind == DeclarationKind::Function).count();
 
-    if overload_count >= 1 && function_count == 1 && overload_count + function_count == kinds.len() {
+    if overload_count >= 1 && function_count == 1 && overload_count + function_count == kinds.len()
+    {
         return false;
     }
 
@@ -5051,9 +5215,19 @@ fn overload_shape_diagnostic(
     }
 
     let message = match function_count {
-        0 => overload_shape_message(module_path, owner_name, duplicate, "without a concrete implementation"),
+        0 => overload_shape_message(
+            module_path,
+            owner_name,
+            duplicate,
+            "without a concrete implementation",
+        ),
         1 => return None,
-        _ => overload_shape_message(module_path, owner_name, duplicate, "with more than one concrete implementation"),
+        _ => overload_shape_message(
+            module_path,
+            owner_name,
+            duplicate,
+            "with more than one concrete implementation",
+        ),
     };
 
     Some(Diagnostic::error("TPY4004", message))
@@ -5085,20 +5259,20 @@ mod tests {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
-    use typepython_binding::{bind, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind};
+    use typepython_binding::{
+        Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
+    };
     use typepython_config::DiagnosticLevel;
-    use typepython_graph::{build, ModuleGraph, ModuleNode};
-    use typepython_syntax::{parse, SourceFile, SourceKind};
+    use typepython_graph::{ModuleGraph, ModuleNode, build};
+    use typepython_syntax::{SourceFile, SourceKind, parse};
 
     fn check_temp_typepython_source(source_text: &str) -> super::CheckResult {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "typepython-checking-{unique}-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir()
+            .join(format!("typepython-checking-{unique}-{}", std::process::id()));
         fs::create_dir_all(&root).expect("temp directory should be created");
         let path = root.join("app.tpy");
         fs::write(&path, source_text).expect("temp source should be written");
@@ -5127,41 +5301,41 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("User"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("User"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("User"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("User"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5324,7 +5498,9 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("missing required synthesized dataclass-transform field(s): age"));
+        assert!(
+            rendered.contains("missing required synthesized dataclass-transform field(s): age")
+        );
     }
 
     #[test]
@@ -5453,41 +5629,41 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("UserId"),
-                    kind: DeclarationKind::TypeAlias,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("UserId"),
+                        kind: DeclarationKind::TypeAlias,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("User"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("User"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5518,59 +5694,59 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Function,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5601,41 +5777,41 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5668,59 +5844,59 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Function,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Function,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5843,41 +6019,41 @@ mod tests {
                 module_kind: SourceKind::Stub,
                 declarations: vec![
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
-                    name: String::from("parse"),
-                    kind: DeclarationKind::Overload,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -5908,23 +6084,23 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("SupportsClose"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
@@ -5934,18 +6110,18 @@ mod tests {
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
-                        kind: DeclarationOwnerKind::Interface,
-                    }),
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
@@ -5955,18 +6131,18 @@ mod tests {
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("SupportsClose"),
-                        kind: DeclarationOwnerKind::Interface,
-                    }),
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -6000,23 +6176,23 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
-                    name: String::from("Parser"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                        name: String::from("Parser"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
@@ -6026,18 +6202,18 @@ mod tests {
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
-                        kind: DeclarationOwnerKind::Class,
-                    }),
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Function,
@@ -6047,18 +6223,18 @@ mod tests {
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Parser"),
-                        kind: DeclarationOwnerKind::Class,
-                    }),
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                },
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
                 ],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -6096,15 +6272,15 @@ mod tests {
                         method_kind: None,
                         class_kind: None,
                         owner: None,
-                    is_async: false,
-                    is_override: false,
+                        is_async: false,
+                        is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: true,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                     Declaration {
                         name: String::from("MAX_SIZE"),
@@ -6114,15 +6290,15 @@ mod tests {
                         method_kind: None,
                         class_kind: None,
                         owner: None,
-                    is_async: false,
-                    is_override: false,
+                        is_async: false,
+                        is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
-                    bases: Vec::new(),
+                        bases: Vec::new(),
                     },
                 ],
                 member_accesses: Vec::new(),
@@ -6167,8 +6343,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6188,8 +6364,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: true,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6209,8 +6385,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6259,8 +6435,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6280,8 +6456,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: true,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6298,8 +6474,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -6319,8 +6495,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6368,8 +6544,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6386,8 +6562,8 @@ mod tests {
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -6415,12 +6591,12 @@ mod tests {
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -6452,21 +6628,21 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
                     }],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -6490,8 +6666,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -6508,8 +6684,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: vec![String::from("Base")],
@@ -6517,13 +6693,13 @@ owner_name: None,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -6558,8 +6734,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6579,8 +6755,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6597,8 +6773,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -6618,8 +6794,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6647,12 +6823,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -6683,8 +6859,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6704,8 +6880,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6722,8 +6898,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("SupportsClose")],
@@ -6771,8 +6947,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6792,8 +6968,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6810,8 +6986,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("SupportsClose")],
@@ -6831,8 +7007,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -6860,12 +7036,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -6897,8 +7073,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -6918,8 +7094,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -6927,13 +7103,13 @@ owner_name: None,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -6957,8 +7133,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -6975,8 +7151,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: vec![String::from("SupportsClose")],
@@ -6996,8 +7172,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -7005,13 +7181,13 @@ owner_name: None,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -7046,8 +7222,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7067,8 +7243,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: true,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7085,8 +7261,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -7134,8 +7310,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7155,8 +7331,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: true,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7210,8 +7386,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -7231,8 +7407,8 @@ owner_name: None,
                             is_override: false,
                             is_abstract_method: true,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -7240,13 +7416,13 @@ owner_name: None,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -7269,8 +7445,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7281,14 +7457,14 @@ owner_name: None,
                         arg_types: Vec::new(),
                         keyword_names: Vec::new(),
                     }],
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -7350,12 +7526,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -7508,10 +7684,10 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7569,10 +7745,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7630,10 +7806,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7673,8 +7849,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7691,8 +7867,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7716,10 +7892,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7757,8 +7933,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7775,8 +7951,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7800,10 +7976,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7843,8 +8019,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7861,8 +8037,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7886,10 +8062,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -7927,8 +8103,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7945,8 +8121,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -7970,10 +8146,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8031,10 +8207,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8090,10 +8266,10 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8133,8 +8309,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8154,8 +8330,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8172,8 +8348,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8192,10 +8368,10 @@ line: 1,
                     value_member_owner_name: Some(String::from("box")),
                     value_member_name: Some(String::from("value")),
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8233,8 +8409,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8254,8 +8430,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8272,8 +8448,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8292,10 +8468,10 @@ line: 1,
                     value_member_owner_name: Some(String::from("box")),
                     value_member_name: Some(String::from("value")),
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8335,8 +8511,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8356,8 +8532,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8374,8 +8550,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8394,10 +8570,10 @@ line: 1,
                     value_member_owner_name: Some(String::from("Box")),
                     value_member_name: Some(String::from("value")),
                     value_member_through_instance: true,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8435,8 +8611,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8456,8 +8632,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8474,8 +8650,8 @@ line: 1,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8494,10 +8670,10 @@ line: 1,
                     value_member_owner_name: Some(String::from("Box")),
                     value_member_name: Some(String::from("value")),
                     value_member_through_instance: true,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -8564,12 +8740,12 @@ line: 1,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -8627,12 +8803,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -8663,8 +8839,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8681,8 +8857,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8710,12 +8886,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -8744,8 +8920,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8762,8 +8938,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8791,12 +8967,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -8827,8 +9003,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8845,8 +9021,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8874,12 +9050,12 @@ owner_name: None,
                     value_member_owner_name: None,
                     value_member_name: None,
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -8908,8 +9084,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8929,8 +9105,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8947,8 +9123,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8965,8 +9141,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -8994,12 +9170,12 @@ owner_name: None,
                     value_member_owner_name: Some(String::from("box")),
                     value_member_name: Some(String::from("value")),
                     value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-owner_name: None,
-                owner_type_name: None,
-                line: 1,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -9060,9 +9236,9 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
-                line: 1,
+                    line: 1,
                 }],
                 summary_fingerprint: 1,
             }],
@@ -9093,8 +9269,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9111,8 +9287,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9134,7 +9310,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 3,
+                    line: 3,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -9157,7 +9333,7 @@ line: 3,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
                 }],
@@ -9188,8 +9364,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9206,8 +9382,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9239,7 +9415,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9256,7 +9432,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
                     },
@@ -9290,8 +9466,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9308,8 +9484,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9326,8 +9502,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9359,7 +9535,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 1,
                     },
@@ -9376,7 +9552,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9408,8 +9584,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9426,8 +9602,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9444,8 +9620,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9477,7 +9653,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 1,
                     },
@@ -9494,7 +9670,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9528,8 +9704,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9546,8 +9722,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9579,7 +9755,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
                     },
@@ -9596,7 +9772,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9613,7 +9789,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
                     },
@@ -9645,8 +9821,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9663,8 +9839,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9686,7 +9862,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 3,
+                    line: 3,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -9710,7 +9886,7 @@ line: 3,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
                     },
@@ -9727,7 +9903,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                        owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9759,8 +9935,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9777,8 +9953,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9795,8 +9971,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9813,8 +9989,8 @@ owner_name: Some(String::from("build")),
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9846,7 +10022,7 @@ owner_name: Some(String::from("build")),
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 1,
                     },
@@ -9863,7 +10039,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 2,
                     },
@@ -9880,7 +10056,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 3,
                     },
@@ -9914,8 +10090,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9932,8 +10108,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -9955,7 +10131,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -9978,7 +10154,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -10039,7 +10215,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -10072,8 +10248,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10090,8 +10266,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10122,7 +10298,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -10153,8 +10329,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10171,8 +10347,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10293,8 +10469,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10311,8 +10487,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10353,7 +10529,9 @@ owner_name: None,
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+        assert!(rendered.contains(
+            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
+        ));
     }
 
     #[test]
@@ -10376,8 +10554,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10394,8 +10572,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10457,8 +10635,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10475,8 +10653,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10517,7 +10695,9 @@ owner_name: None,
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns callable `(str,int)->str` where `handler` expects `Callable[..., int]`"));
+        assert!(rendered.contains(
+            "assigns callable `(str,int)->str` where `handler` expects `Callable[..., int]`"
+        ));
     }
 
     #[test]
@@ -10540,8 +10720,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10561,8 +10741,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10579,8 +10759,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10597,8 +10777,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10660,8 +10840,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10681,8 +10861,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10699,8 +10879,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10717,8 +10897,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10759,7 +10939,9 @@ owner_name: None,
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+        assert!(rendered.contains(
+            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
+        ));
     }
 
     #[test]
@@ -10782,8 +10964,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10803,8 +10985,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10821,8 +11003,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10839,8 +11021,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10902,8 +11084,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10923,8 +11105,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10941,8 +11123,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -10959,8 +11141,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11001,7 +11183,9 @@ owner_name: None,
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+        assert!(rendered.contains(
+            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
+        ));
     }
 
     #[test]
@@ -11054,7 +11238,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -11085,8 +11269,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11103,8 +11287,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11121,8 +11305,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11139,8 +11323,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11162,7 +11346,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 4,
+                    line: 4,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -11186,7 +11370,7 @@ line: 4,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 1,
                     },
@@ -11203,7 +11387,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 2,
                     },
@@ -11220,7 +11404,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-owner_name: None,
+                        owner_name: None,
                         owner_type_name: None,
                         line: 3,
                     },
@@ -11282,7 +11466,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -11315,8 +11499,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11333,8 +11517,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11351,8 +11535,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11374,7 +11558,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -11397,7 +11581,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -11428,8 +11612,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11446,8 +11630,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -11483,7 +11667,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -11549,33 +11733,93 @@ owner_name: None,
     #[test]
     fn check_accepts_typing_extensions_typevar_assignment() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("TypeVar"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing_extensions.TypeVar"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("TypeVar"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing_extensions.TypeVar"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("T"),
+                            kind: DeclarationKind::Value,
+                            detail: String::from("TypeVar"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("TypeVar"),
+                        arg_count: 1,
+                        arg_types: vec![String::from("str")],
+                        keyword_names: Vec::new(),
+                    }],
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: vec![typepython_binding::AssignmentSite {
                         name: String::from("T"),
-                        kind: DeclarationKind::Value,
-                        detail: String::from("TypeVar"),
+                        annotation: Some(String::from("TypeVar")),
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: Some(String::from("TypeVar")),
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        owner_name: None,
+                        owner_type_name: None,
+                        line: 1,
+                    }],
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
+                    module_key: String::from("typing_extensions"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![typepython_binding::Declaration {
+                        name: String::from("TypeVar"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(name:str)->TypeVar"),
                         value_type: None,
                         method_kind: None,
                         class_kind: None,
@@ -11584,85 +11828,28 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
-                    },
-                ],
-                calls: vec![typepython_binding::CallSite {
-                    callee: String::from("TypeVar"),
-                    arg_count: 1,
-                    arg_types: vec![String::from("str")],
-                    keyword_names: Vec::new(),
-                }],
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: vec![typepython_binding::AssignmentSite {
-                    name: String::from("T"),
-                    annotation: Some(String::from("TypeVar")),
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: Some(String::from("TypeVar")),
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: None,
-                    value_method_name: None,
-                    value_method_through_instance: false,
-owner_name: None,
-                    owner_type_name: None,
-                    line: 1,
-                }],
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
-                module_key: String::from("typing_extensions"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
-                    name: String::from("TypeVar"),
-                    kind: DeclarationKind::Function,
-                    detail: String::from("(name:str)->TypeVar"),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                }],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                    }],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -11671,138 +11858,141 @@ owner_name: None,
     #[test]
     fn check_reports_typing_extensions_protocol_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Protocol"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing_extensions.Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Reader"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Protocol")],
-                    },
-                    Declaration {
-                        name: String::from("read"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->str"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Protocol"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing_extensions.Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
                             name: String::from("Reader"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("BadReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Protocol")],
+                        },
+                        Declaration {
+                            name: String::from("read"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->str"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Reader"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("BadReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Reader"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Reader")],
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
+                    module_key: String::from("typing_extensions"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![typepython_binding::Declaration {
+                        name: String::from("Protocol"),
                         kind: DeclarationKind::Class,
-                        detail: String::from("Reader"),
+                        detail: String::new(),
                         value_type: None,
                         method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
+                        class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
-                        bases: vec![String::from("Reader")],
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
-                module_key: String::from("typing_extensions"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
-                    name: String::from("Protocol"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: Some(DeclarationOwnerKind::Interface),
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                }],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                        bases: Vec::new(),
+                    }],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
@@ -11813,203 +12003,206 @@ owner_name: None,
     #[test]
     fn check_accepts_collections_abc_async_iterator_base() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("AsyncIterator"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.AsyncIterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Stream"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("AsyncIterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("AsyncIterator")],
-                    },
-                    Declaration {
-                        name: String::from("__aiter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->AsyncIterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Stream"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("__anext__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Awaitable[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Stream"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("AsyncIterable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__aiter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->AsyncIterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("AsyncIterable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("AsyncIterator"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("AsyncIterable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("AsyncIterable")],
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__anext__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Awaitable[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("AsyncIterator"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.AsyncIterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Stream"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("AsyncIterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("AsyncIterator")],
+                        },
+                        Declaration {
+                            name: String::from("__aiter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->AsyncIterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Stream"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("__anext__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Awaitable[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Stream"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("AsyncIterable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__aiter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->AsyncIterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("AsyncIterable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("AsyncIterator"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("AsyncIterable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("AsyncIterable")],
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__anext__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Awaitable[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("AsyncIterator"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -12018,187 +12211,193 @@ owner_name: None,
     #[test]
     fn check_reports_collections_abc_async_iterator_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("AsyncIterator"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.AsyncIterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("BadStream"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("AsyncIterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("AsyncIterator")],
-                    },
-                    Declaration {
-                        name: String::from("__aiter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->AsyncIterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("BadStream"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("AsyncIterable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__aiter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->AsyncIterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("AsyncIterable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("AsyncIterator"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("AsyncIterable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("AsyncIterable")],
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__anext__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Awaitable[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("AsyncIterator"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.AsyncIterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("BadStream"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("AsyncIterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("AsyncIterator")],
+                        },
+                        Declaration {
+                            name: String::from("__aiter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->AsyncIterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("BadStream"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("AsyncIterable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__aiter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->AsyncIterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("AsyncIterable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("AsyncIterator"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("AsyncIterable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("AsyncIterable")],
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__anext__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Awaitable[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("AsyncIterator"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4008"));
-        assert!(rendered.contains("does not implement interface member `__anext__` from `AsyncIterator`"));
+        assert!(
+            rendered
+                .contains("does not implement interface member `__anext__` from `AsyncIterator`")
+        );
     }
 
     #[test]
@@ -12221,8 +12420,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -12239,8 +12438,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -12276,7 +12475,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -12342,159 +12541,162 @@ owner_name: None,
     #[test]
     fn check_accepts_protocol_derived_base_implementation() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Protocol"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing.Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Reader"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Protocol")],
-                    },
-                    Declaration {
-                        name: String::from("read"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->str"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Protocol"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing.Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
                             name: String::from("Reader"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("FileReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Protocol")],
+                        },
+                        Declaration {
+                            name: String::from("read"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->str"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Reader"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("FileReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Reader"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Reader")],
+                        },
+                        Declaration {
+                            name: String::from("read"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->str"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("FileReader"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-prelude>"),
+                    module_key: String::from("typing"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![typepython_binding::Declaration {
+                        name: String::from("Protocol"),
                         kind: DeclarationKind::Class,
-                        detail: String::from("Reader"),
+                        detail: String::new(),
                         value_type: None,
                         method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
+                        class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Reader")],
-                    },
-                    Declaration {
-                        name: String::from("read"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->str"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("FileReader"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-prelude>"),
-                module_key: String::from("typing"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
-                    name: String::from("Protocol"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: Some(DeclarationOwnerKind::Interface),
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                }],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                    }],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -12503,138 +12705,141 @@ owner_name: None,
     #[test]
     fn check_reports_protocol_derived_base_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Protocol"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing.Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Reader"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Protocol"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Protocol")],
-                    },
-                    Declaration {
-                        name: String::from("read"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->str"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("Protocol"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing.Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
                             name: String::from("Reader"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("BadReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Protocol"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Protocol")],
+                        },
+                        Declaration {
+                            name: String::from("read"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->str"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Reader"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("BadReader"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Reader"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Reader")],
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-prelude>"),
+                    module_key: String::from("typing"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![typepython_binding::Declaration {
+                        name: String::from("Protocol"),
                         kind: DeclarationKind::Class,
-                        detail: String::from("Reader"),
+                        detail: String::new(),
                         value_type: None,
                         method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
+                        class_kind: Some(DeclarationOwnerKind::Interface),
                         owner: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
-                        bases: vec![String::from("Reader")],
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-prelude>"),
-                module_key: String::from("typing"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
-                    name: String::from("Protocol"),
-                    kind: DeclarationKind::Class,
-                    detail: String::new(),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: Some(DeclarationOwnerKind::Interface),
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                }],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                        bases: Vec::new(),
+                    }],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
@@ -12645,143 +12850,146 @@ owner_name: None,
     #[test]
     fn check_accepts_collections_abc_sized_base() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Sized"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.Sized"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Box"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Sized"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Sized")],
-                    },
-                    Declaration {
-                        name: String::from("__len__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->int"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Box"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Sized"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__len__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->int"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Sized"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.Sized"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Box"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Sized"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Sized")],
+                        },
+                        Declaration {
+                            name: String::from("__len__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->int"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Box"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Sized"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__len__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->int"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Sized"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -12790,122 +12998,125 @@ owner_name: None,
     #[test]
     fn check_reports_collections_abc_sized_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Sized"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.Sized"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("BadBox"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Sized"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Sized")],
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Sized"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__len__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->int"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Sized"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.Sized"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("BadBox"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Sized"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Sized")],
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Sized"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__len__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->int"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Sized"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
@@ -12916,143 +13127,146 @@ owner_name: None,
     #[test]
     fn check_accepts_collections_abc_callable_base() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Callable"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.Callable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Runner"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Callable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Callable")],
-                    },
-                    Declaration {
-                        name: String::from("__call__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Any"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Runner"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Callable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__call__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Any"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Callable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.Callable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Runner"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Callable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Callable")],
+                        },
+                        Declaration {
+                            name: String::from("__call__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Any"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Runner"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Callable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__call__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Any"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Callable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -13061,368 +13275,376 @@ owner_name: None,
     #[test]
     fn check_reports_collections_abc_iterator_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Iterator"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("collections.abc.Iterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Cursor"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Iterator"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Iterator")],
-                    },
-                    Declaration {
-                        name: String::from("__iter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Iterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Cursor"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
-                module_key: String::from("collections.abc"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Sized"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__len__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->int"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Sized"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("Iterable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Sized"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Sized")],
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__iter__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Iterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Iterable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("Iterator"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Iterable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Iterable")],
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__next__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Any"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Iterator"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("collections.abc.Iterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Cursor"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Iterator"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Iterator")],
+                        },
+                        Declaration {
+                            name: String::from("__iter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Iterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Cursor"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<collections.abc-prelude>"),
+                    module_key: String::from("collections.abc"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Sized"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__len__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->int"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Sized"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("Iterable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Sized"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Sized")],
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__iter__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Iterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Iterable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("Iterator"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Iterable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Iterable")],
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__next__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Any"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Iterator"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4008"));
-        assert!(rendered.contains("does not implement interface member `__next__` from `Iterator`"));
+        assert!(
+            rendered.contains("does not implement interface member `__next__` from `Iterator`")
+        );
     }
 
     #[test]
     fn check_accepts_typing_awaitable_base() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Awaitable"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing.Awaitable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Job"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Awaitable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Awaitable")],
-                    },
-                    Declaration {
-                        name: String::from("__await__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Iterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
-                            name: String::from("Job"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-prelude>"),
-                module_key: String::from("typing"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Awaitable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__await__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Iterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Awaitable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing.Awaitable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("Job"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Awaitable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Awaitable")],
+                        },
+                        Declaration {
+                            name: String::from("__await__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Iterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Job"),
+                                kind: DeclarationOwnerKind::Class,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-prelude>"),
+                    module_key: String::from("typing"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Awaitable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__await__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Iterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Awaitable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         assert!(result.diagnostics.is_empty());
@@ -13431,127 +13653,132 @@ owner_name: None,
     #[test]
     fn check_reports_typing_awaitable_missing_member() {
         let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.py"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Awaitable"),
-                        kind: DeclarationKind::Import,
-                        detail: String::from("typing.Awaitable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("BadJob"),
-                        kind: DeclarationKind::Class,
-                        detail: String::from("Awaitable"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("Awaitable")],
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }, typepython_graph::ModuleNode {
-                module_path: std::path::PathBuf::from("<typing-prelude>"),
-                module_key: String::from("typing"),
-                module_kind: SourceKind::Stub,
-                declarations: vec![
-                    typepython_binding::Declaration {
-                        name: String::from("Awaitable"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Interface),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                    typepython_binding::Declaration {
-                        name: String::from("__await__"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(self)->Iterator[Any]"),
-                        value_type: None,
-                        method_kind: Some(typepython_syntax::MethodKind::Instance),
-                        class_kind: None,
-                        owner: Some(typepython_binding::DeclarationOwner {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/app/module.py"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::Python,
+                    declarations: vec![
+                        Declaration {
                             name: String::from("Awaitable"),
-                            kind: DeclarationOwnerKind::Interface,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
+                            kind: DeclarationKind::Import,
+                            detail: String::from("typing.Awaitable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("BadJob"),
+                            kind: DeclarationKind::Class,
+                            detail: String::from("Awaitable"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: vec![String::from("Awaitable")],
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+                typepython_graph::ModuleNode {
+                    module_path: std::path::PathBuf::from("<typing-prelude>"),
+                    module_key: String::from("typing"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        typepython_binding::Declaration {
+                            name: String::from("Awaitable"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Interface),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        typepython_binding::Declaration {
+                            name: String::from("__await__"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("(self)->Iterator[Any]"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(typepython_binding::DeclarationOwner {
+                                name: String::from("Awaitable"),
+                                kind: DeclarationOwnerKind::Interface,
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                },
+            ],
         });
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4008"));
-        assert!(rendered.contains("does not implement interface member `__await__` from `Awaitable`"));
+        assert!(
+            rendered.contains("does not implement interface member `__await__` from `Awaitable`")
+        );
     }
 
     #[test]
@@ -13574,8 +13801,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13592,8 +13819,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13624,7 +13851,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -13655,8 +13882,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13673,8 +13900,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13705,7 +13932,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     line: 1,
                 }],
@@ -13738,8 +13965,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13756,8 +13983,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13780,7 +14007,7 @@ owner_name: None,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-line: 2,
+                        line: 2,
                     },
                     typepython_binding::ReturnSite {
                         owner_name: String::from("build"),
@@ -13795,7 +14022,7 @@ line: 2,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-line: 5,
+                        line: 5,
                     },
                 ],
                 yields: Vec::new(),
@@ -13834,8 +14061,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13852,8 +14079,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -13876,7 +14103,7 @@ line: 5,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-line: 2,
+                        line: 2,
                     },
                     typepython_binding::ReturnSite {
                         owner_name: String::from("build"),
@@ -13891,7 +14118,7 @@ line: 2,
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-line: 5,
+                        line: 5,
                     },
                 ],
                 yields: Vec::new(),
@@ -14052,8 +14279,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14070,8 +14297,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14391,8 +14618,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14412,8 +14639,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14468,8 +14695,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14489,8 +14716,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14543,8 +14770,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14564,8 +14791,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14666,8 +14893,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14684,8 +14911,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -14705,8 +14932,8 @@ line: 5,
                         is_override: true,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14754,8 +14981,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14775,8 +15002,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14793,8 +15020,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -14814,8 +15041,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -14864,8 +15091,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -14885,8 +15112,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -14894,13 +15121,13 @@ line: 5,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -14924,8 +15151,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -14942,8 +15169,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: vec![String::from("Base")],
@@ -14963,8 +15190,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -14972,13 +15199,13 @@ line: 5,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -15013,8 +15240,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15034,8 +15261,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15052,8 +15279,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Base")],
@@ -15073,8 +15300,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15123,8 +15350,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -15144,8 +15371,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -15162,8 +15389,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: vec![String::from("Base")],
@@ -15183,8 +15410,8 @@ line: 5,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             bases: Vec::new(),
@@ -15192,13 +15419,13 @@ line: 5,
                     ],
                     calls: Vec::new(),
                     method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
                     yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
                     for_loops: Vec::new(),
                     with_statements: Vec::new(),
                     except_handlers: Vec::new(),
@@ -15238,8 +15465,8 @@ line: 5,
                                 is_override: false,
                                 is_abstract_method: false,
                                 is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                                is_deprecated: false,
+                                deprecation_message: None,
                                 is_final: false,
                                 is_class_var: false,
                                 bases: Vec::new(),
@@ -15259,8 +15486,8 @@ line: 5,
                                 is_override: false,
                                 is_abstract_method: false,
                                 is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                                is_deprecated: false,
+                                deprecation_message: None,
                                 is_final: false,
                                 is_class_var: false,
                                 bases: Vec::new(),
@@ -15268,13 +15495,13 @@ line: 5,
                         ],
                         calls: Vec::new(),
                         method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                        member_accesses: Vec::new(),
+                        returns: Vec::new(),
                         yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                        if_guards: Vec::new(),
+                        asserts: Vec::new(),
+                        invalidations: Vec::new(),
+                        matches: Vec::new(),
                         for_loops: Vec::new(),
                         with_statements: Vec::new(),
                         except_handlers: Vec::new(),
@@ -15298,8 +15525,8 @@ line: 5,
                                 is_override: false,
                                 is_abstract_method: false,
                                 is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                                is_deprecated: false,
+                                deprecation_message: None,
                                 is_final: false,
                                 is_class_var: false,
                                 bases: Vec::new(),
@@ -15316,8 +15543,8 @@ line: 5,
                                 is_override: false,
                                 is_abstract_method: false,
                                 is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                                is_deprecated: false,
+                                deprecation_message: None,
                                 is_final: false,
                                 is_class_var: false,
                                 bases: vec![String::from("Base")],
@@ -15337,8 +15564,8 @@ line: 5,
                                 is_override: false,
                                 is_abstract_method: false,
                                 is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                                is_deprecated: false,
+                                deprecation_message: None,
                                 is_final: false,
                                 is_class_var: false,
                                 bases: Vec::new(),
@@ -15346,13 +15573,13 @@ line: 5,
                         ],
                         calls: Vec::new(),
                         method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
+                        member_accesses: Vec::new(),
+                        returns: Vec::new(),
                         yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
+                        if_guards: Vec::new(),
+                        asserts: Vec::new(),
+                        invalidations: Vec::new(),
+                        matches: Vec::new(),
                         for_loops: Vec::new(),
                         with_statements: Vec::new(),
                         except_handlers: Vec::new(),
@@ -15438,8 +15665,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15459,8 +15686,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: true,
                         bases: Vec::new(),
@@ -15506,8 +15733,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15527,8 +15754,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15545,8 +15772,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15606,8 +15833,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15627,8 +15854,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15645,8 +15872,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15663,8 +15890,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15726,8 +15953,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15747,8 +15974,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15765,8 +15992,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15783,8 +16010,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15848,8 +16075,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15869,8 +16096,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15887,8 +16114,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15950,8 +16177,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15971,8 +16198,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -15989,8 +16216,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16007,8 +16234,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16068,8 +16295,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16089,8 +16316,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16107,8 +16334,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16125,8 +16352,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16175,26 +16402,24 @@ line: 5,
                 module_path: PathBuf::from("src/app/module.py"),
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("build"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(values:list[int])->None"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(values:list[int])->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
                     is_deprecated: false,
                     deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
                 yields: Vec::new(),
@@ -16254,26 +16479,24 @@ line: 5,
                 module_path: PathBuf::from("src/app/module.py"),
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("build"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(values:list[int])->None"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(values:list[int])->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
                     is_deprecated: false,
                     deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                    },
-                ],
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
                 yields: Vec::new(),
@@ -16640,8 +16863,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16661,8 +16884,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16682,8 +16905,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16700,8 +16923,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16776,8 +16999,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16797,8 +17020,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16815,8 +17038,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -16858,7 +17081,6 @@ line: 5,
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("lacks compatible `__enter__`/`__exit__` members"));
     }
-
 
     #[test]
     fn check_accepts_except_handler_binding_type() {
@@ -17191,7 +17413,11 @@ line: 5,
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
+        assert!(
+            rendered.contains(
+                "returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"
+            )
+        );
     }
 
     #[test]
@@ -17348,8 +17574,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17366,8 +17592,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Expr")],
@@ -17384,8 +17610,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Expr")],
@@ -17402,8 +17628,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17429,7 +17655,9 @@ line: 5,
                     subject_method_name: None,
                     subject_method_through_instance: false,
                     cases: vec![typepython_binding::MatchCaseSite {
-                        patterns: vec![typepython_binding::MatchPatternSite::Class(String::from("Add"))],
+                        patterns: vec![typepython_binding::MatchPatternSite::Class(String::from(
+                            "Add",
+                        ))],
                         has_guard: false,
                         line: 3,
                     }],
@@ -17470,8 +17698,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17488,8 +17716,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Expr")],
@@ -17506,8 +17734,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Expr")],
@@ -17524,8 +17752,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17552,7 +17780,9 @@ line: 5,
                     subject_method_through_instance: false,
                     cases: vec![
                         typepython_binding::MatchCaseSite {
-                            patterns: vec![typepython_binding::MatchPatternSite::Class(String::from("Add"))],
+                            patterns: vec![typepython_binding::MatchPatternSite::Class(
+                                String::from("Add"),
+                            )],
                             has_guard: false,
                             line: 3,
                         },
@@ -17806,8 +18036,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17824,8 +18054,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17897,8 +18127,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17915,8 +18145,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -17988,8 +18218,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18006,8 +18236,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18574,26 +18804,24 @@ line: 5,
                         module_path: PathBuf::from("src/app/module.tpy"),
                         module_key: String::from("app.module"),
                         module_kind: SourceKind::TypePython,
-                        declarations: vec![
-                            Declaration {
-                                name: String::from("old"),
-                                kind: DeclarationKind::Import,
-                                detail: String::from("lib.deps.old"),
-                                value_type: None,
-                                method_kind: None,
-                                class_kind: None,
-                                owner: None,
-                                is_async: false,
-                                is_override: false,
-                                is_abstract_method: false,
-                                is_final_decorator: false,
-                                is_deprecated: false,
-                                deprecation_message: None,
-                                is_final: false,
-                                is_class_var: false,
-                                bases: Vec::new(),
-                            },
-                        ],
+                        declarations: vec![Declaration {
+                            name: String::from("old"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("lib.deps.old"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        }],
                         calls: vec![typepython_binding::CallSite {
                             callee: String::from("old"),
                             arg_count: 0,
@@ -18742,8 +18970,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18760,8 +18988,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18810,8 +19038,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18831,8 +19059,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18849,8 +19077,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Box")],
@@ -18867,8 +19095,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18928,8 +19156,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -18949,8 +19177,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19003,8 +19231,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19024,8 +19252,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19042,8 +19270,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19221,8 +19449,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19242,8 +19470,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19263,8 +19491,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19281,8 +19509,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19343,8 +19571,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19364,8 +19592,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19385,8 +19613,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19403,8 +19631,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19424,8 +19652,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19445,8 +19673,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
@@ -19463,8 +19691,8 @@ line: 5,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),

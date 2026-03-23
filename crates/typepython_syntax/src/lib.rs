@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
+use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam, visitor, visitor::Visitor};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -59,12 +59,7 @@ impl SourceFile {
             )
         })?;
 
-        Ok(Self {
-            path,
-            kind,
-            logical_module: String::new(),
-            text,
-        })
+        Ok(Self { path, kind, logical_module: String::new(), text })
     }
 }
 
@@ -632,7 +627,9 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
     for stmt in parsed.suite() {
         match stmt {
             Stmt::FunctionDef(function) => {
-                if let Some(metadata) = dataclass_transform_metadata(source, &function.decorator_list) {
+                if let Some(metadata) =
+                    dataclass_transform_metadata(source, &function.decorator_list)
+                {
                     providers.push(DataclassTransformProviderSite {
                         name: function.name.as_str().to_owned(),
                         metadata,
@@ -641,7 +638,9 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
                 }
             }
             Stmt::ClassDef(class_def) => {
-                if let Some(metadata) = dataclass_transform_metadata(source, &class_def.decorator_list) {
+                if let Some(metadata) =
+                    dataclass_transform_metadata(source, &class_def.decorator_list)
+                {
                     providers.push(DataclassTransformProviderSite {
                         name: class_def.name.as_str().to_owned(),
                         metadata,
@@ -680,15 +679,13 @@ pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFuncti
 fn collect_direct_function_param_sites(
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<DirectFunctionParamSite> {
-    let positional = parameters
-        .posonlyargs
-        .iter()
-        .chain(&parameters.args)
-        .map(|parameter| DirectFunctionParamSite {
+    let positional = parameters.posonlyargs.iter().chain(&parameters.args).map(|parameter| {
+        DirectFunctionParamSite {
             name: parameter.name().as_str().to_owned(),
             has_default: parameter.default().is_some(),
             keyword_only: false,
-        });
+        }
+    });
     let keyword_only = parameters.kwonlyargs.iter().map(|parameter| DirectFunctionParamSite {
         name: parameter.name().as_str().to_owned(),
         has_default: parameter.default().is_some(),
@@ -933,23 +930,16 @@ fn collect_dataclass_transform_class_site(
             .arguments
             .as_ref()
             .map(|arguments| {
-                arguments
-                    .args
-                    .iter()
-                    .filter_map(decorator_target_name)
-                    .collect::<Vec<_>>()
+                arguments.args.iter().filter_map(decorator_target_name).collect::<Vec<_>>()
             })
             .unwrap_or_default(),
-        metaclass: class_def
-            .arguments
-            .as_ref()
-            .and_then(|arguments| {
-                arguments.keywords.iter().find_map(|keyword| {
-                    (keyword.arg.as_ref().map(|arg| arg.as_str()) == Some("metaclass"))
-                        .then(|| decorator_target_name(&keyword.value))
-                        .flatten()
-                })
-            }),
+        metaclass: class_def.arguments.as_ref().and_then(|arguments| {
+            arguments.keywords.iter().find_map(|keyword| {
+                (keyword.arg.as_ref().map(|arg| arg.as_str()) == Some("metaclass"))
+                    .then(|| decorator_target_name(&keyword.value))
+                    .flatten()
+            })
+        }),
         methods: class_def
             .body
             .iter()
@@ -1049,26 +1039,27 @@ fn dataclass_transform_metadata(
     })
 }
 
-fn dataclass_transform_metadata_from_call(
-    source: &str,
-    expr: &Expr,
-) -> DataclassTransformMetadata {
+fn dataclass_transform_metadata_from_call(source: &str, expr: &Expr) -> DataclassTransformMetadata {
     let Expr::Call(call) = expr else {
         return DataclassTransformMetadata::default();
     };
-    let mut metadata = DataclassTransformMetadata {
-        eq_default: true,
-        ..DataclassTransformMetadata::default()
-    };
+    let mut metadata =
+        DataclassTransformMetadata { eq_default: true, ..DataclassTransformMetadata::default() };
     for keyword in &call.arguments.keywords {
         let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
             continue;
         };
         match name {
-            "kw_only_default" => metadata.kw_only_default = expr_static_bool(&keyword.value).unwrap_or(false),
-            "frozen_default" => metadata.frozen_default = expr_static_bool(&keyword.value).unwrap_or(false),
+            "kw_only_default" => {
+                metadata.kw_only_default = expr_static_bool(&keyword.value).unwrap_or(false)
+            }
+            "frozen_default" => {
+                metadata.frozen_default = expr_static_bool(&keyword.value).unwrap_or(false)
+            }
             "eq_default" => metadata.eq_default = expr_static_bool(&keyword.value).unwrap_or(true),
-            "order_default" => metadata.order_default = expr_static_bool(&keyword.value).unwrap_or(false),
+            "order_default" => {
+                metadata.order_default = expr_static_bool(&keyword.value).unwrap_or(false)
+            }
             "field_specifiers" => {
                 metadata.field_specifiers = expr_name_list(&keyword.value, source);
             }
@@ -1093,9 +1084,11 @@ fn is_dataclass_transform_expr(expr: &Expr) -> bool {
 fn decorator_target_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Name(name) => Some(name.id.as_str().to_owned()),
-        Expr::Attribute(attribute) => {
-            Some(format!("{}.{}", decorator_target_name(attribute.value.as_ref())?, attribute.attr.as_str()))
-        }
+        Expr::Attribute(attribute) => Some(format!(
+            "{}.{}",
+            decorator_target_name(attribute.value.as_ref())?,
+            attribute.attr.as_str()
+        )),
         Expr::Call(call) => decorator_target_name(call.func.as_ref()),
         _ => None,
     }
@@ -1112,8 +1105,12 @@ fn expr_static_bool(expr: &Expr) -> Option<bool> {
 
 fn expr_name_list(expr: &Expr, source: &str) -> Vec<String> {
     match expr {
-        Expr::Tuple(tuple) => tuple.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect(),
-        Expr::List(list) => list.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect(),
+        Expr::Tuple(tuple) => {
+            tuple.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect()
+        }
+        Expr::List(list) => {
+            list.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect()
+        }
         _ => decorator_target_name(expr)
             .or_else(|| extract_string_literal_value(source, expr))
             .into_iter()
@@ -1122,20 +1119,12 @@ fn expr_name_list(expr: &Expr, source: &str) -> Vec<String> {
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
-    split_top_level_commas(params)
-        .into_iter()
-        .find_map(|param| {
-            let (name, annotation) = param.split_once(':')?;
-            let name = name.split('=').next()?.trim();
-            (name == target_name).then(|| {
-                annotation
-                    .split('=')
-                    .next()
-                    .unwrap_or(annotation)
-                    .trim()
-                    .to_owned()
-            })
-        })
+    split_top_level_commas(params).into_iter().find_map(|param| {
+        let (name, annotation) = param.split_once(':')?;
+        let name = name.split('=').next()?.trim();
+        (name == target_name)
+            .then(|| annotation.split('=').next().unwrap_or(annotation).trim().to_owned())
+    })
 }
 
 fn normalize_conditional_return_source(source: &str) -> String {
@@ -1231,7 +1220,9 @@ fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
             index += 1;
             continue;
         };
-        let Some(target_name) = rest.strip_suffix(':').map(str::trim).filter(|name| !name.is_empty()) else {
+        let Some(target_name) =
+            rest.strip_suffix(':').map(str::trim).filter(|name| !name.is_empty())
+        else {
             index += 1;
             continue;
         };
@@ -1258,9 +1249,8 @@ fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
             if case_indent <= indent || !case_trimmed.starts_with("case ") {
                 break;
             }
-            if let Some((case_type, _)) = case_trimmed
-                .strip_prefix("case ")
-                .and_then(|rest| rest.split_once(':'))
+            if let Some((case_type, _)) =
+                case_trimmed.strip_prefix("case ").and_then(|rest| rest.split_once(':'))
             {
                 case_input_types.push(case_type.trim().to_owned());
             }
@@ -1508,7 +1498,9 @@ fn collect_direct_call_context_sites_in_suite(
 ) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-        if let Some(site) = extract_direct_call_context_site(stmt, line, owner_name, owner_type_name) {
+        if let Some(site) =
+            extract_direct_call_context_site(stmt, line, owner_name, owner_type_name)
+        {
             sites.push(site);
         }
 
@@ -1855,19 +1847,20 @@ fn extract_string_literal_value(source: &str, expr: &Expr) -> Option<String> {
     let raw = slice_range(source, expr.range())?.trim();
     let quote_start = raw.find(['\'', '"'])?;
     let quoted = &raw[quote_start..];
-    if let Some(inner) = quoted.strip_prefix("\"\"\"").and_then(|inner| inner.strip_suffix("\"\"\"")) {
+    if let Some(inner) =
+        quoted.strip_prefix("\"\"\"").and_then(|inner| inner.strip_suffix("\"\"\""))
+    {
         return Some(inner.to_owned());
     }
-    if let Some(inner) = quoted.strip_prefix("'''").and_then(|inner| inner.strip_suffix("'''")).map(str::to_owned) {
+    if let Some(inner) =
+        quoted.strip_prefix("'''").and_then(|inner| inner.strip_suffix("'''")).map(str::to_owned)
+    {
         return Some(inner);
     }
     if let Some(inner) = quoted.strip_prefix('"').and_then(|inner| inner.strip_suffix('"')) {
         return Some(inner.to_owned());
     }
-    quoted
-        .strip_prefix('\'')
-        .and_then(|inner| inner.strip_suffix('\''))
-        .map(str::to_owned)
+    quoted.strip_prefix('\'').and_then(|inner| inner.strip_suffix('\'')).map(str::to_owned)
 }
 
 fn parse_python_source(source: SourceFile) -> SyntaxTree {
@@ -1897,26 +1890,44 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
             collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
             collect_if_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_assert_statements(&source.text, parsed.suite(), None, None, &mut statements);
-            collect_invalidation_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_invalidation_statements(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             collect_match_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_for_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_with_statements(&source.text, parsed.suite(), None, None, &mut statements);
-            collect_except_handler_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_except_handler_statements(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
             collect_function_body_assignments(&source.text, parsed.suite(), None, &mut statements);
-            collect_function_body_bare_assignments(&source.text, parsed.suite(), None, &mut statements);
+            collect_function_body_bare_assignments(
+                &source.text,
+                parsed.suite(),
+                None,
+                &mut statements,
+            );
             statements.sort_by_key(statement_line);
         }
         Err(error) => {
             let code = parse_error_code(&error.error.to_string());
             diagnostics.push(
-                Diagnostic::error(code, format!("Python syntax error: {}", error.error))
-                    .with_span(parse_error_span(
+                Diagnostic::error(code, format!("Python syntax error: {}", error.error)).with_span(
+                    parse_error_span(
                         &source.path,
                         &source.text,
                         error.location.start().to_usize(),
                         error.location.end().to_usize(),
-                    )),
+                    ),
+                ),
             );
         }
     }
@@ -1936,13 +1947,18 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
             continue;
         }
 
-        if let Some(statement) = parse_extension_statement(&source.path, trimmed, line_number, &mut diagnostics) {
+        if let Some(statement) =
+            parse_extension_statement(&source.path, trimmed, line_number, &mut diagnostics)
+        {
             statements.push(statement);
         }
     }
 
     if !diagnostics.has_errors() {
-        let normalized = normalize_conditional_return_source(&normalize_typepython_source(&source.text, &statements));
+        let normalized = normalize_conditional_return_source(&normalize_typepython_source(
+            &source.text,
+            &statements,
+        ));
         match parse_module(&normalized) {
             Ok(parsed) => {
                 collect_invalid_annotation_placement_diagnostics(
@@ -1978,14 +1994,36 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
                 collect_yield_statements(&normalized, parsed.suite(), None, &mut statements);
                 collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_assert_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_invalidation_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_invalidation_statements(
+                    &normalized,
+                    parsed.suite(),
+                    None,
+                    None,
+                    &mut statements,
+                );
                 collect_match_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
                 collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_except_handler_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                collect_except_handler_statements(
+                    &normalized,
+                    parsed.suite(),
+                    None,
+                    None,
+                    &mut statements,
+                );
                 collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
-                collect_function_body_assignments(&normalized, parsed.suite(), None, &mut statements);
-                collect_function_body_bare_assignments(&normalized, parsed.suite(), None, &mut statements);
+                collect_function_body_assignments(
+                    &normalized,
+                    parsed.suite(),
+                    None,
+                    &mut statements,
+                );
+                collect_function_body_bare_assignments(
+                    &normalized,
+                    parsed.suite(),
+                    None,
+                    &mut statements,
+                );
                 statements.sort_by_key(statement_line);
             }
             Err(error) => {
@@ -2020,7 +2058,9 @@ pub fn apply_type_ignore_directives(
 ) {
     let directives_by_path = syntax_trees
         .iter()
-        .map(|tree| (tree.source.path.to_string_lossy().into_owned(), tree.type_ignore_directives.clone()))
+        .map(|tree| {
+            (tree.source.path.to_string_lossy().into_owned(), tree.type_ignore_directives.clone())
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
 
     diagnostics.diagnostics.retain(|diagnostic| {
@@ -2076,23 +2116,46 @@ fn collect_invalid_annotation_placement_diagnostics(
 ) {
     for statement in suite {
         match statement {
-            Stmt::AnnAssign(assign) if in_function_body && is_classvar_annotation(&assign.annotation) => {
+            Stmt::AnnAssign(assign)
+                if in_function_body && is_classvar_annotation(&assign.annotation) =>
+            {
                 let line = offset_to_line_column(source, assign.range.start().to_usize()).0;
                 diagnostics.push(
                     Diagnostic::error(
                         "TPY4001",
                         "ClassVar[...] is not allowed inside function or method bodies",
                     )
-                    .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                    .with_span(Span::new(
+                        path.display().to_string(),
+                        line,
+                        1,
+                        line,
+                        1,
+                    )),
                 );
             }
             Stmt::FunctionDef(function) => {
-                collect_invalid_parameter_annotation_diagnostics(path, source, &function.parameters, diagnostics);
-                collect_invalid_annotation_placement_diagnostics(path, source, &function.body, true, diagnostics)
+                collect_invalid_parameter_annotation_diagnostics(
+                    path,
+                    source,
+                    &function.parameters,
+                    diagnostics,
+                );
+                collect_invalid_annotation_placement_diagnostics(
+                    path,
+                    source,
+                    &function.body,
+                    true,
+                    diagnostics,
+                )
             }
-            Stmt::ClassDef(class_def) => {
-                collect_invalid_annotation_placement_diagnostics(path, source, &class_def.body, false, diagnostics)
-            }
+            Stmt::ClassDef(class_def) => collect_invalid_annotation_placement_diagnostics(
+                path,
+                source,
+                &class_def.body,
+                false,
+                diagnostics,
+            ),
             _ => {}
         }
     }
@@ -2104,11 +2167,7 @@ fn collect_deferred_async_construct_diagnostics(
     suite: &[Stmt],
     diagnostics: &mut DiagnosticReport,
 ) {
-    let mut visitor = DeferredAsyncConstructVisitor {
-        path,
-        source,
-        diagnostics,
-    };
+    let mut visitor = DeferredAsyncConstructVisitor { path, source, diagnostics };
     visitor.visit_body(suite);
 }
 
@@ -2204,7 +2263,9 @@ fn refresh_custom_statements_from_ast(
     for statement in statements.iter_mut() {
         match statement {
             SyntaxStatement::Interface(existing) => {
-                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                if let Some(ast_statement) =
+                    ast_class_def_for_line(normalized, suite, existing.line)
+                {
                     for body_statement in &ast_statement.body {
                         if !is_valid_interface_body_statement(body_statement) {
                             diagnostics.push(
@@ -2244,8 +2305,10 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
-                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
-                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_final_decorator =
+                            ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message =
+                            deprecated_decorator_message(&ast_statement.decorator_list);
                         existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
@@ -2264,7 +2327,9 @@ fn refresh_custom_statements_from_ast(
                 }
             }
             SyntaxStatement::DataClass(existing) => {
-                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                if let Some(ast_statement) =
+                    ast_class_def_for_line(normalized, suite, existing.line)
+                {
                     if let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
@@ -2275,8 +2340,10 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
-                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
-                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_final_decorator =
+                            ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message =
+                            deprecated_decorator_message(&ast_statement.decorator_list);
                         existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
@@ -2295,7 +2362,9 @@ fn refresh_custom_statements_from_ast(
                 }
             }
             SyntaxStatement::SealedClass(existing) => {
-                if let Some(ast_statement) = ast_class_def_for_line(normalized, suite, existing.line) {
+                if let Some(ast_statement) =
+                    ast_class_def_for_line(normalized, suite, existing.line)
+                {
                     if let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
@@ -2306,8 +2375,10 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
-                        existing.is_final_decorator = ast_statement.decorator_list.iter().any(is_final_decorator);
-                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_final_decorator =
+                            ast_statement.decorator_list.iter().any(is_final_decorator);
+                        existing.deprecation_message =
+                            deprecated_decorator_message(&ast_statement.decorator_list);
                         existing.is_deprecated = existing.deprecation_message.is_some();
                         existing.header_suffix = ast_statement
                             .arguments
@@ -2326,7 +2397,9 @@ fn refresh_custom_statements_from_ast(
                 }
             }
             SyntaxStatement::OverloadDef(existing) => {
-                if let Some(ast_statement) = ast_function_def_for_line(normalized, suite, existing.line) {
+                if let Some(ast_statement) =
+                    ast_function_def_for_line(normalized, suite, existing.line)
+                {
                     if !is_stub_like_function_body(&ast_statement.body) {
                         diagnostics.push(
                             Diagnostic::error(
@@ -2363,15 +2436,18 @@ fn refresh_custom_statements_from_ast(
                     ) {
                         existing.name = ast_statement.name.as_str().to_owned();
                         existing.type_params = type_params;
-                        existing.params = extract_function_params(normalized, &ast_statement.parameters);
+                        existing.params =
+                            extract_function_params(normalized, &ast_statement.parameters);
                         existing.returns = ast_statement
                             .returns
                             .as_ref()
                             .and_then(|returns| slice_range(normalized, returns.range()))
                             .map(str::to_owned);
                         existing.is_async = ast_statement.is_async;
-                        existing.is_override = ast_statement.decorator_list.iter().any(is_override_decorator);
-                        existing.deprecation_message = deprecated_decorator_message(&ast_statement.decorator_list);
+                        existing.is_override =
+                            ast_statement.decorator_list.iter().any(is_override_decorator);
+                        existing.deprecation_message =
+                            deprecated_decorator_message(&ast_statement.decorator_list);
                         existing.is_deprecated = existing.deprecation_message.is_some();
                     }
                 }
@@ -2433,45 +2509,50 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
             Stmt::AnnAssign(assign) => {
                 let is_final = is_final_annotation(&assign.annotation);
                 let is_class_var = is_classvar_annotation(&assign.annotation);
-                members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| ClassMember {
-                    name,
-                    kind: ClassMemberKind::Field,
-                    method_kind: None,
-                    annotation: slice_range(normalized, assign.annotation.range()).map(str::to_owned),
-                    value_type: assign.value.as_deref().map(infer_literal_arg_type),
-                    params: Vec::new(),
-                    returns: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final,
-                    is_class_var,
-                    line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
+                members.extend(extract_assignment_names(&assign.target).into_iter().map(|name| {
+                    ClassMember {
+                        name,
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: slice_range(normalized, assign.annotation.range())
+                            .map(str::to_owned),
+                        value_type: assign.value.as_deref().map(infer_literal_arg_type),
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final,
+                        is_class_var,
+                        line: offset_to_line_column(normalized, assign.range.start().to_usize()).0,
+                    }
                 }));
             }
             Stmt::Assign(assign) => {
                 let line = offset_to_line_column(normalized, assign.range.start().to_usize()).0;
-                members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(|name| ClassMember {
-                    name,
-                    kind: ClassMemberKind::Field,
-                    method_kind: None,
-                    annotation: None,
-                    value_type: None,
-                    params: Vec::new(),
-                    returns: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    line,
-                }));
+                members.extend(assign.targets.iter().flat_map(extract_assignment_names).map(
+                    |name| ClassMember {
+                        name,
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: None,
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line,
+                    },
+                ));
             }
             _ => {}
         }
@@ -2480,7 +2561,11 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
     members
 }
 
-fn ast_class_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtClassDef> {
+fn ast_class_def_for_line<'a>(
+    normalized: &str,
+    suite: &'a [Stmt],
+    line: usize,
+) -> Option<&'a ruff_python_ast::StmtClassDef> {
     suite.iter().find_map(|stmt| match stmt {
         Stmt::ClassDef(class_def)
             if offset_to_line_column(normalized, class_def.range.start().to_usize()).0 == line =>
@@ -2491,10 +2576,15 @@ fn ast_class_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) 
     })
 }
 
-fn ast_function_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usize) -> Option<&'a ruff_python_ast::StmtFunctionDef> {
+fn ast_function_def_for_line<'a>(
+    normalized: &str,
+    suite: &'a [Stmt],
+    line: usize,
+) -> Option<&'a ruff_python_ast::StmtFunctionDef> {
     suite.iter().find_map(|stmt| match stmt {
         Stmt::FunctionDef(function_def)
-            if offset_to_line_column(normalized, function_def.range.start().to_usize()).0 == line =>
+            if offset_to_line_column(normalized, function_def.range.start().to_usize()).0
+                == line =>
         {
             Some(function_def)
         }
@@ -2503,10 +2593,8 @@ fn ast_function_def_for_line<'a>(normalized: &str, suite: &'a [Stmt], line: usiz
 }
 
 fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> String {
-    let statement_lines: std::collections::BTreeMap<usize, &SyntaxStatement> = statements
-        .iter()
-        .map(|statement| (statement_line(statement), statement))
-        .collect();
+    let statement_lines: std::collections::BTreeMap<usize, &SyntaxStatement> =
+        statements.iter().map(|statement| (statement_line(statement), statement)).collect();
 
     let mut normalized_lines = Vec::new();
     for (index, line) in source.lines().enumerate() {
@@ -2578,7 +2666,20 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
             format!("{indentation}{rest}")
         }
         SyntaxStatement::FunctionDef(_) => line.to_owned(),
-        SyntaxStatement::Import(_) | SyntaxStatement::Value(_) | SyntaxStatement::Call(_) | SyntaxStatement::MethodCall(_) | SyntaxStatement::MemberAccess(_) | SyntaxStatement::Return(_) | SyntaxStatement::Yield(_) | SyntaxStatement::If(_) | SyntaxStatement::Assert(_) | SyntaxStatement::Invalidate(_) | SyntaxStatement::Match(_) | SyntaxStatement::For(_) | SyntaxStatement::With(_) | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
+        SyntaxStatement::Import(_)
+        | SyntaxStatement::Value(_)
+        | SyntaxStatement::Call(_)
+        | SyntaxStatement::MethodCall(_)
+        | SyntaxStatement::MemberAccess(_)
+        | SyntaxStatement::Return(_)
+        | SyntaxStatement::Yield(_)
+        | SyntaxStatement::If(_)
+        | SyntaxStatement::Assert(_)
+        | SyntaxStatement::Invalidate(_)
+        | SyntaxStatement::Match(_)
+        | SyntaxStatement::For(_)
+        | SyntaxStatement::With(_)
+        | SyntaxStatement::ExceptHandler(_) => line.to_owned(),
         SyntaxStatement::Unsafe(_) => {
             let indentation = leading_indent(line);
             format!("{indentation}if True:")
@@ -2621,7 +2722,8 @@ fn extract_ast_backed_statements(
     existing: &[SyntaxStatement],
     diagnostics: &mut DiagnosticReport,
 ) -> Vec<SyntaxStatement> {
-    let existing_lines: std::collections::BTreeSet<_> = existing.iter().map(statement_line).collect();
+    let existing_lines: std::collections::BTreeSet<_> =
+        existing.iter().map(statement_line).collect();
     let mut statements = Vec::new();
 
     for stmt in suite {
@@ -2629,9 +2731,15 @@ fn extract_ast_backed_statements(
         if existing_lines.contains(&line) {
             continue;
         }
-        if let Some(statement) =
-            extract_ast_backed_statement(path, current_module_key, source, normalized, stmt, line, diagnostics)
-        {
+        if let Some(statement) = extract_ast_backed_statement(
+            path,
+            current_module_key,
+            source,
+            normalized,
+            stmt,
+            line,
+            diagnostics,
+        ) {
             statements.push(statement);
         }
         if let Some(call_statement) = extract_supplemental_call_statement(stmt, line) {
@@ -2701,11 +2809,7 @@ fn extract_ast_backed_statement(
                     source,
                     stmt.type_params.as_deref(),
                     line,
-                    if is_overload {
-                        "overload declaration"
-                    } else {
-                        "function declaration"
-                    },
+                    if is_overload { "overload declaration" } else { "function declaration" },
                     diagnostics,
                 )?,
                 params: extract_function_params(source, &stmt.parameters),
@@ -2748,7 +2852,8 @@ fn extract_ast_backed_statement(
                     source_path: alias.name.as_str().to_owned(),
                 })
                 .collect::<Vec<_>>();
-            (!bindings.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
+            (!bindings.is_empty())
+                .then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
         }
         Stmt::ImportFrom(stmt) => {
             let bindings = stmt
@@ -2757,9 +2862,15 @@ fn extract_ast_backed_statement(
                 .map(|alias| {
                     let imported_name = alias.name.as_str();
                     let module = stmt.module.as_ref().map(|id| id.as_str()).unwrap_or("");
-                    let module = normalize_import_module(path, current_module_key, stmt.level, module);
+                    let module =
+                        normalize_import_module(path, current_module_key, stmt.level, module);
                     ImportBinding {
-                        local_name: alias.asname.as_ref().unwrap_or(&alias.name).as_str().to_owned(),
+                        local_name: alias
+                            .asname
+                            .as_ref()
+                            .unwrap_or(&alias.name)
+                            .as_str()
+                            .to_owned(),
                         source_path: if module.is_empty() {
                             imported_name.to_owned()
                         } else {
@@ -2768,14 +2879,11 @@ fn extract_ast_backed_statement(
                     }
                 })
                 .collect::<Vec<_>>();
-            (!bindings.is_empty()).then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
+            (!bindings.is_empty())
+                .then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
         }
         Stmt::Assign(stmt) => {
-            let names = stmt
-                .targets
-                .iter()
-                .flat_map(extract_assignment_names)
-                .collect::<Vec<_>>();
+            let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
             if !names.is_empty() {
                 let value = extract_direct_expr_metadata(&stmt.value);
                 Some(SyntaxStatement::Value(ValueStatement {
@@ -2804,11 +2912,8 @@ fn extract_ast_backed_statement(
         Stmt::AnnAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
             if !names.is_empty() {
-                let value = stmt
-                    .value
-                    .as_deref()
-                    .map(extract_direct_expr_metadata)
-                    .unwrap_or(DirectExprMetadata {
+                let value = stmt.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
+                    DirectExprMetadata {
                         value_type: None,
                         is_awaited: false,
                         value_callee: None,
@@ -2819,7 +2924,8 @@ fn extract_ast_backed_statement(
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-                    });
+                    },
+                );
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
@@ -2903,7 +3009,8 @@ fn extract_ast_backed_statement(
 fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> {
     match expr {
         Expr::UnaryOp(expr) if expr.op == ruff_python_ast::UnaryOp::Not => {
-            extract_guard_condition(source, &expr.operand).map(|guard| GuardCondition::Not(Box::new(guard)))
+            extract_guard_condition(source, &expr.operand)
+                .map(|guard| GuardCondition::Not(Box::new(guard)))
         }
         Expr::BoolOp(expr) => {
             let conditions = expr
@@ -2916,23 +3023,25 @@ fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> 
                 ruff_python_ast::BoolOp::Or => Some(GuardCondition::Or(conditions)),
             }
         }
-        Expr::Name(name) => Some(GuardCondition::TruthyName {
-            name: name.id.as_str().to_owned(),
-        }),
+        Expr::Name(name) => Some(GuardCondition::TruthyName { name: name.id.as_str().to_owned() }),
         Expr::Compare(compare) if compare.ops.len() == 1 && compare.comparators.len() == 1 => {
             let Expr::Name(name) = compare.left.as_ref() else {
                 return None;
             };
             let right = compare.comparators.first()?;
             match (compare.ops.first()?, right) {
-                (ruff_python_ast::CmpOp::Is, Expr::NoneLiteral(_)) => Some(GuardCondition::IsNone {
-                    name: name.id.as_str().to_owned(),
-                    negated: false,
-                }),
-                (ruff_python_ast::CmpOp::IsNot, Expr::NoneLiteral(_)) => Some(GuardCondition::IsNone {
-                    name: name.id.as_str().to_owned(),
-                    negated: true,
-                }),
+                (ruff_python_ast::CmpOp::Is, Expr::NoneLiteral(_)) => {
+                    Some(GuardCondition::IsNone {
+                        name: name.id.as_str().to_owned(),
+                        negated: false,
+                    })
+                }
+                (ruff_python_ast::CmpOp::IsNot, Expr::NoneLiteral(_)) => {
+                    Some(GuardCondition::IsNone {
+                        name: name.id.as_str().to_owned(),
+                        negated: true,
+                    })
+                }
                 _ => None,
             }
         }
@@ -2997,9 +3106,7 @@ fn if_false_start_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<u
 }
 
 fn if_false_end_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
-    stmt.elif_else_clauses
-        .last()
-        .and_then(|clause| suite_end_line_optional(source, &clause.body))
+    stmt.elif_else_clauses.last().and_then(|clause| suite_end_line_optional(source, &clause.body))
 }
 
 fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl FnMut(&[Stmt])) {
@@ -3096,10 +3203,9 @@ fn infer_literal_arg_type(expr: &Expr) -> String {
 fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
     match stmt {
         Stmt::Assign(assign) => extract_call_statement(&assign.value, line),
-        Stmt::AnnAssign(assign) => assign
-            .value
-            .as_deref()
-            .and_then(|value| extract_call_statement(value, line)),
+        Stmt::AnnAssign(assign) => {
+            assign.value.as_deref().and_then(|value| extract_call_statement(value, line))
+        }
         _ => None,
     }
 }
@@ -3108,10 +3214,9 @@ fn extract_member_access_statement(stmt: &Stmt, line: usize) -> Option<SyntaxSta
     match stmt {
         Stmt::Expr(expr) => extract_member_access_from_expr(&expr.value, line),
         Stmt::Assign(assign) => extract_member_access_from_expr(&assign.value, line),
-        Stmt::AnnAssign(assign) => assign
-            .value
-            .as_deref()
-            .and_then(|value| extract_member_access_from_expr(value, line)),
+        Stmt::AnnAssign(assign) => {
+            assign.value.as_deref().and_then(|value| extract_member_access_from_expr(value, line))
+        }
         _ => None,
     }
 }
@@ -3143,7 +3248,11 @@ fn extract_member_access_from_expr(expr: &Expr, line: usize) -> Option<SyntaxSta
     }
 }
 
-fn collect_nested_call_statements(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
+fn collect_nested_call_statements(
+    source: &str,
+    suite: &[Stmt],
+    statements: &mut Vec<SyntaxStatement>,
+) {
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
@@ -3183,29 +3292,83 @@ fn collect_return_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_return_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_return_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_return_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_return_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Try(try_stmt) => {
-                collect_return_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_return_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_return_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_return_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_return_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_return_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_return_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_return_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::If(if_stmt) => {
-                collect_return_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                collect_return_statements(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for_each_if_false_suite(if_stmt, |suite| {
-                    collect_return_statements(source, suite, owner_name, owner_type_name, statements);
+                    collect_return_statements(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 });
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_return_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_return_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {
@@ -3213,7 +3376,9 @@ fn collect_return_statements(
                     continue;
                 };
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if let Some(return_statement) = extract_return_statement(stmt, line, owner_name, owner_type_name) {
+                if let Some(return_statement) =
+                    extract_return_statement(stmt, line, owner_name, owner_type_name)
+                {
                     statements.push(return_statement);
                 }
             }
@@ -3231,17 +3396,26 @@ fn collect_yield_statements(
         match stmt {
             Stmt::FunctionDef(function) => {
                 for body_stmt in &function.body {
-                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
-                    if let Some(yield_statement) =
-                        extract_yield_statement(body_stmt, line, function.name.as_str(), owner_type_name)
-                    {
+                    let line =
+                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    if let Some(yield_statement) = extract_yield_statement(
+                        body_stmt,
+                        line,
+                        function.name.as_str(),
+                        owner_type_name,
+                    ) {
                         statements.push(yield_statement);
                     }
                 }
                 collect_yield_statements(source, &function.body, owner_type_name, statements);
             }
             Stmt::ClassDef(class_def) => {
-                collect_yield_statements(source, &class_def.body, Some(class_def.name.as_str()), statements);
+                collect_yield_statements(
+                    source,
+                    &class_def.body,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::If(if_stmt) => {
                 collect_yield_statements(source, &if_stmt.body, owner_type_name, statements);
@@ -3269,19 +3443,55 @@ fn collect_if_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_if_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_if_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_if_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_if_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Try(try_stmt) => {
-                collect_if_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_if_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_if_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_if_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_if_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_if_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_if_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_if_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::If(if_stmt) => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
@@ -3297,14 +3507,26 @@ fn collect_if_statements(
                         false_end_line: if_false_end_line(source, if_stmt),
                     }));
                 }
-                collect_if_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                collect_if_statements(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for_each_if_false_suite(if_stmt, |suite| {
                     collect_if_statements(source, suite, owner_name, owner_type_name, statements);
                 });
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_if_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_if_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {}
@@ -3322,29 +3544,83 @@ fn collect_assert_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_assert_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_assert_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_assert_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_assert_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Try(try_stmt) => {
-                collect_assert_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_assert_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_assert_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_assert_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_assert_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_assert_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_assert_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_assert_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::If(if_stmt) => {
-                collect_assert_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                collect_assert_statements(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for_each_if_false_suite(if_stmt, |suite| {
-                    collect_assert_statements(source, suite, owner_name, owner_type_name, statements);
+                    collect_assert_statements(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 });
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_assert_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_assert_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             Stmt::Assert(assert_stmt) => {
@@ -3373,29 +3649,83 @@ fn collect_invalidation_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_invalidation_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_invalidation_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_invalidation_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_invalidation_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Try(try_stmt) => {
-                collect_invalidation_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_invalidation_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_invalidation_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_invalidation_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_invalidation_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_invalidation_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_invalidation_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_invalidation_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::If(if_stmt) => {
-                collect_invalidation_statements(source, &if_stmt.body, owner_name, owner_type_name, statements);
+                collect_invalidation_statements(
+                    source,
+                    &if_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for_each_if_false_suite(if_stmt, |suite| {
-                    collect_invalidation_statements(source, suite, owner_name, owner_type_name, statements);
+                    collect_invalidation_statements(
+                        source,
+                        suite,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 });
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_invalidation_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_invalidation_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             Stmt::AugAssign(stmt) => {
@@ -3411,7 +3741,8 @@ fn collect_invalidation_statements(
                 }
             }
             Stmt::Delete(stmt) => {
-                let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+                let names =
+                    stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
@@ -3423,7 +3754,8 @@ fn collect_invalidation_statements(
                 }
             }
             Stmt::Global(stmt) => {
-                let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+                let names =
+                    stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
@@ -3435,7 +3767,8 @@ fn collect_invalidation_statements(
                 }
             }
             Stmt::Nonlocal(stmt) => {
-                let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
+                let names =
+                    stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
@@ -3461,23 +3794,61 @@ fn collect_match_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_match_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_match_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_match_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_match_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Try(try_stmt) => {
-                collect_match_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
+                collect_match_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_match_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_match_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_match_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_match_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_match_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_match_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if let Some(match_statement) = extract_match_statement(source, stmt, line, owner_name, owner_type_name) {
+                if let Some(match_statement) =
+                    extract_match_statement(source, stmt, line, owner_name, owner_type_name)
+                {
                     statements.push(match_statement);
                 }
             }
@@ -3495,19 +3866,39 @@ fn collect_for_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_for_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_for_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_for_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_for_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_for_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_for_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if let Some(for_statement) = extract_for_statement(stmt, line, owner_name, owner_type_name) {
+                if let Some(for_statement) =
+                    extract_for_statement(stmt, line, owner_name, owner_type_name)
+                {
                     statements.push(for_statement);
                 }
             }
@@ -3525,14 +3916,32 @@ fn collect_with_statements(
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_with_statements(source, &function.body, Some(function.name.as_str()), owner_type_name, statements);
+                collect_with_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_with_statements(source, &class_def.body, owner_name, Some(class_def.name.as_str()), statements);
+                collect_with_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_with_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_with_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {
@@ -3573,21 +3982,55 @@ fn collect_except_handler_statements(
             Stmt::Try(try_stmt) => {
                 for handler in &try_stmt.handlers {
                     let line = offset_to_line_column(source, handler.range().start().to_usize()).0;
-                    if let Some(statement) =
-                        extract_except_handler_statement(source, handler, line, owner_name, owner_type_name)
-                    {
+                    if let Some(statement) = extract_except_handler_statement(
+                        source,
+                        handler,
+                        line,
+                        owner_name,
+                        owner_type_name,
+                    ) {
                         statements.push(statement);
                     }
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_except_handler_statements(source, &handler.body, owner_name, owner_type_name, statements);
+                    collect_except_handler_statements(
+                        source,
+                        &handler.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
-                collect_except_handler_statements(source, &try_stmt.body, owner_name, owner_type_name, statements);
-                collect_except_handler_statements(source, &try_stmt.orelse, owner_name, owner_type_name, statements);
-                collect_except_handler_statements(source, &try_stmt.finalbody, owner_name, owner_type_name, statements);
+                collect_except_handler_statements(
+                    source,
+                    &try_stmt.body,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_except_handler_statements(
+                    source,
+                    &try_stmt.orelse,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
+                collect_except_handler_statements(
+                    source,
+                    &try_stmt.finalbody,
+                    owner_name,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_except_handler_statements(source, &case.body, owner_name, owner_type_name, statements);
+                    collect_except_handler_statements(
+                        source,
+                        &case.body,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {}
@@ -3605,7 +4048,8 @@ fn collect_function_body_assignments(
         match stmt {
             Stmt::FunctionDef(function) => {
                 for body_stmt in &function.body {
-                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    let line =
+                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
                     if let Some(assignment) = extract_function_body_assignment_statement(
                         source,
                         body_stmt,
@@ -3616,14 +4060,29 @@ fn collect_function_body_assignments(
                         statements.push(assignment);
                     }
                 }
-                collect_function_body_assignments(source, &function.body, owner_type_name, statements);
+                collect_function_body_assignments(
+                    source,
+                    &function.body,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_function_body_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
+                collect_function_body_assignments(
+                    source,
+                    &class_def.body,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_function_body_assignments(source, &case.body, owner_type_name, statements);
+                    collect_function_body_assignments(
+                        source,
+                        &case.body,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {}
@@ -3641,7 +4100,8 @@ fn collect_function_body_bare_assignments(
         match stmt {
             Stmt::FunctionDef(function) => {
                 for body_stmt in &function.body {
-                    let line = offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
+                    let line =
+                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
                     if let Some(assignment) = extract_function_body_bare_assignment_statement(
                         body_stmt,
                         line,
@@ -3651,14 +4111,29 @@ fn collect_function_body_bare_assignments(
                         statements.push(assignment);
                     }
                 }
-                collect_function_body_bare_assignments(source, &function.body, owner_type_name, statements);
+                collect_function_body_bare_assignments(
+                    source,
+                    &function.body,
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_function_body_bare_assignments(source, &class_def.body, Some(class_def.name.as_str()), statements);
+                collect_function_body_bare_assignments(
+                    source,
+                    &class_def.body,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_function_body_bare_assignments(source, &case.body, owner_type_name, statements);
+                    collect_function_body_bare_assignments(
+                        source,
+                        &case.body,
+                        owner_type_name,
+                        statements,
+                    );
                 }
             }
             _ => {}
@@ -3680,11 +4155,8 @@ fn extract_function_body_assignment_statement(
     if names.is_empty() {
         return None;
     }
-    let value = assign
-        .value
-        .as_deref()
-        .map(extract_direct_expr_metadata)
-        .unwrap_or(DirectExprMetadata {
+    let value =
+        assign.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(DirectExprMetadata {
             value_type: None,
             is_awaited: false,
             value_callee: None,
@@ -3692,10 +4164,10 @@ fn extract_function_body_assignment_statement(
             value_member_owner_name: None,
             value_member_name: None,
             value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-});
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+        });
     Some(SyntaxStatement::Value(ValueStatement {
         names,
         annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
@@ -3744,7 +4216,7 @@ fn extract_function_body_bare_assignment_statement(
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
-owner_name: Some(owner_name.to_owned()),
+        owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
         is_class_var: false,
@@ -3764,11 +4236,8 @@ fn extract_yield_statement(
 
     let (value, is_yield_from) = match expr_stmt.value.as_ref() {
         Expr::Yield(yield_expr) => (
-            yield_expr
-                .value
-                .as_deref()
-                .map(extract_direct_expr_metadata)
-                .unwrap_or(DirectExprMetadata {
+            yield_expr.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
+                DirectExprMetadata {
                     value_type: None,
                     is_awaited: false,
                     value_callee: None,
@@ -3779,7 +4248,8 @@ fn extract_yield_statement(
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-                }),
+                },
+            ),
             false,
         ),
         Expr::YieldFrom(yield_expr) => (extract_direct_expr_metadata(&yield_expr.value), true),
@@ -3983,12 +4453,10 @@ fn extract_except_handler_statement(
 fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-        if let Some(call) = extract_supplemental_call_statement(stmt, line)
-            .or_else(|| match stmt {
-                Stmt::Expr(expr) => extract_call_statement(&expr.value, line),
-                _ => None,
-            })
-        {
+        if let Some(call) = extract_supplemental_call_statement(stmt, line).or_else(|| match stmt {
+            Stmt::Expr(expr) => extract_call_statement(&expr.value, line),
+            _ => None,
+        }) {
             statements.push(call);
         }
     }
@@ -4004,11 +4472,8 @@ fn extract_return_statement(
         return None;
     };
 
-    let value = return_stmt
-        .value
-        .as_deref()
-        .map(extract_direct_expr_metadata)
-        .unwrap_or(DirectExprMetadata {
+    let value = return_stmt.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
+        DirectExprMetadata {
             value_type: None,
             is_awaited: false,
             value_callee: None,
@@ -4019,7 +4484,8 @@ fn extract_return_statement(
             value_method_owner_name: None,
             value_method_name: None,
             value_method_through_instance: false,
-        });
+        },
+    );
 
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
@@ -4087,20 +4553,14 @@ fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
     };
 
     match attribute.value.as_ref() {
-        Expr::Name(name) => Some((
-            name.id.as_str().to_owned(),
-            attribute.attr.as_str().to_owned(),
-            false,
-        )),
+        Expr::Name(name) => {
+            Some((name.id.as_str().to_owned(), attribute.attr.as_str().to_owned(), false))
+        }
         Expr::Call(inner_call) => {
             let Expr::Name(name) = inner_call.func.as_ref() else {
                 return None;
             };
-            Some((
-                name.id.as_str().to_owned(),
-                attribute.attr.as_str().to_owned(),
-                true,
-            ))
+            Some((name.id.as_str().to_owned(), attribute.attr.as_str().to_owned(), true))
         }
         _ => None,
     }
@@ -4129,20 +4589,14 @@ fn extract_direct_member_access(expr: &Expr) -> Option<(String, String, bool)> {
     };
 
     match attribute.value.as_ref() {
-        Expr::Name(name) => Some((
-            name.id.as_str().to_owned(),
-            attribute.attr.as_str().to_owned(),
-            false,
-        )),
+        Expr::Name(name) => {
+            Some((name.id.as_str().to_owned(), attribute.attr.as_str().to_owned(), false))
+        }
         Expr::Call(call) => {
             let Expr::Name(name) = call.func.as_ref() else {
                 return None;
             };
-            Some((
-                name.id.as_str().to_owned(),
-                attribute.attr.as_str().to_owned(),
-                true,
-            ))
+            Some((name.id.as_str().to_owned(), attribute.attr.as_str().to_owned(), true))
         }
         _ => None,
     }
@@ -4167,7 +4621,13 @@ fn extract_ast_type_params(
                             "TPY4010",
                             format!("{label} uses deferred-beyond-v1 type parameter defaults"),
                         )
-                        .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                        .with_span(Span::new(
+                            path.display().to_string(),
+                            line,
+                            1,
+                            line,
+                            1,
+                        )),
                     );
                     return None;
                 }
@@ -4186,7 +4646,13 @@ fn extract_ast_type_params(
                         "TPY4010",
                         format!("{label} uses deferred-beyond-v1 type parameter syntax"),
                     )
-                    .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
+                    .with_span(Span::new(
+                        path.display().to_string(),
+                        line,
+                        1,
+                        line,
+                        1,
+                    )),
                 );
                 return None;
             }
@@ -4368,7 +4834,12 @@ fn is_classvar_annotation(expr: &Expr) -> bool {
     }
 }
 
-fn normalize_import_module(path: &Path, current_module_key: &str, level: u32, module: &str) -> String {
+fn normalize_import_module(
+    path: &Path,
+    current_module_key: &str,
+    level: u32,
+    module: &str,
+) -> String {
     if level == 0 {
         return module.to_owned();
     }
@@ -4489,14 +4960,9 @@ fn parse_typealias(
         ));
         return None;
     };
-    let Some(parsed_type_params) = parse_type_params(
-        path,
-        line_number,
-        line,
-        suffix,
-        diagnostics,
-        "typealias declaration",
-    ) else {
+    let Some(parsed_type_params) =
+        parse_type_params(path, line_number, line, suffix, diagnostics, "typealias declaration")
+    else {
         return None;
     };
 
@@ -4612,14 +5078,9 @@ fn parse_function(
         ));
         return None;
     };
-    let Some(parsed_type_params) = parse_type_params(
-        path,
-        line_number,
-        line,
-        suffix,
-        diagnostics,
-        label,
-    ) else {
+    let Some(parsed_type_params) =
+        parse_type_params(path, line_number, line, suffix, diagnostics, label)
+    else {
         return None;
     };
 
@@ -4682,10 +5143,7 @@ fn parse_type_params<'source>(
 ) -> Option<ParsedTypeParams<'source>> {
     let suffix = suffix.trim_start();
     if suffix.is_empty() || !suffix.starts_with('[') {
-        return Some(ParsedTypeParams {
-            type_params: Vec::new(),
-            remainder: suffix,
-        });
+        return Some(ParsedTypeParams { type_params: Vec::new(), remainder: suffix });
     }
 
     let Some((content, remainder)) = split_bracketed(suffix) else {
@@ -4724,10 +5182,7 @@ fn parse_type_params<'source>(
             diagnostics.push(
                 Diagnostic::error(
                     "TPY4004",
-                    format!(
-                        "{label} declares type parameter `{}` more than once",
-                        type_param.name
-                    ),
+                    format!("{label} declares type parameter `{}` more than once", type_param.name),
                 )
                 .with_span(Span::new(
                     path.display().to_string(),
@@ -4741,10 +5196,7 @@ fn parse_type_params<'source>(
         }
     }
 
-    Some(ParsedTypeParams {
-        type_params,
-        remainder,
-    })
+    Some(ParsedTypeParams { type_params, remainder })
 }
 
 fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
@@ -4857,10 +5309,7 @@ fn parse_type_param(
         None => None,
     };
 
-    Ok(TypeParam {
-        name: name_part.to_owned(),
-        bound,
-    })
+    Ok(TypeParam { name: name_part.to_owned(), bound })
 }
 
 fn split_bracketed(input: &str) -> Option<(&str, &str)> {
@@ -4962,13 +5411,13 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CallStatement, ClassMember, ClassMemberKind, FunctionStatement, ImportBinding,
-        AssertStatement, ExceptionHandlerStatement, ForStatement, GuardCondition, IfStatement,
-        InvalidationStatement,
-        ImportStatement, MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
-        MethodCallStatement, MethodKind, ReturnStatement, WithStatement,
-        YieldStatement, NamedBlockStatement, FunctionParam, SourceFile, SourceKind, SyntaxStatement,
-        TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, parse,
+        AssertStatement, CallStatement, ClassMember, ClassMemberKind, ExceptionHandlerStatement,
+        ForStatement, FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
+        ImportStatement, InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
+        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement,
+        ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
+        TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
+        YieldStatement, parse,
     };
     use std::path::PathBuf;
 
@@ -5000,10 +5449,7 @@ mod tests {
             vec![
                 SyntaxStatement::TypeAlias(TypeAliasStatement {
                     name: String::from("Pair"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
@@ -5013,8 +5459,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
@@ -5025,8 +5471,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
@@ -5037,8 +5483,8 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
@@ -5046,10 +5492,7 @@ mod tests {
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
-                    params: vec![FunctionParam {
-                        name: String::from("value"),
-                        annotation: None,
-                    }],
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5097,15 +5540,12 @@ mod tests {
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 2,
@@ -5119,23 +5559,20 @@ mod tests {
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 6,
@@ -5146,10 +5583,7 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
-                    params: vec![FunctionParam {
-                        name: String::from("value"),
-                        annotation: None,
-                    }],
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5319,20 +5753,18 @@ mod tests {
         assert!(tree.diagnostics.is_empty());
         assert_eq!(
             tree.statements,
-            vec![SyntaxStatement::FunctionDef(FunctionStatement {
-                name: String::from("unsafe"),
-                type_params: Vec::new(),
-                params: vec![FunctionParam {
-                    name: String::from("value"),
-                    annotation: None,
-                }],
-                returns: None,
-                is_async: false,
-                is_override: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                line: 1,
-            }),
+            vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("unsafe"),
+                    type_params: Vec::new(),
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
+                    returns: None,
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    line: 1,
+                }),
                 SyntaxStatement::Return(ReturnStatement {
                     owner_name: String::from("unsafe"),
                     owner_type_name: None,
@@ -5346,8 +5778,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
-                })]
+                    line: 2,
+                })
+            ]
         );
     }
 
@@ -5384,7 +5817,9 @@ line: 2,
             path: PathBuf::from("module.pyi"),
             kind: SourceKind::Stub,
             logical_module: String::new(),
-            text: String::from("from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n"),
+            text: String::from(
+                "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n",
+            ),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -5467,7 +5902,9 @@ line: 2,
             path: PathBuf::from("generic.tpy"),
             kind: SourceKind::TypePython,
             logical_module: String::new(),
-            text: String::from("class Box[T]:\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n"),
+            text: String::from(
+                "class Box[T]:\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
+            ),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -5476,25 +5913,19 @@ line: 2,
             vec![
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("first"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("T")),
@@ -5519,7 +5950,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 5,
+                    line: 5,
                 }),
             ]
         );
@@ -5580,7 +6011,7 @@ line: 5,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5599,7 +6030,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5637,7 +6068,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5663,7 +6094,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5682,7 +6113,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5740,7 +6171,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5766,7 +6197,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5822,7 +6253,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5841,7 +6272,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: Some(String::from("build")),
+                    owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -5906,7 +6337,7 @@ owner_name: Some(String::from("build")),
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: false,
@@ -6039,7 +6470,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
             ]
         );
@@ -6084,7 +6515,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("missing"),
@@ -6110,7 +6541,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 5,
+                    line: 5,
                 }),
             ]
         );
@@ -6153,7 +6584,7 @@ line: 5,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
             ]
         );
@@ -6199,7 +6630,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
             ]
         );
@@ -6306,8 +6737,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 2,
@@ -6324,8 +6755,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 3,
@@ -6345,8 +6776,8 @@ line: 2,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -6385,8 +6816,8 @@ line: 2,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -6396,10 +6827,7 @@ line: 2,
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam {
-                                    name: String::from("self"),
-                                    annotation: None,
-                                },
+                                FunctionParam { name: String::from("self"), annotation: None },
                                 FunctionParam {
                                     name: String::from("x"),
                                     annotation: Some(String::from("str")),
@@ -6410,8 +6838,8 @@ line: 2,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -6423,22 +6851,16 @@ line: 2,
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam {
-                                    name: String::from("self"),
-                                    annotation: None,
-                                },
-                                FunctionParam {
-                                    name: String::from("x"),
-                                    annotation: None,
-                                },
+                                FunctionParam { name: String::from("self"), annotation: None },
+                                FunctionParam { name: String::from("x"), annotation: None },
                             ],
                             returns: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 7,
@@ -6459,7 +6881,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 8,
+                    line: 8,
                 }),
             ]
         );
@@ -6500,7 +6922,7 @@ line: 8,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: true,
                     is_class_var: false,
@@ -6512,8 +6934,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("limit"),
@@ -6527,8 +6949,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: true,
                         is_class_var: false,
                         line: 4,
@@ -6567,8 +6989,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: true,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -6585,8 +7007,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: true,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 5,
@@ -6632,7 +7054,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-owner_name: None,
+                    owner_name: None,
                     owner_type_name: None,
                     is_final: false,
                     is_class_var: true,
@@ -6644,8 +7066,8 @@ owner_name: None,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("cache"),
@@ -6659,8 +7081,8 @@ owner_name: None,
                         is_override: false,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: true,
                         line: 4,
@@ -6694,7 +7116,9 @@ owner_name: None,
             path: PathBuf::from("bad-classvar-param.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from("from typing import ClassVar\n\ndef build(value: ClassVar[int]) -> None:\n    pass\n"),
+            text: String::from(
+                "from typing import ClassVar\n\ndef build(value: ClassVar[int]) -> None:\n    pass\n",
+            ),
         });
 
         let rendered = tree.diagnostics.as_text();
@@ -6709,7 +7133,9 @@ owner_name: None,
             path: PathBuf::from("bad-final-param.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from("from typing import Final\n\ndef build(value: Final[int]) -> None:\n    pass\n"),
+            text: String::from(
+                "from typing import Final\n\ndef build(value: Final[int]) -> None:\n    pass\n",
+            ),
         });
 
         let rendered = tree.diagnostics.as_text();
@@ -6778,7 +7204,7 @@ owner_name: None,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
             ]
         );
@@ -6823,7 +7249,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 2,
+                    line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("build"),
@@ -6849,7 +7275,7 @@ line: 2,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 5,
+                    line: 5,
                 }),
             ]
         );
@@ -6893,7 +7319,7 @@ line: 5,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-is_yield_from: false,
+                    is_yield_from: false,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -6919,7 +7345,7 @@ is_yield_from: false,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-is_yield_from: true,
+                    is_yield_from: true,
                     line: 5,
                 }),
             ]
@@ -6999,9 +7425,7 @@ is_yield_from: true,
             path: PathBuf::from("methods.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from(
-                "def build() -> str:\n    return make_box().get()\n",
-            ),
+            text: String::from("def build() -> str:\n    return make_box().get()\n"),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -7109,7 +7533,9 @@ is_yield_from: true,
             path: PathBuf::from("for_loop.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from("def build(pairs: tuple[tuple[int, str]]) -> str:\n    for a, b in pairs:\n        pass\n    return b\n"),
+            text: String::from(
+                "def build(pairs: tuple[tuple[int, str]]) -> str:\n    for a, b in pairs:\n        pass\n    return b\n",
+            ),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -7236,7 +7662,9 @@ is_yield_from: true,
             path: PathBuf::from("with_stmt.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from("def build(manager: Manager) -> None:\n    with manager:\n        pass\n"),
+            text: String::from(
+                "def build(manager: Manager) -> None:\n    with manager:\n        pass\n",
+            ),
         });
 
         assert!(tree.diagnostics.is_empty());
@@ -7480,7 +7908,7 @@ is_yield_from: true,
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-line: 7,
+                    line: 7,
                 }),
             ]
         );
@@ -7525,8 +7953,8 @@ line: 7,
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -7543,8 +7971,8 @@ line: 7,
                         is_override: true,
                         is_abstract_method: false,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 8,
@@ -7583,8 +8011,8 @@ line: 7,
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: true,
                     members: vec![ClassMember {
                         name: String::from("run"),
@@ -7601,8 +8029,8 @@ line: 7,
                         is_override: false,
                         is_abstract_method: true,
                         is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
+                        is_deprecated: false,
+                        deprecation_message: None,
                         is_final: false,
                         is_class_var: false,
                         line: 4,
@@ -7627,94 +8055,96 @@ line: 7,
         assert!(tree.diagnostics.is_empty());
         assert_eq!(
             tree.statements,
-            vec![SyntaxStatement::ClassDef(NamedBlockStatement {
-                name: String::from("Box"),
-                type_params: Vec::new(),
-                header_suffix: String::new(),
-                bases: Vec::new(),
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_abstract_class: false,
-                members: vec![
-                    ClassMember {
-                        name: String::from("make"),
-                        kind: ClassMemberKind::Method,
-                        method_kind: Some(MethodKind::Class),
-                        annotation: None,
-                        value_type: None,
-                        params: vec![FunctionParam {
-                            name: String::from("cls"),
+            vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: vec![
+                        ClassMember {
+                            name: String::from("make"),
+                            kind: ClassMemberKind::Method,
+                            method_kind: Some(MethodKind::Class),
                             annotation: None,
-                        }],
-                        returns: Some(String::from("None")),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        line: 2,
-                    },
-                    ClassMember {
-                        name: String::from("build"),
-                        kind: ClassMemberKind::Method,
-                        method_kind: Some(MethodKind::Static),
-                        annotation: None,
-                        value_type: None,
-                        params: Vec::new(),
-                        returns: Some(String::from("None")),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        line: 6,
-                    },
-                    ClassMember {
-                        name: String::from("name"),
-                        kind: ClassMemberKind::Method,
-                        method_kind: Some(MethodKind::Property),
-                        annotation: None,
-                        value_type: None,
-                        params: vec![FunctionParam {
-                            name: String::from("self"),
+                            value_type: None,
+                            params: vec![FunctionParam {
+                                name: String::from("cls"),
+                                annotation: None,
+                            }],
+                            returns: Some(String::from("None")),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 2,
+                        },
+                        ClassMember {
+                            name: String::from("build"),
+                            kind: ClassMemberKind::Method,
+                            method_kind: Some(MethodKind::Static),
                             annotation: None,
-                        }],
-                        returns: Some(String::from("str")),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        line: 10,
-                    },
-                ],
-                line: 1,
-            }),
-            SyntaxStatement::Return(ReturnStatement {
-                owner_name: String::from("name"),
-                owner_type_name: Some(String::from("Box")),
-                value_type: Some(String::from("str")),
-                is_awaited: false,
-                value_callee: None,
-                value_name: None,
-                value_member_owner_name: None,
-                value_member_name: None,
-                value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-line: 12,
-            })]
+                            value_type: None,
+                            params: Vec::new(),
+                            returns: Some(String::from("None")),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 6,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Method,
+                            method_kind: Some(MethodKind::Property),
+                            annotation: None,
+                            value_type: None,
+                            params: vec![FunctionParam {
+                                name: String::from("self"),
+                                annotation: None,
+                            }],
+                            returns: Some(String::from("str")),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 10,
+                        },
+                    ],
+                    line: 1,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("name"),
+                    owner_type_name: Some(String::from("Box")),
+                    value_type: Some(String::from("str")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    line: 12,
+                })
+            ]
         );
     }
 
@@ -7782,28 +8212,28 @@ line: 12,
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert_eq!(tree.statements[1], SyntaxStatement::If(IfStatement {
-            owner_name: Some(String::from("build")),
-            owner_type_name: None,
-            guard: Some(GuardCondition::IsNone {
-                name: String::from("value"),
-                negated: true,
-            }),
-            line: 2,
-            true_start_line: 3,
-            true_end_line: 3,
-            false_start_line: None,
-            false_end_line: None,
-        }));
-        assert_eq!(tree.statements[3], SyntaxStatement::Assert(AssertStatement {
-            owner_name: Some(String::from("build")),
-            owner_type_name: None,
-            guard: Some(GuardCondition::IsNone {
-                name: String::from("value"),
-                negated: false,
-            }),
-            line: 4,
-        }));
+        assert_eq!(
+            tree.statements[1],
+            SyntaxStatement::If(IfStatement {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                guard: Some(GuardCondition::IsNone { name: String::from("value"), negated: true }),
+                line: 2,
+                true_start_line: 3,
+                true_end_line: 3,
+                false_start_line: None,
+                false_end_line: None,
+            })
+        );
+        assert_eq!(
+            tree.statements[3],
+            SyntaxStatement::Assert(AssertStatement {
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                guard: Some(GuardCondition::IsNone { name: String::from("value"), negated: false }),
+                line: 4,
+            })
+        );
     }
 
     #[test]
@@ -7859,22 +8289,14 @@ line: 12,
             path: PathBuf::from("ignore.py"),
             kind: SourceKind::Python,
             logical_module: String::new(),
-            text: String::from(
-                "x = 1  # type: ignore[TPY4001]\ny = 2  # type: ignore\n",
-            ),
+            text: String::from("x = 1  # type: ignore[TPY4001]\ny = 2  # type: ignore\n"),
         });
 
         assert_eq!(
             tree.type_ignore_directives,
             vec![
-                TypeIgnoreDirective {
-                    line: 1,
-                    codes: Some(vec![String::from("TPY4001")]),
-                },
-                TypeIgnoreDirective {
-                    line: 2,
-                    codes: None,
-                },
+                TypeIgnoreDirective { line: 1, codes: Some(vec![String::from("TPY4001")]) },
+                TypeIgnoreDirective { line: 2, codes: None },
             ]
         );
     }

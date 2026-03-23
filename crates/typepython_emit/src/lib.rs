@@ -1,6 +1,10 @@
 //! Output planning boundary for TypePython.
 
-use std::{collections::BTreeMap, fs, io, path::{Path, PathBuf}};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
@@ -80,11 +84,12 @@ pub fn write_runtime_outputs(
             if let Some(parent) = runtime_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let runtime_source = if runtime_validators && module.source_kind == SourceKind::TypePython {
-                inject_runtime_validators(&module.python_source)?
-            } else {
-                module.python_source.clone()
-            };
+            let runtime_source =
+                if runtime_validators && module.source_kind == SourceKind::TypePython {
+                    inject_runtime_validators(&module.python_source)?
+                } else {
+                    module.python_source.clone()
+                };
             fs::write(runtime_path, runtime_source)?;
             if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
                 if let Some(parent) = runtime_path.parent() {
@@ -123,11 +128,7 @@ pub fn write_runtime_outputs(
         py_typed_written += 1;
     }
 
-    Ok(RuntimeWriteSummary {
-        runtime_files_written,
-        stub_files_written,
-        py_typed_written,
-    })
+    Ok(RuntimeWriteSummary { runtime_files_written, stub_files_written, py_typed_written })
 }
 
 fn inject_runtime_validators(python: &str) -> Result<String, io::Error> {
@@ -247,11 +248,7 @@ fn parse_validator_field(trimmed: &str) -> Option<ValidatorField> {
         Some((annotation, _)) => (annotation.trim(), true),
         None => (rest.trim(), false),
     };
-    Some(ValidatorField {
-        name: name.to_owned(),
-        annotation: annotation.to_owned(),
-        has_default,
-    })
+    Some(ValidatorField { name: name.to_owned(), annotation: annotation.to_owned(), has_default })
 }
 
 fn build_validator_lines(
@@ -291,8 +288,7 @@ fn build_validator_lines(
             lines.push(format!("{body_indent}if \"{}\" not in __data:", field.name));
             lines.push(format!(
                 "{nested_indent}raise TypeError(\"field `{}' expected {} but got missing\")",
-                field.name,
-                field.annotation
+                field.name, field.annotation
             ));
             lines.push(format!("{body_indent}{variable} = __data[\"{}\"]", field.name));
             lines.extend(emit_validation_lines(
@@ -360,9 +356,7 @@ fn emit_validation_lines(
         let nested = " ".repeat(indent.len() + 4);
         let mut lines = vec![format!(
             "{indent}if not isinstance({variable}, dict):\n{nested}raise TypeError(\"field `{}' expected {} but got \" + type({}).__name__)",
-            field_path,
-            annotation,
-            variable
+            field_path, annotation, variable
         )];
         for field in fields {
             let nested_var = format!("{variable}[\"{}\"]", field.name);
@@ -380,8 +374,7 @@ fn emit_validation_lines(
                 lines.push(format!("{indent}if \"{}\" not in {variable}:", field.name));
                 lines.push(format!(
                     "{nested}raise TypeError(\"field `{}' expected {} but got missing\")",
-                    nested_path,
-                    field.annotation
+                    nested_path, field.annotation
                 ));
                 lines.extend(emit_validation_lines(
                     &nested_var,
@@ -400,11 +393,7 @@ fn emit_validation_lines(
     };
     vec![format!(
         "{indent}if not ({}):\n{}    raise TypeError(\"field `{}' expected {} but got \" + type({}).__name__)",
-        check,
-        indent,
-        field_path,
-        annotation,
-        variable
+        check, indent, field_path, annotation, variable
     )]
 }
 
@@ -427,7 +416,10 @@ fn runtime_check_expression(
     if annotation == "None" {
         return Some(format!("{variable} is None"));
     }
-    if matches!(annotation, "int" | "float" | "str" | "bytes" | "bool" | "list" | "dict" | "set" | "tuple") {
+    if matches!(
+        annotation,
+        "int" | "float" | "str" | "bytes" | "bool" | "list" | "dict" | "set" | "tuple"
+    ) {
         return Some(format!("isinstance({variable}, {annotation})"));
     }
     if let Some((head, _)) = annotation.split_once('[') {
@@ -566,7 +558,9 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
     let overloaded_names: std::collections::BTreeSet<_> = suite
         .iter()
         .filter_map(|statement| match statement {
-            Stmt::FunctionDef(function) if function.decorator_list.iter().any(is_overload_decorator) => {
+            Stmt::FunctionDef(function)
+                if function.decorator_list.iter().any(is_overload_decorator) =>
+            {
                 Some(function.name.as_str().to_owned())
             }
             _ => None,
@@ -578,7 +572,8 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
             Stmt::FunctionDef(function) => {
                 let start_line = offset_to_line(source, function.name.range.start().to_usize());
                 let end_offset = function.range.end().to_usize().saturating_sub(1);
-                let end_line = offset_to_line(source, end_offset.max(function.range.start().to_usize()));
+                let end_line =
+                    offset_to_line(source, end_offset.max(function.range.start().to_usize()));
                 let line = source.lines().nth(start_line - 1).unwrap_or("");
                 edits.push(StubEdit {
                     start_line,
@@ -594,7 +589,10 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
             }
             Stmt::AnnAssign(assign) => {
                 if let Some(replacement) = rewrite_stub_annotated_assignment_line(
-                    source.lines().nth(offset_to_line(source, assign.range.start().to_usize()) - 1).unwrap_or(""),
+                    source
+                        .lines()
+                        .nth(offset_to_line(source, assign.range.start().to_usize()) - 1)
+                        .unwrap_or(""),
                 ) {
                     let start_line = offset_to_line(source, assign.range.start().to_usize());
                     edits.push(StubEdit {
@@ -606,9 +604,11 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
             }
             Stmt::ClassDef(class_def) => {
                 if is_empty_stub_class_body(&class_def.body) {
-                    let start_line = offset_to_line(source, class_def.name.range.start().to_usize());
+                    let start_line =
+                        offset_to_line(source, class_def.name.range.start().to_usize());
                     let end_offset = class_def.range.end().to_usize().saturating_sub(1);
-                    let end_line = offset_to_line(source, end_offset.max(class_def.range.start().to_usize()));
+                    let end_line =
+                        offset_to_line(source, end_offset.max(class_def.range.start().to_usize()));
                     let line = source.lines().nth(start_line - 1).unwrap_or("");
                     edits.push(StubEdit {
                         start_line,
@@ -657,7 +657,9 @@ fn rewrite_stub_class_line(line: &str) -> String {
 fn is_empty_stub_class_body(body: &[Stmt]) -> bool {
     body.iter().all(|statement| match statement {
         Stmt::Pass(_) => true,
-        Stmt::Expr(expr) => matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
+        Stmt::Expr(expr) => {
+            matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_))
+        }
         _ => false,
     })
 }
@@ -712,13 +714,16 @@ mod tests {
 
     #[test]
     fn write_runtime_outputs_emits_lowered_typepython_and_python_modules() {
-        let temp_dir = temp_dir("write_runtime_outputs_emits_lowered_typepython_and_python_modules");
+        let temp_dir =
+            temp_dir("write_runtime_outputs_emits_lowered_typepython_and_python_modules");
         let result = (|| {
             let modules = vec![
                 LoweredModule {
                     source_path: PathBuf::from("src/app/__init__.tpy"),
                     source_kind: SourceKind::TypePython,
-                    python_source: String::from("from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n"),
+                    python_source: String::from(
+                        "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n",
+                    ),
                     source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
                 },
                 LoweredModule {
@@ -779,7 +784,8 @@ mod tests {
             let summary = write_runtime_outputs(&artifacts, &modules, false).unwrap();
             let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
             let stub_init = fs::read_to_string(temp_dir.join("build/app/__init__.pyi")).unwrap();
-            let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
+            let runtime_helpers =
+                fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
             let runtime_parse = fs::read_to_string(temp_dir.join("build/app/parse.py")).unwrap();
             let stub_parse = fs::read_to_string(temp_dir.join("build/app/parse.pyi")).unwrap();
             let runtime_empty = fs::read_to_string(temp_dir.join("build/app/empty.py")).unwrap();
@@ -787,11 +793,33 @@ mod tests {
             let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi")).unwrap();
             let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
 
-            (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, runtime_empty, stub_empty, stub_helpers, py_typed)
+            (
+                summary,
+                runtime_init,
+                stub_init,
+                runtime_helpers,
+                runtime_parse,
+                stub_parse,
+                runtime_empty,
+                stub_empty,
+                stub_helpers,
+                py_typed,
+            )
         })();
         remove_temp_dir(&temp_dir);
 
-        let (summary, runtime_init, stub_init, runtime_helpers, runtime_parse, stub_parse, runtime_empty, stub_empty, stub_helpers, py_typed) = result;
+        let (
+            summary,
+            runtime_init,
+            stub_init,
+            runtime_helpers,
+            runtime_parse,
+            stub_parse,
+            runtime_empty,
+            stub_empty,
+            stub_helpers,
+            py_typed,
+        ) = result;
         assert_eq!(
             summary,
             RuntimeWriteSummary {
@@ -800,11 +828,23 @@ mod tests {
                 py_typed_written: 1,
             }
         );
-        assert_eq!(runtime_init, "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n");
-        assert_eq!(stub_init, "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int\n\ndef build_user() -> int: ...\n");
+        assert_eq!(
+            runtime_init,
+            "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n"
+        );
+        assert_eq!(
+            stub_init,
+            "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int\n\ndef build_user() -> int: ...\n"
+        );
         assert_eq!(runtime_helpers, "def helper():\n    return 1\n");
-        assert_eq!(runtime_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n");
-        assert_eq!(stub_parse, "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\n");
+        assert_eq!(
+            runtime_parse,
+            "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n"
+        );
+        assert_eq!(
+            stub_parse,
+            "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\n"
+        );
         assert_eq!(runtime_empty, "class Empty:\n    pass\n");
         assert_eq!(stub_empty, "class Empty: ...\n");
         assert_eq!(stub_helpers, "def helper() -> int: ...\n");

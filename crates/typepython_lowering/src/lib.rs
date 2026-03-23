@@ -64,10 +64,7 @@ fn lower_passthrough(source: &str) -> LoweredText {
         source_map: source
             .lines()
             .enumerate()
-            .map(|(index, _)| SourceMapEntry {
-                original_line: index + 1,
-                lowered_line: index + 1,
-            })
+            .map(|(index, _)| SourceMapEntry { original_line: index + 1, lowered_line: index + 1 })
             .collect(),
     }
 }
@@ -205,7 +202,10 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     // Check if any type alias uses a transform that generates NotRequired
     let needs_notrequired_import = type_aliases.values().any(|stmt| {
         let v = stmt.value.trim();
-        v == "Partial[User]" || v == "Required_[UserUpdate]" || v.starts_with("Partial[") || v.starts_with("Required_[")
+        v == "Partial[User]"
+            || v == "Required_[UserUpdate]"
+            || v.starts_with("Partial[")
+            || v.starts_with("Required_[")
     });
     if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing_extensions import NotRequired"));
@@ -214,7 +214,10 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     // Check if any type alias uses a transform that generates ReadOnly
     let needs_readonly_import = type_aliases.values().any(|stmt| {
         let v = stmt.value.trim();
-        v == "Readonly[Config]" || v == "Mutable[Config]" || v.starts_with("Readonly[") || v.starts_with("Mutable[")
+        v == "Readonly[Config]"
+            || v == "Mutable[Config]"
+            || v.starts_with("Readonly[")
+            || v.starts_with("Mutable[")
     });
     if needs_readonly_import && !has_readonly_import(&tree.source.text) {
         lowered_lines.push(String::from("from typing_extensions import ReadOnly"));
@@ -249,10 +252,8 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             vec![line.to_owned()]
         };
 
-        source_map.push(SourceMapEntry {
-            original_line: line_number,
-            lowered_line: lowered_line_number,
-        });
+        source_map
+            .push(SourceMapEntry { original_line: line_number, lowered_line: lowered_line_number });
         lowered_line_number += replacement_lines.len();
         lowered_lines.extend(replacement_lines);
     }
@@ -291,51 +292,37 @@ fn collect_runtime_type_params(
 
     for statement in type_aliases.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in interfaces.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in data_classes.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in sealed_classes.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in class_defs.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in function_defs.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
     for statement in overloads.values() {
         for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| type_param.bound.clone());
+            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
         }
     }
 
@@ -360,16 +347,10 @@ fn rewrite_unsafe_line(line: &str) -> String {
     format!("{indentation}if True:")
 }
 
-fn rewrite_typealias_line(
-    line: &str,
-    statement: &typepython_syntax::TypeAliasStatement,
-) -> String {
+fn rewrite_typealias_line(line: &str, statement: &typepython_syntax::TypeAliasStatement) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    format!(
-        "{indentation}{}: TypeAlias = {}",
-        statement.name, statement.value
-    )
+    format!("{indentation}{}: TypeAlias = {}", statement.name, statement.value)
 }
 
 fn rewrite_typevar_line(name: &str, bound: Option<&str>) -> String {
@@ -425,10 +406,7 @@ fn rewrite_data_class_lines(
     let indentation = &line[..indentation_width];
     let bases = append_optional_generic_base(statement);
 
-    [
-        format!("{indentation}@dataclass"),
-        format!("{indentation}class {}{}:", statement.name, bases),
-    ]
+    [format!("{indentation}@dataclass"), format!("{indentation}class {}{}:", statement.name, bases)]
 }
 
 fn rewrite_sealed_class_line(
@@ -525,11 +503,7 @@ fn append_bases(header_suffix: &str, extras: &[String]) -> String {
     let inner = if trimmed.is_empty() {
         String::new()
     } else {
-        trimmed
-            .trim_start_matches('(')
-            .trim_end_matches(')')
-            .trim()
-            .to_owned()
+        trimmed.trim_start_matches('(').trim_end_matches(')').trim().to_owned()
     };
 
     let mut parts = Vec::new();
@@ -571,11 +545,8 @@ fn has_dataclass_import(source: &str) -> bool {
 fn rewrite_overload_lines(line: &str) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let rewritten = line
-        .trim_start()
-        .strip_prefix("overload ")
-        .unwrap_or_else(|| line.trim_start())
-        .to_owned();
+    let rewritten =
+        line.trim_start().strip_prefix("overload ").unwrap_or_else(|| line.trim_start()).to_owned();
     let rewritten = strip_generic_type_params(&rewritten);
 
     [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
@@ -591,8 +562,7 @@ fn has_overload_import(source: &str) -> bool {
 
 fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) -> bool {
     statement.header_suffix.is_empty()
-        || (statement.header_suffix.starts_with('(')
-            && statement.header_suffix.ends_with(')'))
+        || (statement.header_suffix.starts_with('(') && statement.header_suffix.ends_with(')'))
 }
 // ─── TypedDict utility transform expansion ───────────────────────────────────
 
@@ -629,11 +599,12 @@ fn try_expand_typeddict_transform(
 
     // Handle nested transforms: if target_arg is itself a transform, recursively expand it
     // inner_args[0]=transform name, [1]=target TypedDict, [2..]=key args
-    let base_members = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg) {
+    let base_members = if let Some((inner_transform, inner_args)) = parse_transform_expr(target_arg)
+    {
         if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
             // Recursively expand the inner transform
             let inner_target_name = &*inner_args[1]; // [1] is the target TypedDict name
-            let inner_key_args = &inner_args[2..];   // [2..] are the key args
+            let inner_key_args = &inner_args[2..]; // [2..] are the key args
             let inner_target = typed_dicts.get(inner_target_name)?;
             // inner_target is &&NamedBlockStatement, dereference to &
             apply_transform_to_members(inner_transform, &inner_target.members, inner_key_args)
@@ -764,10 +735,8 @@ fn apply_transform_to_members<'a>(
     members: &'a [typepython_syntax::ClassMember],
     key_args: &[&str],
 ) -> Vec<typepython_syntax::ClassMember> {
-    let fields: Vec<&'a typepython_syntax::ClassMember> = members
-        .iter()
-        .filter(|m| m.kind == typepython_syntax::ClassMemberKind::Field)
-        .collect();
+    let fields: Vec<&'a typepython_syntax::ClassMember> =
+        members.iter().filter(|m| m.kind == typepython_syntax::ClassMemberKind::Field).collect();
 
     match transform {
         "Partial" => fields
@@ -831,24 +800,30 @@ fn apply_transform_to_members<'a>(
         "Pick" => {
             let keys: std::collections::BTreeSet<_> = key_args
                 .iter()
-                .map(|s| s.trim_matches('"').trim_matches('\'').trim_end_matches(']').trim_end_matches(')').trim_end_matches('>').to_owned())
+                .map(|s| {
+                    s.trim_matches('"')
+                        .trim_matches('\'')
+                        .trim_end_matches(']')
+                        .trim_end_matches(')')
+                        .trim_end_matches('>')
+                        .to_owned()
+                })
                 .collect();
-            fields
-                .into_iter()
-                .filter(|m| keys.contains(&m.name))
-                .map(|m| m.clone())
-                .collect()
+            fields.into_iter().filter(|m| keys.contains(&m.name)).map(|m| m.clone()).collect()
         }
         "Omit" => {
             let keys: std::collections::BTreeSet<_> = key_args
                 .iter()
-                .map(|s| s.trim_matches('"').trim_matches('\'').trim_end_matches(']').trim_end_matches(')').trim_end_matches('>').to_owned())
+                .map(|s| {
+                    s.trim_matches('"')
+                        .trim_matches('\'')
+                        .trim_end_matches(']')
+                        .trim_end_matches(')')
+                        .trim_end_matches('>')
+                        .to_owned()
+                })
                 .collect();
-            fields
-                .into_iter()
-                .filter(|m| !keys.contains(&m.name))
-                .map(|m| m.clone())
-                .collect()
+            fields.into_iter().filter(|m| !keys.contains(&m.name)).map(|m| m.clone()).collect()
         }
         _ => fields.into_iter().map(|m| m.clone()).collect(),
     }
@@ -869,8 +844,7 @@ fn has_notrequired_import(source: &str) -> bool {
         trimmed == "from typing_extensions import NotRequired"
             || (trimmed.starts_with("from typing_extensions import ")
                 && trimmed.contains("NotRequired"))
-            || (trimmed.starts_with("from typing import ")
-                && trimmed.contains("NotRequired"))
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("NotRequired"))
     })
 }
 
@@ -880,8 +854,7 @@ fn has_readonly_import(source: &str) -> bool {
         trimmed == "from typing_extensions import ReadOnly"
             || (trimmed.starts_with("from typing_extensions import ")
                 && trimmed.contains("ReadOnly"))
-            || (trimmed.starts_with("from typing import ")
-                && trimmed.contains("ReadOnly"))
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("ReadOnly"))
     })
 }
 
@@ -914,23 +887,17 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
                 }
             }
             SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {}
-            SyntaxStatement::Interface(statement) => diagnostics.push(lowering_error(
-                &tree.source.path,
-                statement.line,
-                "interface",
-            )),
+            SyntaxStatement::Interface(statement) => {
+                diagnostics.push(lowering_error(&tree.source.path, statement.line, "interface"))
+            }
             SyntaxStatement::DataClass(statement) if is_lowerable_named_block(statement) => {}
-            SyntaxStatement::DataClass(statement) => diagnostics.push(lowering_error(
-                &tree.source.path,
-                statement.line,
-                "data class",
-            )),
+            SyntaxStatement::DataClass(statement) => {
+                diagnostics.push(lowering_error(&tree.source.path, statement.line, "data class"))
+            }
             SyntaxStatement::SealedClass(statement) if is_lowerable_named_block(statement) => {}
-            SyntaxStatement::SealedClass(statement) => diagnostics.push(lowering_error(
-                &tree.source.path,
-                statement.line,
-                "sealed class",
-            )),
+            SyntaxStatement::SealedClass(statement) => {
+                diagnostics.push(lowering_error(&tree.source.path, statement.line, "sealed class"))
+            }
             SyntaxStatement::ClassDef(_) => {}
             SyntaxStatement::FunctionDef(_) => {}
             SyntaxStatement::Import(_) => {}
@@ -980,7 +947,7 @@ fn collect_typed_dict_transform_diagnostics(
                     transform,
                     target_arg.trim()
                 ),
-            )]
+            )];
         }
     };
 
@@ -1003,9 +970,7 @@ fn collect_typed_dict_transform_diagnostics(
                     line,
                     format!(
                         "type transform `{}` references unknown key `{}` on TypedDict `{}`",
-                        transform,
-                        key,
-                        target_name
+                        transform, key, target_name
                     ),
                 )
             })
@@ -1022,15 +987,15 @@ fn resolve_transform_members<'a>(
             let target_arg = args[1];
             let key_args = &args[2..];
             let (target_name, base_members) = resolve_transform_members(target_arg, typed_dicts)?;
-            return Some((target_name, apply_transform_to_members(transform, &base_members, key_args)));
+            return Some((
+                target_name,
+                apply_transform_to_members(transform, &base_members, key_args),
+            ));
         }
     }
 
     let target = typed_dicts.get(value.trim())?;
-    Some((
-        target.name.clone(),
-        target.members.iter().cloned().collect(),
-    ))
+    Some((target.name.clone(), target.members.iter().cloned().collect()))
 }
 
 fn transform_key_name(key: &str) -> String {
@@ -1043,8 +1008,13 @@ fn transform_key_name(key: &str) -> String {
 }
 
 fn typed_dict_transform_error(path: &std::path::Path, line: usize, message: String) -> Diagnostic {
-    Diagnostic::error("TPY4017", message)
-        .with_span(Span::new(path.display().to_string(), line, 1, line, 1))
+    Diagnostic::error("TPY4017", message).with_span(Span::new(
+        path.display().to_string(),
+        line,
+        1,
+        line,
+        1,
+    ))
 }
 
 fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagnostic {
@@ -1061,8 +1031,8 @@ mod tests {
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind,
-        SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam, UnsafeStatement,
+        ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
+        SyntaxTree, TypeAliasStatement, TypeParam, UnsafeStatement,
     };
 
     #[test]
@@ -1087,14 +1057,8 @@ mod tests {
         assert_eq!(
             lowered.module.source_map,
             vec![
-                SourceMapEntry {
-                    original_line: 1,
-                    lowered_line: 1,
-                },
-                SourceMapEntry {
-                    original_line: 2,
-                    lowered_line: 2,
-                },
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
             ]
         );
     }
@@ -1157,7 +1121,10 @@ mod tests {
 
         println!("{}", lowered.module.python_source);
         assert!(lowered.diagnostics.is_empty());
-        assert_eq!(lowered.module.python_source, "from typing import TypeAlias\nUserId: TypeAlias = int\n");
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeAlias\nUserId: TypeAlias = int\n"
+        );
     }
 
     #[test]
@@ -1175,8 +1142,8 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1200,7 +1167,9 @@ mod tests {
                 path: PathBuf::from("interface-bases.tpy"),
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
-                text: String::from("interface SupportsClose(Closable):\n    def close(self): ...\n"),
+                text: String::from(
+                    "interface SupportsClose(Closable):\n    def close(self): ...\n",
+                ),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
                 name: String::from("SupportsClose"),
@@ -1208,8 +1177,8 @@ mod tests {
                 header_suffix: String::from("(Closable)"),
                 bases: vec![String::from("Closable")],
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1232,19 +1201,18 @@ mod tests {
                 path: PathBuf::from("generic-interface.tpy"),
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
-                text: String::from("interface SupportsClose[T]:\n    def close(self, value: T) -> T: ...\n"),
+                text: String::from(
+                    "interface SupportsClose[T]:\n    def close(self, value: T) -> T: ...\n",
+                ),
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
                 name: String::from("SupportsClose"),
-                type_params: vec![TypeParam {
-                    name: String::from("T"),
-                    bound: None,
-                }],
+                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1275,8 +1243,8 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1294,18 +1262,9 @@ mod tests {
         assert_eq!(
             lowered.module.source_map,
             vec![
-                SourceMapEntry {
-                    original_line: 1,
-                    lowered_line: 2,
-                },
-                SourceMapEntry {
-                    original_line: 2,
-                    lowered_line: 4,
-                },
-                SourceMapEntry {
-                    original_line: 3,
-                    lowered_line: 5,
-                },
+                SourceMapEntry { original_line: 1, lowered_line: 2 },
+                SourceMapEntry { original_line: 2, lowered_line: 4 },
+                SourceMapEntry { original_line: 3, lowered_line: 5 },
             ]
         );
     }
@@ -1325,8 +1284,8 @@ mod tests {
                 header_suffix: String::from("(Base)"),
                 bases: vec![String::from("Base")],
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1349,35 +1308,31 @@ mod tests {
                 path: PathBuf::from("generic-classlikes.tpy"),
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
-                text: String::from("data class Point[T]:\n    x: T\n\nsealed class Expr[T](Base):\n    ...\n"),
+                text: String::from(
+                    "data class Point[T]:\n    x: T\n\nsealed class Expr[T](Base):\n    ...\n",
+                ),
             },
             statements: vec![
                 SyntaxStatement::DataClass(NamedBlockStatement {
                     name: String::from("Point"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Expr"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 4,
@@ -1409,8 +1364,8 @@ mod tests {
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1439,8 +1394,8 @@ mod tests {
                 header_suffix: String::from("(Base)"),
                 bases: vec![String::from("Base")],
                 is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_abstract_class: false,
                 members: Vec::new(),
                 line: 1,
@@ -1485,10 +1440,7 @@ mod tests {
         );
         assert_eq!(
             lowered.module.source_map,
-            vec![SourceMapEntry {
-                original_line: 1,
-                lowered_line: 2,
-            }]
+            vec![SourceMapEntry { original_line: 1, lowered_line: 2 }]
         );
     }
 
@@ -1503,10 +1455,7 @@ mod tests {
             },
             statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
                 name: String::from("Pair"),
-                type_params: vec![TypeParam {
-                    name: String::from("T"),
-                    bound: None,
-                }],
+                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                 value: String::from("tuple[T, T]"),
                 line: 1,
             })],
@@ -1532,10 +1481,7 @@ mod tests {
             },
             statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
                 name: String::from("parse"),
-                type_params: vec![TypeParam {
-                    name: String::from("T"),
-                    bound: None,
-                }],
+                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                 params: Vec::new(),
                 returns: None,
                 is_async: false,
@@ -1569,25 +1515,19 @@ mod tests {
             statements: vec![
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::FunctionDef(typepython_syntax::FunctionStatement {
                     name: String::from("first"),
-                    type_params: vec![TypeParam {
-                        name: String::from("T"),
-                        bound: None,
-                    }],
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     params: Vec::new(),
                     returns: None,
                     is_async: false,
@@ -1610,29 +1550,14 @@ mod tests {
         assert_eq!(
             lowered.module.source_map,
             vec![
-                SourceMapEntry {
-                    original_line: 1,
-                    lowered_line: 4,
-                },
-                SourceMapEntry {
-                    original_line: 2,
-                    lowered_line: 5,
-                },
-                SourceMapEntry {
-                    original_line: 3,
-                    lowered_line: 6,
-                },
-                SourceMapEntry {
-                    original_line: 4,
-                    lowered_line: 7,
-                },
-                SourceMapEntry {
-                    original_line: 5,
-                    lowered_line: 8,
-                },
+                SourceMapEntry { original_line: 1, lowered_line: 4 },
+                SourceMapEntry { original_line: 2, lowered_line: 5 },
+                SourceMapEntry { original_line: 3, lowered_line: 6 },
+                SourceMapEntry { original_line: 4, lowered_line: 7 },
+                SourceMapEntry { original_line: 5, lowered_line: 8 },
             ]
         );
-    }    // ─── TypedDict utility transform tests ───────────────────────────────────
+    } // ─── TypedDict utility transform tests ───────────────────────────────────
 
     #[test]
     fn lower_expands_partial_typeddict_transform() {
@@ -1652,8 +1577,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -1668,8 +1593,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 2,
@@ -1686,8 +1611,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 3,
@@ -1707,28 +1632,10 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("class UserCreate(TypedDict):")
-        );
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("id: NotRequired[int]")
-        );
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("name: NotRequired[str]")
-        );
-        assert!(lowered
-            .module
-            .python_source
-            .contains("from typing_extensions import NotRequired"));
+        assert!(lowered.module.python_source.contains("class UserCreate(TypedDict):"));
+        assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
+        assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
+        assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
     }
 
     #[test]
@@ -1749,8 +1656,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -1765,8 +1672,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 2,
@@ -1783,8 +1690,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 3,
@@ -1801,8 +1708,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 4,
@@ -1821,23 +1728,15 @@ mod tests {
             diagnostics: DiagnosticReport::default(),
         });
 
-        println!("OUTPUT:
-{}", lowered.module.python_source);
-        assert!(lowered.diagnostics.is_empty());
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("class UserPublic(TypedDict):")
+        println!(
+            "OUTPUT:
+{}",
+            lowered.module.python_source
         );
-        assert!(lowered
-            .module
-            .python_source
-            .contains("id: int"));
-        assert!(lowered
-            .module
-            .python_source
-            .contains("name: str"));
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("class UserPublic(TypedDict):"));
+        assert!(lowered.module.python_source.contains("id: int"));
+        assert!(lowered.module.python_source.contains("name: str"));
         // email should NOT appear in the UserPublic transform (it's in the original User class)
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
         let user_public_start = all_lines.iter().position(|l| l.contains("class UserPublic"));
@@ -1871,8 +1770,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -1887,8 +1786,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 2,
@@ -1905,8 +1804,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 3,
@@ -1926,16 +1825,8 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("class UserUpdate(TypedDict):")
-        );
-        assert!(lowered
-            .module
-            .python_source
-            .contains("name: str"));
+        assert!(lowered.module.python_source.contains("class UserUpdate(TypedDict):"));
+        assert!(lowered.module.python_source.contains("name: str"));
         // id should NOT appear in the UserUpdate transform (it's in the original User class)
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
         let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
@@ -1969,8 +1860,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("debug"),
@@ -2004,18 +1895,9 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(lowered
-            .module
-            .python_source
-            .contains("class ImmutableConfig(TypedDict):"));
-        assert!(lowered
-            .module
-            .python_source
-            .contains("debug: ReadOnly[bool]"));
-        assert!(lowered
-            .module
-            .python_source
-            .contains("from typing_extensions import ReadOnly"));
+        assert!(lowered.module.python_source.contains("class ImmutableConfig(TypedDict):"));
+        assert!(lowered.module.python_source.contains("debug: ReadOnly[bool]"));
+        assert!(lowered.module.python_source.contains("from typing_extensions import ReadOnly"));
     }
 
     #[test]
@@ -2036,8 +1918,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("name"),
@@ -2071,14 +1953,8 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(lowered
-            .module
-            .python_source
-            .contains("class RequiredUpdate(TypedDict):"));
-        assert!(lowered
-            .module
-            .python_source
-            .contains("name: str"));
+        assert!(lowered.module.python_source.contains("class RequiredUpdate(TypedDict):"));
+        assert!(lowered.module.python_source.contains("name: str"));
     }
 
     #[test]
@@ -2100,8 +1976,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
                         ClassMember {
@@ -2116,8 +1992,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 2,
@@ -2134,8 +2010,8 @@ mod tests {
                             is_override: false,
                             is_abstract_method: false,
                             is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                            is_deprecated: false,
+                            deprecation_message: None,
                             is_final: false,
                             is_class_var: false,
                             line: 3,
@@ -2155,17 +2031,9 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(
-            lowered
-                .module
-                .python_source
-                .contains("class UserUpdate(TypedDict):")
-        );
+        assert!(lowered.module.python_source.contains("class UserUpdate(TypedDict):"));
         // Omit removes id, then Partial makes name optional
-        assert!(lowered
-            .module
-            .python_source
-            .contains("name: NotRequired[str]"));
+        assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
         // id should NOT appear in the UserUpdate transform
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
         let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
@@ -2199,8 +2067,8 @@ mod tests {
                     header_suffix: String::from("(TypedDict)"),
                     bases: vec![String::from("TypedDict")],
                     is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![ClassMember {
                         name: String::from("debug"),
@@ -2234,10 +2102,7 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(lowered
-            .module
-            .python_source
-            .contains("class MutableConfig(TypedDict):"));
+        assert!(lowered.module.python_source.contains("class MutableConfig(TypedDict):"));
         // ReadOnly wrapper should be stripped
         assert!(lowered.module.python_source.contains("debug: bool"));
     }
@@ -2249,9 +2114,7 @@ mod tests {
                 path: PathBuf::from("decorated-class.tpy"),
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
-                text: String::from(
-                    "@model\nclass User:\n    name: str\n    age: int\n",
-                ),
+                text: String::from("@model\nclass User:\n    name: str\n    age: int\n"),
             },
             statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
                 name: String::from("User"),
@@ -2412,14 +2275,7 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
-        assert!(lowered
-            .module
-            .python_source
-            .contains("from typing import TypeAlias"));
-        assert!(lowered
-            .module
-            .python_source
-            .contains("UserId: TypeAlias = int"));
+        assert!(lowered.module.python_source.contains("from typing import TypeAlias"));
+        assert!(lowered.module.python_source.contains("UserId: TypeAlias = int"));
     }
-
 }

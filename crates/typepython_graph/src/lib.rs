@@ -6,7 +6,11 @@ use std::{
     path::PathBuf,
 };
 
-use typepython_binding::{AssertGuardSite, AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, DeclarationOwnerKind, ExceptHandlerSite, ForSite, IfGuardSite, InvalidationSite, MatchSite, MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite};
+use typepython_binding::{
+    AssertGuardSite, AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind,
+    DeclarationOwnerKind, ExceptHandlerSite, ForSite, IfGuardSite, InvalidationSite, MatchSite,
+    MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite,
+};
 use typepython_syntax::{MethodKind, SourceKind};
 
 /// Summary node for one module.
@@ -93,7 +97,11 @@ fn hash_summary(binding: &BindingTable) -> u64 {
     hasher.finish()
 }
 
-fn hash_module_summary(module_path: &std::path::Path, module_key: &str, declarations: &[Declaration]) -> u64 {
+fn hash_module_summary(
+    module_path: &std::path::Path,
+    module_key: &str,
+    declarations: &[Declaration],
+) -> u64 {
     let mut hasher = DefaultHasher::new();
     module_path.hash(&mut hasher);
     module_key.hash(&mut hasher);
@@ -102,19 +110,11 @@ fn hash_module_summary(module_path: &std::path::Path, module_key: &str, declarat
 }
 
 fn typing_prelude_node() -> ModuleNode {
-    prelude_node(
-        "<typing-prelude>",
-        "typing",
-        typing_prelude_declarations(),
-    )
+    prelude_node("<typing-prelude>", "typing", typing_prelude_declarations())
 }
 
 fn typing_extensions_prelude_node() -> ModuleNode {
-    prelude_node(
-        "<typing-extensions-prelude>",
-        "typing_extensions",
-        typing_prelude_declarations(),
-    )
+    prelude_node("<typing-extensions-prelude>", "typing_extensions", typing_prelude_declarations())
 }
 
 fn typing_prelude_declarations() -> Vec<Declaration> {
@@ -243,11 +243,7 @@ fn collections_abc_prelude_node() -> ModuleNode {
                 ("get", "(self, key:Any, default:)->Any"),
             ],
         ),
-        prelude_protocol_class_with_methods(
-            "Callable",
-            &[],
-            &[("__call__", "(self)->Any")],
-        ),
+        prelude_protocol_class_with_methods("Callable", &[], &[("__call__", "(self)->Any")]),
         prelude_protocol_class_with_methods(
             "AsyncIterable",
             &[],
@@ -459,8 +455,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -477,8 +473,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -514,8 +510,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -532,8 +528,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -560,8 +556,8 @@ mod tests {
                 is_override: false,
                 is_abstract_method: false,
                 is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                is_deprecated: false,
+                deprecation_message: None,
                 is_final: false,
                 is_class_var: false,
                 bases: Vec::new(),
@@ -597,8 +593,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -615,8 +611,8 @@ mod tests {
                     is_override: false,
                     is_abstract_method: false,
                     is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
+                    is_deprecated: false,
+                    deprecation_message: None,
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
@@ -639,13 +635,9 @@ mod tests {
 
         println!(
             "{} -> {}",
-            first.nodes[0].summary_fingerprint,
-            second.nodes[0].summary_fingerprint
+            first.nodes[0].summary_fingerprint, second.nodes[0].summary_fingerprint
         );
-        assert_ne!(
-            first.nodes[0].summary_fingerprint,
-            second.nodes[0].summary_fingerprint
-        );
+        assert_ne!(first.nodes[0].summary_fingerprint, second.nodes[0].summary_fingerprint);
     }
 
     #[test]
@@ -700,18 +692,52 @@ mod tests {
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "NewType"));
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "TypeVar"));
         assert_eq!(typing_extensions.module_kind, SourceKind::Stub);
-        assert!(typing_extensions.declarations.iter().any(|declaration| declaration.name == "Protocol"));
-        assert!(typing_extensions.declarations.iter().any(|declaration| declaration.name == "TypedDict"));
-        assert!(typing_extensions.declarations.iter().any(|declaration| declaration.name == "TypeVar"));
-        assert!(typing_extensions.declarations.iter().any(|declaration| declaration.name == "Awaitable"));
+        assert!(
+            typing_extensions.declarations.iter().any(|declaration| declaration.name == "Protocol")
+        );
+        assert!(
+            typing_extensions
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "TypedDict")
+        );
+        assert!(
+            typing_extensions.declarations.iter().any(|declaration| declaration.name == "TypeVar")
+        );
+        assert!(
+            typing_extensions
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "Awaitable")
+        );
         assert_eq!(collections_abc.module_kind, SourceKind::Stub);
         assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Sized"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterable"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Callable"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterator"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "AsyncIterator"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "AsyncGenerator"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Sequence"));
-        assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Mapping"));
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterable")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Callable")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterator")
+        );
+        assert!(
+            collections_abc
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "AsyncIterator")
+        );
+        assert!(
+            collections_abc
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "AsyncGenerator")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Sequence")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Mapping")
+        );
     }
 }

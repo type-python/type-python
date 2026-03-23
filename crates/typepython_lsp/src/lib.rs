@@ -15,7 +15,9 @@ use typepython_checking::check_with_options;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{DiagnosticReport, Severity};
 use typepython_graph::build;
-use typepython_syntax::{SourceFile, SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse};
+use typepython_syntax::{
+    SourceFile, SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse,
+};
 
 #[derive(Debug, Error)]
 pub enum LspError {
@@ -122,15 +124,14 @@ struct Server {
 
 impl Server {
     fn new(config: ConfigHandle) -> Self {
-        Self {
-            config,
-            overlays: BTreeMap::new(),
-            shutdown_requested: false,
-            exited: false,
-        }
+        Self { config, overlays: BTreeMap::new(), shutdown_requested: false, exited: false }
     }
 
-    fn serve<R: BufRead, W: Write>(&mut self, mut reader: R, mut writer: W) -> Result<(), LspError> {
+    fn serve<R: BufRead, W: Write>(
+        &mut self,
+        mut reader: R,
+        mut writer: W,
+    ) -> Result<(), LspError> {
         while let Some(message) = read_message(&mut reader)? {
             let responses = self.handle_message(message)?;
             for response in responses {
@@ -238,17 +239,12 @@ impl Server {
             .get("text")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didOpen missing text")))?;
-        let version = text_document
-            .get("version")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| LspError::Other(String::from("TPY6002: didOpen missing document version")))?;
+        let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
+            LspError::Other(String::from("TPY6002: didOpen missing document version"))
+        })?;
         self.overlays.insert(
             uri_to_path(uri)?,
-            OverlayDocument {
-                uri: uri.to_owned(),
-                text: text.to_owned(),
-                version,
-            },
+            OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
         );
         Ok(())
     }
@@ -261,23 +257,17 @@ impl Server {
             .get("uri")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing uri")))?;
-        let version = text_document
-            .get("version")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| LspError::Other(String::from("TPY6002: didChange missing document version")))?;
+        let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
+            LspError::Other(String::from("TPY6002: didChange missing document version"))
+        })?;
         let path = uri_to_path(uri)?;
         let current = self.overlays.get(&path).ok_or_else(|| {
-            LspError::Other(format!(
-                "TPY6002: didChange received for unopened overlay `{}`",
-                uri
-            ))
+            LspError::Other(format!("TPY6002: didChange received for unopened overlay `{}`", uri))
         })?;
         if version <= current.version {
             return Err(LspError::Other(format!(
                 "TPY6002: didChange version {} is out of sync with overlay version {} for `{}`",
-                version,
-                current.version,
-                uri
+                version, current.version, uri
             )));
         }
         let content_changes = params
@@ -289,14 +279,8 @@ impl Server {
             .and_then(|change| change.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
-        self.overlays.insert(
-            path,
-            OverlayDocument {
-                uri: uri.to_owned(),
-                text: text.to_owned(),
-                version,
-            },
-        );
+        self.overlays
+            .insert(path, OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version });
         Ok(())
     }
 
@@ -368,10 +352,7 @@ impl Server {
         let Some(declaration) = workspace.declarations_by_canonical.get(&symbol.canonical) else {
             return Ok(Value::Null);
         };
-        Ok(json!([LspLocation {
-            uri: declaration.uri.clone(),
-            range: declaration.range,
-        }]))
+        Ok(json!([LspLocation { uri: declaration.uri.clone(), range: declaration.range }]))
     }
 
     fn handle_references(&self, params: Value) -> Result<Value, LspError> {
@@ -390,10 +371,7 @@ impl Server {
             .iter()
             .filter(|occurrence| occurrence.canonical == symbol.canonical)
             .filter(|occurrence| include_declaration || !occurrence.declaration)
-            .map(|occurrence| LspLocation {
-                uri: occurrence.uri.clone(),
-                range: occurrence.range,
-            })
+            .map(|occurrence| LspLocation { uri: occurrence.uri.clone(), range: occurrence.range })
             .collect::<Vec<_>>();
         Ok(json!(references))
     }
@@ -414,10 +392,10 @@ impl Server {
             .iter()
             .filter(|occurrence| occurrence.canonical == symbol.canonical)
         {
-            changes.entry(occurrence.uri.clone()).or_default().push(LspTextEdit {
-                range: occurrence.range,
-                new_text: new_name.to_owned(),
-            });
+            changes
+                .entry(occurrence.uri.clone())
+                .or_default()
+                .push(LspTextEdit { range: occurrence.range, new_text: new_name.to_owned() });
         }
         Ok(json!({"changes": changes}))
     }
@@ -428,9 +406,7 @@ impl Server {
         let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
             return Ok(json!([]));
         };
-        let is_member_access = line_prefix(&document.text, position)
-            .trim_end()
-            .ends_with('.');
+        let is_member_access = line_prefix(&document.text, position).trim_end().ends_with('.');
 
         let items = if is_member_access {
             let mut seen = BTreeSet::new();
@@ -528,12 +504,7 @@ impl Server {
         }
 
         let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
-        Ok(WorkspaceState {
-            documents,
-            diagnostics_by_uri,
-            occurrences,
-            declarations_by_canonical,
-        })
+        Ok(WorkspaceState { documents, diagnostics_by_uri, occurrences, declarations_by_canonical })
     }
 }
 
@@ -550,12 +521,9 @@ fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, LspError> {
         }
         if let Some((name, value)) = line.split_once(':') {
             if name.eq_ignore_ascii_case("Content-Length") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|error| LspError::Other(format!("invalid Content-Length: {error}")))?,
-                );
+                content_length = Some(value.trim().parse::<usize>().map_err(|error| {
+                    LspError::Other(format!("invalid Content-Length: {error}"))
+                })?);
             }
         }
     }
@@ -591,17 +559,21 @@ fn text_document_position(params: &Value) -> Result<(String, LspPosition), LspEr
         .get("textDocument")
         .and_then(|document| document.get("uri"))
         .and_then(Value::as_str)
-        .ok_or_else(|| LspError::Other(String::from("textDocument/position request missing uri")))?;
-    let position: LspPosition = serde_json::from_value(
-        params
-            .get("position")
-            .cloned()
-            .ok_or_else(|| LspError::Other(String::from("textDocument/position request missing position")))?,
-    )?;
+        .ok_or_else(|| {
+            LspError::Other(String::from("textDocument/position request missing uri"))
+        })?;
+    let position: LspPosition =
+        serde_json::from_value(params.get("position").cloned().ok_or_else(|| {
+            LspError::Other(String::from("textDocument/position request missing position"))
+        })?)?;
     Ok((uri.to_owned(), position))
 }
 
-fn resolve_symbol<'a>(workspace: &'a WorkspaceState, uri: &str, position: LspPosition) -> Option<&'a SymbolOccurrence> {
+fn resolve_symbol<'a>(
+    workspace: &'a WorkspaceState,
+    uri: &str,
+    position: LspPosition,
+) -> Option<&'a SymbolOccurrence> {
     workspace
         .occurrences
         .iter()
@@ -615,7 +587,10 @@ fn range_contains(range: LspRange, position: LspPosition) -> bool {
             || (position.line == range.end.line && position.character <= range.end.character))
 }
 
-fn diagnostics_by_uri(documents: &[DocumentState], diagnostics: &DiagnosticReport) -> BTreeMap<String, Vec<LspDiagnostic>> {
+fn diagnostics_by_uri(
+    documents: &[DocumentState],
+    diagnostics: &DiagnosticReport,
+) -> BTreeMap<String, Vec<LspDiagnostic>> {
     let mut by_uri = documents
         .iter()
         .map(|document| (document.uri.clone(), Vec::new()))
@@ -661,7 +636,9 @@ fn diagnostics_by_uri(documents: &[DocumentState], diagnostics: &DiagnosticRepor
     by_uri
 }
 
-fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, Vec<SymbolOccurrence>) {
+fn collect_declarations(
+    document: &DocumentState,
+) -> (BTreeMap<String, String>, Vec<SymbolOccurrence>) {
     let mut local_symbols = BTreeMap::new();
     let mut declarations = Vec::new();
     let module_key = &document.syntax.source.logical_module;
@@ -671,7 +648,9 @@ fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, 
             SyntaxStatement::TypeAlias(statement) => {
                 let canonical = format!("{module_key}.{}", statement.name);
                 local_symbols.insert(statement.name.clone(), canonical.clone());
-                if let Some(range) = find_name_range(&document.text, statement.line, &statement.name) {
+                if let Some(range) =
+                    find_name_range(&document.text, statement.line, &statement.name)
+                {
                     declarations.push(SymbolOccurrence {
                         canonical,
                         name: statement.name.clone(),
@@ -688,7 +667,9 @@ fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, 
             | SyntaxStatement::ClassDef(statement) => {
                 let canonical = format!("{module_key}.{}", statement.name);
                 local_symbols.insert(statement.name.clone(), canonical.clone());
-                if let Some(range) = find_name_range(&document.text, statement.line, &statement.name) {
+                if let Some(range) =
+                    find_name_range(&document.text, statement.line, &statement.name)
+                {
                     declarations.push(SymbolOccurrence {
                         canonical: canonical.clone(),
                         name: statement.name.clone(),
@@ -700,7 +681,8 @@ fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, 
                 }
                 for member in &statement.members {
                     let member_canonical = format!("{canonical}.{}", member.name);
-                    if let Some(range) = find_name_range(&document.text, member.line, &member.name) {
+                    if let Some(range) = find_name_range(&document.text, member.line, &member.name)
+                    {
                         declarations.push(SymbolOccurrence {
                             canonical: member_canonical,
                             name: member.name.clone(),
@@ -746,7 +728,9 @@ fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, 
             SyntaxStatement::Import(statement) => {
                 for binding in &statement.bindings {
                     local_symbols.insert(binding.local_name.clone(), binding.source_path.clone());
-                    if let Some(range) = find_name_range(&document.text, statement.line, &binding.local_name) {
+                    if let Some(range) =
+                        find_name_range(&document.text, statement.line, &binding.local_name)
+                    {
                         declarations.push(SymbolOccurrence {
                             canonical: binding.source_path.clone(),
                             name: binding.local_name.clone(),
@@ -768,7 +752,11 @@ fn collect_declarations(document: &DocumentState) -> (BTreeMap<String, String>, 
                             name: name.clone(),
                             uri: document.uri.clone(),
                             range,
-                            detail: format!("value {}: {}", name, statement.annotation.clone().unwrap_or_default()),
+                            detail: format!(
+                                "value {}: {}",
+                                name,
+                                statement.annotation.clone().unwrap_or_default()
+                            ),
                             declaration: true,
                         });
                     }
@@ -855,14 +843,8 @@ fn tokenize_identifiers(text: &str) -> Vec<TokenOccurrence> {
                 tokens.push(TokenOccurrence {
                     name,
                     range: LspRange {
-                        start: LspPosition {
-                            line: line_index as u32,
-                            character: start as u32,
-                        },
-                        end: LspPosition {
-                            line: line_index as u32,
-                            character: index as u32,
-                        },
+                        start: LspPosition { line: line_index as u32, character: start as u32 },
+                        end: LspPosition { line: line_index as u32, character: index as u32 },
                     },
                     preceded_by_dot,
                 });
@@ -878,10 +860,7 @@ fn find_name_range(text: &str, line: usize, name: &str) -> Option<LspRange> {
     let line_text = text.lines().nth(line.saturating_sub(1))?;
     let column = line_text.find(name)?;
     Some(LspRange {
-        start: LspPosition {
-            line: line.saturating_sub(1) as u32,
-            character: column as u32,
-        },
+        start: LspPosition { line: line.saturating_sub(1) as u32, character: column as u32 },
         end: LspPosition {
             line: line.saturating_sub(1) as u32,
             character: (column + name.len()) as u32,
@@ -948,11 +927,7 @@ fn collect_source_paths(
             continue;
         };
         if !sources.iter().any(|source| source.path == *path) {
-            sources.push(DiscoveredSource {
-                path: path.clone(),
-                kind,
-                logical_module,
-            });
+            sources.push(DiscoveredSource { path: path.clone(), kind, logical_module });
         }
     }
 
@@ -964,7 +939,10 @@ fn bundled_stdlib_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")
 }
 
-fn walk_bundled_stdlib_directory(directory: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
+fn walk_bundled_stdlib_directory(
+    directory: &Path,
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
     if !directory.exists() {
         return Ok(());
     }
@@ -1087,11 +1065,7 @@ fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
 }
 
 fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
-    let Ok(relative_parent) = path
-        .parent()
-        .unwrap_or(root)
-        .strip_prefix(root)
-    else {
+    let Ok(relative_parent) = path.parent().unwrap_or(root).strip_prefix(root) else {
         return false;
     };
     let mut current = PathBuf::new();
@@ -1109,10 +1083,7 @@ fn compile_patterns(config: &ConfigHandle, patterns: &[String]) -> Result<Vec<Pa
         .iter()
         .map(|pattern| {
             Pattern::new(pattern).with_context(|| {
-                format!(
-                    "invalid glob pattern `{pattern}` in {}",
-                    config.config_path.display()
-                )
+                format!("invalid glob pattern `{pattern}` in {}", config.config_path.display())
             })
         })
         .collect()
@@ -1150,11 +1121,7 @@ fn walk_directory(
         let Some(logical_module) = logical_module_path(&root, &path) else {
             continue;
         };
-        sources.push(DiscoveredSource {
-            path,
-            kind,
-            logical_module,
-        });
+        sources.push(DiscoveredSource { path, kind, logical_module });
     }
     Ok(())
 }
@@ -1169,10 +1136,8 @@ fn is_selected_source_path(
         format!("unable to relativize {} to {}", path.display(), config.config_dir.display())
     })?;
     let relative = normalize_glob_path(relative);
-    Ok(
-        include_patterns.iter().any(|pattern| pattern.matches(&relative))
-            && !exclude_patterns.iter().any(|pattern| pattern.matches(&relative)),
-    )
+    Ok(include_patterns.iter().any(|pattern| pattern.matches(&relative))
+        && !exclude_patterns.iter().any(|pattern| pattern.matches(&relative)))
 }
 
 fn source_root_for_path(config: &ConfigHandle, path: &Path) -> Option<PathBuf> {
@@ -1247,9 +1212,7 @@ fn load_syntax_trees(
 fn collect_parse_diagnostics(syntax_trees: &[SyntaxTree]) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
     for tree in syntax_trees {
-        diagnostics
-            .diagnostics
-            .extend(tree.diagnostics.diagnostics.iter().cloned());
+        diagnostics.diagnostics.extend(tree.diagnostics.diagnostics.iter().cloned());
     }
     diagnostics
 }
@@ -1262,10 +1225,7 @@ fn normalize_glob_path(path: &Path) -> String {
 }
 
 fn normalize_path_string(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned()
 }
 
 fn path_to_uri(path: &Path) -> String {
@@ -1282,7 +1242,10 @@ fn uri_to_path(uri: &str) -> Result<PathBuf, LspError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        env, fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn handle_initialize_returns_required_capabilities() {
@@ -1300,7 +1263,10 @@ mod tests {
 
     #[test]
     fn did_open_publishes_overlay_diagnostics() {
-        let config = temp_config("did_open_publishes_overlay_diagnostics", "def ok() -> int:\n    return 1\n");
+        let config = temp_config(
+            "did_open_publishes_overlay_diagnostics",
+            "def ok() -> int:\n    return 1\n",
+        );
         let mut server = Server::new(config.clone());
         let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
         let responses = server
@@ -1310,7 +1276,11 @@ mod tests {
                 "params": {"textDocument": {"uri": uri, "text": "def broken(:\n", "languageId": "typepython", "version": 1}}
             }))
             .unwrap();
-        assert!(responses.iter().any(|response| response["method"] == json!("textDocument/publishDiagnostics")));
+        assert!(
+            responses
+                .iter()
+                .any(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+        );
         let payload = responses
             .iter()
             .find(|response| {
@@ -1328,7 +1298,10 @@ mod tests {
             "hover_definition_references_and_rename_work",
             &[
                 ("src/app/a.tpy", "def target(value: int) -> int:\n    return value\n"),
-                ("src/app/b.tpy", "from app.a import target\n\ndef use() -> int:\n    return target(1)\n"),
+                (
+                    "src/app/b.tpy",
+                    "from app.a import target\n\ndef use() -> int:\n    return target(1)\n",
+                ),
             ],
         );
         let server = Server::new(config.clone());
@@ -1373,9 +1346,10 @@ mod tests {
     fn completion_returns_local_symbols_and_member_symbols() {
         let config = temp_workspace(
             "completion_returns_local_symbols_and_member_symbols",
-            &[
-                ("src/app/__init__.tpy", "class Box:\n    value: int\n    def method(self) -> int:\n        return self.value\n\ndef build() -> Box:\n    return Box()\n\nbox: Box = build()\nbox.method\n"),
-            ],
+            &[(
+                "src/app/__init__.tpy",
+                "class Box:\n    value: int\n    def method(self) -> int:\n        return self.value\n\ndef build() -> Box:\n    return Box()\n\nbox: Box = build()\nbox.method\n",
+            )],
         );
         let mut server = Server::new(config.clone());
         let path = config.config_dir.join("src/app/__init__.tpy");
@@ -1395,7 +1369,9 @@ mod tests {
                 "position": {"line": 8, "character": 3}
             }))
             .unwrap();
-        assert!(symbols["items"].as_array().unwrap().iter().any(|item| item["label"] == json!("build")));
+        assert!(
+            symbols["items"].as_array().unwrap().iter().any(|item| item["label"] == json!("build"))
+        );
 
         let members = server
             .handle_completion(json!({
@@ -1403,7 +1379,13 @@ mod tests {
                 "position": {"line": 9, "character": 4}
             }))
             .unwrap();
-        assert!(members["items"].as_array().unwrap().iter().any(|item| item["label"] == json!("method")));
+        assert!(
+            members["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["label"] == json!("method"))
+        );
     }
 
     #[test]

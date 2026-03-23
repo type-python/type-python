@@ -38,7 +38,9 @@ pub enum SnapshotDecodeError {
 impl std::fmt::Display for SnapshotDecodeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidJson(error) => write!(formatter, "invalid incremental snapshot JSON: {error}"),
+            Self::InvalidJson(error) => {
+                write!(formatter, "invalid incremental snapshot JSON: {error}")
+            }
             Self::IncompatibleSchemaVersion(version) => write!(
                 formatter,
                 "incremental snapshot schema version {version} is incompatible with expected version {SNAPSHOT_SCHEMA_VERSION}"
@@ -72,10 +74,9 @@ pub fn diff(previous: &IncrementalState, current: &IncrementalState) -> Snapshot
 
     for (module_key, fingerprint) in &current.fingerprints {
         match previous.fingerprints.get(module_key) {
-            None => snapshot_diff.added.push(Fingerprint {
-                module_key: module_key.clone(),
-                fingerprint: *fingerprint,
-            }),
+            None => snapshot_diff
+                .added
+                .push(Fingerprint { module_key: module_key.clone(), fingerprint: *fingerprint }),
             Some(previous_fingerprint) if previous_fingerprint != fingerprint => {
                 snapshot_diff.changed.push(Fingerprint {
                     module_key: module_key.clone(),
@@ -88,10 +89,9 @@ pub fn diff(previous: &IncrementalState, current: &IncrementalState) -> Snapshot
 
     for (module_key, fingerprint) in &previous.fingerprints {
         if !current.fingerprints.contains_key(module_key) {
-            snapshot_diff.removed.push(Fingerprint {
-                module_key: module_key.clone(),
-                fingerprint: *fingerprint,
-            });
+            snapshot_diff
+                .removed
+                .push(Fingerprint { module_key: module_key.clone(), fingerprint: *fingerprint });
         }
     }
 
@@ -109,18 +109,17 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
     let snapshot: SnapshotFile = serde_json::from_str(contents)
         .map_err(|error| SnapshotDecodeError::InvalidJson(error.to_string()))?;
     if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION {
-        return Err(SnapshotDecodeError::IncompatibleSchemaVersion(
-            snapshot.schema_version,
-        ));
+        return Err(SnapshotDecodeError::IncompatibleSchemaVersion(snapshot.schema_version));
     }
-    Ok(IncrementalState {
-        fingerprints: snapshot.fingerprints,
-    })
+    Ok(IncrementalState { fingerprints: snapshot.fingerprints })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Fingerprint, IncrementalState, SNAPSHOT_SCHEMA_VERSION, SnapshotDecodeError, SnapshotDiff, decode_snapshot, diff, encode_snapshot};
+    use super::{
+        Fingerprint, IncrementalState, SNAPSHOT_SCHEMA_VERSION, SnapshotDecodeError, SnapshotDiff,
+        decode_snapshot, diff, encode_snapshot,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -143,27 +142,17 @@ mod tests {
         assert_eq!(
             snapshot_diff,
             SnapshotDiff {
-                added: vec![Fingerprint {
-                    module_key: String::from("pkg.c"),
-                    fingerprint: 40,
-                }],
-                removed: vec![Fingerprint {
-                    module_key: String::from("pkg.a"),
-                    fingerprint: 10,
-                }],
-                changed: vec![Fingerprint {
-                    module_key: String::from("pkg.b"),
-                    fingerprint: 30,
-                }],
+                added: vec![Fingerprint { module_key: String::from("pkg.c"), fingerprint: 40 }],
+                removed: vec![Fingerprint { module_key: String::from("pkg.a"), fingerprint: 10 }],
+                changed: vec![Fingerprint { module_key: String::from("pkg.b"), fingerprint: 30 }],
             }
         );
     }
 
     #[test]
     fn diff_reports_no_changes_for_identical_snapshots() {
-        let state = IncrementalState {
-            fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
-        };
+        let state =
+            IncrementalState { fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]) };
 
         let snapshot_diff = diff(&state, &state);
         assert!(snapshot_diff.added.is_empty());
@@ -188,9 +177,6 @@ mod tests {
         let error = decode_snapshot("{\"schema_version\":999,\"fingerprints\":{}}")
             .expect_err("unexpected schema version should be rejected");
 
-        assert_eq!(
-            error,
-            SnapshotDecodeError::IncompatibleSchemaVersion(999)
-        );
+        assert_eq!(error, SnapshotDecodeError::IncompatibleSchemaVersion(999));
     }
 }

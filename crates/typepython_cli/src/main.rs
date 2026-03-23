@@ -31,11 +31,7 @@ const INIT_SOURCE_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/src/app/__init__.tpy"));
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "typepython",
-    version,
-    about = "Rust compiler and tooling for TypePython"
-)]
+#[command(name = "typepython", version, about = "Rust compiler and tooling for TypePython")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -279,7 +275,9 @@ fn run_watch(args: RunArgs) -> Result<ExitCode> {
     .context("unable to start filesystem watcher")?;
 
     for (path, mode) in &watch_targets {
-        watcher.watch(path, *mode).with_context(|| format!("unable to watch {}", path.display()))?;
+        watcher
+            .watch(path, *mode)
+            .with_context(|| format!("unable to watch {}", path.display()))?;
     }
 
     let debounce = Duration::from_millis(config.config.watch.debounce_ms);
@@ -322,10 +320,7 @@ fn build_diagnostics(config: &ConfigHandle, diagnostics: &DiagnosticReport) -> D
     if diagnostics.has_errors() && config.config.emit.no_emit_on_error {
         build_diagnostics.push(Diagnostic::error(
             "TPY5002",
-            format!(
-                "emit blocked by `emit.no_emit_on_error` for {}",
-                config.config_dir.display()
-            ),
+            format!("emit blocked by `emit.no_emit_on_error` for {}", config.config_dir.display()),
         ));
     }
 
@@ -350,7 +345,9 @@ fn clean_project(args: CleanArgs) -> Result<ExitCode> {
 fn run_lsp(args: RunArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
     if args.format == OutputFormat::Json {
-        return Err(anyhow::anyhow!("`typepython lsp` speaks JSON-RPC over stdio and does not support `--format json`"));
+        return Err(anyhow::anyhow!(
+            "`typepython lsp` speaks JSON-RPC over stdio and does not support `--format json`"
+        ));
     }
     typepython_lsp::serve(&config)?;
     Ok(ExitCode::SUCCESS)
@@ -496,18 +493,21 @@ fn run_build_like_command(
 }
 
 fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
-    fs::create_dir_all(config.resolve_relative_path(&config.config.project.out_dir)).with_context(|| {
-        format!(
-            "unable to create output directory {}",
-            config.resolve_relative_path(&config.config.project.out_dir).display()
-        )
-    })?;
-    fs::create_dir_all(config.resolve_relative_path(&config.config.project.cache_dir)).with_context(|| {
-        format!(
-            "unable to create cache directory {}",
-            config.resolve_relative_path(&config.config.project.cache_dir).display()
-        )
-    })?;
+    fs::create_dir_all(config.resolve_relative_path(&config.config.project.out_dir)).with_context(
+        || {
+            format!(
+                "unable to create output directory {}",
+                config.resolve_relative_path(&config.config.project.out_dir).display()
+            )
+        },
+    )?;
+    fs::create_dir_all(config.resolve_relative_path(&config.config.project.cache_dir))
+        .with_context(|| {
+            format!(
+                "unable to create cache directory {}",
+                config.resolve_relative_path(&config.config.project.cache_dir).display()
+            )
+        })?;
     Ok(())
 }
 
@@ -541,10 +541,7 @@ fn format_watch_rebuild_note(changed_paths: &BTreeSet<PathBuf>) -> String {
     if changed_paths.len() <= 3 {
         format!("rebuild triggered by {preview}")
     } else {
-        format!(
-            "rebuild triggered by {preview} and {} more path(s)",
-            changed_paths.len() - 3
-        )
+        format!("rebuild triggered by {preview} and {} more path(s)", changed_paths.len() - 3)
     }
 }
 
@@ -609,9 +606,7 @@ fn build_migration_report(
                     })
                     .max_by_key(|stats| stats.module_key.len());
                 if let Some(stats) = target {
-                    *downstream_reference_counts
-                        .entry(stats.entry.path.clone())
-                        .or_default() += 1;
+                    *downstream_reference_counts.entry(stats.entry.path.clone()).or_default() += 1;
                 }
             }
         }
@@ -677,7 +672,10 @@ fn migration_file_stats(
     }
 }
 
-fn accumulate_statement_coverage(statement: &typepython_syntax::SyntaxStatement, tally: &mut CoverageTally) {
+fn accumulate_statement_coverage(
+    statement: &typepython_syntax::SyntaxStatement,
+    tally: &mut CoverageTally,
+) {
     match statement {
         typepython_syntax::SyntaxStatement::TypeAlias(statement) => {
             tally.declarations += 1;
@@ -736,8 +734,9 @@ fn accumulate_statement_coverage(statement: &typepython_syntax::SyntaxStatement,
             }
         }
         typepython_syntax::SyntaxStatement::Value(statement) => {
-            let (annotation_known, dynamic_count, unknown_count) =
-                known_type_slot(statement.annotation.as_deref().or(statement.value_type.as_deref()));
+            let (annotation_known, dynamic_count, unknown_count) = known_type_slot(
+                statement.annotation.as_deref().or(statement.value_type.as_deref()),
+            );
             tally.dynamic_boundaries += dynamic_count;
             tally.unknown_boundaries += unknown_count;
             for _ in &statement.names {
@@ -769,13 +768,12 @@ fn class_member_coverage(member: &typepython_syntax::ClassMember) -> (bool, usiz
         typepython_syntax::ClassMemberKind::Field => {
             known_type_slot(member.annotation.as_deref().or(member.value_type.as_deref()))
         }
-        typepython_syntax::ClassMemberKind::Method | typepython_syntax::ClassMemberKind::Overload => {
-            function_signature_coverage(
-                &member.params,
-                member.returns.as_deref(),
-                !matches!(member.method_kind, Some(typepython_syntax::MethodKind::Static)),
-            )
-        }
+        typepython_syntax::ClassMemberKind::Method
+        | typepython_syntax::ClassMemberKind::Overload => function_signature_coverage(
+            &member.params,
+            member.returns.as_deref(),
+            !matches!(member.method_kind, Some(typepython_syntax::MethodKind::Static)),
+        ),
     }
 }
 
@@ -797,7 +795,8 @@ fn function_signature_coverage(
             continue;
         }
 
-        let (param_known, dynamic_count, unknown_count) = known_type_slot(param.annotation.as_deref());
+        let (param_known, dynamic_count, unknown_count) =
+            known_type_slot(param.annotation.as_deref());
         dynamic_boundaries += dynamic_count;
         unknown_boundaries += unknown_count;
         if !param_known {
@@ -820,11 +819,7 @@ fn known_type_slot(text: Option<&str>) -> (bool, usize, usize) {
         return (false, 0, 0);
     };
     let (dynamic_count, unknown_count) = count_boundary_tokens(text);
-    (
-        !text.is_empty() && dynamic_count == 0 && unknown_count == 0,
-        dynamic_count,
-        unknown_count,
-    )
+    (!text.is_empty() && dynamic_count == 0 && unknown_count == 0, dynamic_count, unknown_count)
 }
 
 fn count_boundary_tokens(text: &str) -> (usize, usize) {
@@ -856,11 +851,7 @@ fn count_boundary_tokens(text: &str) -> (usize, usize) {
 }
 
 fn coverage_percent(known: usize, total: usize) -> f64 {
-    if total == 0 {
-        100.0
-    } else {
-        ((known as f64 / total as f64) * 1000.0).round() / 10.0
-    }
+    if total == 0 { 100.0 } else { ((known as f64 / total as f64) * 1000.0).round() / 10.0 }
 }
 
 fn source_kind_label(kind: SourceKind) -> &'static str {
@@ -962,7 +953,8 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
-    let lowered_modules: Vec<_> = lowering_results.into_iter().map(|result| result.module).collect();
+    let lowered_modules: Vec<_> =
+        lowering_results.into_iter().map(|result| result.module).collect();
     let bindings: Vec<_> = all_syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
     let mut diagnostics = check_with_options(
@@ -974,9 +966,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     .diagnostics;
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
     diagnostics.diagnostics.extend(
-        public_surface_completeness_diagnostics(config, &syntax_trees)
-            .diagnostics
-            .into_iter(),
+        public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics.into_iter(),
     );
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
@@ -1065,9 +1055,12 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
             }
         }
 
-        if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
+        if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
+        {
             if runtime_path.exists() && stub_path.exists() {
-                if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
+                if let Some(diagnostic) =
+                    verify_emitted_declaration_surface(runtime_path, stub_path)
+                {
                     diagnostics.push(diagnostic);
                 }
             }
@@ -1086,9 +1079,8 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
         }
     }
 
-    let snapshot_path = config
-        .resolve_relative_path(&config.config.project.cache_dir)
-        .join("snapshot.json");
+    let snapshot_path =
+        config.resolve_relative_path(&config.config.project.cache_dir).join("snapshot.json");
     if !snapshot_path.exists() {
         diagnostics.push(Diagnostic::error(
             "TPY5003",
@@ -1111,9 +1103,7 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
 fn verify_incremental_snapshot(path: &Path) -> Result<(), String> {
     let rendered = fs::read_to_string(path)
         .map_err(|error| format!("unable to read incremental snapshot: {error}"))?;
-    decode_snapshot(&rendered)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    decode_snapshot(&rendered).map(|_| ()).map_err(|error| error.to_string())
 }
 
 fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
@@ -1123,7 +1113,7 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
             return Some(Diagnostic::error(
                 "TPY5003",
                 format!("unable to read emitted artifact `{}`: {error}", path.display()),
-            ))
+            ));
         }
     };
     let syntax = parse(source);
@@ -1158,11 +1148,7 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
 fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {
     let source = SourceFile::from_path(path).ok()?;
     let syntax = parse(source);
-    if syntax.diagnostics.has_errors() {
-        None
-    } else {
-        Some(syntax)
-    }
+    if syntax.diagnostics.has_errors() { None } else { Some(syntax) }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -1221,7 +1207,9 @@ fn declaration_surface(
                             typepython_syntax::ClassMemberKind::Method
                             | typepython_syntax::ClassMemberKind::Overload => format!(
                                 "kind={:?};final={};sig={}",
-                                member.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance),
+                                member
+                                    .method_kind
+                                    .unwrap_or(typepython_syntax::MethodKind::Instance),
                                 member.is_final_decorator,
                                 format_signature(&member.params, member.returns.as_deref())
                             ),
@@ -1481,7 +1469,10 @@ fn bundled_stdlib_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")
 }
 
-fn walk_bundled_stdlib_directory(directory: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
+fn walk_bundled_stdlib_directory(
+    directory: &Path,
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
     if !directory.exists() {
         return Ok(());
     }
@@ -1595,12 +1586,7 @@ fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> 
         let Some(logical_module) = logical_module_path(root, &path) else {
             continue;
         };
-        sources.push(DiscoveredSource {
-            path,
-            root: root.to_path_buf(),
-            kind,
-            logical_module,
-        });
+        sources.push(DiscoveredSource { path, root: root.to_path_buf(), kind, logical_module });
     }
     Ok(())
 }
@@ -1614,11 +1600,7 @@ fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
 }
 
 fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
-    let Ok(relative_parent) = path
-        .parent()
-        .unwrap_or(root)
-        .strip_prefix(root)
-    else {
+    let Ok(relative_parent) = path.parent().unwrap_or(root).strip_prefix(root) else {
         return false;
     };
     let mut current = PathBuf::new();
@@ -1831,12 +1813,13 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_diagnostics, build_migration_report, collect_source_paths,
-        compile_runtime_bytecode, format_watch_rebuild_note, load_syntax_trees, run_pipeline,
-        should_emit_build_outputs, watch_targets, verify_build_artifacts,
-        write_incremental_snapshot,
+        build_diagnostics, build_migration_report, collect_source_paths, compile_runtime_bytecode,
+        format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
+        verify_build_artifacts, watch_targets, write_incremental_snapshot,
     };
     use notify::RecursiveMode;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::{
         collections::BTreeSet,
         env, fs,
@@ -1844,8 +1827,6 @@ mod tests {
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     use typepython_config::load;
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::EmitArtifact;
@@ -1974,7 +1955,8 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             let config = load(&project_dir).unwrap();
@@ -1998,18 +1980,33 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
-        let project_dir = temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
+        let project_dir = temp_project_dir(
+            "verify_build_artifacts_accepts_present_runtime_stub_and_marker_files",
+        );
         let diagnostics = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n").unwrap();
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
+            )
+            .unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/helpers.pyi"), "def helper() -> int: ...\n").unwrap();
+            fs::write(
+                project_dir.join(".typepython/build/app/helpers.pyi"),
+                "def helper() -> int: ...\n",
+            )
+            .unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").unwrap();
-            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc")
+                .unwrap();
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2035,9 +2032,14 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_missing_bytecode_when_enabled() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_bytecode_when_enabled");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_bytecode_when_enabled");
         let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n").unwrap();
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
+            )
+            .unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
@@ -2062,7 +2064,8 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_missing_incremental_snapshot() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
@@ -2089,15 +2092,21 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_invalid_emitted_python_syntax() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n").unwrap();
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n")
+                .unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2118,15 +2127,24 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
             fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def build_user() -> int:\n    return 1\n").unwrap();
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "def build_user() -> int:\n    return 1\n",
+            )
+            .unwrap();
             fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2147,7 +2165,8 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
@@ -2163,7 +2182,11 @@ mod tests {
             )
             .unwrap();
             fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(&project_dir.join(".typepython/cache"), &IncrementalState::default()).unwrap();
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
 
             verify_build_artifacts(
@@ -2184,7 +2207,8 @@ mod tests {
 
     #[test]
     fn verify_build_artifacts_reports_corrupt_incremental_snapshot() {
-        let project_dir = temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
@@ -2213,7 +2237,8 @@ mod tests {
 
     #[test]
     fn run_pipeline_reports_incomplete_public_surface_when_required() {
-        let project_dir = temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
+        let project_dir =
+            temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
         let rendered = (|| {
             fs::create_dir_all(project_dir.join("src/app")).unwrap();
             fs::write(
@@ -2238,7 +2263,8 @@ mod tests {
 
     #[test]
     fn run_pipeline_ignores_private_incomplete_surface_when_required() {
-        let project_dir = temp_project_dir("run_pipeline_ignores_private_incomplete_surface_when_required");
+        let project_dir =
+            temp_project_dir("run_pipeline_ignores_private_incomplete_surface_when_required");
         let diagnostics = (|| {
             fs::create_dir_all(project_dir.join("src/app")).unwrap();
             fs::write(
@@ -2262,7 +2288,8 @@ mod tests {
 
     #[test]
     fn build_diagnostics_adds_emit_blocked_error_when_configured() {
-        let project_dir = temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
+        let project_dir =
+            temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
         let rendered = (|| {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             let config = load(&project_dir).unwrap();
@@ -2281,7 +2308,11 @@ mod tests {
     fn should_emit_build_outputs_respects_no_emit_on_error() {
         let project_dir = temp_project_dir("should_emit_build_outputs_respects_no_emit_on_error");
         let result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n").unwrap();
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
@@ -2308,7 +2339,10 @@ mod tests {
             )
             .unwrap();
 
-            (snapshot_path, fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).unwrap())
+            (
+                snapshot_path,
+                fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).unwrap(),
+            )
         })();
         remove_temp_project_dir(&project_dir);
 
@@ -2320,7 +2354,8 @@ mod tests {
 
     #[test]
     fn compile_runtime_bytecode_uses_configured_python_executable() {
-        let project_dir = temp_project_dir("compile_runtime_bytecode_uses_configured_python_executable");
+        let project_dir =
+            temp_project_dir("compile_runtime_bytecode_uses_configured_python_executable");
         let result = (|| {
             fs::create_dir_all(project_dir.join("bin")).unwrap();
             fs::create_dir_all(project_dir.join("out/app")).unwrap();
@@ -2371,7 +2406,8 @@ mod tests {
 
     #[test]
     fn watch_targets_include_config_and_existing_source_roots() {
-        let project_dir = temp_project_dir("watch_targets_include_config_and_existing_source_roots");
+        let project_dir =
+            temp_project_dir("watch_targets_include_config_and_existing_source_roots");
         let targets = (|| {
             fs::create_dir_all(project_dir.join("src/app")).unwrap();
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
@@ -2384,7 +2420,11 @@ mod tests {
         assert!(targets.iter().any(|(path, mode)| {
             path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
         }));
-        assert!(targets.iter().any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive));
+        assert!(
+            targets
+                .iter()
+                .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive)
+        );
     }
 
     #[test]
@@ -2403,7 +2443,8 @@ mod tests {
 
     #[test]
     fn build_migration_report_counts_file_coverage_and_boundaries() {
-        let project_dir = temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
+        let project_dir =
+            temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
         let report = (|| {
             fs::create_dir_all(project_dir.join("src/app")).unwrap();
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
@@ -2429,18 +2470,27 @@ mod tests {
 
     #[test]
     fn build_migration_report_ranks_high_impact_untyped_files() {
-        let project_dir = temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
+        let project_dir =
+            temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
         let report = (|| {
             fs::create_dir_all(project_dir.join("src/app")).unwrap();
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
             fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/app/a.tpy"), "def untyped(value) -> int:\n    return 0\n").unwrap();
+            fs::write(
+                project_dir.join("src/app/a.tpy"),
+                "def untyped(value) -> int:\n    return 0\n",
+            )
+            .unwrap();
             fs::write(
                 project_dir.join("src/app/b.tpy"),
                 "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
             )
             .unwrap();
-            fs::write(project_dir.join("src/app/c.tpy"), "def clean(value: int) -> int:\n    return value\n").unwrap();
+            fs::write(
+                project_dir.join("src/app/c.tpy"),
+                "def clean(value: int) -> int:\n    return value\n",
+            )
+            .unwrap();
             let config = load(&project_dir).unwrap();
             let discovery = collect_source_paths(&config).unwrap();
             let syntax_trees = load_syntax_trees(&discovery.sources).unwrap();
@@ -2539,14 +2589,8 @@ fn print_migration_report(
             print_summary(OutputFormat::Text, summary, diagnostics)?;
             println!("  migration total declarations: {}", report.total_declarations);
             println!("  migration known declarations: {}", report.known_declarations);
-            println!(
-                "  migration dynamic boundaries: {}",
-                report.total_dynamic_boundaries
-            );
-            println!(
-                "  migration unknown boundaries: {}",
-                report.total_unknown_boundaries
-            );
+            println!("  migration dynamic boundaries: {}", report.total_dynamic_boundaries);
+            println!("  migration unknown boundaries: {}", report.total_unknown_boundaries);
             println!("  file coverage:");
             for entry in &report.files {
                 println!(
