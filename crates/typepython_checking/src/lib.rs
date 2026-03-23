@@ -3177,9 +3177,13 @@ fn direct_method_call_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let direct_method_signatures = load_direct_method_signatures(node);
 
     for call in &node.method_calls {
-        let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name)
+        let Some(owner_type_name) = resolve_method_call_owner_type(node, nodes, call) else {
+            continue;
+        };
+        let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name)
         else {
             continue;
         };
@@ -3188,6 +3192,24 @@ fn direct_method_call_diagnostics(
         else {
             continue;
         };
+
+        if let Some(signature) =
+            direct_method_signatures.get(&(class_decl.name.clone(), call.method.clone()))
+        {
+            let direct_call = typepython_binding::CallSite {
+                callee: format!("{}.{}", class_decl.name, call.method),
+                arg_count: call.arg_count,
+                arg_types: call.arg_types.clone(),
+                keyword_names: call.keyword_names.clone(),
+                keyword_arg_types: call.keyword_arg_types.clone(),
+            };
+            if let Some(diagnostic) = direct_source_function_arity_diagnostic(node, &direct_call, signature) {
+                diagnostics.push(diagnostic);
+            }
+            diagnostics.extend(direct_source_function_keyword_diagnostics(node, &direct_call, signature));
+            diagnostics.extend(direct_source_function_type_diagnostics(node, &direct_call, signature));
+            continue;
+        }
 
         let method_signature = substitute_self_annotation(&target.detail, Some(&class_decl.name));
         let param_names = direct_param_names(&method_signature).unwrap_or_default();
@@ -3219,6 +3241,16 @@ fn direct_method_call_diagnostics(
                 }
                 _ => param_names.into_iter().skip(1).collect(),
             };
+        let expected_types = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                direct_param_types(&method_signature).unwrap_or_default()
+            }
+            _ => direct_param_types(&method_signature)
+                .unwrap_or_default()
+                .into_iter()
+                .skip(1)
+                .collect(),
+        };
         for keyword in &call.keyword_names {
             if !expected_names.iter().any(|param| param == keyword) {
                 diagnostics.push(Diagnostic::error(
@@ -3232,6 +3264,111 @@ fn direct_method_call_diagnostics(
                     ),
                 ));
             }
+        }
+        diagnostics.extend(positional_and_method_keyword_type_diagnostics(
+            node,
+            &owner_type_name,
+            call,
+            &expected_types,
+            &expected_names,
+        ));
+    }
+
+    diagnostics
+}
+
+fn load_direct_method_signatures(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return BTreeMap::new();
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_direct_method_signature_sites(&source)
+        .into_iter()
+        .map(|signature| {
+            let params = signature.params.into_iter().skip(1).collect::<Vec<_>>();
+            ((signature.owner_type_name, signature.name), params)
+        })
+        .collect()
+}
+
+fn resolve_method_call_owner_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::MethodCallSite,
+) -> Option<String> {
+    if call.through_instance {
+        return resolve_direct_callable_return_type(node, nodes, &call.owner_name)
+            .map(|return_type| normalize_type_text(&return_type))
+            .or_else(|| Some(call.owner_name.clone()));
+    }
+
+    resolve_direct_name_reference_type(
+        node,
+        nodes,
+        None,
+        None,
+        None,
+        None,
+        call.line,
+        &call.owner_name,
+    )
+    .or_else(|| Some(call.owner_name.clone()))
+}
+
+fn positional_and_method_keyword_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    owner_type_name: &str,
+    call: &typepython_binding::MethodCallSite,
+    param_types: &[String],
+    param_names: &[String],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = call
+        .arg_types
+        .iter()
+        .zip(param_types.iter())
+        .filter(|(arg_ty, param_ty)| {
+            !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+        })
+        .map(|(arg_ty, param_ty)| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}.{}` in module `{}` passes `{}` where parameter expects `{}`",
+                    owner_type_name,
+                    call.method,
+                    node.module_path.display(),
+                    arg_ty,
+                    param_ty
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+        let Some(index) = param_names.iter().position(|param| param == keyword) else {
+            continue;
+        };
+        let Some(param_ty) = param_types.get(index) else {
+            continue;
+        };
+        if !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty != param_ty {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}.{}` in module `{}` passes `{}` for keyword `{}` where parameter expects `{}`",
+                    owner_type_name,
+                    call.method,
+                    node.module_path.display(),
+                    arg_ty,
+                    keyword,
+                    param_ty
+                ),
+            ));
         }
     }
 
@@ -14625,6 +14762,7 @@ mod tests {
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    line: 1,
                 }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -14807,6 +14945,7 @@ mod tests {
                     arg_types: vec![String::from("int")],
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    line: 1,
                 }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -16548,6 +16687,18 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("returns `str` where `build` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_keyword_type_mismatch_in_method_calls() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def set_age(self, age: int):\n        self.age = age\n\nuser = User()\nuser.set_age(age=\"oops\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("keyword `age`"));
+        assert!(rendered.contains("parameter expects `int`"));
     }
 
     #[test]
@@ -19362,6 +19513,7 @@ mod tests {
                     arg_types: vec![String::from("Box")],
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    line: 1,
                 }],
             }],
         });
