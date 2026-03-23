@@ -1253,7 +1253,7 @@ mod tests {
         let mut server = Server::new(config);
         let responses = server
             .handle_message(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
-            .unwrap();
+            .expect("initialize should succeed");
         let capabilities = &responses[0]["result"]["capabilities"];
         assert_eq!(capabilities["hoverProvider"], json!(true));
         assert_eq!(capabilities["definitionProvider"], json!(true));
@@ -1275,7 +1275,7 @@ mod tests {
                 "method":"textDocument/didOpen",
                 "params": {"textDocument": {"uri": uri, "text": "def broken(:\n", "languageId": "typepython", "version": 1}}
             }))
-            .unwrap();
+            .expect("didOpen should publish diagnostics");
         assert!(
             responses
                 .iter()
@@ -1287,8 +1287,10 @@ mod tests {
                 response["method"] == json!("textDocument/publishDiagnostics")
                     && response["params"]["uri"] == json!(uri)
             })
-            .unwrap();
-        let diagnostics = payload["params"]["diagnostics"].as_array().unwrap();
+            .expect("publishDiagnostics notification should be present");
+        let diagnostics = payload["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics payload should be an array");
         assert!(!diagnostics.is_empty());
     }
 
@@ -1312,16 +1314,21 @@ mod tests {
                 "textDocument": {"uri": uri},
                 "position": {"line": 3, "character": 11}
             }))
-            .unwrap();
-        assert!(hover["contents"]["value"].as_str().unwrap().contains("function target"));
+            .expect("hover should succeed");
+        assert!(
+            hover["contents"]["value"]
+                .as_str()
+                .expect("hover contents should be a string")
+                .contains("function target")
+        );
 
         let definition = server
             .handle_definition(json!({
                 "textDocument": {"uri": uri},
                 "position": {"line": 3, "character": 11}
             }))
-            .unwrap();
-        assert_eq!(definition.as_array().unwrap().len(), 1);
+            .expect("definition should succeed");
+        assert_eq!(definition.as_array().expect("definition should be an array").len(), 1);
 
         let references = server
             .handle_references(json!({
@@ -1329,8 +1336,8 @@ mod tests {
                 "position": {"line": 3, "character": 11},
                 "context": {"includeDeclaration": true}
             }))
-            .unwrap();
-        assert!(references.as_array().unwrap().len() >= 2);
+            .expect("references should succeed");
+        assert!(references.as_array().expect("references should be an array").len() >= 2);
 
         let rename = server
             .handle_rename(json!({
@@ -1338,7 +1345,7 @@ mod tests {
                 "position": {"line": 3, "character": 11},
                 "newName": "renamed"
             }))
-            .unwrap();
+            .expect("rename should succeed");
         assert!(rename["changes"].is_object());
     }
 
@@ -1353,7 +1360,7 @@ mod tests {
         );
         let mut server = Server::new(config.clone());
         let path = config.config_dir.join("src/app/__init__.tpy");
-        let text = fs::read_to_string(&path).unwrap();
+        let text = fs::read_to_string(&path).expect("source file should be readable");
         let uri = path_to_uri(&path);
         server
             .handle_message(json!({
@@ -1361,16 +1368,20 @@ mod tests {
                 "method":"textDocument/didOpen",
                 "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
             }))
-            .unwrap();
+            .expect("didOpen should succeed");
 
         let symbols = server
             .handle_completion(json!({
                 "textDocument": {"uri": uri},
                 "position": {"line": 8, "character": 3}
             }))
-            .unwrap();
+            .expect("completion for local symbols should succeed");
         assert!(
-            symbols["items"].as_array().unwrap().iter().any(|item| item["label"] == json!("build"))
+            symbols["items"]
+                .as_array()
+                .expect("completion items should be an array")
+                .iter()
+                .any(|item| item["label"] == json!("build"))
         );
 
         let members = server
@@ -1378,11 +1389,11 @@ mod tests {
                 "textDocument": {"uri": uri},
                 "position": {"line": 9, "character": 4}
             }))
-            .unwrap();
+            .expect("completion for member symbols should succeed");
         assert!(
             members["items"]
                 .as_array()
-                .unwrap()
+                .expect("member completion items should be an array")
                 .iter()
                 .any(|item| item["label"] == json!("method"))
         );
@@ -1426,7 +1437,7 @@ mod tests {
                 "method":"textDocument/didOpen",
                 "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 3}}
             }))
-            .unwrap();
+            .expect("didOpen should succeed");
 
         let error = server
             .handle_message(json!({
@@ -1448,26 +1459,30 @@ mod tests {
     }
 
     fn temp_workspace(test_name: &str, files: &[(&str, &str)]) -> ConfigHandle {
-        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
         let root = env::temp_dir().join(format!("typepython-lsp-{test_name}-{unique}"));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
+        fs::create_dir_all(&root).expect("workspace root should be created");
+        fs::write(root.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("typepython.toml should be written");
         for (path, content) in files {
             let file_path = root.join(path);
             if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent).unwrap();
+                fs::create_dir_all(parent).expect("parent directory should be created");
                 let src_root = root.join("src");
                 let mut current = parent.to_path_buf();
                 while current.starts_with(&src_root) && current != src_root {
                     let init_path = current.join("__init__.tpy");
                     if !init_path.exists() {
-                        fs::write(&init_path, "pass\n").unwrap();
+                        fs::write(&init_path, "pass\n").expect("package marker should be written");
                     }
-                    current = current.parent().unwrap().to_path_buf();
+                    current = current.parent().expect("parent directory should exist").to_path_buf();
                 }
             }
-            fs::write(file_path, content).unwrap();
+            fs::write(file_path, content).expect("workspace file should be written");
         }
-        typepython_config::load(&root).unwrap()
+        typepython_config::load(&root).expect("workspace config should load")
     }
 }
