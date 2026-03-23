@@ -94,7 +94,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .iter()
         .filter_map(|statement| match statement {
             SyntaxStatement::Interface(statement) if is_lowerable_named_block(statement) => {
-                Some((statement.line, statement))
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
             }
             _ => None,
         })
@@ -104,7 +104,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .iter()
         .filter_map(|statement| match statement {
             SyntaxStatement::DataClass(statement) if is_lowerable_named_block(statement) => {
-                Some((statement.line, statement))
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
             }
             _ => None,
         })
@@ -113,7 +113,9 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::OverloadDef(statement) => Some((statement.line, statement)),
+            SyntaxStatement::OverloadDef(statement) => {
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
+            }
             _ => None,
         })
         .collect();
@@ -122,7 +124,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .iter()
         .filter_map(|statement| match statement {
             SyntaxStatement::SealedClass(statement) if is_lowerable_named_block(statement) => {
-                Some((statement.line, statement))
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
             }
             _ => None,
         })
@@ -131,7 +133,9 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::ClassDef(statement) => Some((statement.line, statement)),
+            SyntaxStatement::ClassDef(statement) => {
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
+            }
             _ => None,
         })
         .collect();
@@ -145,7 +149,9 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
         .statements
         .iter()
         .filter_map(|statement| match statement {
-            SyntaxStatement::FunctionDef(statement) => Some((statement.line, statement)),
+            SyntaxStatement::FunctionDef(statement) => {
+                Some((header_line_for_statement(&tree.source.text, statement.line), statement))
+            }
             _ => None,
         })
         .collect();
@@ -257,6 +263,19 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     }
 
     LoweredText { python_source: lowered, source_map }
+}
+
+fn header_line_for_statement(source: &str, start_line: usize) -> usize {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut index = start_line.saturating_sub(1);
+    while index < lines.len() {
+        let trimmed = lines[index].trim_start();
+        if !trimmed.is_empty() && !trimmed.starts_with('@') {
+            return index + 1;
+        }
+        index += 1;
+    }
+    start_line
 }
 
 fn collect_runtime_type_params(
@@ -2221,6 +2240,74 @@ mod tests {
             .contains("class MutableConfig(TypedDict):"));
         // ReadOnly wrapper should be stripped
         assert!(lowered.module.python_source.contains("debug: bool"));
+    }
+
+    #[test]
+    fn lower_keeps_decorated_class_header_singleton() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("decorated-class.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "@model\nclass User:\n    name: str\n    age: int\n",
+                ),
+            },
+            statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("User"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: vec![
+                    ClassMember {
+                        name: String::from("name"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("str")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 3,
+                    },
+                    ClassMember {
+                        name: String::from("age"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("int")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 4,
+                    },
+                ],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        let lines = lowered.module.python_source.lines().collect::<Vec<_>>();
+        assert_eq!(lines, vec!["@model", "class User:", "    name: str", "    age: int"]);
     }
 
     #[test]
