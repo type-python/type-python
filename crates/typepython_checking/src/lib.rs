@@ -3290,7 +3290,14 @@ fn load_direct_method_signatures(
     typepython_syntax::collect_direct_method_signature_sites(&source)
         .into_iter()
         .map(|signature| {
-            let params = signature.params.into_iter().skip(1).collect::<Vec<_>>();
+            let params = match signature.method_kind {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    signature.params
+                }
+                typepython_syntax::MethodKind::Instance | typepython_syntax::MethodKind::Class => {
+                    signature.params.into_iter().skip(1).collect()
+                }
+            };
             ((signature.owner_type_name, signature.name), params)
         })
         .collect()
@@ -3583,17 +3590,29 @@ fn direct_source_function_keyword_diagnostics(
     let param_names = signature.iter().map(|param| param.name.as_str()).collect::<BTreeSet<_>>();
     call.keyword_names
         .iter()
-        .filter(|keyword| !param_names.contains(keyword.as_str()))
-        .map(|keyword| {
-            Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}` in module `{}` uses unknown keyword `{}`",
-                    call.callee,
-                    node.module_path.display(),
-                    keyword
+        .filter_map(|keyword| {
+            let matching = signature.iter().find(|param| param.name == *keyword);
+            Some(match matching {
+                Some(param) if param.positional_only => Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` passes positional-only parameter `{}` as a keyword",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
                 ),
-            )
+                None if !param_names.contains(keyword.as_str()) => Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` uses unknown keyword `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
+                ),
+                _ => return None,
+            })
         })
         .collect()
 }
@@ -5694,6 +5713,17 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_positional_only_parameter_passed_as_keyword() {
+        let result = check_temp_typepython_source(
+            "def takes(x: int, /):\n    return x\n\ntakes(x=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("positional-only parameter `x`"));
+    }
+
+    #[test]
     fn check_accepts_keyword_constructor_calls_for_explicit_init() {
         let result = check_temp_typepython_source(
             "class User:\n    def __init__(self, age: int, name: str = \"Ada\"):\n        self.age = age\n        self.name = name\n\nUser(age=1)\nUser(age=1, name=\"Grace\")\n",
@@ -5701,6 +5731,17 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_positional_only_constructor_parameter_passed_as_keyword() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def __init__(self, age: int, /):\n        self.age = age\n\nUser(age=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("positional-only parameter `age`"));
     }
 
     #[test]
@@ -16703,6 +16744,17 @@ mod tests {
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("keyword `age`"));
         assert!(rendered.contains("parameter expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_positional_only_method_parameter_passed_as_keyword() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def set_age(self, age: int, /):\n        self.age = age\n\nuser = User()\nuser.set_age(age=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("positional-only parameter `age`"));
     }
 
     #[test]

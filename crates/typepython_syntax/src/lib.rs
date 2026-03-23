@@ -532,6 +532,7 @@ pub struct DirectFunctionParamSite {
     pub name: String,
     pub annotation: Option<String>,
     pub has_default: bool,
+    pub positional_only: bool,
     pub keyword_only: bool,
 }
 
@@ -546,6 +547,7 @@ pub struct DirectFunctionSignatureSite {
 pub struct DirectMethodSignatureSite {
     pub owner_type_name: String,
     pub name: String,
+    pub method_kind: MethodKind,
     pub params: Vec<DirectFunctionParamSite>,
     pub line: usize,
 }
@@ -704,6 +706,7 @@ pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSi
                     Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
                         owner_type_name: class_def.name.as_str().to_owned(),
                         name: function.name.as_str().to_owned(),
+                        method_kind: method_kind_from_decorators(&function.decorator_list),
                         params: collect_direct_function_param_sites(source, &function.parameters),
                         line: offset_to_line_column(source, function.range.start().to_usize()).0,
                     }),
@@ -719,16 +722,25 @@ fn collect_direct_function_param_sites(
     source: &str,
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<DirectFunctionParamSite> {
-    let positional = parameters.posonlyargs.iter().chain(&parameters.args).map(|parameter| {
-        DirectFunctionParamSite {
-            name: parameter.name().as_str().to_owned(),
-            annotation: parameter
-                .annotation()
-                .and_then(|annotation| slice_range(source, annotation.range()))
-                .map(str::to_owned),
-            has_default: parameter.default().is_some(),
-            keyword_only: false,
-        }
+    let positional_only = parameters.posonlyargs.iter().map(|parameter| DirectFunctionParamSite {
+        name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
+        has_default: parameter.default().is_some(),
+        positional_only: true,
+        keyword_only: false,
+    });
+    let positional = parameters.args.iter().map(|parameter| DirectFunctionParamSite {
+        name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
+        has_default: parameter.default().is_some(),
+        positional_only: false,
+        keyword_only: false,
     });
     let keyword_only = parameters.kwonlyargs.iter().map(|parameter| DirectFunctionParamSite {
         name: parameter.name().as_str().to_owned(),
@@ -737,10 +749,11 @@ fn collect_direct_function_param_sites(
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
         has_default: parameter.default().is_some(),
+        positional_only: false,
         keyword_only: true,
     });
 
-    positional.chain(keyword_only).collect()
+    positional_only.chain(positional).chain(keyword_only).collect()
 }
 
 #[must_use]
