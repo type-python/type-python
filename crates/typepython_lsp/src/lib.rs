@@ -274,8 +274,15 @@ impl Server {
             .get("contentChanges")
             .and_then(Value::as_array)
             .ok_or_else(|| LspError::Other(String::from("didChange missing contentChanges")))?;
+        if content_changes.len() != 1 {
+            return Err(LspError::Other(format!(
+                "TPY6002: didChange received {} content changes for `{}` but the server only supports single full-text updates",
+                content_changes.len(),
+                uri
+            )));
+        }
         let text = content_changes
-            .last()
+            .first()
             .and_then(|change| change.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
@@ -1452,6 +1459,40 @@ mod tests {
 
         assert!(error.to_string().contains("TPY6002"));
         assert!(error.to_string().contains("out of sync"));
+    }
+
+    #[test]
+    fn did_change_reports_overlay_sync_failure_for_multiple_content_changes() {
+        let config = temp_config(
+            "did_change_reports_overlay_sync_failure_for_multiple_content_changes",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let error = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [
+                        {"text": "def first() -> int:\n    return 1\n"},
+                        {"text": "def second() -> int:\n    return 2\n"}
+                    ]
+                }
+            }))
+            .expect_err("multi-change didChange should fail until incremental patching is supported");
+
+        assert!(error.to_string().contains("TPY6002"));
+        assert!(error.to_string().contains("only supports single full-text updates"));
     }
 
     fn temp_config(test_name: &str, source: &str) -> ConfigHandle {
