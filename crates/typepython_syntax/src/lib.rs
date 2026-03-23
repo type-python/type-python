@@ -539,6 +539,14 @@ pub struct DirectFunctionSignatureSite {
     pub line: usize,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectMethodSignatureSite {
+    pub owner_type_name: String,
+    pub name: String,
+    pub params: Vec<DirectFunctionParamSite>,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FrozenFieldMutationKind {
     Assignment,
@@ -672,6 +680,34 @@ pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFuncti
                 line: offset_to_line_column(source, function.range.start().to_usize()).0,
             }),
             _ => None,
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSignatureSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    parsed
+        .suite()
+        .iter()
+        .flat_map(|stmt| match stmt {
+            Stmt::ClassDef(class_def) => class_def
+                .body
+                .iter()
+                .filter_map(|member| match member {
+                    Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
+                        owner_type_name: class_def.name.as_str().to_owned(),
+                        name: function.name.as_str().to_owned(),
+                        params: collect_direct_function_param_sites(&function.parameters),
+                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                    }),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
         })
         .collect()
 }

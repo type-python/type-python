@@ -3243,6 +3243,7 @@ fn direct_call_arity_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let direct_function_signatures = load_direct_function_signatures(node);
+    let direct_init_signatures = load_direct_init_signatures(node);
     node.calls
         .iter()
         .filter_map(|call| {
@@ -3250,6 +3251,9 @@ fn direct_call_arity_diagnostics(
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
+            }
+            if let Some(signature) = direct_init_signatures.get(&call.callee) {
+                return direct_source_function_arity_diagnostic(node, call, signature);
             }
             if let Some(signature) = direct_function_signatures.get(&call.callee) {
                 return direct_source_function_arity_diagnostic(node, call, signature);
@@ -3355,6 +3359,7 @@ fn direct_call_keyword_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let direct_function_signatures = load_direct_function_signatures(node);
+    let direct_init_signatures = load_direct_init_signatures(node);
 
     for call in &node.calls {
         if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
@@ -3362,6 +3367,10 @@ fn direct_call_keyword_diagnostics(
         {
             diagnostics
                 .extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
+            continue;
+        }
+        if let Some(signature) = direct_init_signatures.get(&call.callee) {
+            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, signature));
             continue;
         }
         if let Some(signature) = direct_function_signatures.get(&call.callee) {
@@ -3474,6 +3483,26 @@ fn load_direct_function_signatures(
     typepython_syntax::collect_direct_function_signature_sites(&source)
         .into_iter()
         .map(|signature| (signature.name, signature.params))
+        .collect()
+}
+
+fn load_direct_init_signatures(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return BTreeMap::new();
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_direct_method_signature_sites(&source)
+        .into_iter()
+        .filter(|signature| signature.name == "__init__")
+        .map(|signature| {
+            let params = signature.params.into_iter().skip(1).collect::<Vec<_>>();
+            (signature.owner_type_name, params)
+        })
         .collect()
 }
 
@@ -5439,6 +5468,16 @@ mod tests {
     fn check_accepts_keyword_and_default_arguments_in_direct_calls() {
         let result = check_temp_typepython_source(
             "def field(default=None, init=True, kw_only=False):\n    return default\n\nfield(default=\"Ada\", init=False)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_keyword_constructor_calls_for_explicit_init() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def __init__(self, age: int, name: str = \"Ada\"):\n        self.age = age\n        self.name = name\n\nUser(age=1)\nUser(age=1, name=\"Grace\")\n",
         );
 
         let rendered = result.diagnostics.as_text();
