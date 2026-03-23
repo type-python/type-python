@@ -4960,11 +4960,8 @@ fn parse_typealias(
         ));
         return None;
     };
-    let Some(parsed_type_params) =
-        parse_type_params(path, line_number, line, suffix, diagnostics, "typealias declaration")
-    else {
-        return None;
-    };
+    let parsed_type_params =
+        parse_type_params(path, line_number, line, suffix, diagnostics, "typealias declaration")?;
 
     Some(SyntaxStatement::TypeAlias(TypeAliasStatement {
         name,
@@ -5003,11 +5000,7 @@ fn parse_named_block(
         ));
         return None;
     };
-    let Some(parsed_type_params) =
-        parse_type_params(path, line_number, line, suffix, diagnostics, label)
-    else {
-        return None;
-    };
+    let parsed_type_params = parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
 
     Some(constructor(NamedBlockStatement {
         name,
@@ -5078,11 +5071,7 @@ fn parse_function(
         ));
         return None;
     };
-    let Some(parsed_type_params) =
-        parse_type_params(path, line_number, line, suffix, diagnostics, label)
-    else {
-        return None;
-    };
+    let parsed_type_params = parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
 
     Some(constructor(FunctionStatement {
         name,
@@ -5170,7 +5159,7 @@ fn parse_type_params<'source>(
         match parse_type_param(path, line_number, line, item, label) {
             Ok(type_param) => type_params.push(type_param),
             Err(diagnostic) => {
-                diagnostics.push(diagnostic);
+                diagnostics.push(*diagnostic);
                 return None;
             }
         }
@@ -5256,23 +5245,23 @@ fn parse_type_param(
     line: &str,
     item: &str,
     label: &str,
-) -> Result<TypeParam, Diagnostic> {
+) -> Result<TypeParam, Box<Diagnostic>> {
     let item = item.trim();
     if item.is_empty() {
-        return Err(parse_error(
+        return Err(Box::new(parse_error(
             path,
             line_number,
             line,
             format!("{label} contains an empty type parameter entry"),
-        ));
+        )));
     }
     if item.contains('=') {
-        return Err(parse_error(
+        return Err(Box::new(parse_error(
             path,
             line_number,
             line,
             format!("{label} type parameter defaults are deferred beyond v1"),
-        ));
+        )));
     }
 
     let (name_part, bound) = match item.split_once(':') {
@@ -5280,30 +5269,30 @@ fn parse_type_param(
         None => (item, None),
     };
     if !is_valid_identifier(name_part) {
-        return Err(parse_error(
+        return Err(Box::new(parse_error(
             path,
             line_number,
             line,
             format!("{label} contains an invalid type parameter name"),
-        ));
+        )));
     }
 
     let bound = match bound {
-        Some(bound) if bound.is_empty() => {
-            return Err(parse_error(
+        Some("") => {
+            return Err(Box::new(parse_error(
                 path,
                 line_number,
                 line,
                 format!("{label} type parameter bound must not be empty"),
-            ));
+            )));
         }
         Some(bound) if bound.starts_with('(') => {
-            return Err(parse_error(
+            return Err(Box::new(parse_error(
                 path,
                 line_number,
                 line,
                 format!("{label} type parameter constraint lists are deferred beyond v1"),
-            ));
+            )));
         }
         Some(bound) => Some(bound.to_owned()),
         None => None,
