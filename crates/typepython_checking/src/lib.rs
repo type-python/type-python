@@ -3144,6 +3144,7 @@ fn direct_call_arity_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let direct_function_signatures = load_direct_function_signatures(node);
     node.calls
         .iter()
         .filter_map(|call| {
@@ -3151,6 +3152,9 @@ fn direct_call_arity_diagnostics(
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
+            }
+            if let Some(signature) = direct_function_signatures.get(&call.callee) {
+                return direct_source_function_arity_diagnostic(node, call, signature);
             }
             let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
             (call.arg_count != expected).then(|| {
@@ -3249,12 +3253,17 @@ fn direct_call_keyword_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let direct_function_signatures = load_direct_function_signatures(node);
 
     for call in &node.calls {
         if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
             && !shape.has_explicit_init
         {
             diagnostics.extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
+            continue;
+        }
+        if let Some(signature) = direct_function_signatures.get(&call.callee) {
+            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, signature));
             continue;
         }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee) else {
@@ -3276,6 +3285,95 @@ fn direct_call_keyword_diagnostics(
     }
 
     diagnostics
+}
+
+fn direct_source_function_arity_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Option<Diagnostic> {
+    let positional_params = signature
+        .iter()
+        .filter(|param| !param.keyword_only)
+        .collect::<Vec<_>>();
+    if call.arg_count > positional_params.len() {
+        return Some(Diagnostic::error(
+            "TPY4001",
+            format!(
+                "call to `{}` in module `{}` expects at most {} positional argument(s) but received {}",
+                call.callee,
+                node.module_path.display(),
+                positional_params.len(),
+                call.arg_count
+            ),
+        ));
+    }
+
+    let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    let missing = signature
+        .iter()
+        .enumerate()
+        .filter(|(index, param)| {
+            if param.has_default {
+                return false;
+            }
+            if param.keyword_only {
+                return !provided_keywords.contains(&param.name);
+            }
+            *index >= call.arg_count && !provided_keywords.contains(&param.name)
+        })
+        .map(|(_, param)| param.name.clone())
+        .collect::<Vec<_>>();
+    (!missing.is_empty()).then(|| {
+        Diagnostic::error(
+            "TPY4001",
+            format!(
+                "call to `{}` in module `{}` is missing required argument(s): {}",
+                call.callee,
+                node.module_path.display(),
+                missing.join(", ")
+            ),
+        )
+    })
+}
+
+fn direct_source_function_keyword_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Vec<Diagnostic> {
+    let param_names = signature.iter().map(|param| param.name.as_str()).collect::<BTreeSet<_>>();
+    call.keyword_names
+        .iter()
+        .filter(|keyword| !param_names.contains(keyword.as_str()))
+        .map(|keyword| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` uses unknown keyword `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    keyword
+                ),
+            )
+        })
+        .collect()
+}
+
+fn load_direct_function_signatures(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return BTreeMap::new();
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_direct_function_signature_sites(&source)
+        .into_iter()
+        .map(|signature| (signature.name, signature.params))
+        .collect()
 }
 
 fn dataclass_transform_constructor_arity_diagnostic(
@@ -5154,6 +5252,16 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4014"));
         assert!(rendered.contains("Concatenate[int, P]"));
+    }
+
+    #[test]
+    fn check_accepts_keyword_and_default_arguments_in_direct_calls() {
+        let result = check_temp_typepython_source(
+            "def field(default=None, init=True, kw_only=False):\n    return default\n\nfield(default=\"Ada\", init=False)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
     }
 
     #[test]

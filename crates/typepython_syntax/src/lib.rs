@@ -530,6 +530,20 @@ pub struct DataclassTransformModuleInfo {
     pub classes: Vec<DataclassTransformClassSite>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectFunctionParamSite {
+    pub name: String,
+    pub has_default: bool,
+    pub keyword_only: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectFunctionSignatureSite {
+    pub name: String,
+    pub params: Vec<DirectFunctionParamSite>,
+    pub line: usize,
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FrozenFieldMutationKind {
     Assignment,
@@ -641,6 +655,47 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
     }
 
     DataclassTransformModuleInfo { providers, classes }
+}
+
+#[must_use]
+pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFunctionSignatureSite> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    parsed
+        .suite()
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
+                name: function.name.as_str().to_owned(),
+                params: collect_direct_function_param_sites(&function.parameters),
+                line: offset_to_line_column(source, function.range.start().to_usize()).0,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn collect_direct_function_param_sites(
+    parameters: &ruff_python_ast::Parameters,
+) -> Vec<DirectFunctionParamSite> {
+    let positional = parameters
+        .posonlyargs
+        .iter()
+        .chain(&parameters.args)
+        .map(|parameter| DirectFunctionParamSite {
+            name: parameter.name().as_str().to_owned(),
+            has_default: parameter.default().is_some(),
+            keyword_only: false,
+        });
+    let keyword_only = parameters.kwonlyargs.iter().map(|parameter| DirectFunctionParamSite {
+        name: parameter.name().as_str().to_owned(),
+        has_default: parameter.default().is_some(),
+        keyword_only: true,
+    });
+
+    positional.chain(keyword_only).collect()
 }
 
 #[must_use]
