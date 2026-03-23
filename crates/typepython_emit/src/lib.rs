@@ -716,96 +716,103 @@ mod tests {
     fn write_runtime_outputs_emits_lowered_typepython_and_python_modules() {
         let temp_dir =
             temp_dir("write_runtime_outputs_emits_lowered_typepython_and_python_modules");
-        let result = (|| {
-            let modules = vec![
-                LoweredModule {
-                    source_path: PathBuf::from("src/app/__init__.tpy"),
-                    source_kind: SourceKind::TypePython,
-                    python_source: String::from(
-                        "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n",
-                    ),
-                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-                },
-                LoweredModule {
-                    source_path: PathBuf::from("src/app/helpers.py"),
-                    source_kind: SourceKind::Python,
-                    python_source: String::from("def helper():\n    return 1\n"),
-                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-                },
-                LoweredModule {
-                    source_path: PathBuf::from("src/app/parse.tpy"),
-                    source_kind: SourceKind::TypePython,
-                    python_source: String::from(
-                        "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n",
-                    ),
-                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-                },
-                LoweredModule {
-                    source_path: PathBuf::from("src/app/empty.tpy"),
-                    source_kind: SourceKind::TypePython,
-                    python_source: String::from("class Empty:\n    pass\n"),
-                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-                },
-                LoweredModule {
-                    source_path: PathBuf::from("src/app/helpers.pyi"),
-                    source_kind: SourceKind::Stub,
-                    python_source: String::from("def helper() -> int: ...\n"),
-                    source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-                },
-            ];
-            let artifacts = vec![
-                EmitArtifact {
-                    source_path: PathBuf::from("src/app/__init__.tpy"),
-                    runtime_path: Some(temp_dir.join("build/app/__init__.py")),
-                    stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
-                },
-                EmitArtifact {
-                    source_path: PathBuf::from("src/app/helpers.py"),
-                    runtime_path: Some(temp_dir.join("build/app/helpers.py")),
-                    stub_path: None,
-                },
-                EmitArtifact {
-                    source_path: PathBuf::from("src/app/parse.tpy"),
-                    runtime_path: Some(temp_dir.join("build/app/parse.py")),
-                    stub_path: Some(temp_dir.join("build/app/parse.pyi")),
-                },
-                EmitArtifact {
-                    source_path: PathBuf::from("src/app/empty.tpy"),
-                    runtime_path: Some(temp_dir.join("build/app/empty.py")),
-                    stub_path: Some(temp_dir.join("build/app/empty.pyi")),
-                },
-                EmitArtifact {
-                    source_path: PathBuf::from("src/app/helpers.pyi"),
-                    runtime_path: None,
-                    stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
-                },
-            ];
+        let modules = vec![
+            LoweredModule {
+                source_path: PathBuf::from("src/app/__init__.tpy"),
+                source_kind: SourceKind::TypePython,
+                python_source: String::from(
+                    "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n",
+                ),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            },
+            LoweredModule {
+                source_path: PathBuf::from("src/app/helpers.py"),
+                source_kind: SourceKind::Python,
+                python_source: String::from("def helper():\n    return 1\n"),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            },
+            LoweredModule {
+                source_path: PathBuf::from("src/app/parse.tpy"),
+                source_kind: SourceKind::TypePython,
+                python_source: String::from(
+                    "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n",
+                ),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            },
+            LoweredModule {
+                source_path: PathBuf::from("src/app/empty.tpy"),
+                source_kind: SourceKind::TypePython,
+                python_source: String::from("class Empty:\n    pass\n"),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            },
+            LoweredModule {
+                source_path: PathBuf::from("src/app/helpers.pyi"),
+                source_kind: SourceKind::Stub,
+                python_source: String::from("def helper() -> int: ...\n"),
+                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            },
+        ];
+        let artifacts = vec![
+            EmitArtifact {
+                source_path: PathBuf::from("src/app/__init__.tpy"),
+                runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+                stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+            },
+            EmitArtifact {
+                source_path: PathBuf::from("src/app/helpers.py"),
+                runtime_path: Some(temp_dir.join("build/app/helpers.py")),
+                stub_path: None,
+            },
+            EmitArtifact {
+                source_path: PathBuf::from("src/app/parse.tpy"),
+                runtime_path: Some(temp_dir.join("build/app/parse.py")),
+                stub_path: Some(temp_dir.join("build/app/parse.pyi")),
+            },
+            EmitArtifact {
+                source_path: PathBuf::from("src/app/empty.tpy"),
+                runtime_path: Some(temp_dir.join("build/app/empty.py")),
+                stub_path: Some(temp_dir.join("build/app/empty.pyi")),
+            },
+            EmitArtifact {
+                source_path: PathBuf::from("src/app/helpers.pyi"),
+                runtime_path: None,
+                stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
+            },
+        ];
 
-            let summary = write_runtime_outputs(&artifacts, &modules, false).unwrap();
-            let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
-            let stub_init = fs::read_to_string(temp_dir.join("build/app/__init__.pyi")).unwrap();
-            let runtime_helpers =
-                fs::read_to_string(temp_dir.join("build/app/helpers.py")).unwrap();
-            let runtime_parse = fs::read_to_string(temp_dir.join("build/app/parse.py")).unwrap();
-            let stub_parse = fs::read_to_string(temp_dir.join("build/app/parse.pyi")).unwrap();
-            let runtime_empty = fs::read_to_string(temp_dir.join("build/app/empty.py")).unwrap();
-            let stub_empty = fs::read_to_string(temp_dir.join("build/app/empty.pyi")).unwrap();
-            let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi")).unwrap();
-            let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed")).unwrap();
+        let summary = write_runtime_outputs(&artifacts, &modules, false)
+            .expect("runtime outputs should be written");
+        let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+            .expect("runtime __init__.py should be readable");
+        let stub_init = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+            .expect("stub __init__.pyi should be readable");
+        let runtime_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.py"))
+            .expect("helpers.py should be readable");
+        let runtime_parse = fs::read_to_string(temp_dir.join("build/app/parse.py"))
+            .expect("parse.py should be readable");
+        let stub_parse = fs::read_to_string(temp_dir.join("build/app/parse.pyi"))
+            .expect("parse.pyi should be readable");
+        let runtime_empty = fs::read_to_string(temp_dir.join("build/app/empty.py"))
+            .expect("empty.py should be readable");
+        let stub_empty = fs::read_to_string(temp_dir.join("build/app/empty.pyi"))
+            .expect("empty.pyi should be readable");
+        let stub_helpers = fs::read_to_string(temp_dir.join("build/app/helpers.pyi"))
+            .expect("helpers.pyi should be readable");
+        let py_typed = fs::read_to_string(temp_dir.join("build/app/py.typed"))
+            .expect("py.typed should be readable");
 
-            (
-                summary,
-                runtime_init,
-                stub_init,
-                runtime_helpers,
-                runtime_parse,
-                stub_parse,
-                runtime_empty,
-                stub_empty,
-                stub_helpers,
-                py_typed,
-            )
-        })();
+        let result = (
+            summary,
+            runtime_init,
+            stub_init,
+            runtime_helpers,
+            runtime_parse,
+            stub_parse,
+            runtime_empty,
+            stub_empty,
+            stub_helpers,
+            py_typed,
+        );
         remove_temp_dir(&temp_dir);
 
         let (
@@ -854,33 +861,34 @@ mod tests {
     #[test]
     fn write_runtime_outputs_adds_runtime_validators_only_when_enabled() {
         let temp_dir = temp_dir("write_runtime_outputs_adds_runtime_validators_only_when_enabled");
-        let result = (|| {
-            fs::create_dir_all(temp_dir.join("src/app")).unwrap();
-            fs::write(
-                temp_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n",
-            )
-            .unwrap();
-            let _config = load(&temp_dir).unwrap();
-            let modules = vec![LoweredModule {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                source_kind: SourceKind::TypePython,
-                python_source: String::from(
-                    "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n    age: int\n    email: str | None = None\n",
-                ),
-                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-            }];
-            let artifacts = vec![EmitArtifact {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                runtime_path: Some(temp_dir.join("build/app/__init__.py")),
-                stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
-            }];
+        fs::create_dir_all(temp_dir.join("src/app")).expect("src/app should be created");
+        fs::write(
+            temp_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n",
+        )
+        .expect("typepython.toml should be written");
+        let _config = load(&temp_dir).expect("config should load");
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n    age: int\n    email: str | None = None\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+            stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+        }];
 
-            write_runtime_outputs(&artifacts, &modules, true).unwrap();
-            let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap();
-            let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi")).unwrap();
-            (runtime, stub)
-        })();
+        write_runtime_outputs(&artifacts, &modules, true)
+            .expect("runtime validator outputs should be written");
+        let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+            .expect("runtime validator file should be readable");
+        let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+            .expect("stub validator file should be readable");
+        let result = (runtime, stub);
         remove_temp_dir(&temp_dir);
 
         let (runtime, stub) = result;
@@ -892,23 +900,23 @@ mod tests {
     #[test]
     fn write_runtime_outputs_skips_runtime_validators_when_disabled() {
         let temp_dir = temp_dir("write_runtime_outputs_skips_runtime_validators_when_disabled");
-        let runtime = (|| {
-            let modules = vec![LoweredModule {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                source_kind: SourceKind::TypePython,
-                python_source: String::from(
-                    "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n",
-                ),
-                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-            }];
-            let artifacts = vec![EmitArtifact {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                runtime_path: Some(temp_dir.join("build/app/__init__.py")),
-                stub_path: None,
-            }];
-            write_runtime_outputs(&artifacts, &modules, false).unwrap();
-            fs::read_to_string(temp_dir.join("build/app/__init__.py")).unwrap()
-        })();
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+            stub_path: None,
+        }];
+        write_runtime_outputs(&artifacts, &modules, false)
+            .expect("runtime outputs should be written without validators");
+        let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
+            .expect("runtime file should be readable");
         remove_temp_dir(&temp_dir);
 
         assert!(!runtime.contains("__tpy_validate__"));
@@ -917,21 +925,19 @@ mod tests {
     #[test]
     fn write_runtime_outputs_reports_pyi_generation_failure() {
         let temp_dir = temp_dir("write_runtime_outputs_reports_pyi_generation_failure");
-        let result = (|| {
-            let modules = vec![LoweredModule {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                source_kind: SourceKind::TypePython,
-                python_source: String::from("def broken(:\n"),
-                source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
-            }];
-            let artifacts = vec![EmitArtifact {
-                source_path: PathBuf::from("src/app/__init__.tpy"),
-                runtime_path: Some(temp_dir.join("build/app/__init__.py")),
-                stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
-            }];
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from("def broken(:\n"),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+            stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+        }];
 
-            write_runtime_outputs(&artifacts, &modules, false)
-        })();
+        let result = write_runtime_outputs(&artifacts, &modules, false);
         remove_temp_dir(&temp_dir);
 
         let error = result.expect_err("invalid lowered python should fail stub generation");
