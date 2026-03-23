@@ -281,9 +281,15 @@ impl Server {
                 uri
             )));
         }
-        let text = content_changes
-            .first()
-            .and_then(|change| change.get("text"))
+        let change = content_changes.first().expect("single change should exist");
+        if change.get("range").is_some() || change.get("rangeLength").is_some() {
+            return Err(LspError::Other(format!(
+                "TPY6002: didChange for `{}` uses ranged incremental edits but the server only supports single full-text updates",
+                uri
+            )));
+        }
+        let text = change
+            .get("text")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
         self.overlays
@@ -1493,6 +1499,45 @@ mod tests {
 
         assert!(error.to_string().contains("TPY6002"));
         assert!(error.to_string().contains("only supports single full-text updates"));
+    }
+
+    #[test]
+    fn did_change_reports_overlay_sync_failure_for_ranged_content_change() {
+        let config = temp_config(
+            "did_change_reports_overlay_sync_failure_for_ranged_content_change",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let error = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [
+                        {
+                            "range": {
+                                "start": {"line": 0, "character": 4},
+                                "end": {"line": 0, "character": 6}
+                            },
+                            "text": "name"
+                        }
+                    ]
+                }
+            }))
+            .expect_err("ranged didChange should fail until incremental patching is supported");
+
+        assert!(error.to_string().contains("TPY6002"));
+        assert!(error.to_string().contains("ranged incremental edits"));
     }
 
     fn temp_config(test_name: &str, source: &str) -> ConfigHandle {
