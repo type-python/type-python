@@ -425,6 +425,7 @@ fn recursive_type_alias_diagnostics(
     diagnostics
 }
 
+#[expect(clippy::too_many_arguments, reason = "recursive alias traversal threads shared state through helper recursion")]
 fn collect_recursive_type_alias_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
     node: &typepython_graph::ModuleNode,
@@ -1390,11 +1391,7 @@ fn callable_assignment_result(
     expected: &str,
 ) -> Option<Option<Diagnostic>> {
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
-    let Some((actual_params, actual_return)) =
-        resolve_callable_assignment_signature(node, nodes, assignment)
-    else {
-        return None;
-    };
+    let (actual_params, actual_return) = resolve_callable_assignment_signature(node, nodes, assignment)?;
 
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
@@ -1465,6 +1462,7 @@ fn resolve_callable_assignment_signature(
     )
 }
 
+#[expect(clippy::too_many_arguments, reason = "member callable resolution needs the current scope and member context")]
 fn resolve_direct_member_callable_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1694,7 +1692,7 @@ fn rewrite_imported_typing_token(node: &typepython_graph::ModuleNode, token: &st
     token.to_owned()
 }
 
-fn normalized_assignment_annotation<'a>(annotation: &'a str) -> Option<&'a str> {
+fn normalized_assignment_annotation(annotation: &str) -> Option<&str> {
     let annotation = annotation.trim();
     if annotation.is_empty() {
         return None;
@@ -1890,6 +1888,7 @@ fn resolve_typing_callable_signature(callee: &str) -> Option<&'static str> {
         .find_map(|(name, signature)| (*name == callee).then_some(*signature))
 }
 
+#[expect(clippy::too_many_arguments, reason = "direct expression resolution is driven by parsed expression metadata fields")]
 fn resolve_direct_expression_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1984,6 +1983,7 @@ fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<
     })
 }
 
+#[expect(clippy::too_many_arguments, reason = "name reference resolution needs scope and source-position context")]
 fn resolve_direct_name_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2125,6 +2125,7 @@ fn find_owned_callable_declaration<'a>(
     })
 }
 
+#[expect(clippy::too_many_arguments, reason = "unnarrowed name resolution needs scope and source-position context")]
 fn resolve_unnarrowed_name_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2963,6 +2964,7 @@ fn join_branch_types(types: Vec<String>) -> String {
     join_type_candidates(types)
 }
 
+#[expect(clippy::too_many_arguments, reason = "member reference resolution needs source metadata and scope context")]
 fn resolve_direct_member_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -3033,6 +3035,7 @@ fn is_enum_like_class(
     })
 }
 
+#[expect(clippy::too_many_arguments, reason = "method return resolution needs source metadata and scope context")]
 fn resolve_direct_method_return_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
