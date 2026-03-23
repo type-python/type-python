@@ -692,17 +692,18 @@ mod tests {
     #[test]
     fn prefers_typepython_toml_over_pyproject() {
         let project_dir = temp_project_dir("prefers_typepython_toml_over_pyproject");
-        let load_result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.11\"\n")
-                .unwrap();
-            fs::write(
-                project_dir.join("pyproject.toml"),
-                "[tool.typepython.project]\ntarget_python = \"3.12\"\n",
-            )
-            .unwrap();
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\ntarget_python = \"3.11\"\n",
+        )
+        .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[tool.typepython.project]\ntarget_python = \"3.12\"\n",
+        )
+        .expect("pyproject.toml should be written");
 
-            load(&project_dir)
-        })();
+        let load_result = load(&project_dir);
 
         remove_temp_project_dir(&project_dir);
 
@@ -714,12 +715,13 @@ mod tests {
     #[test]
     fn rejects_unsupported_target_python() {
         let project_dir = temp_project_dir("rejects_unsupported_target_python");
-        let load_result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.9\"\n")
-                .unwrap();
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\ntarget_python = \"3.9\"\n",
+        )
+        .expect("typepython.toml should be written");
 
-            load(&project_dir)
-        })();
+        let load_result = load(&project_dir);
 
         remove_temp_project_dir(&project_dir);
 
@@ -732,24 +734,22 @@ mod tests {
     #[test]
     fn rejects_python_executable_version_mismatch() {
         let project_dir = temp_project_dir("rejects_python_executable_version_mismatch");
-        let load_result = (|| {
-            let executable = write_fake_python(&project_dir, "3.11");
-            fs::write(
-                project_dir.join("typepython.toml"),
-                format!(
-                    concat!(
-                        "[project]\n",
-                        "target_python = \"3.10\"\n\n",
-                        "[resolution]\n",
-                        "python_executable = \"{}\"\n"
-                    ),
-                    executable.display()
+        let executable = write_fake_python(&project_dir, "3.11");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                concat!(
+                    "[project]\n",
+                    "target_python = \"3.10\"\n\n",
+                    "[resolution]\n",
+                    "python_executable = \"{}\"\n"
                 ),
-            )
-            .unwrap();
+                executable.display()
+            ),
+        )
+        .expect("typepython.toml should be written");
 
-            load(&project_dir)
-        })();
+        let load_result = load(&project_dir);
 
         remove_temp_project_dir(&project_dir);
 
@@ -763,24 +763,22 @@ mod tests {
     #[test]
     fn accepts_matching_python_executable_version() {
         let project_dir = temp_project_dir("accepts_matching_python_executable_version");
-        let load_result = (|| {
-            let executable = write_fake_python(&project_dir, "3.11");
-            fs::write(
-                project_dir.join("typepython.toml"),
-                format!(
-                    concat!(
-                        "[project]\n",
-                        "target_python = \"3.11\"\n\n",
-                        "[resolution]\n",
-                        "python_executable = \"{}\"\n"
-                    ),
-                    executable.display()
+        let executable = write_fake_python(&project_dir, "3.11");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                concat!(
+                    "[project]\n",
+                    "target_python = \"3.11\"\n\n",
+                    "[resolution]\n",
+                    "python_executable = \"{}\"\n"
                 ),
-            )
-            .unwrap();
+                executable.display()
+            ),
+        )
+        .expect("typepython.toml should be written");
 
-            load(&project_dir)
-        })();
+        let load_result = load(&project_dir);
 
         remove_temp_project_dir(&project_dir);
 
