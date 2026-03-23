@@ -1137,12 +1137,42 @@ fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim_start();
-        if !trimmed.starts_with("def ") || !trimmed.contains("-> match ") || !trimmed.ends_with(':') {
+        if !trimmed.starts_with("def ") {
             index += 1;
             continue;
         }
         let indent = line.len() - trimmed.len();
-        let Some((header, rest)) = trimmed.split_once("-> match ") else {
+
+        let mut header_parts = vec![trimmed];
+        let mut header_cursor = index;
+        let mut conditional_header = None;
+        while header_cursor < lines.len() {
+            let header_line = lines[header_cursor];
+            let header_trimmed = header_line.trim_start();
+            if header_cursor > index {
+                header_parts.push(header_trimmed);
+            }
+
+            if header_trimmed.contains("-> match ") && header_trimmed.ends_with(':') {
+                conditional_header = Some(header_parts.join(" "));
+                break;
+            }
+
+            if header_cursor > index {
+                let continuation_indent = header_line.len() - header_trimmed.len();
+                if continuation_indent <= indent || header_trimmed.starts_with("case ") {
+                    break;
+                }
+            }
+
+            header_cursor += 1;
+        }
+
+        let Some(header_line) = conditional_header else {
+            index += 1;
+            continue;
+        };
+        let Some((header, rest)) = header_line.split_once("-> match ") else {
             index += 1;
             continue;
         };
@@ -1161,7 +1191,7 @@ fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
         };
 
         let mut case_input_types = Vec::new();
-        let mut cursor = index + 1;
+        let mut cursor = header_cursor + 1;
         while cursor < lines.len() {
             let case_line = lines[cursor];
             let case_trimmed = case_line.trim_start();
@@ -7806,6 +7836,35 @@ line: 12,
         });
 
         assert!(tree.diagnostics.is_empty());
+        let sites = crate::collect_conditional_return_sites(&tree.source.text);
+        assert_eq!(
+            sites,
+            vec![crate::ConditionalReturnSite {
+                function_name: String::from("decode"),
+                target_name: String::from("x"),
+                target_type: String::from("str | bytes | None"),
+                case_input_types: vec![
+                    String::from("str"),
+                    String::from("bytes"),
+                    String::from("None"),
+                ],
+                line: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_accepts_multiline_conditional_return_syntax() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("conditional-return-multiline.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "def decode(\n    x: str | bytes | None,\n) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n\nvalue: int = 1\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
         let sites = crate::collect_conditional_return_sites(&tree.source.text);
         assert_eq!(
             sites,
