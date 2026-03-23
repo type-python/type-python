@@ -185,6 +185,7 @@ pub struct CallStatement {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
+    pub keyword_arg_types: Vec<String>,
     pub line: usize,
 }
 
@@ -204,6 +205,7 @@ pub struct MethodCallStatement {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
+    pub keyword_arg_types: Vec<String>,
     pub line: usize,
 }
 
@@ -528,6 +530,7 @@ pub struct DataclassTransformModuleInfo {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectFunctionParamSite {
     pub name: String,
+    pub annotation: Option<String>,
     pub has_default: bool,
     pub keyword_only: bool,
 }
@@ -676,7 +679,7 @@ pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFuncti
         .filter_map(|stmt| match stmt {
             Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
                 name: function.name.as_str().to_owned(),
-                params: collect_direct_function_param_sites(&function.parameters),
+                params: collect_direct_function_param_sites(source, &function.parameters),
                 line: offset_to_line_column(source, function.range.start().to_usize()).0,
             }),
             _ => None,
@@ -701,7 +704,7 @@ pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSi
                     Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
                         owner_type_name: class_def.name.as_str().to_owned(),
                         name: function.name.as_str().to_owned(),
-                        params: collect_direct_function_param_sites(&function.parameters),
+                        params: collect_direct_function_param_sites(source, &function.parameters),
                         line: offset_to_line_column(source, function.range.start().to_usize()).0,
                     }),
                     _ => None,
@@ -713,17 +716,26 @@ pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSi
 }
 
 fn collect_direct_function_param_sites(
+    source: &str,
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<DirectFunctionParamSite> {
     let positional = parameters.posonlyargs.iter().chain(&parameters.args).map(|parameter| {
         DirectFunctionParamSite {
             name: parameter.name().as_str().to_owned(),
+            annotation: parameter
+                .annotation()
+                .and_then(|annotation| slice_range(source, annotation.range()))
+                .map(str::to_owned),
             has_default: parameter.default().is_some(),
             keyword_only: false,
         }
     });
     let keyword_only = parameters.kwonlyargs.iter().map(|parameter| DirectFunctionParamSite {
         name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
         has_default: parameter.default().is_some(),
         keyword_only: true,
     });
@@ -3169,6 +3181,13 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
             .iter()
             .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
             .collect(),
+        keyword_arg_types: call
+            .arguments
+            .keywords
+            .iter()
+            .filter(|keyword| keyword.arg.is_some())
+            .map(|keyword| infer_literal_arg_type(&keyword.value))
+            .collect(),
         line,
     }))
 }
@@ -3201,6 +3220,13 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                 .iter()
                 .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
                 .collect(),
+            keyword_arg_types: call
+                .arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_some())
+                .map(|keyword| infer_literal_arg_type(&keyword.value))
+                .collect(),
             line,
         })),
         Expr::Call(inner_call) => {
@@ -3218,6 +3244,13 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                     .keywords
                     .iter()
                     .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
+                    .collect(),
+                keyword_arg_types: call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .filter(|keyword| keyword.arg.is_some())
+                    .map(|keyword| infer_literal_arg_type(&keyword.value))
                     .collect(),
                 line,
             }))
@@ -6104,6 +6137,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6207,6 +6241,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 3,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6263,6 +6298,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6347,6 +6383,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6373,6 +6410,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -6396,6 +6434,7 @@ mod tests {
                 arg_count: 0,
                 arg_types: Vec::new(),
                 keyword_names: vec![String::from("x"), String::from("y")],
+                keyword_arg_types: vec![String::from("int"), String::from("int")],
                 line: 1,
             })]
         );
@@ -6418,6 +6457,7 @@ mod tests {
                 arg_count: 2,
                 arg_types: vec![String::from("int"), String::from("str")],
                 keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 line: 1,
             })]
         );
@@ -6452,6 +6492,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -6710,6 +6751,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::MethodCall(MethodCallStatement {
@@ -6719,6 +6761,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: vec![String::from("x")],
+                    keyword_arg_types: vec![String::from("int")],
                     line: 2,
                 }),
             ]

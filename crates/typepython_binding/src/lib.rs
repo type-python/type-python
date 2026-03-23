@@ -55,6 +55,7 @@ pub struct CallSite {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
+    pub keyword_arg_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -72,6 +73,7 @@ pub struct MethodCallSite {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
+    pub keyword_arg_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -306,6 +308,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     arg_count: statement.arg_count,
                     arg_types: statement.arg_types.clone(),
                     keyword_names: statement.keyword_names.clone(),
+                    keyword_arg_types: statement.keyword_arg_types.clone(),
                 }),
                 _ => None,
             })
@@ -321,6 +324,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     arg_count: statement.arg_count,
                     arg_types: statement.arg_types.clone(),
                     keyword_names: statement.keyword_names.clone(),
+                    keyword_arg_types: statement.keyword_arg_types.clone(),
                 }),
                 _ => None,
             })

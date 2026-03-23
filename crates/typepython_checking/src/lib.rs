@@ -3316,6 +3316,8 @@ fn direct_call_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
+    let direct_function_signatures = load_direct_function_signatures(node);
+    let direct_init_signatures = load_direct_init_signatures(node);
     node.calls
         .iter()
         .flat_map(|call| {
@@ -3324,31 +3326,18 @@ fn direct_call_type_diagnostics(
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
             }
+            if let Some(signature) = direct_init_signatures.get(&call.callee) {
+                return direct_source_function_type_diagnostics(node, call, signature);
+            }
+            if let Some(signature) = direct_function_signatures.get(&call.callee) {
+                return direct_source_function_type_diagnostics(node, call, signature);
+            }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee)
             else {
                 return Vec::new();
             };
-            call.arg_types
-                .iter()
-                .zip(param_types.iter())
-                .filter(|(arg_ty, param_ty)| {
-                    !arg_ty.is_empty()
-                        && !param_ty.is_empty()
-                        && arg_ty.as_str() != param_ty.as_str()
-                })
-                .map(|(arg_ty, param_ty)| {
-                    Diagnostic::error(
-                        "TPY4001",
-                        format!(
-                            "call to `{}` in module `{}` passes `{}` where parameter expects `{}`",
-                            call.callee,
-                            node.module_path.display(),
-                            arg_ty,
-                            param_ty
-                        ),
-                    )
-                })
-                .collect::<Vec<_>>()
+            let param_names = direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
+            positional_and_keyword_type_diagnostics(node, call, &param_types, &param_names)
         })
         .collect()
 }
@@ -3470,6 +3459,71 @@ fn direct_source_function_keyword_diagnostics(
         .collect()
 }
 
+fn direct_source_function_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Vec<Diagnostic> {
+    let param_types = signature
+        .iter()
+        .map(|param| param.annotation.clone().unwrap_or_default())
+        .collect::<Vec<_>>();
+    let param_names = signature.iter().map(|param| param.name.clone()).collect::<Vec<_>>();
+    positional_and_keyword_type_diagnostics(node, call, &param_types, &param_names)
+}
+
+fn positional_and_keyword_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    call: &typepython_binding::CallSite,
+    param_types: &[String],
+    param_names: &[String],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = call
+        .arg_types
+        .iter()
+        .zip(param_types.iter())
+        .filter(|(arg_ty, param_ty)| {
+            !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+        })
+        .map(|(arg_ty, param_ty)| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` passes `{}` where parameter expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    param_ty
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+        let Some(index) = param_names.iter().position(|param| param == keyword) else {
+            continue;
+        };
+        let Some(param_ty) = param_types.get(index) else {
+            continue;
+        };
+        if !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty != param_ty {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` passes `{}` for keyword `{}` where parameter expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    keyword,
+                    param_ty
+                ),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
 fn load_direct_function_signatures(
     node: &typepython_graph::ModuleNode,
 ) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
@@ -3504,6 +3558,30 @@ fn load_direct_init_signatures(
             (signature.owner_type_name, params)
         })
         .collect()
+}
+
+fn direct_param_names_from_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<Vec<String>> {
+    if let Some(local) = resolve_direct_function(node, nodes, callee) {
+        return direct_param_names(&local.detail);
+    }
+
+    if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        let init = class_node.declarations.iter().find(|declaration| {
+            declaration.kind == DeclarationKind::Function
+                && declaration.name == "__init__"
+                && declaration.owner.as_ref().is_some_and(|owner| {
+                    owner.kind == DeclarationOwnerKind::Class && owner.name == class_decl.name
+                })
+        })?;
+
+        return direct_param_names(&init.detail).map(|names| names.into_iter().skip(1).collect());
+    }
+
+    None
 }
 
 fn dataclass_transform_constructor_arity_diagnostic(
@@ -6057,6 +6135,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
             }],
@@ -7400,6 +7479,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -7513,6 +7593,7 @@ mod tests {
                         arg_count: 0,
                         arg_types: Vec::new(),
                         keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     }],
                     method_calls: Vec::new(),
                     member_accesses: Vec::new(),
@@ -7629,6 +7710,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -7681,6 +7763,7 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -7936,6 +8019,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -8020,6 +8104,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -8106,6 +8191,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -8190,6 +8276,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -11699,6 +11786,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("str")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -11765,6 +11853,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -11838,6 +11927,7 @@ mod tests {
                         arg_count: 1,
                         arg_types: vec![String::from("str")],
                         keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                     }],
                     method_calls: Vec::new(),
                     member_accesses: Vec::new(),
@@ -12507,6 +12597,7 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::new()],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -12573,6 +12664,7 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("int"), String::new()],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -14425,6 +14517,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: vec![String::from("z")],
+                    keyword_arg_types: vec![String::from("int")],
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -14531,6 +14624,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -14582,6 +14676,7 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -14711,6 +14806,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 member_accesses: Vec::new(),
                 returns: Vec::new(),
@@ -14785,6 +14881,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: Vec::new(),
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -14860,6 +14957,7 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -18884,6 +18982,7 @@ mod tests {
                             arg_count: 0,
                             arg_types: Vec::new(),
                             keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                         }],
                         method_calls: Vec::new(),
                         member_accesses: Vec::new(),
@@ -18982,6 +19081,7 @@ mod tests {
                             arg_count: 0,
                             arg_types: Vec::new(),
                             keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                         }],
                         method_calls: Vec::new(),
                         member_accesses: Vec::new(),
@@ -19261,6 +19361,7 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("Box")],
                     keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
                 }],
             }],
         });
