@@ -578,9 +578,7 @@ fn try_expand_typeddict_transform(
     source_line: &str,
 ) -> Option<Vec<String>> {
     let value = value.trim();
-    let Some((transform, args)) = parse_transform_expr(value) else {
-        return None;
-    };
+    let (transform, args) = parse_transform_expr(value)?;
     if !TYPEDICT_TRANSFORMS.contains(&transform) {
         return None;
     }
@@ -594,7 +592,7 @@ fn try_expand_typeddict_transform(
     let (transform, target_arg, key_args) = if args.len() < 2 {
         return None;
     } else {
-        (&*args[0], &*args[1], &args[2..])
+        (args[0], args[1], &args[2..])
     };
 
     // Handle nested transforms: if target_arg is itself a transform, recursively expand it
@@ -603,7 +601,7 @@ fn try_expand_typeddict_transform(
     {
         if TYPEDICT_TRANSFORMS.contains(&inner_transform) && inner_args.len() >= 2 {
             // Recursively expand the inner transform
-            let inner_target_name = &*inner_args[1]; // [1] is the target TypedDict name
+            let inner_target_name = inner_args[1]; // [1] is the target TypedDict name
             let inner_key_args = &inner_args[2..]; // [2..] are the key args
             let inner_target = typed_dicts.get(inner_target_name)?;
             // inner_target is &&NamedBlockStatement, dereference to &
@@ -614,7 +612,7 @@ fn try_expand_typeddict_transform(
     } else {
         // target_arg is a regular TypedDict name
         let target = typed_dicts.get(target_arg)?;
-        target.members.iter().map(|m| m.clone()).collect()
+        target.members.to_vec()
     };
 
     let indentation = source_line.len() - source_line.trim_start().len();
@@ -683,7 +681,7 @@ fn parse_transform_expr(value: &str) -> Option<(&str, Vec<&str>)> {
     }
     args.push(inner[start..].trim());
 
-    if args.len() < 1 {
+    if args.is_empty() {
         return None;
     }
     // Prepend transform name so args = [transform_name, target_or_key, key2, ...]
@@ -761,7 +759,7 @@ fn apply_transform_to_members<'a>(
                 let ann = m.annotation.as_deref().unwrap_or("object");
                 let new_ann = if ann.starts_with("NotRequired[") {
                     ann.strip_prefix("NotRequired[")
-                        .unwrap()
+                        .expect("NotRequired prefix should already be matched")
                         .trim_end_matches(']')
                         .trim()
                         .to_owned()
@@ -809,7 +807,11 @@ fn apply_transform_to_members<'a>(
                         .to_owned()
                 })
                 .collect();
-            fields.into_iter().filter(|m| keys.contains(&m.name)).map(|m| m.clone()).collect()
+            fields
+                .into_iter()
+                .filter(|m| keys.contains(&m.name))
+                .cloned()
+                .collect()
         }
         "Omit" => {
             let keys: std::collections::BTreeSet<_> = key_args
@@ -823,9 +825,13 @@ fn apply_transform_to_members<'a>(
                         .to_owned()
                 })
                 .collect();
-            fields.into_iter().filter(|m| !keys.contains(&m.name)).map(|m| m.clone()).collect()
+            fields
+                .into_iter()
+                .filter(|m| !keys.contains(&m.name))
+                .cloned()
+                .collect()
         }
-        _ => fields.into_iter().map(|m| m.clone()).collect(),
+        _ => fields.into_iter().cloned().collect(),
     }
 }
 
@@ -978,9 +984,9 @@ fn collect_typed_dict_transform_diagnostics(
         .collect()
 }
 
-fn resolve_transform_members<'a>(
+fn resolve_transform_members(
     value: &str,
-    typed_dicts: &std::collections::BTreeMap<&str, &'a typepython_syntax::NamedBlockStatement>,
+    typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
 ) -> Option<(String, Vec<typepython_syntax::ClassMember>)> {
     if let Some((transform, args)) = parse_transform_expr(value.trim()) {
         if TYPEDICT_TRANSFORMS.contains(&transform) && args.len() >= 2 {
@@ -995,7 +1001,7 @@ fn resolve_transform_members<'a>(
     }
 
     let target = typed_dicts.get(value.trim())?;
-    Some((target.name.clone(), target.members.iter().cloned().collect()))
+    Some((target.name.clone(), target.members.to_vec()))
 }
 
 fn transform_key_name(key: &str) -> String {
@@ -1739,10 +1745,12 @@ mod tests {
         assert!(lowered.module.python_source.contains("name: str"));
         // email should NOT appear in the UserPublic transform (it's in the original User class)
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
-        let user_public_start = all_lines.iter().position(|l| l.contains("class UserPublic"));
-        assert!(user_public_start.is_some());
+        let user_public_start = all_lines
+            .iter()
+            .position(|l| l.contains("class UserPublic"))
+            .expect("UserPublic class should be emitted");
         let mut section = String::new();
-        for l in &all_lines[user_public_start.unwrap()..] {
+        for l in &all_lines[user_public_start..] {
             if l.trim().is_empty() || l.trim().starts_with("class ") {
                 break;
             }
@@ -1829,10 +1837,12 @@ mod tests {
         assert!(lowered.module.python_source.contains("name: str"));
         // id should NOT appear in the UserUpdate transform (it's in the original User class)
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
-        let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
-        assert!(user_update_start.is_some());
+        let user_update_start = all_lines
+            .iter()
+            .position(|l| l.contains("class UserUpdate"))
+            .expect("UserUpdate class should be emitted");
         let mut section = String::new();
-        for l in &all_lines[user_update_start.unwrap()..] {
+        for l in &all_lines[user_update_start..] {
             if l.trim().is_empty() || l.trim().starts_with("class ") {
                 break;
             }
@@ -2036,10 +2046,12 @@ mod tests {
         assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
         // id should NOT appear in the UserUpdate transform
         let all_lines: Vec<_> = lowered.module.python_source.lines().collect();
-        let user_update_start = all_lines.iter().position(|l| l.contains("class UserUpdate"));
-        assert!(user_update_start.is_some());
+        let user_update_start = all_lines
+            .iter()
+            .position(|l| l.contains("class UserUpdate"))
+            .expect("UserUpdate class should be emitted");
         let mut section = String::new();
-        for l in &all_lines[user_update_start.unwrap()..] {
+        for l in &all_lines[user_update_start..] {
             if l.trim().is_empty() || l.trim().starts_with("class ") {
                 break;
             }
