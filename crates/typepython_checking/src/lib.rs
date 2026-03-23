@@ -3332,7 +3332,9 @@ fn positional_and_method_keyword_type_diagnostics(
         .iter()
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+            !arg_ty.is_empty()
+                && !param_ty.is_empty()
+                && !direct_type_matches(param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
             Diagnostic::error(
@@ -3356,7 +3358,7 @@ fn positional_and_method_keyword_type_diagnostics(
         let Some(param_ty) = param_types.get(index) else {
             continue;
         };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty != param_ty {
+        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -3620,7 +3622,9 @@ fn positional_and_keyword_type_diagnostics(
         .iter()
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty.as_str() != param_ty.as_str()
+            !arg_ty.is_empty()
+                && !param_ty.is_empty()
+                && !direct_type_matches(param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
             Diagnostic::error(
@@ -3643,7 +3647,7 @@ fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = param_types.get(index) else {
             continue;
         };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && arg_ty != param_ty {
+        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -16699,6 +16703,26 @@ mod tests {
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("keyword `age`"));
         assert!(rendered.contains("parameter expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_semantically_matching_keyword_type_in_direct_calls() {
+        let result = check_temp_typepython_source(
+            "from typing import Optional\n\ndef takes(x: Optional[int]) -> int:\n    return 0\n\ntakes(x=None)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_semantically_matching_keyword_type_in_method_calls() {
+        let result = check_temp_typepython_source(
+            "from typing import Optional\n\nclass User:\n    def set_age(self, age: Optional[int]):\n        self.age = age\n\nuser = User()\nuser.set_age(age=None)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
     }
 
     #[test]
