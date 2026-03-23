@@ -30,10 +30,21 @@ def _configured_command() -> list[str] | None:
     return [configured]
 
 
+def _bundled_command() -> list[str] | None:
+    binary_name = "typepython.exe" if os.name == "nt" else "typepython"
+    bundled = pathlib.Path(__file__).resolve().parent / "bin" / binary_name
+    if not bundled.is_file():
+        return None
+    return [str(bundled)]
+
+
 def _command() -> list[str]:
     configured = _configured_command()
     if configured is not None:
         return configured
+    bundled = _bundled_command()
+    if bundled is not None:
+        return bundled
     cargo_command = _cargo_typepython_command()
     if cargo_command is not None:
         return cargo_command

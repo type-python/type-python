@@ -1,0 +1,13 @@
+include Cargo.toml
+include Cargo.lock
+include LICENSE
+include README.md
+include pyproject.toml
+include rust-toolchain.toml
+include rustfmt.toml
+graft crates
+graft stdlib
+graft templates
+prune target
+prune dist
+prune .ruff_cache
