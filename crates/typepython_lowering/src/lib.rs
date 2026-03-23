@@ -5,6 +5,10 @@ use std::{collections::BTreeSet, path::PathBuf};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
 
+fn is_typed_dict_base(base: &str) -> bool {
+    matches!(base.trim(), "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict")
+}
+
 /// A single source-map row.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct SourceMapEntry {
@@ -136,10 +140,9 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             _ => None,
         })
         .collect();
-    // TypedDict classes are class defs with "TypedDict" in their bases.
     let typed_dicts_by_name: std::collections::BTreeMap<_, _> = class_defs
         .values()
-        .filter(|statement| statement.bases.iter().any(|b| b == "TypedDict"))
+        .filter(|statement| statement.bases.iter().any(|b| is_typed_dict_base(b)))
         .map(|statement| (statement.name.as_str(), *statement))
         .collect();
     let function_defs: std::collections::BTreeMap<_, _> = tree
@@ -870,7 +873,7 @@ fn collect_lowering_diagnostics(tree: &SyntaxTree) -> DiagnosticReport {
         .iter()
         .filter_map(|statement| match statement {
             SyntaxStatement::ClassDef(statement)
-                if statement.bases.iter().any(|base| base == "TypedDict") =>
+                if statement.bases.iter().any(|base| is_typed_dict_base(base)) =>
             {
                 Some((statement.name.as_str(), statement))
             }
@@ -1641,6 +1644,86 @@ mod tests {
         assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
         assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
         assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
+    }
+
+    #[test]
+    fn lower_expands_partial_typeddict_transform_for_qualified_bases() {
+        for base in ["typing.TypedDict", "typing_extensions.TypedDict"] {
+            let lowered = lower(&SyntaxTree {
+                source: SourceFile {
+                    path: PathBuf::from("partial-qualified.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: format!(
+                        "class User({base}):\n    id: int\n    name: str\n\ntypealias UserCreate = Partial[User]\n"
+                    ),
+                },
+                statements: vec![
+                    SyntaxStatement::ClassDef(NamedBlockStatement {
+                        name: String::from("User"),
+                        type_params: Vec::new(),
+                        header_suffix: format!("({base})"),
+                        bases: vec![String::from(base)],
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_abstract_class: false,
+                        members: vec![
+                            ClassMember {
+                                name: String::from("id"),
+                                kind: ClassMemberKind::Field,
+                                method_kind: None,
+                                annotation: Some(String::from("int")),
+                                value_type: None,
+                                params: Vec::new(),
+                                returns: None,
+                                is_async: false,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_deprecated: false,
+                                deprecation_message: None,
+                                is_final: false,
+                                is_class_var: false,
+                                line: 2,
+                            },
+                            ClassMember {
+                                name: String::from("name"),
+                                kind: ClassMemberKind::Field,
+                                method_kind: None,
+                                annotation: Some(String::from("str")),
+                                value_type: None,
+                                params: Vec::new(),
+                                returns: None,
+                                is_async: false,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_deprecated: false,
+                                deprecation_message: None,
+                                is_final: false,
+                                is_class_var: false,
+                                line: 3,
+                            },
+                        ],
+                        line: 1,
+                    }),
+                    SyntaxStatement::TypeAlias(TypeAliasStatement {
+                        name: String::from("UserCreate"),
+                        type_params: Vec::new(),
+                        value: String::from("Partial[User]"),
+                        line: 5,
+                    }),
+                ],
+                type_ignore_directives: Vec::new(),
+                diagnostics: DiagnosticReport::default(),
+            });
+
+            assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+            assert!(lowered.module.python_source.contains("class UserCreate(TypedDict):"));
+            assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
+            assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
+        }
     }
 
     #[test]

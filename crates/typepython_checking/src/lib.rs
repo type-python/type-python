@@ -914,6 +914,10 @@ struct DataclassTransformClassShape {
     has_explicit_init: bool,
 }
 
+fn is_typed_dict_base_name(base: &str) -> bool {
+    matches!(base.trim(), "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict")
+}
+
 fn typed_dict_literal_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1305,9 +1309,9 @@ fn is_typed_dict_class(
         return false;
     }
 
-    class_decl.name == "TypedDict"
+    is_typed_dict_base_name(&class_decl.name)
         || class_decl.bases.iter().any(|base| {
-            base == "TypedDict"
+            is_typed_dict_base_name(base)
                 || resolve_direct_base(nodes, class_node, base).is_some_and(
                     |(base_node, base_decl)| {
                         is_typed_dict_class(nodes, base_node, base_decl, visited)
@@ -5616,6 +5620,17 @@ mod tests {
     fn check_reports_readonly_typed_dict_item_delete() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict):\n    name: ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    del user[\"name\"]\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4016"));
+        assert!(rendered.contains("cannot be deleted"));
+    }
+
+    #[test]
+    fn check_reports_readonly_typed_dict_item_delete_for_qualified_base() {
+        let result = check_temp_typepython_source(
+            "import typing\nfrom typing_extensions import ReadOnly\n\nclass User(typing.TypedDict):\n    name: ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    del user[\"name\"]\n",
         );
 
         let rendered = result.diagnostics.as_text();
