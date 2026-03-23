@@ -165,7 +165,7 @@ mod tests {
         let rendered = encode_snapshot(&IncrementalState {
             fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
         })
-        .unwrap();
+        .expect("snapshot encoding should succeed");
 
         assert!(rendered.contains("schema_version"));
         assert!(rendered.contains(&SNAPSHOT_SCHEMA_VERSION.to_string()));
