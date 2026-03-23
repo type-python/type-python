@@ -757,12 +757,11 @@ fn apply_transform_to_members<'a>(
             .into_iter()
             .map(|m| {
                 let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = if ann.starts_with("NotRequired[") {
-                    ann.strip_prefix("NotRequired[")
-                        .expect("NotRequired prefix should already be matched")
-                        .trim_end_matches(']')
-                        .trim()
-                        .to_owned()
+                let new_ann = if let Some(inner) = ann
+                    .strip_prefix("NotRequired[")
+                    .and_then(|inner| inner.strip_suffix(']'))
+                {
+                    inner.trim().to_owned()
                 } else {
                     ann.to_owned()
                 };
@@ -1965,6 +1964,63 @@ mod tests {
         assert!(lowered.diagnostics.is_empty());
         assert!(lowered.module.python_source.contains("class RequiredUpdate(TypedDict):"));
         assert!(lowered.module.python_source.contains("name: str"));
+    }
+
+    #[test]
+    fn lower_expands_required_typeddict_transform_with_nested_annotation() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("required-nested.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "class UserUpdate(TypedDict):\n    value: NotRequired[list[int]]\n\ntypealias RequiredUpdate = Required_[UserUpdate]\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("UserUpdate"),
+                    type_params: Vec::new(),
+                    header_suffix: String::from("(TypedDict)"),
+                    bases: vec![String::from("TypedDict")],
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: vec![ClassMember {
+                        name: String::from("value"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("NotRequired[list[int]]")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    }],
+                    line: 1,
+                }),
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("RequiredUpdate"),
+                    type_params: Vec::new(),
+                    value: String::from("Required_[UserUpdate]"),
+                    line: 4,
+                }),
+            ],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("class RequiredUpdate(TypedDict):"));
+        assert!(lowered.module.python_source.contains("value: list[int]"));
     }
 
     #[test]
