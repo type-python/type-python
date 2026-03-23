@@ -388,7 +388,7 @@ fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let mut diagnostics = discovery.diagnostics.clone();
     let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
-    diagnostics.diagnostics.extend(parse_diagnostics.diagnostics.into_iter());
+    diagnostics.diagnostics.extend(parse_diagnostics.diagnostics);
 
     let report = build_migration_report(&config, &syntax_trees);
     let mut notes = vec![String::from(
@@ -966,7 +966,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     .diagnostics;
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
     diagnostics.diagnostics.extend(
-        public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics.into_iter(),
+        public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics,
     );
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
@@ -1810,716 +1810,6 @@ fn source_kind_name(kind: SourceKind) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        build_diagnostics, build_migration_report, collect_source_paths, compile_runtime_bytecode,
-        format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
-        verify_build_artifacts, watch_targets, write_incremental_snapshot,
-    };
-    use notify::RecursiveMode;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use std::{
-        collections::BTreeSet,
-        env, fs,
-        path::MAIN_SEPARATOR,
-        path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
-    };
-    use typepython_config::load;
-    use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-    use typepython_emit::EmitArtifact;
-    use typepython_incremental::IncrementalState;
-
-    #[test]
-    fn collect_source_paths_skips_implicit_namespace_packages() {
-        let project_dir = temp_project_dir("skips_implicit_namespace_packages");
-        let result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join("src/pkg/subpkg")).unwrap();
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n").unwrap();
-
-            let config = load(&project_dir).unwrap();
-            collect_source_paths(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let discovery = result.unwrap();
-        assert!(discovery.diagnostics.is_empty());
-        assert_eq!(discovery.sources.len(), 1);
-        assert_eq!(discovery.sources[0].logical_module, "pkg");
-    }
-
-    #[test]
-    fn collect_source_paths_respects_include_and_exclude_patterns() {
-        let project_dir = temp_project_dir("respects_include_and_exclude_patterns");
-        let result = (|| {
-            fs::write(
-                project_dir.join("typepython.toml"),
-                concat!(
-                    "[project]\n",
-                    "src = [\"src\"]\n",
-                    "include = [\"src/**/*.tpy\"]\n",
-                    "exclude = [\"src/pkg/excluded/**\"]\n"
-                ),
-            )
-            .unwrap();
-            fs::create_dir_all(project_dir.join("src/pkg/excluded")).unwrap();
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/kept.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/excluded/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/excluded/hidden.tpy"), "pass\n").unwrap();
-
-            let config = load(&project_dir).unwrap();
-            collect_source_paths(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let discovery = result.unwrap();
-        let logical_modules: Vec<_> =
-            discovery.sources.iter().map(|source| source.logical_module.as_str()).collect();
-        assert_eq!(logical_modules, vec!["pkg", "pkg.kept"]);
-    }
-
-    #[test]
-    fn collect_source_paths_reports_tpy_python_collisions() {
-        let project_dir = temp_project_dir("reports_tpy_python_collisions");
-        let result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").unwrap();
-
-            let config = load(&project_dir).unwrap();
-            collect_source_paths(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let discovery = result.unwrap();
-        assert!(discovery.diagnostics.has_errors());
-        let text = discovery.diagnostics.as_text();
-        assert!(text.contains("TPY3002"));
-        assert!(text.contains("pkg.value"));
-    }
-
-    #[test]
-    fn collect_source_paths_allows_python_with_companion_stub() {
-        let project_dir = temp_project_dir("allows_python_with_companion_stub");
-        let result = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
-            fs::write(project_dir.join("src/pkg/__init__.py"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").unwrap();
-            fs::write(project_dir.join("src/pkg/value.pyi"), "...\n").unwrap();
-
-            let config = load(&project_dir).unwrap();
-            collect_source_paths(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let discovery = result.unwrap();
-        assert!(discovery.diagnostics.is_empty());
-        assert_eq!(discovery.sources.len(), 3);
-    }
-
-    #[test]
-    fn collect_source_paths_reports_cross_root_collisions() {
-        let project_dir = temp_project_dir("reports_cross_root_collisions");
-        let result = (|| {
-            fs::write(
-                project_dir.join("typepython.toml"),
-                concat!(
-                    "[project]\n",
-                    "src = [\"src\", \"vendor\"]\n",
-                    "include = [\"src/**/*.tpy\", \"vendor/**/*.tpy\"]\n"
-                ),
-            )
-            .unwrap();
-            fs::create_dir_all(project_dir.join("src/pkg")).unwrap();
-            fs::create_dir_all(project_dir.join("vendor/pkg")).unwrap();
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").unwrap();
-            fs::write(project_dir.join("vendor/pkg/__init__.tpy"), "pass\n").unwrap();
-
-            let config = load(&project_dir).unwrap();
-            collect_source_paths(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let discovery = result.unwrap();
-        assert!(discovery.diagnostics.has_errors());
-        assert!(discovery.diagnostics.as_text().contains("TPY3002"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("missing runtime artifact"));
-        assert!(rendered.contains("missing package marker"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
-        let project_dir = temp_project_dir(
-            "verify_build_artifacts_accepts_present_runtime_stub_and_marker_files",
-        );
-        let diagnostics = (|| {
-            fs::write(
-                project_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
-            )
-            .unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(
-                project_dir.join(".typepython/build/app/helpers.pyi"),
-                "def helper() -> int: ...\n",
-            )
-            .unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc")
-                .unwrap();
-            write_incremental_snapshot(
-                &project_dir.join(".typepython/cache"),
-                &IncrementalState::default(),
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[
-                    EmitArtifact {
-                        source_path: project_dir.join("src/app/__init__.tpy"),
-                        runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                        stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                    },
-                    EmitArtifact {
-                        source_path: project_dir.join("src/app/helpers.pyi"),
-                        runtime_path: None,
-                        stub_path: Some(project_dir.join(".typepython/build/app/helpers.pyi")),
-                    },
-                ],
-            )
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(diagnostics.is_empty());
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_missing_bytecode_when_enabled() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_missing_bytecode_when_enabled");
-        let rendered = (|| {
-            fs::write(
-                project_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
-            )
-            .unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("missing bytecode artifact"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_missing_incremental_snapshot() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("missing incremental snapshot"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_invalid_emitted_python_syntax() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n")
-                .unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(
-                &project_dir.join(".typepython/cache"),
-                &IncrementalState::default(),
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("is not valid Python syntax"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(
-                project_dir.join(".typepython/build/app/__init__.py"),
-                "def build_user() -> int:\n    return 1\n",
-            )
-            .unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(
-                &project_dir.join(".typepython/cache"),
-                &IncrementalState::default(),
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("declaration surfaces differ"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(
-                project_dir.join(".typepython/build/app/__init__.py"),
-                "class Box:\n    @classmethod\n    def build(cls) -> None:\n        pass\n",
-            )
-            .unwrap();
-            fs::write(
-                project_dir.join(".typepython/build/app/__init__.pyi"),
-                "class Box:\n    def build(self) -> None: ...\n",
-            )
-            .unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            write_incremental_snapshot(
-                &project_dir.join(".typepython/cache"),
-                &IncrementalState::default(),
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("declaration surfaces differ"));
-    }
-
-    #[test]
-    fn verify_build_artifacts_reports_corrupt_incremental_snapshot() {
-        let project_dir =
-            temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).unwrap();
-            fs::create_dir_all(project_dir.join(".typepython/cache")).unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").unwrap();
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").unwrap();
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{not-json\n").unwrap();
-            let config = load(&project_dir).unwrap();
-
-            verify_build_artifacts(
-                &config,
-                &[EmitArtifact {
-                    source_path: project_dir.join("src/app/__init__.tpy"),
-                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
-                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
-                }],
-            )
-            .as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY6001"));
-        assert!(rendered.contains("incompatible or corrupt"));
-    }
-
-    #[test]
-    fn run_pipeline_reports_incomplete_public_surface_when_required() {
-        let project_dir =
-            temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
-        let rendered = (|| {
-            fs::create_dir_all(project_dir.join("src/app")).unwrap();
-            fs::write(
-                project_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
-            )
-            .unwrap();
-            fs::write(
-                project_dir.join("src/app/__init__.tpy"),
-                "def leak(value: dynamic) -> int:\n    return 0\n",
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            run_pipeline(&config).unwrap().diagnostics.as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY4015"));
-        assert!(rendered.contains("exports incomplete type surface for `leak`"));
-    }
-
-    #[test]
-    fn run_pipeline_ignores_private_incomplete_surface_when_required() {
-        let project_dir =
-            temp_project_dir("run_pipeline_ignores_private_incomplete_surface_when_required");
-        let diagnostics = (|| {
-            fs::create_dir_all(project_dir.join("src/app")).unwrap();
-            fs::write(
-                project_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
-            )
-            .unwrap();
-            fs::write(
-                project_dir.join("src/app/__init__.tpy"),
-                "def _leak(value: dynamic) -> int:\n    return 0\n",
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-
-            run_pipeline(&config).unwrap().diagnostics
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(diagnostics.is_empty());
-    }
-
-    #[test]
-    fn build_diagnostics_adds_emit_blocked_error_when_configured() {
-        let project_dir =
-            temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
-        let rendered = (|| {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            let config = load(&project_dir).unwrap();
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
-
-            build_diagnostics(&config, &diagnostics).as_text()
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(rendered.contains("TPY4004"));
-        assert!(rendered.contains("TPY5002"));
-    }
-
-    #[test]
-    fn should_emit_build_outputs_respects_no_emit_on_error() {
-        let project_dir = temp_project_dir("should_emit_build_outputs_respects_no_emit_on_error");
-        let result = (|| {
-            fs::write(
-                project_dir.join("typepython.toml"),
-                "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
-
-            should_emit_build_outputs(&config, &diagnostics)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(result);
-    }
-
-    #[test]
-    fn write_incremental_snapshot_persists_fingerprint_json() {
-        let project_dir = temp_project_dir("write_incremental_snapshot_persists_fingerprint_json");
-        let result = (|| {
-            let snapshot_path = write_incremental_snapshot(
-                &project_dir.join(".typepython/cache"),
-                &IncrementalState {
-                    fingerprints: std::collections::BTreeMap::from([
-                        (String::from("pkg.a"), 10),
-                        (String::from("pkg.b"), 20),
-                    ]),
-                },
-            )
-            .unwrap();
-
-            (
-                snapshot_path,
-                fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).unwrap(),
-            )
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let (snapshot_path, rendered) = result;
-        assert!(snapshot_path.ends_with("snapshot.json"));
-        assert!(rendered.contains("pkg.a"));
-        assert!(rendered.contains("pkg.b"));
-    }
-
-    #[test]
-    fn compile_runtime_bytecode_uses_configured_python_executable() {
-        let project_dir =
-            temp_project_dir("compile_runtime_bytecode_uses_configured_python_executable");
-        let result = (|| {
-            fs::create_dir_all(project_dir.join("bin")).unwrap();
-            fs::create_dir_all(project_dir.join("out/app")).unwrap();
-            let log_path = project_dir.join("compiler.log");
-            let fake_python = project_dir.join("bin/fake-python.sh");
-            fs::write(
-                project_dir.join("typepython.toml"),
-                format!(
-                    "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"bin{}fake-python.sh\"\n\n[emit]\nemit_pyc = true\n",
-                    MAIN_SEPARATOR
-                ),
-            )
-            .unwrap();
-            fs::write(
-                &fake_python,
-                format!(
-                    "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q 'version_info'; then\n  printf '3.10\\n'\n  exit 0\nfi\nprintf '%s\\n' \"$*\" >> \"{}\"\nexit 0\n",
-                    log_path.display()
-                ),
-            )
-            .unwrap();
-            #[cfg(unix)]
-            {
-                let mut permissions = fs::metadata(&fake_python).unwrap().permissions();
-                permissions.set_mode(0o755);
-                fs::set_permissions(&fake_python, permissions).unwrap();
-            }
-            let config = load(&project_dir).unwrap();
-            let artifacts = vec![EmitArtifact {
-                source_path: project_dir.join("src/app/__init__.tpy"),
-                runtime_path: Some(project_dir.join("out/app/__init__.py")),
-                stub_path: None,
-            }];
-            fs::write(project_dir.join("out/app/__init__.py"), "pass\n").unwrap();
-
-            let compiled = compile_runtime_bytecode(&config, &artifacts).unwrap();
-            let log = fs::read_to_string(&log_path).unwrap();
-            (compiled, log)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        let (compiled, log) = result;
-        assert_eq!(compiled, 1);
-        assert!(log.contains("py_compile.compile"));
-        assert!(log.contains("__init__.py"));
-        assert!(log.contains("__pycache__"));
-    }
-
-    #[test]
-    fn watch_targets_include_config_and_existing_source_roots() {
-        let project_dir =
-            temp_project_dir("watch_targets_include_config_and_existing_source_roots");
-        let targets = (|| {
-            fs::create_dir_all(project_dir.join("src/app")).unwrap();
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            let config = load(&project_dir).unwrap();
-            watch_targets(&config)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert_eq!(targets.len(), 2);
-        assert!(targets.iter().any(|(path, mode)| {
-            path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
-        }));
-        assert!(
-            targets
-                .iter()
-                .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive)
-        );
-    }
-
-    #[test]
-    fn format_watch_rebuild_note_summarizes_changed_paths() {
-        let changed = BTreeSet::from([
-            PathBuf::from("src/app/__init__.tpy"),
-            PathBuf::from("src/app/models.tpy"),
-            PathBuf::from("src/app/views.tpy"),
-            PathBuf::from("src/app/more.tpy"),
-        ]);
-
-        let note = format_watch_rebuild_note(&changed);
-        assert!(note.contains("rebuild triggered by"));
-        assert!(note.contains("and 1 more path(s)"));
-    }
-
-    #[test]
-    fn build_migration_report_counts_file_coverage_and_boundaries() {
-        let project_dir =
-            temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
-        let report = (|| {
-            fs::create_dir_all(project_dir.join("src/app")).unwrap();
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::write(
-                project_dir.join("src/app/__init__.tpy"),
-                "def typed(value: int) -> int:\n    return value\n\ndef untyped(value) -> int:\n    return 0\n\nleak: dynamic = 1\n",
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-            let discovery = collect_source_paths(&config).unwrap();
-            let syntax_trees = load_syntax_trees(&discovery.sources).unwrap();
-            build_migration_report(&config, &syntax_trees)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert_eq!(report.total_declarations, 3);
-        assert_eq!(report.known_declarations, 1);
-        assert_eq!(report.total_dynamic_boundaries, 1);
-        assert_eq!(report.total_unknown_boundaries, 0);
-        assert_eq!(report.files.len(), 1);
-        assert_eq!(report.files[0].known_declarations, 1);
-    }
-
-    #[test]
-    fn build_migration_report_ranks_high_impact_untyped_files() {
-        let project_dir =
-            temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
-        let report = (|| {
-            fs::create_dir_all(project_dir.join("src/app")).unwrap();
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").unwrap();
-            fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n").unwrap();
-            fs::write(
-                project_dir.join("src/app/a.tpy"),
-                "def untyped(value) -> int:\n    return 0\n",
-            )
-            .unwrap();
-            fs::write(
-                project_dir.join("src/app/b.tpy"),
-                "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
-            )
-            .unwrap();
-            fs::write(
-                project_dir.join("src/app/c.tpy"),
-                "def clean(value: int) -> int:\n    return value\n",
-            )
-            .unwrap();
-            let config = load(&project_dir).unwrap();
-            let discovery = collect_source_paths(&config).unwrap();
-            let syntax_trees = load_syntax_trees(&discovery.sources).unwrap();
-            build_migration_report(&config, &syntax_trees)
-        })();
-        remove_temp_project_dir(&project_dir);
-
-        assert!(!report.high_impact_untyped_files.is_empty());
-        assert!(report.high_impact_untyped_files[0].path.ends_with("src/app/a.tpy"));
-        assert_eq!(report.high_impact_untyped_files[0].downstream_references, 1);
-    }
-
-    fn temp_project_dir(test_name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after epoch")
-            .as_nanos();
-        let directory = env::temp_dir().join(format!("typepython-cli-{test_name}-{unique}"));
-        fs::create_dir_all(&directory).expect("temp project directory should be created");
-        directory
-    }
-
-    fn remove_temp_project_dir(path: &Path) {
-        if path.exists() {
-            fs::remove_dir_all(path).expect("temp project directory should be removed");
-        }
-    }
-}
-
 fn write_file(path: &Path, content: &str, force: bool) -> Result<()> {
     if path.exists() && !force {
         anyhow::bail!("{} already exists; rerun with --force to overwrite", path.display());
@@ -2647,4 +1937,688 @@ fn print_migration_report(
 
 fn exit_code(diagnostics: &DiagnosticReport) -> ExitCode {
     if diagnostics.has_errors() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_diagnostics, build_migration_report, collect_source_paths, compile_runtime_bytecode,
+        format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
+        verify_build_artifacts, watch_targets, write_incremental_snapshot,
+    };
+    use notify::RecursiveMode;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::{
+        collections::BTreeSet,
+        env, fs,
+        path::MAIN_SEPARATOR,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use typepython_config::load;
+    use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+    use typepython_emit::EmitArtifact;
+    use typepython_incremental::IncrementalState;
+
+    #[test]
+    fn collect_source_paths_skips_implicit_namespace_packages() {
+        let project_dir = temp_project_dir("skips_implicit_namespace_packages");
+        let result = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg/subpkg")).expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n").expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.expect("test setup should succeed");
+        assert!(discovery.diagnostics.is_empty());
+        assert_eq!(discovery.sources.len(), 1);
+        assert_eq!(discovery.sources[0].logical_module, "pkg");
+    }
+
+    #[test]
+    fn collect_source_paths_respects_include_and_exclude_patterns() {
+        let project_dir = temp_project_dir("respects_include_and_exclude_patterns");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n",
+                    "exclude = [\"src/pkg/excluded/**\"]\n"
+                ),
+            ).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg/excluded")).expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/kept.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/excluded/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/excluded/hidden.tpy"), "pass\n").expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.expect("test setup should succeed");
+        let logical_modules: Vec<_> =
+            discovery.sources.iter().map(|source| source.logical_module.as_str()).collect();
+        assert_eq!(logical_modules, vec!["pkg", "pkg.kept"]);
+    }
+
+    #[test]
+    fn collect_source_paths_reports_tpy_python_collisions() {
+        let project_dir = temp_project_dir("reports_tpy_python_collisions");
+        let result = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.expect("test setup should succeed");
+        assert!(discovery.diagnostics.has_errors());
+        let text = discovery.diagnostics.as_text();
+        assert!(text.contains("TPY3002"));
+        assert!(text.contains("pkg.value"));
+    }
+
+    #[test]
+    fn collect_source_paths_allows_python_with_companion_stub() {
+        let project_dir = temp_project_dir("allows_python_with_companion_stub");
+        let result = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.pyi"), "...\n").expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.expect("test setup should succeed");
+        assert!(discovery.diagnostics.is_empty());
+        assert_eq!(discovery.sources.len(), 3);
+    }
+
+    #[test]
+    fn collect_source_paths_reports_cross_root_collisions() {
+        let project_dir = temp_project_dir("reports_cross_root_collisions");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\", \"vendor\"]\n",
+                    "include = [\"src/**/*.tpy\", \"vendor/**/*.tpy\"]\n"
+                ),
+            ).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("vendor/pkg")).expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("vendor/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let discovery = result.expect("test setup should succeed");
+        assert!(discovery.diagnostics.has_errors());
+        assert!(discovery.diagnostics.as_text().contains("TPY3002"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing runtime artifact"));
+        assert!(rendered.contains("missing package marker"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
+        let project_dir = temp_project_dir(
+            "verify_build_artifacts_accepts_present_runtime_stub_and_marker_files",
+        );
+        let diagnostics = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
+            ).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/helpers.pyi"),
+                "def helper() -> int: ...\n",
+            ).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[
+                    EmitArtifact {
+                        source_path: project_dir.join("src/app/__init__.tpy"),
+                        runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                        stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                    },
+                    EmitArtifact {
+                        source_path: project_dir.join("src/app/helpers.pyi"),
+                        runtime_path: None,
+                        stub_path: Some(project_dir.join(".typepython/build/app/helpers.pyi")),
+                    },
+                ],
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_bytecode_when_enabled() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_bytecode_when_enabled");
+        let rendered = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
+            ).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing bytecode artifact"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_missing_incremental_snapshot() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing incremental snapshot"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_invalid_emitted_python_syntax() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("is not valid Python syntax"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "def build_user() -> int:\n    return 1\n",
+            ).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("declaration surfaces differ"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "class Box:\n    @classmethod\n    def build(cls) -> None:\n        pass\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "class Box:\n    def build(self) -> None: ...\n",
+            ).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("declaration surfaces differ"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_corrupt_incremental_snapshot() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{not-json\n").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY6001"));
+        assert!(rendered.contains("incompatible or corrupt"));
+    }
+
+    #[test]
+    fn run_pipeline_reports_incomplete_public_surface_when_required() {
+        let project_dir =
+            temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
+        let rendered = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def leak(value: dynamic) -> int:\n    return 0\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed").diagnostics.as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY4015"));
+        assert!(rendered.contains("exports incomplete type surface for `leak`"));
+    }
+
+    #[test]
+    fn run_pipeline_ignores_private_incomplete_surface_when_required() {
+        let project_dir =
+            temp_project_dir("run_pipeline_ignores_private_incomplete_surface_when_required");
+        let diagnostics = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def _leak(value: dynamic) -> int:\n    return 0\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed").diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn build_diagnostics_adds_emit_blocked_error_when_configured() {
+        let project_dir =
+            temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+
+            build_diagnostics(&config, &diagnostics).as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY4004"));
+        assert!(rendered.contains("TPY5002"));
+    }
+
+    #[test]
+    fn should_emit_build_outputs_respects_no_emit_on_error() {
+        let project_dir = temp_project_dir("should_emit_build_outputs_respects_no_emit_on_error");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+
+            should_emit_build_outputs(&config, &diagnostics)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(result);
+    }
+
+    #[test]
+    fn write_incremental_snapshot_persists_fingerprint_json() {
+        let project_dir = temp_project_dir("write_incremental_snapshot_persists_fingerprint_json");
+        let result = {
+            let snapshot_path = write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState {
+                    fingerprints: std::collections::BTreeMap::from([
+                        (String::from("pkg.a"), 10),
+                        (String::from("pkg.b"), 20),
+                    ]),
+                },
+            ).expect("test setup should succeed");
+
+            (
+                snapshot_path,
+                fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).expect("test setup should succeed"),
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let (snapshot_path, rendered) = result;
+        assert!(snapshot_path.ends_with("snapshot.json"));
+        assert!(rendered.contains("pkg.a"));
+        assert!(rendered.contains("pkg.b"));
+    }
+
+    #[test]
+    fn compile_runtime_bytecode_uses_configured_python_executable() {
+        let project_dir =
+            temp_project_dir("compile_runtime_bytecode_uses_configured_python_executable");
+        let result = {
+            fs::create_dir_all(project_dir.join("bin")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("out/app")).expect("test setup should succeed");
+            let log_path = project_dir.join("compiler.log");
+            let fake_python = project_dir.join("bin/fake-python.sh");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"bin{}fake-python.sh\"\n\n[emit]\nemit_pyc = true\n",
+                    MAIN_SEPARATOR
+                ),
+            ).expect("test setup should succeed");
+            fs::write(
+                &fake_python,
+                format!(
+                    "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q 'version_info'; then\n  printf '3.10\\n'\n  exit 0\nfi\nprintf '%s\\n' \"$*\" >> \"{}\"\nexit 0\n",
+                    log_path.display()
+                ),
+            ).expect("test setup should succeed");
+            #[cfg(unix)]
+            {
+                let mut permissions = fs::metadata(&fake_python).expect("test setup should succeed").permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(&fake_python, permissions).expect("test setup should succeed");
+            }
+            let config = load(&project_dir).expect("test setup should succeed");
+            let artifacts = vec![EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("out/app/__init__.py")),
+                stub_path: None,
+            }];
+            fs::write(project_dir.join("out/app/__init__.py"), "pass\n").expect("test setup should succeed");
+
+            let compiled = compile_runtime_bytecode(&config, &artifacts).expect("test setup should succeed");
+            let log = fs::read_to_string(&log_path).expect("test setup should succeed");
+            (compiled, log)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let (compiled, log) = result;
+        assert_eq!(compiled, 1);
+        assert!(log.contains("py_compile.compile"));
+        assert!(log.contains("__init__.py"));
+        assert!(log.contains("__pycache__"));
+    }
+
+    #[test]
+    fn watch_targets_include_config_and_existing_source_roots() {
+        let project_dir =
+            temp_project_dir("watch_targets_include_config_and_existing_source_roots");
+        let targets = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            watch_targets(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|(path, mode)| {
+            path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
+        }));
+        assert!(
+            targets
+                .iter()
+                .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive)
+        );
+    }
+
+    #[test]
+    fn format_watch_rebuild_note_summarizes_changed_paths() {
+        let changed = BTreeSet::from([
+            PathBuf::from("src/app/__init__.tpy"),
+            PathBuf::from("src/app/models.tpy"),
+            PathBuf::from("src/app/views.tpy"),
+            PathBuf::from("src/app/more.tpy"),
+        ]);
+
+        let note = format_watch_rebuild_note(&changed);
+        assert!(note.contains("rebuild triggered by"));
+        assert!(note.contains("and 1 more path(s)"));
+    }
+
+    #[test]
+    fn build_migration_report_counts_file_coverage_and_boundaries() {
+        let project_dir =
+            temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
+        let report = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "def typed(value: int) -> int:\n    return value\n\ndef untyped(value) -> int:\n    return 0\n\nleak: dynamic = 1\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let discovery = collect_source_paths(&config).expect("test setup should succeed");
+            let syntax_trees = load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+            build_migration_report(&config, &syntax_trees)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(report.total_declarations, 3);
+        assert_eq!(report.known_declarations, 1);
+        assert_eq!(report.total_dynamic_boundaries, 1);
+        assert_eq!(report.total_unknown_boundaries, 0);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].known_declarations, 1);
+    }
+
+    #[test]
+    fn build_migration_report_ranks_high_impact_untyped_files() {
+        let project_dir =
+            temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
+        let report = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/a.tpy"),
+                "def untyped(value) -> int:\n    return 0\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/b.tpy"),
+                "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/c.tpy"),
+                "def clean(value: int) -> int:\n    return value\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let discovery = collect_source_paths(&config).expect("test setup should succeed");
+            let syntax_trees = load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+            build_migration_report(&config, &syntax_trees)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!report.high_impact_untyped_files.is_empty());
+        assert!(report.high_impact_untyped_files[0].path.ends_with("src/app/a.tpy"));
+        assert_eq!(report.high_impact_untyped_files[0].downstream_references, 1);
+    }
+
+    fn temp_project_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("typepython-cli-{test_name}-{unique}"));
+        fs::create_dir_all(&directory).expect("temp project directory should be created");
+        directory
+    }
+
+    fn remove_temp_project_dir(path: &Path) {
+        if path.exists() {
+            fs::remove_dir_all(path).expect("temp project directory should be removed");
+        }
+    }
 }
