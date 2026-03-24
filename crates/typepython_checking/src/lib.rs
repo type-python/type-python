@@ -3697,8 +3697,6 @@ fn direct_call_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    let direct_function_signatures = load_direct_function_signatures(node);
-    let direct_init_signatures = load_direct_init_signatures(node);
     node.calls
         .iter()
         .flat_map(|call| {
@@ -3707,11 +3705,8 @@ fn direct_call_type_diagnostics(
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
             }
-            if let Some(signature) = direct_init_signatures.get(&call.callee) {
-                return direct_source_function_type_diagnostics(node, call, signature);
-            }
-            if let Some(signature) = direct_function_signatures.get(&call.callee) {
-                return direct_source_function_type_diagnostics(node, call, signature);
+            if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee) {
+                return direct_source_function_type_diagnostics(node, call, &signature);
             }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee)
             else {
@@ -3735,8 +3730,6 @@ fn direct_call_keyword_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let direct_function_signatures = load_direct_function_signatures(node);
-    let direct_init_signatures = load_direct_init_signatures(node);
 
     for call in &node.calls {
         if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
@@ -3746,12 +3739,8 @@ fn direct_call_keyword_diagnostics(
                 .extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
             continue;
         }
-        if let Some(signature) = direct_init_signatures.get(&call.callee) {
-            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, signature));
-            continue;
-        }
-        if let Some(signature) = direct_function_signatures.get(&call.callee) {
-            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, signature));
+        if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee) {
+            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, &signature));
             continue;
         }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee)
@@ -4072,6 +4061,53 @@ fn load_direct_init_signatures(
             (signature.owner_type_name, params)
         })
         .collect()
+}
+
+fn direct_signature_sites_from_detail(detail: &str) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+    direct_signature_params(detail)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|param| typepython_syntax::DirectFunctionParamSite {
+            name: param.name,
+            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
+            has_default: param.has_default,
+            positional_only: param.positional_only,
+            keyword_only: param.keyword_only,
+            variadic: param.variadic,
+            keyword_variadic: param.keyword_variadic,
+        })
+        .collect()
+}
+
+fn resolve_direct_callable_signature_sites(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let direct_function_signatures = load_direct_function_signatures(node);
+    if let Some(signature) = direct_function_signatures.get(callee) {
+        return Some(signature.clone());
+    }
+
+    let direct_init_signatures = load_direct_init_signatures(node);
+    if let Some(signature) = direct_init_signatures.get(callee) {
+        return Some(signature.clone());
+    }
+
+    if let Some(function) = resolve_direct_function(node, nodes, callee) {
+        return Some(direct_signature_sites_from_detail(&function.detail));
+    }
+
+    if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        let init = class_node.declarations.iter().find(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == "__init__"
+                && declaration.kind == DeclarationKind::Function
+        })?;
+        return Some(direct_signature_sites_from_detail(&init.detail).into_iter().skip(1).collect());
+    }
+
+    resolve_typing_callable_signature(callee).map(direct_signature_sites_from_detail)
 }
 
 fn direct_param_names_from_signature(
