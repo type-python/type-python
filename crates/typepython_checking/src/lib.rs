@@ -397,7 +397,7 @@ fn direct_unknown_operation_diagnostics(
 
 fn plain_dataclass_field_specifier_call(
     node: &typepython_graph::ModuleNode,
-    callee: &str,
+    _callee: &str,
     line: usize,
 ) -> bool {
     if node.module_path.to_string_lossy().starts_with('<') {
@@ -415,12 +415,7 @@ fn plain_dataclass_field_specifier_call(
             && class_site.fields.iter().any(|field| {
                 field.line == line
                     && field.field_specifier_name.as_ref().is_some_and(|name| {
-                        name == callee
-                            || name.ends_with(&format!(".{callee}"))
-                            || matches!(
-                                (name.as_str(), callee),
-                                ("field", "dataclasses.field") | ("dataclasses.field", "field")
-                            )
+                        matches!(name.as_str(), "field" | "dataclasses.field")
                     })
             })
     })
