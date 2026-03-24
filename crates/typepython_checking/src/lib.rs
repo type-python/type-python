@@ -2196,6 +2196,65 @@ fn find_owned_callable_declaration<'a>(
     })
 }
 
+fn find_owned_callable_declarations<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Vec<&'a Declaration> {
+    let mut visited = BTreeSet::new();
+    find_owned_callable_declarations_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        &mut visited,
+    )
+}
+
+fn find_owned_callable_declarations_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Vec<&'a Declaration> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return Vec::new();
+    }
+
+    let local = class_node
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == member_name
+                && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+        })
+        .collect::<Vec<_>>();
+    if !local.is_empty() {
+        return local;
+    }
+
+    for base in &class_decl.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+            let inherited = find_owned_callable_declarations_with_visited(
+                nodes,
+                base_node,
+                base_decl,
+                member_name,
+                visited,
+            );
+            if !inherited.is_empty() {
+                return inherited;
+            }
+        }
+    }
+
+    Vec::new()
+}
+
 #[expect(clippy::too_many_arguments, reason = "unnarrowed name resolution needs scope and source-position context")]
 fn resolve_unnarrowed_name_reference_type(
     node: &typepython_graph::ModuleNode,
@@ -3254,22 +3313,57 @@ fn direct_method_call_diagnostics(
         else {
             continue;
         };
-        let Some(target) =
-            find_owned_callable_declaration(nodes, class_node, class_decl, &call.method)
-        else {
+        let candidates = find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
+        let Some(target) = candidates.first().copied() else {
             continue;
         };
+
+        let direct_call = typepython_binding::CallSite {
+            callee: format!("{}.{}", class_decl.name, call.method),
+            arg_count: call.arg_count,
+            arg_types: call.arg_types.clone(),
+            keyword_names: call.keyword_names.clone(),
+            keyword_arg_types: call.keyword_arg_types.clone(),
+        };
+
+        let overloads = candidates
+            .iter()
+            .copied()
+            .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+            .collect::<Vec<_>>();
+        if !overloads.is_empty() {
+            let applicable = overloads
+                .iter()
+                .copied()
+                .filter(|declaration| method_overload_is_applicable(&direct_call, declaration, &owner_type_name))
+                .collect::<Vec<_>>();
+            if applicable.len() >= 2 {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4012",
+                    format!(
+                        "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                        class_decl.name,
+                        call.method,
+                        node.module_path.display(),
+                        applicable.len()
+                    ),
+                ));
+                continue;
+            }
+            if let Some(applicable) = applicable.first().copied() {
+                let signature = direct_method_signature_sites(applicable, &owner_type_name);
+                if let Some(diagnostic) = direct_source_function_arity_diagnostic(node, &direct_call, &signature) {
+                    diagnostics.push(diagnostic);
+                }
+                diagnostics.extend(direct_source_function_keyword_diagnostics(node, &direct_call, &signature));
+                diagnostics.extend(direct_source_function_type_diagnostics(node, &direct_call, &signature));
+                continue;
+            }
+        }
 
         if let Some(signature) =
             direct_method_signatures.get(&(class_decl.name.clone(), call.method.clone()))
         {
-            let direct_call = typepython_binding::CallSite {
-                callee: format!("{}.{}", class_decl.name, call.method),
-                arg_count: call.arg_count,
-                arg_types: call.arg_types.clone(),
-                keyword_names: call.keyword_names.clone(),
-                keyword_arg_types: call.keyword_arg_types.clone(),
-            };
             if let Some(diagnostic) = direct_source_function_arity_diagnostic(node, &direct_call, signature) {
                 diagnostics.push(diagnostic);
             }
@@ -3301,13 +3395,6 @@ fn direct_method_call_diagnostics(
             }
             _ => fallback_signature.into_iter().skip(1).collect(),
         };
-        let direct_call = typepython_binding::CallSite {
-            callee: format!("{}.{}", class_decl.name, call.method),
-            arg_count: call.arg_count,
-            arg_types: call.arg_types.clone(),
-            keyword_names: call.keyword_names.clone(),
-            keyword_arg_types: call.keyword_arg_types.clone(),
-        };
         if let Some(diagnostic) =
             direct_source_function_arity_diagnostic(node, &direct_call, &fallback_signature)
         {
@@ -3326,6 +3413,115 @@ fn direct_method_call_diagnostics(
     }
 
     diagnostics
+}
+
+fn direct_method_signature_sites(
+    declaration: &Declaration,
+    owner_type_name: &str,
+) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+    let method_signature = substitute_self_annotation(&declaration.detail, Some(owner_type_name));
+    let params = direct_signature_params(&method_signature).unwrap_or_default();
+    let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+        typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
+        _ => params.into_iter().skip(1).collect(),
+    };
+
+    params
+        .into_iter()
+        .map(|param| typepython_syntax::DirectFunctionParamSite {
+            name: param.name,
+            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
+            has_default: param.has_default,
+            positional_only: param.positional_only,
+            keyword_only: param.keyword_only,
+            variadic: param.variadic,
+            keyword_variadic: param.keyword_variadic,
+        })
+        .collect()
+}
+
+fn method_overload_is_applicable(
+    call: &typepython_binding::CallSite,
+    declaration: &Declaration,
+    owner_type_name: &str,
+) -> bool {
+    let method_signature = substitute_self_annotation(&declaration.detail, Some(owner_type_name));
+    let params = direct_signature_params(&method_signature).unwrap_or_default();
+    let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+        typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
+        _ => params.into_iter().skip(1).collect(),
+    };
+    method_signature_params_are_applicable(call, &params)
+}
+
+fn method_signature_params_are_applicable(
+    call: &typepython_binding::CallSite,
+    params: &[DirectSignatureParam],
+) -> bool {
+    let positional_params = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let has_variadic = params.iter().any(|param| param.variadic);
+    if !has_variadic && call.arg_count > positional_params.len() {
+        return false;
+    }
+    let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
+    if call.keyword_names.iter().any(|keyword| {
+        !params
+            .iter()
+            .any(|param| param.name == **keyword && !param.positional_only)
+            && !accepts_extra_keywords
+    }) {
+        return false;
+    }
+    if params.iter().enumerate().any(|(index, param)| {
+        !param.has_default
+            && if param.keyword_only {
+                !provided_keywords.contains(&param.name)
+            } else if param.variadic || param.keyword_variadic {
+                false
+            } else {
+                index >= call.arg_count
+                    && (param.positional_only || !provided_keywords.contains(&param.name))
+            }
+    }) {
+        return false;
+    }
+
+    let param_types = params.iter().map(|param| param.annotation.as_str()).collect::<Vec<_>>();
+    let variadic_type = params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
+    let keyword_variadic_type = params
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .map(|param| param.annotation.as_str());
+    let positional_ok = call
+        .arg_types
+        .iter()
+        .take(positional_params.len())
+        .zip(param_types.iter())
+        .all(|(arg_ty, param_ty)| {
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        })
+        && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
+            let Some(param_ty) = variadic_type else {
+                return false;
+            };
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        });
+    let keyword_ok = call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
+        let Some(index) = params.iter().position(|param| param.name == *keyword) else {
+            let Some(param_ty) = keyword_variadic_type else {
+                return false;
+            };
+            return arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty);
+        };
+        let param_ty = param_types[index];
+        arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+    });
+
+    positional_ok && keyword_ok
 }
 
 fn load_direct_method_signatures(
@@ -6537,6 +6733,165 @@ mod tests {
             "def takes(*args: int):\n    return 0\n\ndef kw(**kwargs: int):\n    return 0\n\ntakes(1, 2, 3)\nkw(x=1, y=2)\n",
         );
 
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_stub_overloaded_method_keyword_calls() {
+        let graph = ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("/tmp/pkg/util.pyi"),
+                    module_key: String::from("pkg.util"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("User"),
+                            kind: DeclarationKind::Class,
+                            detail: String::new(),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: Some(DeclarationOwnerKind::Class),
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("parse"),
+                            kind: DeclarationKind::Overload,
+                            detail: String::from("(self,value:int)->int"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                kind: DeclarationOwnerKind::Class,
+                                name: String::from("User"),
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("parse"),
+                            kind: DeclarationKind::Overload,
+                            detail: String::from("(self,value:str)->str"),
+                            value_type: None,
+                            method_kind: Some(typepython_syntax::MethodKind::Instance),
+                            class_kind: None,
+                            owner: Some(DeclarationOwner {
+                                kind: DeclarationOwnerKind::Class,
+                                name: String::from("User"),
+                            }),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 0,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("/tmp/app.tpy"),
+                    module_key: String::from("app"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("User"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("pkg.util.User"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("user"),
+                            kind: DeclarationKind::Value,
+                            detail: String::from("User"),
+                            value_type: Some(String::from("User")),
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                        },
+                    ],
+                    calls: Vec::new(),
+                    method_calls: vec![typepython_binding::MethodCallSite {
+                        owner_name: String::from("user"),
+                        method: String::from("parse"),
+                        through_instance: false,
+                        arg_count: 0,
+                        arg_types: Vec::new(),
+                        keyword_names: vec![String::from("value")],
+                        keyword_arg_types: vec![String::from("str")],
+                        line: 1,
+                    }],
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 0,
+                },
+            ],
+        };
+
+        let result = check(&graph);
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
     }
