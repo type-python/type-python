@@ -18,6 +18,7 @@ use typepython_graph::build;
 use typepython_syntax::{
     SourceFile, SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse,
 };
+use url::Url;
 
 #[derive(Debug, Error)]
 pub enum LspError {
@@ -1242,14 +1243,16 @@ fn normalize_path_string(path: &Path) -> String {
 }
 
 fn path_to_uri(path: &Path) -> String {
-    format!("file://{}", path.to_string_lossy())
+    Url::from_file_path(path)
+        .expect("filesystem paths should convert to file:// URIs")
+        .into()
 }
 
 fn uri_to_path(uri: &str) -> Result<PathBuf, LspError> {
-    let Some(path) = uri.strip_prefix("file://") else {
-        return Err(LspError::Other(format!("unsupported URI `{uri}`")));
-    };
-    Ok(PathBuf::from(path))
+    let parsed = Url::parse(uri).map_err(|error| LspError::Other(format!("unsupported URI `{uri}`: {error}")))?;
+    parsed
+        .to_file_path()
+        .map_err(|()| LspError::Other(format!("unsupported URI `{uri}`")))
 }
 
 #[cfg(test)]
@@ -1538,6 +1541,15 @@ mod tests {
 
         assert!(error.to_string().contains("TPY6002"));
         assert!(error.to_string().contains("ranged incremental edits"));
+    }
+
+    #[test]
+    fn file_uri_helpers_round_trip_paths_with_spaces() {
+        let path = PathBuf::from("/tmp/typepython spaced/project/__init__.tpy");
+        let uri = path_to_uri(&path);
+
+        assert_eq!(uri, "file:///tmp/typepython%20spaced/project/__init__.tpy");
+        assert_eq!(uri_to_path(&uri).expect("URI should decode to file path"), path);
     }
 
     fn temp_config(test_name: &str, source: &str) -> ConfigHandle {
