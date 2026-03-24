@@ -267,6 +267,9 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
     }) {
         return false;
     }
+    if keyword_duplicates_positional_arguments(call, &params) {
+        return false;
+    }
     if params.iter().enumerate().any(|(index, param)| {
         !param.has_default
             && if param.keyword_only {
@@ -3476,6 +3479,9 @@ fn method_signature_params_are_applicable(
     }) {
         return false;
     }
+    if keyword_duplicates_positional_arguments(call, params) {
+        return false;
+    }
     if params.iter().enumerate().any(|(index, param)| {
         !param.has_default
             && if param.keyword_only {
@@ -3835,7 +3841,7 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
     let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
-    call.keyword_names
+    let mut diagnostics = call.keyword_names
         .iter()
         .filter_map(|keyword| {
             let matching = signature.iter().find(|param| param.name == *keyword);
@@ -3863,7 +3869,49 @@ fn direct_source_function_keyword_diagnostics(
                 _ => return None,
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    let positional_param_names = signature
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    for keyword in &call.keyword_names {
+        if positional_param_names
+            .iter()
+            .take(call.arg_count)
+            .any(|name| *name == keyword.as_str())
+        {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` binds parameter `{}` both positionally and by keyword",
+                    call.callee,
+                    node.module_path.display(),
+                    keyword
+                ),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn keyword_duplicates_positional_arguments(
+    call: &typepython_binding::CallSite,
+    params: &[DirectSignatureParam],
+) -> bool {
+    let positional_param_names = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    call.keyword_names.iter().any(|keyword| {
+        positional_param_names
+            .iter()
+            .take(call.arg_count)
+            .any(|name| *name == keyword.as_str())
+    })
 }
 
 fn direct_source_function_type_diagnostics(
@@ -6735,6 +6783,39 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_duplicate_function_parameter_binding() {
+        let result = check_temp_typepython_source(
+            "def takes(x: int):\n    return x\n\ntakes(1, x=2)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("binds parameter `x` both positionally and by keyword"));
+    }
+
+    #[test]
+    fn check_reports_duplicate_constructor_parameter_binding() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def __init__(self, age: int):\n        self.age = age\n\nUser(1, age=2)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("binds parameter `age` both positionally and by keyword"));
+    }
+
+    #[test]
+    fn check_reports_duplicate_method_parameter_binding() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def set_age(self, age: int):\n        self.age = age\n\nuser = User()\nuser.set_age(1, age=2)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("binds parameter `age` both positionally and by keyword"));
     }
 
     #[test]
