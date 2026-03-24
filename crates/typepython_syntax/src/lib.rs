@@ -1,6 +1,7 @@
 //! Source classification and parser boundary for TypePython.
 
 use std::{
+    collections::BTreeMap,
     ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
@@ -645,13 +646,14 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
         return DataclassTransformModuleInfo::default();
     };
 
+    let import_bindings = collect_import_bindings(parsed.suite());
     let mut providers = Vec::new();
     let mut classes = Vec::new();
     for stmt in parsed.suite() {
         match stmt {
             Stmt::FunctionDef(function) => {
                 if let Some(metadata) =
-                    dataclass_transform_metadata(source, &function.decorator_list)
+                    dataclass_transform_metadata(source, &function.decorator_list, &import_bindings)
                 {
                     providers.push(DataclassTransformProviderSite {
                         name: function.name.as_str().to_owned(),
@@ -661,8 +663,11 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
                 }
             }
             Stmt::ClassDef(class_def) => {
-                if let Some(metadata) =
-                    dataclass_transform_metadata(source, &class_def.decorator_list)
+                if let Some(metadata) = dataclass_transform_metadata(
+                    source,
+                    &class_def.decorator_list,
+                    &import_bindings,
+                )
                 {
                     providers.push(DataclassTransformProviderSite {
                         name: class_def.name.as_str().to_owned(),
@@ -670,7 +675,11 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
                         line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
                     });
                 }
-                classes.push(collect_dataclass_transform_class_site(source, class_def));
+                classes.push(collect_dataclass_transform_class_site(
+                    source,
+                    class_def,
+                    &import_bindings,
+                ));
             }
             _ => {}
         }
@@ -1024,14 +1033,16 @@ fn extract_frozen_field_mutation_site(
 fn collect_dataclass_transform_class_site(
     source: &str,
     class_def: &ruff_python_ast::StmtClassDef,
+    import_bindings: &BTreeMap<String, String>,
 ) -> DataclassTransformClassSite {
-    let plain_dataclass = dataclass_decorator_metadata(&class_def.decorator_list);
+    let plain_dataclass = dataclass_decorator_metadata(&class_def.decorator_list, import_bindings);
     DataclassTransformClassSite {
         name: class_def.name.as_str().to_owned(),
         decorators: class_def
             .decorator_list
             .iter()
             .filter_map(|decorator| decorator_target_name(&decorator.expression))
+            .map(|name| normalize_imported_name(&name, import_bindings))
             .collect(),
         plain_dataclass_frozen: plain_dataclass.as_ref().is_some_and(|metadata| metadata.frozen),
         plain_dataclass_kw_only: plain_dataclass.as_ref().is_some_and(|metadata| metadata.kw_only),
@@ -1040,7 +1051,12 @@ fn collect_dataclass_transform_class_site(
             .arguments
             .as_ref()
             .map(|arguments| {
-                arguments.args.iter().filter_map(decorator_target_name).collect::<Vec<_>>()
+                arguments
+                    .args
+                    .iter()
+                    .filter_map(decorator_target_name)
+                    .map(|name| normalize_imported_name(&name, import_bindings))
+                    .collect::<Vec<_>>()
             })
             .unwrap_or_default(),
         metaclass: class_def.arguments.as_ref().and_then(|arguments| {
@@ -1048,6 +1064,7 @@ fn collect_dataclass_transform_class_site(
                 (keyword.arg.as_ref().map(|arg| arg.as_str()) == Some("metaclass"))
                     .then(|| decorator_target_name(&keyword.value))
                     .flatten()
+                    .map(|name| normalize_imported_name(&name, import_bindings))
             })
         }),
         methods: class_def
@@ -1061,7 +1078,7 @@ fn collect_dataclass_transform_class_site(
         fields: class_def
             .body
             .iter()
-            .filter_map(|stmt| extract_dataclass_transform_field(source, stmt))
+            .filter_map(|stmt| extract_dataclass_transform_field(source, stmt, import_bindings))
             .collect(),
         line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
     }
@@ -1070,6 +1087,7 @@ fn collect_dataclass_transform_class_site(
 fn extract_dataclass_transform_field(
     source: &str,
     stmt: &Stmt,
+    import_bindings: &BTreeMap<String, String>,
 ) -> Option<DataclassTransformFieldSite> {
     let Stmt::AnnAssign(assign) = stmt else {
         return None;
@@ -1078,7 +1096,7 @@ fn extract_dataclass_transform_field(
         return None;
     };
     let value = assign.value.as_deref();
-    let field_specifier = value.and_then(|expr| extract_field_specifier_site(source, expr));
+    let field_specifier = value.and_then(|expr| extract_field_specifier_site(source, expr, import_bindings));
     Some(DataclassTransformFieldSite {
         name: name.id.as_str().to_owned(),
         annotation: slice_range(source, assign.annotation.range())?.to_owned(),
@@ -1115,12 +1133,17 @@ struct DataclassDecoratorMetadata {
     init: bool,
 }
 
-fn extract_field_specifier_site(source: &str, expr: &Expr) -> Option<FieldSpecifierSite> {
+fn extract_field_specifier_site(
+    source: &str,
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> Option<FieldSpecifierSite> {
     let Expr::Call(call) = expr else {
         return None;
     };
     let mut result = FieldSpecifierSite {
-        name: decorator_target_name(call.func.as_ref()),
+        name: decorator_target_name(call.func.as_ref())
+            .map(|name| normalize_imported_name(&name, import_bindings)),
         has_default: false,
         has_default_factory: false,
         init: None,
@@ -1146,11 +1169,16 @@ fn extract_field_specifier_site(source: &str, expr: &Expr) -> Option<FieldSpecif
 fn dataclass_transform_metadata(
     source: &str,
     decorators: &[ruff_python_ast::Decorator],
+    import_bindings: &BTreeMap<String, String>,
 ) -> Option<DataclassTransformMetadata> {
     decorators.iter().find_map(|decorator| {
         let expression = &decorator.expression;
-        if is_dataclass_transform_expr(expression) {
-            return Some(dataclass_transform_metadata_from_call(source, expression));
+        if is_dataclass_transform_expr(expression, import_bindings) {
+            return Some(dataclass_transform_metadata_from_call(
+                source,
+                expression,
+                import_bindings,
+            ));
         }
         None
     })
@@ -1158,10 +1186,11 @@ fn dataclass_transform_metadata(
 
 fn dataclass_decorator_metadata(
     decorators: &[ruff_python_ast::Decorator],
+    import_bindings: &BTreeMap<String, String>,
 ) -> Option<DataclassDecoratorMetadata> {
     decorators.iter().find_map(|decorator| {
         let expression = &decorator.expression;
-        if !is_dataclass_expr(expression) {
+        if !is_dataclass_expr(expression, import_bindings) {
             return None;
         }
         Some(dataclass_decorator_metadata_from_expr(expression))
@@ -1187,19 +1216,17 @@ fn dataclass_decorator_metadata_from_expr(expr: &Expr) -> DataclassDecoratorMeta
     metadata
 }
 
-fn is_dataclass_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Call(call) => is_dataclass_expr(call.func.as_ref()),
-        Expr::Name(name) => name.id.as_str() == "dataclass",
-        Expr::Attribute(attribute) => {
-            attribute.attr.as_str() == "dataclass"
-                && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "dataclasses")
-        }
-        _ => false,
-    }
+fn is_dataclass_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
+    decorator_target_name(expr)
+        .map(|name| normalize_imported_name(&name, import_bindings))
+        .is_some_and(|name| matches!(name.as_str(), "dataclass" | "dataclasses.dataclass"))
 }
 
-fn dataclass_transform_metadata_from_call(source: &str, expr: &Expr) -> DataclassTransformMetadata {
+fn dataclass_transform_metadata_from_call(
+    source: &str,
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> DataclassTransformMetadata {
     let Expr::Call(call) = expr else {
         return DataclassTransformMetadata::default();
     };
@@ -1221,7 +1248,7 @@ fn dataclass_transform_metadata_from_call(source: &str, expr: &Expr) -> Dataclas
                 metadata.order_default = expr_static_bool(&keyword.value).unwrap_or(false)
             }
             "field_specifiers" => {
-                metadata.field_specifiers = expr_name_list(&keyword.value, source);
+                metadata.field_specifiers = expr_name_list(&keyword.value, source, import_bindings);
             }
             _ => {}
         }
@@ -1229,16 +1256,17 @@ fn dataclass_transform_metadata_from_call(source: &str, expr: &Expr) -> Dataclas
     metadata
 }
 
-fn is_dataclass_transform_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Call(call) => is_dataclass_transform_expr(call.func.as_ref()),
-        Expr::Name(name) => name.id.as_str() == "dataclass_transform",
-        Expr::Attribute(attribute) => {
-            attribute.attr.as_str() == "dataclass_transform"
-                && matches!(attribute.value.as_ref(), Expr::Name(name) if matches!(name.id.as_str(), "typing" | "typing_extensions"))
-        }
-        _ => false,
-    }
+fn is_dataclass_transform_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
+    decorator_target_name(expr)
+        .map(|name| normalize_imported_name(&name, import_bindings))
+        .is_some_and(|name| {
+            matches!(
+                name.as_str(),
+                "dataclass_transform"
+                    | "typing.dataclass_transform"
+                    | "typing_extensions.dataclass_transform"
+            )
+        })
 }
 
 fn decorator_target_name(expr: &Expr) -> Option<String> {
@@ -1263,18 +1291,83 @@ fn expr_static_bool(expr: &Expr) -> Option<bool> {
     }
 }
 
-fn expr_name_list(expr: &Expr, source: &str) -> Vec<String> {
+fn expr_name_list(
+    expr: &Expr,
+    source: &str,
+    import_bindings: &BTreeMap<String, String>,
+) -> Vec<String> {
     match expr {
-        Expr::Tuple(tuple) => {
-            tuple.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect()
-        }
-        Expr::List(list) => {
-            list.elts.iter().flat_map(|expr| expr_name_list(expr, source)).collect()
-        }
+        Expr::Tuple(tuple) => tuple
+            .elts
+            .iter()
+            .flat_map(|expr| expr_name_list(expr, source, import_bindings))
+            .collect(),
+        Expr::List(list) => list
+            .elts
+            .iter()
+            .flat_map(|expr| expr_name_list(expr, source, import_bindings))
+            .collect(),
         _ => decorator_target_name(expr)
+            .map(|name| normalize_imported_name(&name, import_bindings))
             .or_else(|| extract_string_literal_value(source, expr))
             .into_iter()
             .collect(),
+    }
+}
+
+fn collect_import_bindings(suite: &[Stmt]) -> BTreeMap<String, String> {
+    let mut bindings = BTreeMap::new();
+    for stmt in suite {
+        match stmt {
+            Stmt::Import(import) => {
+                for alias in &import.names {
+                    bindings.insert(
+                        alias
+                            .asname
+                            .as_ref()
+                            .map(|name| name.as_str())
+                            .unwrap_or_else(|| alias.name.as_str())
+                            .to_owned(),
+                        alias.name.as_str().to_owned(),
+                    );
+                }
+            }
+            Stmt::ImportFrom(import) => {
+                let module = import.module.as_deref().unwrap_or("");
+                for alias in &import.names {
+                    bindings.insert(
+                        alias
+                            .asname
+                            .as_ref()
+                            .map(|name| name.as_str())
+                            .unwrap_or_else(|| alias.name.as_str())
+                            .to_owned(),
+                        if module.is_empty() {
+                            alias.name.as_str().to_owned()
+                        } else {
+                            format!("{module}.{}", alias.name)
+                        },
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    bindings
+}
+
+fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String>) -> String {
+    let mut parts = name.split('.');
+    let head = parts.next().unwrap_or(name);
+    let tail = parts.collect::<Vec<_>>();
+    let head = import_bindings
+        .get(head)
+        .cloned()
+        .unwrap_or_else(|| head.to_owned());
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head}.{}", tail.join("."))
     }
 }
 
