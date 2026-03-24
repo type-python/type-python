@@ -248,22 +248,54 @@ fn resolve_direct_overloads<'a>(
 }
 
 fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Declaration) -> bool {
-    let param_names = direct_param_names(&declaration.detail).unwrap_or_default();
-    if call.arg_count != param_names.len() {
+    let params = direct_signature_params(&declaration.detail).unwrap_or_default();
+    let positional_params = params.iter().filter(|param| !param.keyword_only).collect::<Vec<_>>();
+    if call.arg_count > positional_params.len() {
         return false;
     }
-    if call.keyword_names.iter().any(|keyword| !param_names.iter().any(|param| param == keyword)) {
+    let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    if call.keyword_names.iter().any(|keyword| {
+        !params.iter().any(|param| param.name == **keyword && !param.positional_only)
+    }) {
+        return false;
+    }
+    if params.iter().enumerate().any(|(index, param)| {
+        !param.has_default
+            && if param.keyword_only {
+                !provided_keywords.contains(&param.name)
+            } else {
+                index >= call.arg_count && (param.positional_only || !provided_keywords.contains(&param.name))
+            }
+    }) {
         return false;
     }
 
-    let param_types = direct_param_types(&declaration.detail).unwrap_or_default();
-    call.arg_types.iter().zip(param_types.iter()).all(|(arg_ty, param_ty)| {
+    let param_types = params.iter().map(|param| param.annotation.clone()).collect::<Vec<_>>();
+    let positional_ok = call.arg_types.iter().zip(param_types.iter()).all(|(arg_ty, param_ty)| {
         if arg_ty.is_empty() || param_ty.is_empty() {
             true
         } else {
-            direct_type_matches(arg_ty, param_ty)
+            direct_type_matches(param_ty, arg_ty)
         }
-    })
+    });
+    let keyword_ok = call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
+        let Some(index) = params.iter().position(|param| param.name == *keyword) else {
+            return false;
+        };
+        let param_ty = &param_types[index];
+        arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+    });
+
+    positional_ok && keyword_ok
+}
+
+#[derive(Debug, Clone)]
+struct DirectSignatureParam {
+    name: String,
+    annotation: String,
+    has_default: bool,
+    positional_only: bool,
+    keyword_only: bool,
 }
 
 fn direct_unknown_operation_diagnostics(
@@ -3422,20 +3454,14 @@ fn direct_call_arity_diagnostics(
 }
 
 fn direct_param_count(signature: &str) -> Option<usize> {
-    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
-    if inner.is_empty() { Some(0) } else { Some(split_top_level_type_args(inner).len()) }
+    Some(direct_signature_params(signature)?.len())
 }
 
 fn direct_param_names(signature: &str) -> Option<Vec<String>> {
-    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
-    if inner.is_empty() {
-        return Some(Vec::new());
-    }
-
     Some(
-        split_top_level_type_args(inner)
+        direct_signature_params(signature)?
             .into_iter()
-            .map(|part| part.split(':').next().unwrap_or(part).trim().to_owned())
+            .map(|param| param.name)
             .collect(),
     )
 }
@@ -3447,15 +3473,45 @@ fn direct_param_types(signature: &str) -> Option<Vec<String>> {
     }
 
     Some(
-        split_top_level_type_args(inner)
+        direct_signature_params(signature)?
             .into_iter()
-            .map(|part| {
-                part.split_once(':')
-                    .map(|(_, annotation)| annotation.trim().to_owned())
-                    .unwrap_or_default()
-            })
+            .map(|param| param.annotation)
             .collect(),
     )
+}
+
+fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>> {
+    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let parts = split_top_level_type_args(inner);
+    let slash_index = parts.iter().position(|part| part.trim() == "/");
+    let star_index = parts.iter().position(|part| part.trim() == "*");
+    let mut params = Vec::new();
+    for (index, part) in parts.into_iter().enumerate() {
+        let part = part.trim();
+        if matches!(part, "/" | "*") {
+            continue;
+        }
+
+        let has_default = part.ends_with('=');
+        let part = part.trim_end_matches('=').trim();
+        let (name, annotation) = part
+            .split_once(':')
+            .map(|(name, annotation)| (name.trim(), annotation.trim().to_owned()))
+            .unwrap_or((part, String::new()));
+        params.push(DirectSignatureParam {
+            name: name.to_owned(),
+            annotation,
+            has_default,
+            positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
+            keyword_only: star_index.is_some_and(|star_index| index > star_index),
+        });
+    }
+
+    Some(params)
 }
 
 fn direct_call_type_diagnostics(
@@ -6326,6 +6382,68 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4012"));
         assert!(rendered.contains("ambiguous across 2 overloads"));
+    }
+
+    #[test]
+    fn overload_applicability_accepts_keyword_default_and_semantic_match() {
+        let call = typepython_binding::CallSite {
+            callee: String::from("parse"),
+            arg_count: 0,
+            arg_types: Vec::new(),
+            keyword_names: vec![String::from("value")],
+            keyword_arg_types: vec![String::from("None")],
+        };
+        let declaration = Declaration {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(value:Optional[int]=)->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+        };
+
+        assert!(crate::overload_is_applicable(&call, &declaration));
+    }
+
+    #[test]
+    fn overload_applicability_rejects_positional_only_keyword() {
+        let call = typepython_binding::CallSite {
+            callee: String::from("parse"),
+            arg_count: 0,
+            arg_types: Vec::new(),
+            keyword_names: vec![String::from("value")],
+            keyword_arg_types: vec![String::from("int")],
+        };
+        let declaration = Declaration {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(value:int,/)->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+        };
+
+        assert!(!crate::overload_is_applicable(&call, &declaration));
     }
 
     #[test]

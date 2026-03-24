@@ -144,6 +144,9 @@ pub struct FunctionStatement {
 pub struct FunctionParam {
     pub name: String,
     pub annotation: Option<String>,
+    pub has_default: bool,
+    pub positional_only: bool,
+    pub keyword_only: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4762,16 +4765,38 @@ fn extract_function_params(
     source: &str,
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<FunctionParam> {
-    parameters
-        .iter()
-        .map(|parameter| FunctionParam {
-            name: parameter.name().as_str().to_owned(),
-            annotation: parameter
-                .annotation()
-                .and_then(|annotation| slice_range(source, annotation.range()))
-                .map(str::to_owned),
-        })
-        .collect()
+    let positional_only = parameters.posonlyargs.iter().map(|parameter| FunctionParam {
+        name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
+        has_default: parameter.default().is_some(),
+        positional_only: true,
+        keyword_only: false,
+    });
+    let positional = parameters.args.iter().map(|parameter| FunctionParam {
+        name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
+        has_default: parameter.default().is_some(),
+        positional_only: false,
+        keyword_only: false,
+    });
+    let keyword_only = parameters.kwonlyargs.iter().map(|parameter| FunctionParam {
+        name: parameter.name().as_str().to_owned(),
+        annotation: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .map(str::to_owned),
+        has_default: parameter.default().is_some(),
+        positional_only: false,
+        keyword_only: true,
+    });
+
+    positional_only.chain(positional).chain(keyword_only).collect()
 }
 
 fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> Vec<String> {
@@ -5563,7 +5588,7 @@ mod tests {
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5654,7 +5679,7 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5785,8 +5810,7 @@ mod tests {
                 type_params: Vec::new(),
                 params: vec![FunctionParam {
                     name: String::from("x"),
-                    annotation: Some(String::from("str")),
-                }],
+                    annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
                 returns: Some(String::from("int")),
                 is_async: false,
                 is_override: false,
@@ -5828,7 +5852,7 @@ mod tests {
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("unsafe"),
                     type_params: Vec::new(),
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None }],
+                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5909,8 +5933,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("x"),
-                        annotation: Some(String::from("str")),
-                    }],
+                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -5999,8 +6022,7 @@ mod tests {
                     type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("T")),
-                    }],
+                        annotation: Some(String::from("T")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("T")),
                     is_async: false,
                     is_override: false,
@@ -6221,8 +6243,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")),
-                    }],
+                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
@@ -6687,8 +6708,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("box"),
-                        annotation: Some(String::from("Box")),
-                    }],
+                        annotation: Some(String::from("Box")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -6850,8 +6870,7 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None,
-                        }],
+                            annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                         returns: Some(String::from("int")),
                         is_async: false,
                         is_override: false,
@@ -6908,11 +6927,10 @@ mod tests {
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam { name: String::from("self"), annotation: None },
+                                FunctionParam { name: String::from("self"), annotation: None, has_default: false, positional_only: false, keyword_only: false },
                                 FunctionParam {
                                     name: String::from("x"),
-                                    annotation: Some(String::from("str")),
-                                },
+                                    annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false },
                             ],
                             returns: Some(String::from("int")),
                             is_async: false,
@@ -6932,8 +6950,8 @@ mod tests {
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam { name: String::from("self"), annotation: None },
-                                FunctionParam { name: String::from("x"), annotation: None },
+                                FunctionParam { name: String::from("self"), annotation: None, has_default: false, positional_only: false, keyword_only: false },
+                                FunctionParam { name: String::from("x"), annotation: None, has_default: false, positional_only: false, keyword_only: false },
                             ],
                             returns: None,
                             is_async: false,
@@ -7081,8 +7099,7 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None,
-                        }],
+                            annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: false,
@@ -7453,8 +7470,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("box"),
-                        annotation: Some(String::from("Box")),
-                    }],
+                        annotation: Some(String::from("Box")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7563,8 +7579,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("values"),
-                        annotation: Some(String::from("list[int]")),
-                    }],
+                        annotation: Some(String::from("list[int]")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -7628,8 +7643,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("pairs"),
-                        annotation: Some(String::from("tuple[tuple[int, str]]")),
-                    }],
+                        annotation: Some(String::from("tuple[tuple[int, str]]")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7693,8 +7707,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("manager"),
-                        annotation: Some(String::from("Manager")),
-                    }],
+                        annotation: Some(String::from("Manager")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7757,8 +7770,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("manager"),
-                        annotation: Some(String::from("Manager")),
-                    }],
+                        annotation: Some(String::from("Manager")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
@@ -7807,12 +7819,10 @@ mod tests {
                     params: vec![
                         FunctionParam {
                             name: String::from("a"),
-                            annotation: Some(String::from("A")),
-                        },
+                            annotation: Some(String::from("A")), has_default: false, positional_only: false, keyword_only: false },
                         FunctionParam {
                             name: String::from("b"),
-                            annotation: Some(String::from("B")),
-                        },
+                            annotation: Some(String::from("B")), has_default: false, positional_only: false, keyword_only: false },
                     ],
                     returns: Some(String::from("str")),
                     is_async: false,
@@ -7953,8 +7963,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")),
-                    }],
+                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -7967,8 +7976,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("int")),
-                    }],
+                        annotation: Some(String::from("int")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -8045,8 +8053,7 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None,
-                        }],
+                            annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: true,
@@ -8103,8 +8110,7 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None,
-                        }],
+                            annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: false,
@@ -8155,8 +8161,7 @@ mod tests {
                             value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("cls"),
-                                annotation: None,
-                            }],
+                                annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                             returns: Some(String::from("None")),
                             is_async: false,
                             is_override: false,
@@ -8194,8 +8199,7 @@ mod tests {
                             value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("self"),
-                                annotation: None,
-                            }],
+                                annotation: None, has_default: false, positional_only: false, keyword_only: false }],
                             returns: Some(String::from("str")),
                             is_async: false,
                             is_override: false,

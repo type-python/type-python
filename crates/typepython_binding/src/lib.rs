@@ -792,16 +792,32 @@ fn bind_named_block(
 }
 
 fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option<&str>) -> String {
+    let mut rendered_params = Vec::new();
+    let positional_only_count = params.iter().filter(|param| param.positional_only).count();
+    let keyword_only_index = params.iter().position(|param| param.keyword_only);
+
+    for (index, param) in params.iter().enumerate() {
+        if keyword_only_index == Some(index) {
+            rendered_params.push(String::from("*"));
+        }
+
+        let mut rendered = match &param.annotation {
+            Some(annotation) => format!("{}:{}", param.name, annotation),
+            None => param.name.clone(),
+        };
+        if param.has_default {
+            rendered.push('=');
+        }
+        rendered_params.push(rendered);
+
+        if positional_only_count > 0 && index + 1 == positional_only_count {
+            rendered_params.push(String::from("/"));
+        }
+    }
+
     format!(
         "({})->{}",
-        params
-            .iter()
-            .map(|param| match &param.annotation {
-                Some(annotation) => format!("{}:{}", param.name, annotation),
-                None => param.name.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join(","),
+        rendered_params.join(","),
         returns.unwrap_or("")
     )
 }
@@ -1272,8 +1288,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![typepython_syntax::FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")),
-                    }],
+                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
