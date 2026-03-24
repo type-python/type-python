@@ -3614,7 +3614,7 @@ fn direct_call_arity_diagnostics(
     node.calls
         .iter()
         .filter_map(|call| {
-            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+            if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
@@ -3723,7 +3723,7 @@ fn direct_call_type_diagnostics(
     node.calls
         .iter()
         .flat_map(|call| {
-            if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+            if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
@@ -3755,7 +3755,7 @@ fn direct_call_keyword_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.calls {
-        if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, &call.callee)
+        if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
             && !shape.has_explicit_init
         {
             diagnostics
@@ -4406,7 +4406,7 @@ fn resolve_direct_callable_param_types(
         return Some(direct_param_types(&local.detail).unwrap_or_default());
     }
 
-    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee)
+    if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, callee)
         && !shape.has_explicit_init
     {
         return Some(
@@ -4503,7 +4503,7 @@ fn resolve_direct_callable_signature(
         ));
     }
 
-    if let Some(shape) = resolve_dataclass_transform_class_shape(node, nodes, callee)
+    if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, callee)
         && !shape.has_explicit_init
     {
         return Some((
@@ -4537,6 +4537,54 @@ fn resolve_direct_callable_signature(
         direct_param_count(&function.detail).unwrap_or_default(),
         direct_param_names(&function.detail).unwrap_or_default(),
     ))
+}
+
+fn resolve_synthesized_dataclass_class_shape(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<DataclassTransformClassShape> {
+    resolve_dataclass_transform_class_shape(node, nodes, callee)
+        .or_else(|| resolve_plain_dataclass_class_shape(node, nodes, callee))
+}
+
+fn resolve_plain_dataclass_class_shape(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<DataclassTransformClassShape> {
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
+    let info = load_dataclass_transform_module_info(class_node)?;
+    let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
+    let is_plain_dataclass = class_decl.class_kind == Some(DeclarationOwnerKind::DataClass)
+        || class_site
+            .decorators
+            .iter()
+            .any(|decorator| matches!(decorator.as_str(), "dataclass" | "dataclasses.dataclass"));
+    if !is_plain_dataclass {
+        return None;
+    }
+
+    let has_explicit_init = class_site.methods.iter().any(|method| method == "__init__");
+
+    let fields = class_site
+        .fields
+        .iter()
+        .filter(|field| !field.is_class_var)
+        .map(|field| DataclassTransformFieldShape {
+            name: field.name.clone(),
+            keyword_name: field.name.clone(),
+            annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
+            required: !field.has_default,
+            kw_only: false,
+        })
+        .collect::<Vec<_>>();
+
+    Some(DataclassTransformClassShape {
+        fields,
+        frozen: false,
+        has_explicit_init,
+    })
 }
 
 fn resolve_dataclass_transform_class_shape(
@@ -6313,6 +6361,16 @@ mod tests {
     fn check_accepts_dataclass_transform_default_and_classvar_fields() {
         let result = check_temp_typepython_source(
             "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    role: ClassVar[str]\n    name: str\n    age: int = 1\n\nuser: User = User(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_plain_dataclass_constructor_arguments() {
+        let result = check_temp_typepython_source(
+            "@dataclass\nclass User:\n    name: str\n    age: int = 1\n\nUser(\"Ada\")\nUser(\"Ada\", 2)\n",
         );
 
         let rendered = result.diagnostics.as_text();
