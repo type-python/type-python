@@ -424,14 +424,7 @@ impl Server {
         let is_member_access = line_prefix(&document.text, position).trim_end().ends_with('.');
 
         let items = if is_member_access {
-            let mut seen = BTreeSet::new();
-            workspace
-                .declarations_by_canonical
-                .values()
-                .filter(|occurrence| occurrence.canonical.matches('.').count() >= 2)
-                .filter(|occurrence| seen.insert(occurrence.name.clone()))
-                .map(|occurrence| json!({"label": occurrence.name, "detail": occurrence.detail}))
-                .collect::<Vec<_>>()
+            collect_member_completion_items(document, &workspace.declarations_by_canonical, position)
         } else {
             let mut keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
             keys.sort();
@@ -870,6 +863,61 @@ fn resolve_member_owner_canonical(
         }
     }
     None
+}
+
+fn resolve_completion_member_owner_canonical(
+    document: &DocumentState,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
+    position: LspPosition,
+) -> Option<String> {
+    let line = position.line as usize + 1;
+    for statement in &document.syntax.statements {
+        match statement {
+            SyntaxStatement::MethodCall(method_call) if method_call.line == line => {
+                return resolve_owner_canonical(
+                    document,
+                    declarations_by_canonical,
+                    &method_call.owner_name,
+                    method_call.through_instance,
+                );
+            }
+            SyntaxStatement::MemberAccess(member_access) if member_access.line == line => {
+                return resolve_owner_canonical(
+                    document,
+                    declarations_by_canonical,
+                    &member_access.owner_name,
+                    member_access.through_instance,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let receiver = member_receiver_name(&document.text, position)?;
+    document.local_value_types.get(&receiver).cloned()
+}
+
+fn collect_member_completion_items(
+    document: &DocumentState,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
+    position: LspPosition,
+) -> Vec<Value> {
+    let owner = resolve_completion_member_owner_canonical(document, declarations_by_canonical, position);
+    let mut seen = BTreeSet::new();
+    declarations_by_canonical
+        .values()
+        .filter(|occurrence| occurrence.canonical.matches('.').count() >= 2)
+        .filter(|occurrence| {
+            owner.as_ref().is_none_or(|owner| {
+                occurrence
+                    .canonical
+                    .strip_prefix(owner)
+                    .is_some_and(|suffix| suffix.starts_with('.'))
+            })
+        })
+        .filter(|occurrence| seen.insert(occurrence.name.clone()))
+        .map(|occurrence| json!({"label": occurrence.name, "detail": occurrence.detail}))
+        .collect()
 }
 
 fn resolve_owner_canonical(
@@ -1601,6 +1649,58 @@ mod tests {
         let entries = definition.as_array().expect("definition should be an array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["range"]["start"]["line"], json!(1));
+    }
+
+    #[test]
+    fn completion_resolves_duplicate_member_names_by_receiver() {
+        let config = temp_workspace(
+            "completion_resolves_duplicate_member_names_by_receiver",
+            &[ (
+                "src/app/__init__.tpy",
+                "class Foo:
+    def ping(self) -> int:
+        return 1
+    def only_foo(self) -> int:
+        return 1
+
+class Bar:
+    def ping(self) -> int:
+        return 2
+    def only_bar(self) -> int:
+        return 2
+
+foo: Foo = Foo()
+foo.ping()
+",
+            )],
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let completion = server
+            .handle_completion(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 13, "character": 4}
+            }))
+            .expect("completion should succeed");
+        let labels = completion["items"]
+            .as_array()
+            .expect("completion items should be an array")
+            .iter()
+            .map(|item| item["label"].as_str().expect("label should be a string"))
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"ping"));
+        assert!(labels.contains(&"only_foo"));
+        assert!(!labels.contains(&"only_bar"));
     }
 
     #[test]
