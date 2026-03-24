@@ -56,6 +56,7 @@ pub struct CallSite {
     pub arg_types: Vec<String>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -310,6 +311,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     arg_types: statement.arg_types.clone(),
                     keyword_names: statement.keyword_names.clone(),
                     keyword_arg_types: statement.keyword_arg_types.clone(),
+                    line: statement.line,
                 }),
                 _ => None,
             })
