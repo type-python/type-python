@@ -4800,6 +4800,46 @@ fn resolve_known_dataclass_transform_shape_from_type(
     resolve_dataclass_transform_class_shape(node, nodes, &type_name)
 }
 
+fn resolve_dataclass_transform_metadata_from_decl(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> Option<typepython_syntax::DataclassTransformMetadata> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visiting.insert(key) {
+        return None;
+    }
+
+    let info = load_dataclass_transform_module_info(class_node)?;
+    let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
+
+    for decorator in &class_site.decorators {
+        if let Some(provider) = resolve_dataclass_transform_provider(nodes, class_node, decorator) {
+            return Some(provider.metadata.clone());
+        }
+    }
+    if let Some(provider_name) = class_site
+        .bases
+        .iter()
+        .find(|base| resolve_dataclass_transform_provider(nodes, class_node, base).is_some())
+    {
+        return resolve_dataclass_transform_provider(nodes, class_node, provider_name)
+            .map(|provider| provider.metadata.clone());
+    }
+    if let Some(metaclass) = class_site.metaclass.as_deref() {
+        if let Some(provider) = resolve_dataclass_transform_provider(nodes, class_node, metaclass) {
+            return Some(provider.metadata.clone());
+        }
+    }
+
+    class_site.bases.iter().find_map(|base| {
+        let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
+        let mut branch_visiting = visiting.clone();
+        resolve_dataclass_transform_metadata_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
+    })
+}
+
 fn resolve_dataclass_transform_class_shape_from_decl(
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,
@@ -4850,16 +4890,12 @@ fn resolve_dataclass_transform_class_shape_from_decl(
         metadata = class_site.bases.iter().find_map(|base| {
             let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
             let mut branch_visiting = visiting.clone();
-            resolve_dataclass_transform_class_shape_from_decl(
+            resolve_dataclass_transform_metadata_from_decl(
                 nodes,
                 base_node,
                 base_decl,
                 &mut branch_visiting,
             )
-            .map(|shape| typepython_syntax::DataclassTransformMetadata {
-                frozen_default: shape.frozen,
-                ..typepython_syntax::DataclassTransformMetadata::default()
-            })
         });
     }
     let metadata = metadata?;
@@ -6593,6 +6629,16 @@ mod tests {
     fn check_accepts_dataclass_transform_inherited_fields() {
         let result = check_temp_typepython_source(
             "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass Base:\n    name: str\n\nclass User(Base):\n    age: int\n\nuser: User = User(\"Ada\", 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_inherited_dataclass_transform_kw_only_defaults() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\ndef field(*, default=None, kw_only=False, init=True):\n    return default\n\n@dataclass_transform(field_specifiers=(field,), kw_only_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass Base:\n    age: int\n\nclass User(Base):\n    name: str\n\nUser(name=\"Ada\", age=1)\n",
         );
 
         let rendered = result.diagnostics.as_text();
