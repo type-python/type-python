@@ -3279,65 +3279,49 @@ fn direct_method_call_diagnostics(
         }
 
         let method_signature = substitute_self_annotation(&target.detail, Some(&class_decl.name));
-        let param_names = direct_param_names(&method_signature).unwrap_or_default();
-        let expected = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+        let fallback_signature = direct_signature_params(&method_signature)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|param| typepython_syntax::DirectFunctionParamSite {
+                name: param.name,
+                annotation: (!param.annotation.is_empty()).then_some(param.annotation),
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
+            })
+            .collect::<Vec<_>>();
+        let fallback_signature = match target
+            .method_kind
+            .unwrap_or(typepython_syntax::MethodKind::Instance)
+        {
             typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                param_names.len()
+                fallback_signature
             }
-            _ => param_names.len().saturating_sub(1),
+            _ => fallback_signature.into_iter().skip(1).collect(),
         };
-
-        if call.arg_count != expected {
-            diagnostics.push(Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}.{}` in module `{}` expects {} positional argument(s) but received {}",
-                    class_decl.name,
-                    call.method,
-                    node.module_path.display(),
-                    expected,
-                    call.arg_count
-                ),
-            ));
-        }
-
-        let expected_names: Vec<String> =
-            match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                    param_names
-                }
-                _ => param_names.into_iter().skip(1).collect(),
-            };
-        let expected_types = match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                direct_param_types(&method_signature).unwrap_or_default()
-            }
-            _ => direct_param_types(&method_signature)
-                .unwrap_or_default()
-                .into_iter()
-                .skip(1)
-                .collect(),
+        let direct_call = typepython_binding::CallSite {
+            callee: format!("{}.{}", class_decl.name, call.method),
+            arg_count: call.arg_count,
+            arg_types: call.arg_types.clone(),
+            keyword_names: call.keyword_names.clone(),
+            keyword_arg_types: call.keyword_arg_types.clone(),
         };
-        for keyword in &call.keyword_names {
-            if !expected_names.iter().any(|param| param == keyword) {
-                diagnostics.push(Diagnostic::error(
-                    "TPY4001",
-                    format!(
-                        "call to `{}.{}` in module `{}` uses unknown keyword `{}`",
-                        class_decl.name,
-                        call.method,
-                        node.module_path.display(),
-                        keyword
-                    ),
-                ));
-            }
+        if let Some(diagnostic) =
+            direct_source_function_arity_diagnostic(node, &direct_call, &fallback_signature)
+        {
+            diagnostics.push(diagnostic);
         }
-        diagnostics.extend(positional_and_method_keyword_type_diagnostics(
+        diagnostics.extend(direct_source_function_keyword_diagnostics(
             node,
-            &owner_type_name,
-            call,
-            &expected_types,
-            &expected_names,
+            &direct_call,
+            &fallback_signature,
+        ));
+        diagnostics.extend(direct_source_function_type_diagnostics(
+            node,
+            &direct_call,
+            &fallback_signature,
         ));
     }
 
@@ -3392,63 +3376,6 @@ fn resolve_method_call_owner_type(
         &call.owner_name,
     )
     .or_else(|| Some(call.owner_name.clone()))
-}
-
-fn positional_and_method_keyword_type_diagnostics(
-    node: &typepython_graph::ModuleNode,
-    owner_type_name: &str,
-    call: &typepython_binding::MethodCallSite,
-    param_types: &[String],
-    param_names: &[String],
-) -> Vec<Diagnostic> {
-    let mut diagnostics = call
-        .arg_types
-        .iter()
-        .zip(param_types.iter())
-        .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty()
-                && !param_ty.is_empty()
-                && !direct_type_matches(param_ty, arg_ty)
-        })
-        .map(|(arg_ty, param_ty)| {
-            Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}.{}` in module `{}` passes `{}` where parameter expects `{}`",
-                    owner_type_name,
-                    call.method,
-                    node.module_path.display(),
-                    arg_ty,
-                    param_ty
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
-        let Some(index) = param_names.iter().position(|param| param == keyword) else {
-            continue;
-        };
-        let Some(param_ty) = param_types.get(index) else {
-            continue;
-        };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
-            diagnostics.push(Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "call to `{}.{}` in module `{}` passes `{}` for keyword `{}` where parameter expects `{}`",
-                    owner_type_name,
-                    call.method,
-                    node.module_path.display(),
-                    arg_ty,
-                    keyword,
-                    param_ty
-                ),
-            ));
-        }
-    }
-
-    diagnostics
 }
 
 fn direct_call_arity_diagnostics(
