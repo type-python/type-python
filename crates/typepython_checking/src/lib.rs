@@ -129,6 +129,10 @@ pub fn check_with_options(
         {
             diagnostics.push(dataclass_diagnostic);
         }
+        for dataclass_diagnostic in frozen_plain_dataclass_mutation_diagnostics(node, &graph.nodes)
+        {
+            diagnostics.push(dataclass_diagnostic);
+        }
         for duplicate in
             duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
         {
@@ -1298,6 +1302,78 @@ fn frozen_dataclass_transform_mutation_diagnostics(
                 ),
                 typepython_syntax::FrozenFieldMutationKind::Delete => format!(
                     "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be deleted after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+            };
+            Some(Diagnostic::error("TPY4001", message).with_span(Span::new(
+                node.module_path.display().to_string(),
+                site.line,
+                1,
+                site.line,
+                1,
+            )))
+        })
+        .collect()
+}
+
+fn frozen_plain_dataclass_mutation_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            let signature = resolve_scope_owner_signature(
+                node,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+            );
+            let target_type = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &site.target,
+            )?;
+            let shape = resolve_known_plain_dataclass_shape_from_type(node, nodes, &target_type)?;
+            if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
+                return None;
+            }
+
+            let in_initializer = site.owner_name.as_deref() == Some("__init__")
+                && site.owner_type_name.as_deref() == Some(target_type.as_str())
+                && site.target.value_name.as_deref() == Some("self");
+            if in_initializer {
+                return None;
+            }
+
+            let message = match site.kind {
+                typepython_syntax::FrozenFieldMutationKind::Assignment => format!(
+                    "frozen dataclass field `{}` on `{}` in module `{}` cannot be assigned after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+                typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => format!(
+                    "frozen dataclass field `{}` on `{}` in module `{}` cannot be updated with augmented assignment after initialization",
+                    site.field_name,
+                    target_type,
+                    node.module_path.display()
+                ),
+                typepython_syntax::FrozenFieldMutationKind::Delete => format!(
+                    "frozen dataclass field `{}` on `{}` in module `{}` cannot be deleted after initialization",
                     site.field_name,
                     target_type,
                     node.module_path.display()
@@ -4565,7 +4641,8 @@ fn resolve_plain_dataclass_class_shape(
         return None;
     }
 
-    let has_explicit_init = class_site.methods.iter().any(|method| method == "__init__");
+    let has_explicit_init = !class_site.plain_dataclass_init
+        || class_site.methods.iter().any(|method| method == "__init__");
 
     let fields = class_site
         .fields
@@ -4576,15 +4653,24 @@ fn resolve_plain_dataclass_class_shape(
             keyword_name: field.name.clone(),
             annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
             required: !field.has_default,
-            kw_only: false,
+            kw_only: class_site.plain_dataclass_kw_only,
         })
         .collect::<Vec<_>>();
 
     Some(DataclassTransformClassShape {
         fields,
-        frozen: false,
+        frozen: class_site.plain_dataclass_frozen,
         has_explicit_init,
     })
+}
+
+fn resolve_known_plain_dataclass_shape_from_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<DataclassTransformClassShape> {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    resolve_plain_dataclass_class_shape(node, nodes, &type_name)
 }
 
 fn resolve_dataclass_transform_class_shape(
@@ -6375,6 +6461,28 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_plain_frozen_dataclass_field_assignment_after_init() {
+        let result = check_temp_typepython_source(
+            "@dataclass(frozen=True)\nclass User:\n    name: str\n\nuser = User(\"Ada\")\nuser.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("frozen dataclass field `name`"));
+    }
+
+    #[test]
+    fn check_reports_plain_kw_only_dataclass_positional_call() {
+        let result = check_temp_typepython_source(
+            "@dataclass(kw_only=True)\nclass User:\n    name: str\n\nUser(\"Ada\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("expects at most 0 positional argument(s) but received 1"));
     }
 
     #[test]

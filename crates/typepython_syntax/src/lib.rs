@@ -519,6 +519,9 @@ pub struct DataclassTransformFieldSite {
 pub struct DataclassTransformClassSite {
     pub name: String,
     pub decorators: Vec<String>,
+    pub plain_dataclass_frozen: bool,
+    pub plain_dataclass_kw_only: bool,
+    pub plain_dataclass_init: bool,
     pub bases: Vec<String>,
     pub metaclass: Option<String>,
     pub methods: Vec<String>,
@@ -1022,6 +1025,7 @@ fn collect_dataclass_transform_class_site(
     source: &str,
     class_def: &ruff_python_ast::StmtClassDef,
 ) -> DataclassTransformClassSite {
+    let plain_dataclass = dataclass_decorator_metadata(&class_def.decorator_list);
     DataclassTransformClassSite {
         name: class_def.name.as_str().to_owned(),
         decorators: class_def
@@ -1029,6 +1033,9 @@ fn collect_dataclass_transform_class_site(
             .iter()
             .filter_map(|decorator| decorator_target_name(&decorator.expression))
             .collect(),
+        plain_dataclass_frozen: plain_dataclass.as_ref().is_some_and(|metadata| metadata.frozen),
+        plain_dataclass_kw_only: plain_dataclass.as_ref().is_some_and(|metadata| metadata.kw_only),
+        plain_dataclass_init: plain_dataclass.as_ref().map(|metadata| metadata.init).unwrap_or(true),
         bases: class_def
             .arguments
             .as_ref()
@@ -1101,6 +1108,13 @@ struct FieldSpecifierSite {
     alias: Option<String>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DataclassDecoratorMetadata {
+    frozen: bool,
+    kw_only: bool,
+    init: bool,
+}
+
 fn extract_field_specifier_site(source: &str, expr: &Expr) -> Option<FieldSpecifierSite> {
     let Expr::Call(call) = expr else {
         return None;
@@ -1140,6 +1154,49 @@ fn dataclass_transform_metadata(
         }
         None
     })
+}
+
+fn dataclass_decorator_metadata(
+    decorators: &[ruff_python_ast::Decorator],
+) -> Option<DataclassDecoratorMetadata> {
+    decorators.iter().find_map(|decorator| {
+        let expression = &decorator.expression;
+        if !is_dataclass_expr(expression) {
+            return None;
+        }
+        Some(dataclass_decorator_metadata_from_expr(expression))
+    })
+}
+
+fn dataclass_decorator_metadata_from_expr(expr: &Expr) -> DataclassDecoratorMetadata {
+    let Expr::Call(call) = expr else {
+        return DataclassDecoratorMetadata { frozen: false, kw_only: false, init: true };
+    };
+    let mut metadata = DataclassDecoratorMetadata { frozen: false, kw_only: false, init: true };
+    for keyword in &call.arguments.keywords {
+        let Some(name) = keyword.arg.as_ref().map(|name| name.as_str()) else {
+            continue;
+        };
+        match name {
+            "frozen" => metadata.frozen = expr_static_bool(&keyword.value).unwrap_or(false),
+            "kw_only" => metadata.kw_only = expr_static_bool(&keyword.value).unwrap_or(false),
+            "init" => metadata.init = expr_static_bool(&keyword.value).unwrap_or(true),
+            _ => {}
+        }
+    }
+    metadata
+}
+
+fn is_dataclass_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(call) => is_dataclass_expr(call.func.as_ref()),
+        Expr::Name(name) => name.id.as_str() == "dataclass",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "dataclass"
+                && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "dataclasses")
+        }
+        _ => false,
+    }
 }
 
 fn dataclass_transform_metadata_from_call(source: &str, expr: &Expr) -> DataclassTransformMetadata {
