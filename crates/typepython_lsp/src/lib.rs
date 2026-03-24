@@ -64,6 +64,7 @@ struct DocumentState {
     text: String,
     syntax: SyntaxTree,
     local_symbols: BTreeMap<String, String>,
+    local_value_types: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -484,6 +485,7 @@ impl Server {
                     text,
                     syntax,
                     local_symbols: BTreeMap::new(),
+                    local_value_types: BTreeMap::new(),
                 }
             })
             .collect::<Vec<_>>();
@@ -492,6 +494,7 @@ impl Server {
         let mut member_symbols = BTreeMap::<String, Vec<String>>::new();
         for document in &mut documents {
             let (local_symbols, declared) = collect_declarations(document);
+            let local_value_types = collect_local_value_types(document, &local_symbols);
             for occurrence in &declared {
                 if occurrence.canonical.matches('.').count() >= 2 {
                     member_symbols
@@ -501,14 +504,9 @@ impl Server {
                 }
             }
             document.local_symbols = local_symbols;
+            document.local_value_types = local_value_types;
             declarations.extend(declared);
         }
-
-        let mut occurrences = declarations.clone();
-        for document in &documents {
-            occurrences.extend(collect_reference_occurrences(document, &member_symbols));
-        }
-        dedupe_occurrences(&mut occurrences);
 
         let mut declarations_by_canonical = BTreeMap::new();
         for occurrence in &declarations {
@@ -516,6 +514,16 @@ impl Server {
                 .entry(occurrence.canonical.clone())
                 .or_insert_with(|| occurrence.clone());
         }
+
+        let mut occurrences = declarations.clone();
+        for document in &documents {
+            occurrences.extend(collect_reference_occurrences(
+                document,
+                &member_symbols,
+                &declarations_by_canonical,
+            ));
+        }
+        dedupe_occurrences(&mut occurrences);
 
         let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
         Ok(WorkspaceState { documents, diagnostics_by_uri, occurrences, declarations_by_canonical })
@@ -786,16 +794,14 @@ fn collect_declarations(
 fn collect_reference_occurrences(
     document: &DocumentState,
     member_symbols: &BTreeMap<String, Vec<String>>,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
 ) -> Vec<SymbolOccurrence> {
     tokenize_identifiers(&document.text)
         .into_iter()
         .filter_map(|token| {
             let local = document.local_symbols.get(&token.name).cloned();
             let member = if token.preceded_by_dot {
-                member_symbols
-                    .get(&token.name)
-                    .filter(|candidates| candidates.len() == 1)
-                    .and_then(|candidates| candidates.first().cloned())
+                resolve_member_symbol(document, member_symbols, declarations_by_canonical, &token)
             } else {
                 None
             };
@@ -810,6 +816,148 @@ fn collect_reference_occurrences(
             })
         })
         .collect()
+}
+
+fn resolve_member_symbol(
+    document: &DocumentState,
+    member_symbols: &BTreeMap<String, Vec<String>>,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
+    token: &TokenOccurrence,
+) -> Option<String> {
+    let candidates = member_symbols.get(&token.name)?;
+    if candidates.len() == 1 {
+        return candidates.first().cloned();
+    }
+
+    let owner_canonical = resolve_member_owner_canonical(document, declarations_by_canonical, token)
+        .or_else(|| {
+            let receiver = member_receiver_name(&document.text, token.range.start)?;
+            document.local_value_types.get(&receiver).cloned()
+        })?;
+    let expected = format!("{}.{}", owner_canonical, token.name);
+    candidates.iter().find(|candidate| *candidate == &expected).cloned()
+}
+
+fn resolve_member_owner_canonical(
+    document: &DocumentState,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
+    token: &TokenOccurrence,
+) -> Option<String> {
+    let line = token.range.start.line as usize + 1;
+    for statement in &document.syntax.statements {
+        match statement {
+            SyntaxStatement::MethodCall(method_call)
+                if method_call.line == line && method_call.method == token.name =>
+            {
+                return resolve_owner_canonical(
+                    document,
+                    declarations_by_canonical,
+                    &method_call.owner_name,
+                    method_call.through_instance,
+                );
+            }
+            SyntaxStatement::MemberAccess(member_access)
+                if member_access.line == line && member_access.member == token.name =>
+            {
+                return resolve_owner_canonical(
+                    document,
+                    declarations_by_canonical,
+                    &member_access.owner_name,
+                    member_access.through_instance,
+                );
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn resolve_owner_canonical(
+    document: &DocumentState,
+    declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
+    owner_name: &str,
+    through_instance: bool,
+) -> Option<String> {
+    if !through_instance {
+        return document
+            .local_value_types
+            .get(owner_name)
+            .cloned()
+            .or_else(|| document.local_symbols.get(owner_name).cloned());
+    }
+
+    let callable_canonical = document.local_symbols.get(owner_name)?.clone();
+    let callable = declarations_by_canonical.get(&callable_canonical)?;
+    let return_type = callable.detail.split_once("->")?.1.trim();
+    document
+        .local_symbols
+        .get(return_type)
+        .cloned()
+        .or_else(|| Some(return_type.to_owned()))
+}
+
+fn member_receiver_name(text: &str, position: LspPosition) -> Option<String> {
+    let line = text.lines().nth(position.line as usize)?;
+    let prefix = line.chars().take(position.character as usize).collect::<String>();
+    let mut chars = prefix.chars().collect::<Vec<_>>();
+    while chars.last().is_some_and(|ch| ch.is_whitespace()) {
+        chars.pop();
+    }
+    if chars.pop()? != '.' {
+        return None;
+    }
+    while chars.last().is_some_and(|ch| ch.is_whitespace()) {
+        chars.pop();
+    }
+    let end = chars.len();
+    let mut start = end;
+    while start > 0 {
+        let ch = chars[start - 1];
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            start -= 1;
+        } else {
+            break;
+        }
+    }
+    (start < end).then(|| chars[start..end].iter().collect())
+}
+
+fn collect_local_value_types(
+    document: &DocumentState,
+    local_symbols: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut types = BTreeMap::new();
+    for statement in &document.syntax.statements {
+        let SyntaxStatement::Value(statement) = statement else {
+            continue;
+        };
+        let resolved_type = statement
+            .annotation
+            .as_ref()
+            .and_then(|annotation| local_symbols.get(annotation))
+            .cloned()
+            .or_else(|| {
+                statement
+                    .value_callee
+                    .as_ref()
+                    .and_then(|callee| local_symbols.get(callee))
+                    .cloned()
+            })
+            .or_else(|| {
+                statement
+                    .value_type
+                    .as_ref()
+                    .and_then(|value_type| local_symbols.get(value_type))
+                    .cloned()
+            });
+        let Some(resolved_type) = resolved_type else {
+            continue;
+        };
+        for name in &statement.names {
+            types.insert(name.clone(), resolved_type.clone());
+        }
+    }
+    types
 }
 
 fn dedupe_occurrences(occurrences: &mut Vec<SymbolOccurrence>) {
@@ -1413,6 +1561,46 @@ mod tests {
                 .iter()
                 .any(|item| item["label"] == json!("method"))
         );
+    }
+
+    #[test]
+    fn hover_and_definition_resolve_duplicate_member_names_by_receiver() {
+        let config = temp_workspace(
+            "hover_and_definition_resolve_duplicate_member_names_by_receiver",
+            &[ (
+                "src/app/__init__.tpy",
+                "class Foo:\n    def ping(self) -> int:\n        return 1\n\nclass Bar:\n    def ping(self) -> int:\n        return 2\n\nfoo = Foo()\nfoo.ping()\n",
+            )],
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let hover = server
+            .handle_hover(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 9, "character": 5}
+            }))
+            .expect("hover should succeed");
+        assert_ne!(hover, Value::Null);
+
+        let definition = server
+            .handle_definition(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 9, "character": 5}
+            }))
+            .expect("definition should succeed");
+        let entries = definition.as_array().expect("definition should be an array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["range"]["start"]["line"], json!(1));
     }
 
     #[test]
