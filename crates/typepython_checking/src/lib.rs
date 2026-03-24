@@ -249,13 +249,21 @@ fn resolve_direct_overloads<'a>(
 
 fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Declaration) -> bool {
     let params = direct_signature_params(&declaration.detail).unwrap_or_default();
-    let positional_params = params.iter().filter(|param| !param.keyword_only).collect::<Vec<_>>();
-    if call.arg_count > positional_params.len() {
+    let positional_params = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let has_variadic = params.iter().any(|param| param.variadic);
+    if !has_variadic && call.arg_count > positional_params.len() {
         return false;
     }
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
     if call.keyword_names.iter().any(|keyword| {
-        !params.iter().any(|param| param.name == **keyword && !param.positional_only)
+        !params
+            .iter()
+            .any(|param| param.name == **keyword && !param.positional_only)
+            && !accepts_extra_keywords
     }) {
         return false;
     }
@@ -263,24 +271,49 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
         !param.has_default
             && if param.keyword_only {
                 !provided_keywords.contains(&param.name)
+            } else if param.variadic || param.keyword_variadic {
+                false
             } else {
-                index >= call.arg_count && (param.positional_only || !provided_keywords.contains(&param.name))
+                index >= call.arg_count
+                    && (param.positional_only || !provided_keywords.contains(&param.name))
             }
     }) {
         return false;
     }
 
     let param_types = params.iter().map(|param| param.annotation.clone()).collect::<Vec<_>>();
-    let positional_ok = call.arg_types.iter().zip(param_types.iter()).all(|(arg_ty, param_ty)| {
-        if arg_ty.is_empty() || param_ty.is_empty() {
-            true
-        } else {
-            direct_type_matches(param_ty, arg_ty)
-        }
-    });
+    let variadic_type = params
+        .iter()
+        .find(|param| param.variadic)
+        .map(|param| param.annotation.as_str());
+    let keyword_variadic_type = params
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .map(|param| param.annotation.as_str());
+    let positional_ok = call
+        .arg_types
+        .iter()
+        .take(positional_params.len())
+        .zip(param_types.iter())
+        .all(|(arg_ty, param_ty)| {
+            if arg_ty.is_empty() || param_ty.is_empty() {
+                true
+            } else {
+                direct_type_matches(param_ty, arg_ty)
+            }
+        })
+        && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
+            let Some(param_ty) = variadic_type else {
+                return false;
+            };
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        });
     let keyword_ok = call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
         let Some(index) = params.iter().position(|param| param.name == *keyword) else {
-            return false;
+            let Some(param_ty) = keyword_variadic_type else {
+                return false;
+            };
+            return arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty);
         };
         let param_ty = &param_types[index];
         arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
@@ -296,6 +329,8 @@ struct DirectSignatureParam {
     has_default: bool,
     positional_only: bool,
     keyword_only: bool,
+    variadic: bool,
+    keyword_variadic: bool,
 }
 
 fn direct_unknown_operation_diagnostics(
@@ -3490,14 +3525,27 @@ fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>>
     let slash_index = parts.iter().position(|part| part.trim() == "/");
     let star_index = parts.iter().position(|part| part.trim() == "*");
     let mut params = Vec::new();
+    let mut keyword_only_active = false;
     for (index, part) in parts.into_iter().enumerate() {
         let part = part.trim();
-        if matches!(part, "/" | "*") {
+        if part == "/" {
+            continue;
+        }
+        if part == "*" {
+            keyword_only_active = true;
             continue;
         }
 
         let has_default = part.ends_with('=');
         let part = part.trim_end_matches('=').trim();
+        let (part, variadic, keyword_variadic) = if let Some(part) = part.strip_prefix("**") {
+            (part.trim(), false, true)
+        } else if let Some(part) = part.strip_prefix('*') {
+            keyword_only_active = true;
+            (part.trim(), true, false)
+        } else {
+            (part, false, false)
+        };
         let (name, annotation) = part
             .split_once(':')
             .map(|(name, annotation)| (name.trim(), annotation.trim().to_owned()))
@@ -3507,7 +3555,9 @@ fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>>
             annotation,
             has_default,
             positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
-            keyword_only: star_index.is_some_and(|star_index| index > star_index),
+            keyword_only: !variadic && !keyword_variadic && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
+            variadic,
+            keyword_variadic,
         });
     }
 
@@ -3539,7 +3589,14 @@ fn direct_call_type_diagnostics(
                 return Vec::new();
             };
             let param_names = direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
-            positional_and_keyword_type_diagnostics(node, call, &param_types, &param_names)
+            positional_and_keyword_type_diagnostics(
+                node,
+                call,
+                &param_types,
+                &param_names,
+                None,
+                None,
+            )
         })
         .collect()
 }
@@ -3595,9 +3652,12 @@ fn direct_source_function_arity_diagnostic(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
-    let positional_params =
-        signature.iter().filter(|param| !param.keyword_only).collect::<Vec<_>>();
-    if call.arg_count > positional_params.len() {
+    let positional_params = signature
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let has_variadic = signature.iter().any(|param| param.variadic);
+    if !has_variadic && call.arg_count > positional_params.len() {
         return Some(Diagnostic::error(
             "TPY4001",
             format!(
@@ -3621,6 +3681,9 @@ fn direct_source_function_arity_diagnostic(
             if param.keyword_only {
                 return !provided_keywords.contains(&param.name);
             }
+            if param.variadic || param.keyword_variadic {
+                return false;
+            }
             *index >= call.arg_count && !provided_keywords.contains(&param.name)
         })
         .map(|(_, param)| param.name.clone())
@@ -3643,7 +3706,12 @@ fn direct_source_function_keyword_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let param_names = signature.iter().map(|param| param.name.as_str()).collect::<BTreeSet<_>>();
+    let param_names = signature
+        .iter()
+        .filter(|param| !param.keyword_variadic)
+        .map(|param| param.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
     call.keyword_names
         .iter()
         .filter_map(|keyword| {
@@ -3658,7 +3726,8 @@ fn direct_source_function_keyword_diagnostics(
                         keyword
                     ),
                 ),
-                None if !param_names.contains(keyword.as_str()) => Diagnostic::error(
+                None if !accepts_extra_keywords && !param_names.contains(keyword.as_str()) => {
+                    Diagnostic::error(
                     "TPY4001",
                     format!(
                         "call to `{}` in module `{}` uses unknown keyword `{}`",
@@ -3666,7 +3735,8 @@ fn direct_source_function_keyword_diagnostics(
                         node.module_path.display(),
                         keyword
                     ),
-                ),
+                )
+                }
                 _ => return None,
             })
         })
@@ -3680,10 +3750,30 @@ fn direct_source_function_type_diagnostics(
 ) -> Vec<Diagnostic> {
     let param_types = signature
         .iter()
+        .filter(|param| !param.keyword_variadic)
         .map(|param| param.annotation.clone().unwrap_or_default())
         .collect::<Vec<_>>();
-    let param_names = signature.iter().map(|param| param.name.clone()).collect::<Vec<_>>();
-    positional_and_keyword_type_diagnostics(node, call, &param_types, &param_names)
+    let param_names = signature
+        .iter()
+        .filter(|param| !param.keyword_variadic)
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    let variadic_type = signature
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| param.annotation.as_deref());
+    let keyword_variadic_type = signature
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.as_deref());
+    positional_and_keyword_type_diagnostics(
+        node,
+        call,
+        &param_types,
+        &param_names,
+        variadic_type,
+        keyword_variadic_type,
+    )
 }
 
 fn positional_and_keyword_type_diagnostics(
@@ -3691,10 +3781,13 @@ fn positional_and_keyword_type_diagnostics(
     call: &typepython_binding::CallSite,
     param_types: &[String],
     param_names: &[String],
+    variadic_type: Option<&str>,
+    keyword_variadic_type: Option<&str>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = call
         .arg_types
         .iter()
+        .take(param_types.len())
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
             !arg_ty.is_empty()
@@ -3715,8 +3808,42 @@ fn positional_and_keyword_type_diagnostics(
         })
         .collect::<Vec<_>>();
 
+    for arg_ty in call.arg_types.iter().skip(param_types.len()) {
+        let Some(param_ty) = variadic_type else {
+            break;
+        };
+        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` passes `{}` where variadic parameter expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    param_ty
+                ),
+            ));
+        }
+    }
+
     for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
         let Some(index) = param_names.iter().position(|param| param == keyword) else {
+            let Some(param_ty) = keyword_variadic_type else {
+                continue;
+            };
+            if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` passes `{}` for keyword `{}` where variadic keyword parameter expects `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        arg_ty,
+                        keyword,
+                        param_ty
+                    ),
+                ));
+            }
             continue;
         };
         let Some(param_ty) = param_types.get(index) else {
@@ -6444,6 +6571,47 @@ mod tests {
         };
 
         assert!(!crate::overload_is_applicable(&call, &declaration));
+    }
+
+    #[test]
+    fn overload_applicability_accepts_variadic_arguments() {
+        let call = typepython_binding::CallSite {
+            callee: String::from("parse"),
+            arg_count: 3,
+            arg_types: vec![String::from("int"), String::from("int"), String::from("int")],
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+        };
+        let declaration = Declaration {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(*args:int)->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+        };
+
+        assert!(crate::overload_is_applicable(&call, &declaration));
+    }
+
+    #[test]
+    fn check_accepts_variadic_direct_calls() {
+        let result = check_temp_typepython_source(
+            "def takes(*args: int):\n    return 0\n\ndef kw(**kwargs: int):\n    return 0\n\ntakes(1, 2, 3)\nkw(x=1, y=2)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
     }
 
     #[test]

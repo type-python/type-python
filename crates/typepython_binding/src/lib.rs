@@ -794,10 +794,11 @@ fn bind_named_block(
 fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option<&str>) -> String {
     let mut rendered_params = Vec::new();
     let positional_only_count = params.iter().filter(|param| param.positional_only).count();
+    let has_variadic = params.iter().any(|param| param.variadic);
     let keyword_only_index = params.iter().position(|param| param.keyword_only);
 
     for (index, param) in params.iter().enumerate() {
-        if keyword_only_index == Some(index) {
+        if keyword_only_index == Some(index) && !has_variadic {
             rendered_params.push(String::from("*"));
         }
 
@@ -807,6 +808,11 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
         };
         if param.has_default {
             rendered.push('=');
+        }
+        if param.keyword_variadic {
+            rendered = format!("**{rendered}");
+        } else if param.variadic {
+            rendered = format!("*{rendered}");
         }
         rendered_params.push(rendered);
 
@@ -1288,7 +1294,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![typepython_syntax::FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false }],
+                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
