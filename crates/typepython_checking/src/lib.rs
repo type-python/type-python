@@ -4186,14 +4186,19 @@ fn dataclass_transform_constructor_type_diagnostics(
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
 ) -> Vec<Diagnostic> {
-    shape
+    let positional_fields = shape
         .fields
         .iter()
         .filter(|field| !field.kw_only)
+        .collect::<Vec<_>>();
+    let mut diagnostics = positional_fields
+        .iter()
         .take(call.arg_count)
         .zip(call.arg_types.iter())
         .filter(|(field, arg_ty)| {
-            !arg_ty.is_empty() && !field.annotation.is_empty() && !direct_type_matches(&field.annotation, arg_ty)
+            !arg_ty.is_empty()
+                && !field.annotation.is_empty()
+                && !direct_type_matches(&field.annotation, arg_ty)
         })
         .map(|(field, arg_ty)| {
             Diagnostic::error(
@@ -4208,7 +4213,29 @@ fn dataclass_transform_constructor_type_diagnostics(
                 ),
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+        let Some(field) = shape.fields.iter().find(|field| field.keyword_name == *keyword) else {
+            continue;
+        };
+        if !arg_ty.is_empty() && !field.annotation.is_empty() && !direct_type_matches(&field.annotation, arg_ty) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` passes `{}` for synthesized keyword `{}` where field `{}` expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    keyword,
+                    field.name,
+                    field.annotation
+                ),
+            ));
+        }
+    }
+
+    diagnostics
 }
 
 fn dataclass_transform_constructor_keyword_diagnostics(
@@ -4218,7 +4245,13 @@ fn dataclass_transform_constructor_keyword_diagnostics(
 ) -> Vec<Diagnostic> {
     let valid_names =
         shape.fields.iter().map(|field| field.keyword_name.as_str()).collect::<BTreeSet<_>>();
-    call.keyword_names
+    let positional_field_names = shape
+        .fields
+        .iter()
+        .filter(|field| !field.kw_only)
+        .map(|field| field.keyword_name.as_str())
+        .collect::<Vec<_>>();
+    let mut diagnostics = call.keyword_names
         .iter()
         .filter(|keyword| !valid_names.contains(keyword.as_str()))
         .map(|keyword| {
@@ -4232,7 +4265,27 @@ fn dataclass_transform_constructor_keyword_diagnostics(
                 ),
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    for keyword in &call.keyword_names {
+        if positional_field_names
+            .iter()
+            .take(call.arg_count)
+            .any(|name| *name == keyword.as_str())
+        {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` binds synthesized field `{}` both positionally and by keyword",
+                    call.callee,
+                    node.module_path.display(),
+                    keyword
+                ),
+            ));
+        }
+    }
+
+    diagnostics
 }
 
 fn direct_unresolved_paramspec_call_diagnostics(
@@ -6208,6 +6261,29 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("synthesized dataclass-transform field `age` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_dataclass_transform_constructor_keyword_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(age=\"oops\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("synthesized keyword `age`"));
+        assert!(rendered.contains("expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_dataclass_transform_constructor_duplicate_binding() {
+        let result = check_temp_typepython_source(
+            "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    age: int\n\nuser: User = User(1, age=2)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("binds synthesized field `age` both positionally and by keyword"));
     }
 
     #[test]
