@@ -4666,6 +4666,20 @@ fn resolve_plain_dataclass_class_shape(
     callee: &str,
 ) -> Option<DataclassTransformClassShape> {
     let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
+    resolve_plain_dataclass_class_shape_from_decl(nodes, class_node, class_decl, &mut BTreeSet::new())
+}
+
+fn resolve_plain_dataclass_class_shape_from_decl(
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> Option<DataclassTransformClassShape> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visiting.insert(key) {
+        return None;
+    }
+
     let info = load_dataclass_transform_module_info(class_node)?;
     let class_site = info.classes.iter().find(|class_site| class_site.name == class_decl.name)?;
     let is_plain_dataclass = class_decl.class_kind == Some(DeclarationOwnerKind::DataClass)
@@ -4680,7 +4694,41 @@ fn resolve_plain_dataclass_class_shape(
     let has_explicit_init = !class_site.plain_dataclass_init
         || class_site.methods.iter().any(|method| method == "__init__");
 
-    let fields = class_site
+    let mut fields = Vec::new();
+    for base in &class_site.bases {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+            continue;
+        };
+        let mut branch_visiting = visiting.clone();
+        let inherited = resolve_plain_dataclass_class_shape_from_decl(
+            nodes,
+            base_node,
+            base_decl,
+            &mut branch_visiting,
+        )
+        .or_else(|| {
+            resolve_dataclass_transform_class_shape_from_decl(
+                nodes,
+                base_node,
+                base_decl,
+                &mut branch_visiting,
+            )
+        });
+        let Some(inherited) = inherited else {
+            continue;
+        };
+        for field in inherited.fields {
+            if let Some(index) = fields
+                .iter()
+                .position(|existing: &DataclassTransformFieldShape| existing.name == field.name)
+            {
+                fields.remove(index);
+            }
+            fields.push(field);
+        }
+    }
+
+    let local_fields = class_site
         .fields
         .iter()
         .filter(|field| !field.is_class_var)
@@ -4708,6 +4756,15 @@ fn resolve_plain_dataclass_class_shape(
             })
         })
         .collect::<Vec<_>>();
+    for field in local_fields {
+        if let Some(index) = fields
+            .iter()
+            .position(|existing: &DataclassTransformFieldShape| existing.name == field.name)
+        {
+            fields.remove(index);
+        }
+        fields.push(field);
+    }
 
     Some(DataclassTransformClassShape {
         fields,
