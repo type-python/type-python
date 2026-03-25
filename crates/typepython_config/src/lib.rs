@@ -692,11 +692,8 @@ mod tests {
     #[test]
     fn prefers_typepython_toml_over_pyproject() {
         let project_dir = temp_project_dir("prefers_typepython_toml_over_pyproject");
-        fs::write(
-            project_dir.join("typepython.toml"),
-            "[project]\ntarget_python = \"3.11\"\n",
-        )
-        .expect("typepython.toml should be written");
+        fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.11\"\n")
+            .expect("typepython.toml should be written");
         fs::write(
             project_dir.join("pyproject.toml"),
             "[tool.typepython.project]\ntarget_python = \"3.12\"\n",
@@ -715,11 +712,8 @@ mod tests {
     #[test]
     fn rejects_unsupported_target_python() {
         let project_dir = temp_project_dir("rejects_unsupported_target_python");
-        fs::write(
-            project_dir.join("typepython.toml"),
-            "[project]\ntarget_python = \"3.9\"\n",
-        )
-        .expect("typepython.toml should be written");
+        fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.9\"\n")
+            .expect("typepython.toml should be written");
 
         let load_result = load(&project_dir);
 
@@ -788,6 +782,78 @@ mod tests {
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn loads_embedded_pyproject_typepython_config() {
+        let project_dir = temp_project_dir("loads_embedded_pyproject_typepython_config");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            concat!(
+                "[tool.typepython.project]\n",
+                "target_python = \"3.12\"\n\n",
+                "[tool.typepython.watch]\n",
+                "debounce_ms = 125\n"
+            ),
+        )
+        .expect("pyproject.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected embedded pyproject config to load");
+        assert_eq!(handle.source, ConfigSource::PyProject);
+        assert_eq!(handle.config.project.target_python, "3.12");
+        assert_eq!(handle.config.watch.debounce_ms, 125);
+    }
+
+    #[test]
+    fn library_profile_expands_required_defaults() {
+        let project_dir = temp_project_dir("library_profile_expands_required_defaults");
+        fs::write(project_dir.join("typepython.toml"), "[typing]\nprofile = \"library\"\n")
+            .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected library profile to load");
+        assert!(handle.config.typing.strict);
+        assert!(handle.config.typing.strict_nulls);
+        assert!(handle.config.typing.no_implicit_dynamic);
+        assert!(handle.config.typing.warn_unsafe);
+        assert!(handle.config.typing.require_known_public_types);
+        assert_eq!(handle.config.typing.imports, super::ImportFallback::Unknown);
+        assert_eq!(handle.config.typing.report_deprecated, super::DiagnosticLevel::Warning);
+        assert!(!handle.config.typing.require_explicit_overrides);
+    }
+
+    #[test]
+    fn explicit_typing_keys_override_profile_defaults() {
+        let project_dir = temp_project_dir("explicit_typing_keys_override_profile_defaults");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[typing]\n",
+                "profile = \"migration\"\n",
+                "strict = true\n",
+                "imports = \"unknown\"\n",
+                "report_deprecated = \"error\"\n",
+                "require_known_public_types = true\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected explicit typing overrides to load");
+        assert!(handle.config.typing.strict);
+        assert_eq!(handle.config.typing.imports, super::ImportFallback::Unknown);
+        assert_eq!(handle.config.typing.report_deprecated, super::DiagnosticLevel::Error);
+        assert!(handle.config.typing.require_known_public_types);
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
