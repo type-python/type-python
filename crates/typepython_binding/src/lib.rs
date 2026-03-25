@@ -268,7 +268,13 @@ pub struct Declaration {
     pub is_final: bool,
     pub is_class_var: bool,
     pub bases: Vec<String>,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<GenericTypeParam>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct GenericTypeParam {
+    pub name: String,
+    pub bound: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -594,7 +600,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
-            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
+            type_params: bind_type_params(&statement.type_params),
         }],
         SyntaxStatement::Interface(statement) => {
             bind_named_block(statement, DeclarationOwnerKind::Interface)
@@ -625,7 +631,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
-            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
+            type_params: bind_type_params(&statement.type_params),
         }],
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
@@ -644,7 +650,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
-            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
+            type_params: bind_type_params(&statement.type_params),
         }],
         SyntaxStatement::Import(statement) => statement
             .bindings
@@ -765,7 +771,7 @@ fn bind_named_block(
         is_final: false,
         is_class_var: false,
         bases: statement.bases.clone(),
-        type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
+        type_params: bind_type_params(&statement.type_params),
     }];
     declarations.extend(statement.members.iter().map(|member| Declaration {
         name: member.name.clone(),
@@ -834,12 +840,20 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
     format!("({})->{}", rendered_params.join(","), returns.unwrap_or(""))
 }
 
+fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<GenericTypeParam> {
+    type_params
+        .iter()
+        .map(|param| GenericTypeParam { name: param.name.clone(), bound: param.bound.clone() })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
-        DeclarationOwnerKind, ExceptHandlerSite, ForSite, GuardConditionSite, IfGuardSite,
-        InvalidationSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
+        DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GuardConditionSite,
+        IfGuardSite, InvalidationSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite,
+        YieldSite, bind,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
@@ -915,7 +929,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![String::from("T")],
+                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
                 },
                 Declaration {
                     name: String::from("User"),
@@ -934,7 +948,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![String::from("T")],
+                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
                 },
                 Declaration {
                     name: String::from("helper"),
@@ -953,7 +967,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![String::from("T")],
+                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
                 },
             ]
         );
@@ -1045,7 +1059,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![String::from("T")],
+                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
                 },
                 Declaration {
                     name: String::from("parse"),

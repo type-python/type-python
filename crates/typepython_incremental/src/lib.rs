@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
+use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
 use typepython_graph::ModuleGraph;
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -56,8 +56,14 @@ pub struct SummaryExport {
     #[serde(rename = "type")]
     pub type_repr: String,
     #[serde(rename = "typeParams")]
-    pub type_params: Vec<String>,
+    pub type_params: Vec<SummaryTypeParam>,
     pub public: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryTypeParam {
+    pub name: String,
+    pub bound: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -173,7 +179,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             name: declaration.name.clone(),
             kind: summary_kind(declaration),
             type_repr: summary_type_repr(declaration),
-            type_params: declaration.type_params.clone(),
+            type_params: declaration.type_params.iter().map(summary_type_param).collect(),
             public: !declaration.name.starts_with('_'),
         })
         .collect::<Vec<_>>();
@@ -243,6 +249,10 @@ fn summary_type_repr(declaration: &Declaration) -> String {
     }
 }
 
+fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
+    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.bound.clone() }
+}
+
 fn is_package_entry_path(path: &std::path::Path) -> bool {
     path.file_name().is_some_and(|name| {
         name == "__init__.py" || name == "__init__.pyi" || name == "__init__.tpy"
@@ -253,11 +263,13 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         Fingerprint, IncrementalState, PublicSummary, SNAPSHOT_SCHEMA_VERSION, SealedRootSummary,
-        SnapshotDecodeError, SnapshotDiff, SummaryExport, decode_snapshot, diff, encode_snapshot,
-        snapshot,
+        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam, decode_snapshot, diff,
+        encode_snapshot, snapshot,
     };
     use std::{collections::BTreeMap, path::PathBuf};
-    use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
+    use typepython_binding::{
+        Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam,
+    };
     use typepython_graph::{ModuleGraph, ModuleNode};
     use typepython_syntax::SourceKind;
 
@@ -317,7 +329,10 @@ mod tests {
                     name: String::from("Foo"),
                     kind: String::from("class"),
                     type_repr: String::from("Foo"),
-                    type_params: vec![String::from("T")],
+                    type_params: vec![SummaryTypeParam {
+                        name: String::from("T"),
+                        bound: Some(String::from("SupportsClose")),
+                    }],
                     public: true,
                 }],
                 imports: vec![String::from("pkg.base")],
@@ -364,7 +379,10 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
-                        type_params: vec![String::from("T")],
+                        type_params: vec![GenericTypeParam {
+                            name: String::from("T"),
+                            bound: Some(String::from("SupportsClose")),
+                        }],
                     },
                     Declaration {
                         name: String::from("Add"),
@@ -402,7 +420,10 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
-                        type_params: vec![String::from("T")],
+                        type_params: vec![GenericTypeParam {
+                            name: String::from("T"),
+                            bound: None,
+                        }],
                     },
                     Declaration {
                         name: String::from("base"),
@@ -459,7 +480,10 @@ mod tests {
                         name: String::from("Expr"),
                         kind: String::from("class"),
                         type_repr: String::from("Expr"),
-                        type_params: vec![String::from("T")],
+                        type_params: vec![SummaryTypeParam {
+                            name: String::from("T"),
+                            bound: Some(String::from("SupportsClose")),
+                        }],
                         public: true,
                     },
                     SummaryExport {
@@ -473,7 +497,10 @@ mod tests {
                         name: String::from("helper"),
                         kind: String::from("function"),
                         type_repr: String::from("()->int"),
-                        type_params: vec![String::from("T")],
+                        type_params: vec![SummaryTypeParam {
+                            name: String::from("T"),
+                            bound: None,
+                        }],
                         public: true,
                     },
                 ],
