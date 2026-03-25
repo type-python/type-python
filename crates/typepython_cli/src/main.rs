@@ -20,7 +20,7 @@ use tar::Archive as TarArchive;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
 use typepython_checking::check_with_options;
-use typepython_config::{ConfigHandle, ConfigSource, load};
+use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
@@ -241,16 +241,32 @@ struct CoverageTally {
 fn main() -> ExitCode {
     if let Err(error) = init_tracing() {
         eprintln!("failed to initialize tracing: {error:#}");
-        return ExitCode::FAILURE;
+        return ExitCode::from(2);
     }
 
     match run() {
         Ok(code) => code,
         Err(error) => {
             eprintln!("{error:#}");
-            ExitCode::FAILURE
+            exit_code_for_error(&error)
         }
     }
+}
+
+fn exit_code_for_error(error: &anyhow::Error) -> ExitCode {
+    if error.chain().any(|cause| cause.downcast_ref::<ConfigError>().is_some()) {
+        return ExitCode::from(1);
+    }
+
+    if error
+        .chain()
+        .map(ToString::to_string)
+        .any(|message| message.contains("already exists; rerun with --force"))
+    {
+        return ExitCode::from(1);
+    }
+
+    ExitCode::from(2)
 }
 
 fn init_tracing() -> Result<()> {
@@ -2439,9 +2455,10 @@ mod tests {
     use super::{
         Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
-        format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
-        supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
-        verify_runtime_public_name_parity, watch_targets, write_incremental_snapshot,
+        exit_code_for_error, format_watch_rebuild_note, load_syntax_trees, run_pipeline,
+        should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
+        verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
+        write_incremental_snapshot,
     };
     use clap::Parser;
     use flate2::{Compression, write::GzEncoder};
@@ -2453,6 +2470,7 @@ mod tests {
         env, fs,
         path::MAIN_SEPARATOR,
         path::{Path, PathBuf},
+        process::ExitCode,
         time::{SystemTime, UNIX_EPOCH},
     };
     use typepython_config::load;
@@ -2483,6 +2501,22 @@ mod tests {
         assert!(discovery.diagnostics.is_empty());
         assert_eq!(discovery.sources.len(), 1);
         assert_eq!(discovery.sources[0].logical_module, "pkg");
+    }
+
+    #[test]
+    fn exit_code_for_config_errors_returns_one() {
+        let error = anyhow::Error::new(typepython_config::ConfigError::NotFound(PathBuf::from(
+            "/tmp/typepython-missing-project",
+        )));
+
+        assert_eq!(exit_code_for_error(&error), ExitCode::from(1));
+    }
+
+    #[test]
+    fn exit_code_for_internal_errors_returns_two() {
+        let error = anyhow::anyhow!("unexpected internal compiler failure");
+
+        assert_eq!(exit_code_for_error(&error), ExitCode::from(2));
     }
 
     #[test]
