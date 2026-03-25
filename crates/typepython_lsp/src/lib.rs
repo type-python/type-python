@@ -465,6 +465,8 @@ impl Server {
                     self.config.config.typing.require_explicit_overrides,
                     self.config.config.typing.enable_sealed_exhaustiveness,
                     self.config.config.typing.report_deprecated,
+                    self.config.config.typing.strict,
+                    self.config.config.typing.warn_unsafe,
                 )
                 .diagnostics
                 .diagnostics,

@@ -584,6 +584,24 @@ pub struct FrozenFieldMutationSite {
     pub line: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum UnsafeOperationKind {
+    EvalCall,
+    ExecCall,
+    GlobalsWrite,
+    LocalsWrite,
+    DictWrite,
+    SetAttrNonLiteral,
+    DelAttrNonLiteral,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct UnsafeOperationSite {
+    pub kind: UnsafeOperationKind,
+    pub line: usize,
+    pub in_unsafe_block: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct ParseOptions {
     pub enable_conditional_returns: bool,
@@ -634,6 +652,28 @@ pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationS
     let mut sites = Vec::new();
     collect_typed_dict_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
     sites
+}
+
+#[must_use]
+pub fn collect_unsafe_operation_sites(source: &str) -> Vec<UnsafeOperationSite> {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("<unsafe>.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: source.to_owned(),
+    });
+    let normalized = normalize_typepython_source(source, &tree.statements);
+    let Ok(parsed) = parse_module(&normalized) else {
+        return Vec::new();
+    };
+
+    let unsafe_ranges = collect_unsafe_block_ranges(source, &tree.statements);
+    let mut collector =
+        UnsafeOperationCollector { source: &normalized, unsafe_ranges, sites: Vec::new() };
+    for stmt in parsed.suite() {
+        visitor::Visitor::visit_stmt(&mut collector, stmt);
+    }
+    collector.sites
 }
 
 #[must_use]
@@ -2075,6 +2115,133 @@ fn collect_typed_dict_literal_sites_in_suite(
             _ => {}
         }
     }
+}
+
+struct UnsafeOperationCollector<'source> {
+    source: &'source str,
+    unsafe_ranges: Vec<(usize, usize)>,
+    sites: Vec<UnsafeOperationSite>,
+}
+
+impl<'source, 'ast> visitor::Visitor<'ast> for UnsafeOperationCollector<'source> {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
+        match stmt {
+            Stmt::Assign(assign) => {
+                for target in &assign.targets {
+                    self.push_unsafe_write_target(target);
+                }
+            }
+            Stmt::AnnAssign(assign) => self.push_unsafe_write_target(&assign.target),
+            Stmt::AugAssign(assign) => self.push_unsafe_write_target(&assign.target),
+            Stmt::Delete(delete) => {
+                for target in &delete.targets {
+                    self.push_unsafe_write_target(target);
+                }
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'ast Expr) {
+        if let Expr::Call(call) = expr {
+            let Expr::Name(name) = call.func.as_ref() else {
+                visitor::walk_expr(self, expr);
+                return;
+            };
+            match name.id.as_str() {
+                "eval" => self.push_site(expr.range(), UnsafeOperationKind::EvalCall),
+                "exec" => self.push_site(expr.range(), UnsafeOperationKind::ExecCall),
+                "setattr" if call.arguments.args.len() >= 2 => {
+                    if !matches!(call.arguments.args[1], Expr::StringLiteral(_)) {
+                        self.push_site(expr.range(), UnsafeOperationKind::SetAttrNonLiteral);
+                    }
+                }
+                "delattr" if call.arguments.args.len() >= 2 => {
+                    if !matches!(call.arguments.args[1], Expr::StringLiteral(_)) {
+                        self.push_site(expr.range(), UnsafeOperationKind::DelAttrNonLiteral);
+                    }
+                }
+                _ => {}
+            }
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
+impl<'source> UnsafeOperationCollector<'source> {
+    fn push_unsafe_write_target(&mut self, target: &Expr) {
+        if let Some(kind) = unsafe_write_target_kind(target) {
+            self.push_site(target.range(), kind);
+        }
+    }
+
+    fn push_site(&mut self, range: ruff_text_size::TextRange, kind: UnsafeOperationKind) {
+        let line = offset_to_line_column(self.source, range.start().to_usize()).0;
+        let in_unsafe_block =
+            self.unsafe_ranges.iter().any(|(start, end)| *start <= line && line <= *end);
+        self.sites.push(UnsafeOperationSite { kind, line, in_unsafe_block });
+    }
+}
+
+fn unsafe_write_target_kind(target: &Expr) -> Option<UnsafeOperationKind> {
+    match target {
+        Expr::Subscript(subscript) => match subscript.value.as_ref() {
+            Expr::Call(call) => {
+                let Expr::Name(name) = call.func.as_ref() else {
+                    return None;
+                };
+                match name.id.as_str() {
+                    "globals" => Some(UnsafeOperationKind::GlobalsWrite),
+                    "locals" => Some(UnsafeOperationKind::LocalsWrite),
+                    _ => None,
+                }
+            }
+            Expr::Attribute(attribute) if attribute.attr.as_str() == "__dict__" => {
+                Some(UnsafeOperationKind::DictWrite)
+            }
+            _ => None,
+        },
+        Expr::Attribute(attribute) if attribute.attr.as_str() == "__dict__" => {
+            Some(UnsafeOperationKind::DictWrite)
+        }
+        _ => None,
+    }
+}
+
+fn collect_unsafe_block_ranges(
+    source: &str,
+    statements: &[SyntaxStatement],
+) -> Vec<(usize, usize)> {
+    let unsafe_lines = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Unsafe(statement) => Some(statement.line),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let lines = source.lines().collect::<Vec<_>>();
+    unsafe_lines
+        .into_iter()
+        .filter_map(|line_number| {
+            let header = lines.get(line_number.saturating_sub(1))?;
+            let header_indent =
+                header.chars().take_while(|character| character.is_whitespace()).count();
+            let mut end_line = line_number;
+            for (index, line) in lines.iter().enumerate().skip(line_number) {
+                let trimmed = line.trim_start();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                let indent = line.chars().take_while(|character| character.is_whitespace()).count();
+                if indent <= header_indent {
+                    break;
+                }
+                end_line = index + 1;
+            }
+            Some((line_number, end_line))
+        })
+        .collect()
 }
 
 fn extract_typed_dict_literal_site(

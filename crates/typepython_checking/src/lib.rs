@@ -55,7 +55,7 @@ pub struct CheckResult {
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
-    check_with_options(graph, false, true, DiagnosticLevel::Warning)
+    check_with_options(graph, false, true, DiagnosticLevel::Warning, false, false)
 }
 
 #[must_use]
@@ -64,6 +64,8 @@ pub fn check_with_options(
     require_explicit_overrides: bool,
     enable_sealed_exhaustiveness: bool,
     report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
 ) -> CheckResult {
     let mut diagnostics = DiagnosticReport::default();
 
@@ -82,6 +84,9 @@ pub fn check_with_options(
         }
         for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
             diagnostics.push(access_diagnostic);
+        }
+        for unsafe_diagnostic in unsafe_boundary_diagnostics(node, strict, warn_unsafe) {
+            diagnostics.push(unsafe_diagnostic);
         }
         for deprecated_diagnostic in
             deprecated_use_diagnostics(node, &graph.nodes, report_deprecated)
@@ -175,6 +180,58 @@ pub fn check_with_options(
     }
 
     CheckResult { diagnostics }
+}
+
+fn unsafe_boundary_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    strict: bool,
+    warn_unsafe: bool,
+) -> Vec<Diagnostic> {
+    if !strict || !warn_unsafe || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+    typepython_syntax::collect_unsafe_operation_sites(&source)
+        .into_iter()
+        .filter(|site| !site.in_unsafe_block)
+        .map(|site| {
+            Diagnostic::warning(
+                "TPY4019",
+                match site.kind {
+                    typepython_syntax::UnsafeOperationKind::EvalCall => String::from(
+                        "unsafe boundary operation `eval(...)` must appear inside `unsafe:`",
+                    ),
+                    typepython_syntax::UnsafeOperationKind::ExecCall => String::from(
+                        "unsafe boundary operation `exec(...)` must appear inside `unsafe:`",
+                    ),
+                    typepython_syntax::UnsafeOperationKind::GlobalsWrite => {
+                        String::from("writes through `globals()` must appear inside `unsafe:`")
+                    }
+                    typepython_syntax::UnsafeOperationKind::LocalsWrite => {
+                        String::from("writes through `locals()` must appear inside `unsafe:`")
+                    }
+                    typepython_syntax::UnsafeOperationKind::DictWrite => {
+                        String::from("writes through `__dict__` must appear inside `unsafe:`")
+                    }
+                    typepython_syntax::UnsafeOperationKind::SetAttrNonLiteral => String::from(
+                        "non-literal `setattr(obj, name, value)` must appear inside `unsafe:`",
+                    ),
+                    typepython_syntax::UnsafeOperationKind::DelAttrNonLiteral => String::from(
+                        "non-literal `delattr(obj, name)` must appear inside `unsafe:`",
+                    ),
+                },
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                site.line,
+                1,
+                site.line,
+                1,
+            ))
+        })
+        .collect()
 }
 
 fn ambiguous_overload_call_diagnostics(
@@ -6605,6 +6662,26 @@ mod tests {
         source_text: &str,
         options: ParseOptions,
     ) -> super::CheckResult {
+        check_temp_typepython_source_with_check_options(
+            source_text,
+            options,
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            false,
+            false,
+        )
+    }
+
+    fn check_temp_typepython_source_with_check_options(
+        source_text: &str,
+        options: ParseOptions,
+        require_explicit_overrides: bool,
+        enable_sealed_exhaustiveness: bool,
+        report_deprecated: DiagnosticLevel,
+        strict: bool,
+        warn_unsafe: bool,
+    ) -> super::CheckResult {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
@@ -6624,7 +6701,14 @@ mod tests {
         let tree = parse_with_options(source, options);
         let binding = bind(&tree);
         let graph = build(&[binding]);
-        let result = check(&graph);
+        let result = check_with_options(
+            &graph,
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+        );
 
         let _ = fs::remove_dir_all(&root);
         result
@@ -12446,6 +12530,38 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_eval_outside_unsafe_block_when_strict() {
+        let result = check_temp_typepython_source_with_check_options(
+            "def run() -> None:\n    eval(\"1 + 1\")\n",
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            true,
+            true,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4019"));
+        assert!(rendered.contains("eval(...)"));
+    }
+
+    #[test]
+    fn check_accepts_eval_inside_unsafe_block_when_strict() {
+        let result = check_temp_typepython_source_with_check_options(
+            "def run() -> None:\n    unsafe:\n        eval(\"1 + 1\")\n",
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            true,
+            true,
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_builtin_return_type_mismatch() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -17913,6 +18029,8 @@ mod tests {
             true,
             true,
             DiagnosticLevel::Warning,
+            false,
+            false,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -18073,6 +18191,8 @@ mod tests {
             true,
             true,
             DiagnosticLevel::Warning,
+            false,
+            false,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -21446,6 +21566,8 @@ mod tests {
             false,
             true,
             DiagnosticLevel::Warning,
+            false,
+            false,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -21550,6 +21672,8 @@ mod tests {
             false,
             true,
             DiagnosticLevel::Ignore,
+            false,
+            false,
         );
 
         assert!(result.diagnostics.is_empty());

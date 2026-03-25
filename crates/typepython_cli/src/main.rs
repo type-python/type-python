@@ -1154,6 +1154,8 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         config.config.typing.require_explicit_overrides,
         config.config.typing.enable_sealed_exhaustiveness,
         config.config.typing.report_deprecated,
+        config.config.typing.strict,
+        config.config.typing.warn_unsafe,
     )
     .diagnostics;
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
