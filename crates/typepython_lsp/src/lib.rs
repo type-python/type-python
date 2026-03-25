@@ -1242,16 +1242,24 @@ fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
 }
 
 fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
-    if !root.exists() {
+    walk_external_type_root_directory(root, root, sources)
+}
+
+fn walk_external_type_root_directory(
+    root: &Path,
+    directory: &Path,
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
+    if !directory.exists() {
         return Ok(());
     }
-    for entry in std::fs::read_dir(root)
-        .with_context(|| format!("unable to read directory {}", root.display()))?
+    for entry in std::fs::read_dir(directory)
+        .with_context(|| format!("unable to read directory {}", directory.display()))?
     {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            walk_external_type_root(&path, sources)?;
+            walk_external_type_root_directory(root, &path, sources)?;
             continue;
         }
 
@@ -1261,7 +1269,7 @@ fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> 
         if !external_source_allowed(root, &path, kind) {
             continue;
         }
-        let Some(logical_module) = logical_module_path(root, &path) else {
+        let Some(logical_module) = external_logical_module_path(root, &path) else {
             continue;
         };
         if !sources.iter().any(|source| source.path == path) {
@@ -1274,9 +1282,33 @@ fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> 
 fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Stub => true,
-        SourceKind::Python => external_runtime_is_typed(root, path),
+        SourceKind::Python => {
+            external_runtime_is_typed(root, path)
+                || external_runtime_allowed_by_partial_stub(root, path)
+        }
         SourceKind::TypePython => false,
     }
+}
+
+fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let Some(first) =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())
+    else {
+        return None;
+    };
+    if first.ends_with("-stubs") {
+        let stub_distribution_root = root.join(first);
+        let Ok(relative_inside_distribution) = relative.strip_prefix(first) else {
+            return None;
+        };
+        return logical_module_path(
+            &stub_distribution_root,
+            &stub_distribution_root.join(relative_inside_distribution),
+        );
+    }
+
+    logical_module_path(root, path)
 }
 
 fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
@@ -1291,6 +1323,38 @@ fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
         }
     }
     false
+}
+
+fn external_runtime_allowed_by_partial_stub(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut components = relative.components();
+    let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
+        return false;
+    };
+    if first.ends_with("-stubs") {
+        return false;
+    }
+
+    let stub_root = root.join(format!("{first}-stubs"));
+    if !partial_stub_package_marker(&stub_root) {
+        return false;
+    }
+
+    let Ok(relative_inside_package) = relative.strip_prefix(first) else {
+        return false;
+    };
+    let nested_stub_root = stub_root.join(first);
+    let stub_package_root = if nested_stub_root.exists() { nested_stub_root } else { stub_root };
+    let stub_candidate = stub_package_root.join(relative_inside_package).with_extension("pyi");
+    !stub_candidate.is_file()
+}
+
+fn partial_stub_package_marker(stub_root: &Path) -> bool {
+    std::fs::read_to_string(stub_root.join("py.typed"))
+        .ok()
+        .is_some_and(|contents| contents.lines().any(|line| line.trim() == "partial"))
 }
 
 fn compile_patterns(config: &ConfigHandle, patterns: &[String]) -> Result<Vec<Pattern>> {

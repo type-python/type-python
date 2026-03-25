@@ -2224,16 +2224,24 @@ fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
 }
 
 fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
-    if !root.exists() {
+    walk_external_type_root_directory(root, root, sources)
+}
+
+fn walk_external_type_root_directory(
+    root: &Path,
+    directory: &Path,
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
+    if !directory.exists() {
         return Ok(());
     }
-    for entry in fs::read_dir(root)
-        .with_context(|| format!("unable to read directory {}", root.display()))?
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("unable to read directory {}", directory.display()))?
     {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            walk_external_type_root(&path, sources)?;
+            walk_external_type_root_directory(root, &path, sources)?;
             continue;
         }
 
@@ -2243,7 +2251,7 @@ fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> 
         if !external_source_allowed(root, &path, kind) {
             continue;
         }
-        let Some(logical_module) = logical_module_path(root, &path) else {
+        let Some(logical_module) = external_logical_module_path(root, &path) else {
             continue;
         };
         sources.push(DiscoveredSource { path, root: root.to_path_buf(), kind, logical_module });
@@ -2254,9 +2262,33 @@ fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> 
 fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Stub => true,
-        SourceKind::Python => external_runtime_is_typed(root, path),
+        SourceKind::Python => {
+            external_runtime_is_typed(root, path)
+                || external_runtime_allowed_by_partial_stub(root, path)
+        }
         SourceKind::TypePython => false,
     }
+}
+
+fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let Some(first) =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())
+    else {
+        return None;
+    };
+    if first.ends_with("-stubs") {
+        let stub_distribution_root = root.join(first);
+        let Ok(relative_inside_distribution) = relative.strip_prefix(first) else {
+            return None;
+        };
+        return logical_module_path(
+            &stub_distribution_root,
+            &stub_distribution_root.join(relative_inside_distribution),
+        );
+    }
+
+    logical_module_path(root, path)
 }
 
 fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
@@ -2271,6 +2303,38 @@ fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
         }
     }
     false
+}
+
+fn external_runtime_allowed_by_partial_stub(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut components = relative.components();
+    let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
+        return false;
+    };
+    if first.ends_with("-stubs") {
+        return false;
+    }
+
+    let stub_root = root.join(format!("{first}-stubs"));
+    if !partial_stub_package_marker(&stub_root) {
+        return false;
+    }
+
+    let Ok(relative_inside_package) = relative.strip_prefix(first) else {
+        return false;
+    };
+    let nested_stub_root = stub_root.join(first);
+    let stub_package_root = if nested_stub_root.exists() { nested_stub_root } else { stub_root };
+    let stub_candidate = stub_package_root.join(relative_inside_package).with_extension("pyi");
+    !stub_candidate.is_file()
+}
+
+fn partial_stub_package_marker(stub_root: &Path) -> bool {
+    fs::read_to_string(stub_root.join("py.typed"))
+        .ok()
+        .is_some_and(|contents| contents.lines().any(|line| line.trim() == "partial"))
 }
 
 fn compile_patterns(
@@ -2604,10 +2668,11 @@ mod tests {
     use super::{
         Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
-        embedded_config_template, exit_code_for_error, format_watch_rebuild_note, init_project,
-        load_syntax_trees, run_pipeline, should_emit_build_outputs, supplied_verify_artifacts,
-        verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
-        watch_targets, write_incremental_snapshot,
+        embedded_config_template, exit_code_for_error, external_resolution_sources,
+        format_watch_rebuild_note, init_project, load_syntax_trees, run_pipeline,
+        should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
+        verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
+        write_incremental_snapshot,
     };
     use clap::Parser;
     use flate2::{Compression, write::GzEncoder};
@@ -2804,6 +2869,85 @@ mod tests {
         assert!(message.contains("TPY1002"));
         assert!(message.contains("project.include"));
         assert!(message.contains("invalid glob pattern"));
+    }
+
+    #[test]
+    fn external_resolution_merges_partial_stub_packages_with_runtime_fallback() {
+        let project_dir = temp_project_dir(
+            "external_resolution_merges_partial_stub_packages_with_runtime_fallback",
+        );
+        let modules = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\n",
+                    project_dir.join("site-packages").display()
+                ),
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo-stubs/demo"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo/runtime_only.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/demo/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/demo/typed_only.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/py.typed"), "partial\n")
+                .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            let sources = external_resolution_sources(&config).expect("test setup should succeed");
+            let mut modules =
+                sources.into_iter().map(|source| source.logical_module).collect::<Vec<_>>();
+            modules.sort();
+            modules
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(modules, vec!["demo", "demo.runtime_only", "demo.typed_only"]);
+    }
+
+    #[test]
+    fn external_resolution_does_not_fallback_for_non_partial_stub_packages() {
+        let project_dir =
+            temp_project_dir("external_resolution_does_not_fallback_for_non_partial_stub_packages");
+        let modules = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\n",
+                    project_dir.join("site-packages").display()
+                ),
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo-stubs/demo"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo/runtime_only.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/demo/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/py.typed"), "\n")
+                .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            let sources = external_resolution_sources(&config).expect("test setup should succeed");
+            let mut modules =
+                sources.into_iter().map(|source| source.logical_module).collect::<Vec<_>>();
+            modules.sort();
+            modules
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(modules, vec!["demo"]);
     }
 
     #[test]
