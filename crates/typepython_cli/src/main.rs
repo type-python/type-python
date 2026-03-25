@@ -26,7 +26,7 @@ use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, encode_snapshot, snapshot};
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
-use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives, parse};
+use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 use zip::ZipArchive;
 
 const CONFIG_TEMPLATE: &str =
@@ -578,9 +578,11 @@ fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerifyArtifact> {
 fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
     let discovery = collect_source_paths(&config)?;
-    let mut syntax_trees = load_syntax_trees(&discovery.sources)?;
+    let mut syntax_trees =
+        load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
     let bundled_sources = bundled_stdlib_sources()?;
-    syntax_trees.extend(load_syntax_trees(&bundled_sources)?);
+    syntax_trees
+        .extend(load_syntax_trees(&bundled_sources, config.config.typing.conditional_returns)?);
     let mut diagnostics = discovery.diagnostics.clone();
     let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
@@ -1058,14 +1060,20 @@ fn source_kind_label(kind: SourceKind) -> &'static str {
     }
 }
 
-fn load_syntax_trees(sources: &[DiscoveredSource]) -> Result<Vec<typepython_syntax::SyntaxTree>> {
+fn load_syntax_trees(
+    sources: &[DiscoveredSource],
+    enable_conditional_returns: bool,
+) -> Result<Vec<typepython_syntax::SyntaxTree>> {
     sources
         .iter()
         .map(|source| {
             let mut source_file = SourceFile::from_path(&source.path)
                 .with_context(|| format!("unable to read {}", source.path.display()))?;
             source_file.logical_module = source.logical_module.clone();
-            Ok(parse(source_file))
+            Ok(typepython_syntax::parse_with_options(
+                source_file,
+                typepython_syntax::ParseOptions { enable_conditional_returns },
+            ))
         })
         .collect::<Result<Vec<_>>>()
 }
@@ -1117,10 +1125,12 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees = load_syntax_trees(&discovery.sources)?;
+    let syntax_trees =
+        load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
     let mut checking_sources = bundled_stdlib_sources()?;
     checking_sources.extend(external_resolution_sources(config)?);
-    let checking_support_syntax = load_syntax_trees(&checking_sources)?;
+    let checking_support_syntax =
+        load_syntax_trees(&checking_sources, config.config.typing.conditional_returns)?;
     let mut all_syntax_trees = syntax_trees.clone();
     all_syntax_trees.extend(checking_support_syntax);
     let mut parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
@@ -1712,7 +1722,7 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
             ));
         }
     };
-    let syntax = parse(source);
+    let syntax = typepython_syntax::parse(source);
     if syntax.diagnostics.has_errors() {
         Some(Diagnostic::error(
             "TPY5003",
@@ -1743,7 +1753,7 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
 
 fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {
     let source = SourceFile::from_path(path).ok()?;
-    let syntax = parse(source);
+    let syntax = typepython_syntax::parse(source);
     if syntax.diagnostics.has_errors() { None } else { Some(syntax) }
 }
 
@@ -3690,6 +3700,51 @@ mod tests {
     }
 
     #[test]
+    fn run_pipeline_rejects_conditional_returns_by_default() {
+        let project_dir = temp_project_dir("run_pipeline_rejects_conditional_returns_by_default");
+        let diagnostics = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app.tpy"),
+                "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed").diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.has_errors(), "{}", diagnostics.as_text());
+    }
+
+    #[test]
+    fn run_pipeline_accepts_conditional_returns_when_enabled() {
+        let project_dir = temp_project_dir("run_pipeline_accepts_conditional_returns_when_enabled");
+        let diagnostics = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\nconditional_returns = true\n",
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app.tpy"),
+                "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed").diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
+    }
+
+    #[test]
     fn build_diagnostics_adds_emit_blocked_error_when_configured() {
         let project_dir =
             temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
@@ -3882,7 +3937,7 @@ mod tests {
             let config = load(&project_dir).expect("test setup should succeed");
             let discovery = collect_source_paths(&config).expect("test setup should succeed");
             let syntax_trees =
-                load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+                load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
             build_migration_report(&config, &syntax_trees)
         };
         remove_temp_project_dir(&project_dir);
@@ -3923,7 +3978,7 @@ mod tests {
             let config = load(&project_dir).expect("test setup should succeed");
             let discovery = collect_source_paths(&config).expect("test setup should succeed");
             let syntax_trees =
-                load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+                load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
             build_migration_report(&config, &syntax_trees)
         };
         remove_temp_project_dir(&project_dir);

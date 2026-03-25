@@ -251,6 +251,7 @@ pub struct TypingConfig {
     pub require_known_public_types: bool,
     /// Enable pass-through inference.
     pub infer_passthrough: bool,
+    pub conditional_returns: bool,
 }
 
 impl Default for TypingConfig {
@@ -267,6 +268,7 @@ impl Default for TypingConfig {
             require_explicit_overrides: false,
             require_known_public_types: false,
             infer_passthrough: false,
+            conditional_returns: false,
         }
     }
 }
@@ -341,6 +343,7 @@ struct RawTypingConfig {
     require_explicit_overrides: Option<bool>,
     require_known_public_types: Option<bool>,
     infer_passthrough: Option<bool>,
+    conditional_returns: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -466,6 +469,7 @@ impl TypingConfig {
                 require_explicit_overrides: false,
                 require_known_public_types: true,
                 infer_passthrough: false,
+                conditional_returns: false,
             },
             Some(TypingProfile::Application) => {
                 Self { profile: Some(TypingProfile::Application), ..Self::default() }
@@ -482,6 +486,7 @@ impl TypingConfig {
                 require_explicit_overrides: false,
                 require_known_public_types: false,
                 infer_passthrough: false,
+                conditional_returns: false,
             },
             None => Self::default(),
         };
@@ -515,6 +520,9 @@ impl TypingConfig {
         }
         if let Some(infer_passthrough) = raw.infer_passthrough {
             config.infer_passthrough = infer_passthrough;
+        }
+        if let Some(conditional_returns) = raw.conditional_returns {
+            config.conditional_returns = conditional_returns;
         }
 
         config
@@ -899,6 +907,20 @@ mod tests {
         let handle = load_result.expect("expected embedded null python_executable to load");
         assert_eq!(handle.source, ConfigSource::PyProject);
         assert_eq!(handle.config.resolution.python_executable, None);
+    }
+
+    #[test]
+    fn loads_conditional_return_opt_in_from_typepython_toml() {
+        let project_dir = temp_project_dir("loads_conditional_return_opt_in_from_typepython_toml");
+        fs::write(project_dir.join("typepython.toml"), "[typing]\nconditional_returns = true\n")
+            .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected conditional return opt-in to load");
+        assert!(handle.config.typing.conditional_returns);
     }
 
     #[test]

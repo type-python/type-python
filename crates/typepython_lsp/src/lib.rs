@@ -16,7 +16,8 @@ use typepython_config::ConfigHandle;
 use typepython_diagnostics::{DiagnosticReport, Severity};
 use typepython_graph::build;
 use typepython_syntax::{
-    SourceFile, SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse,
+    ParseOptions, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
+    apply_type_ignore_directives, parse_with_options,
 };
 use url::Url;
 
@@ -446,7 +447,11 @@ impl Server {
 
     fn rebuild_workspace(&self) -> Result<WorkspaceState, LspError> {
         let sources = collect_source_paths(&self.config, &self.overlays)?;
-        let syntax_trees = load_syntax_trees(&sources, &self.overlays)?;
+        let syntax_trees = load_syntax_trees(
+            &sources,
+            &self.overlays,
+            self.config.config.typing.conditional_returns,
+        )?;
 
         let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
         apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
@@ -1396,6 +1401,7 @@ fn is_explicit_package_dir(directory: &Path) -> bool {
 fn load_syntax_trees(
     sources: &[DiscoveredSource],
     overlays: &BTreeMap<PathBuf, OverlayDocument>,
+    enable_conditional_returns: bool,
 ) -> Result<Vec<SyntaxTree>> {
     sources
         .iter()
@@ -1414,7 +1420,7 @@ fn load_syntax_trees(
                 source_file
             };
             source_file.logical_module = source.logical_module.clone();
-            Ok(parse(source_file))
+            Ok(parse_with_options(source_file, ParseOptions { enable_conditional_returns }))
         })
         .collect()
 }

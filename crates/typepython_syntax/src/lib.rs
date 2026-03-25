@@ -580,11 +580,21 @@ pub struct FrozenFieldMutationSite {
     pub line: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct ParseOptions {
+    pub enable_conditional_returns: bool,
+}
+
 /// Parses a source file into a syntax tree.
 #[must_use]
 pub fn parse(source: SourceFile) -> SyntaxTree {
+    parse_with_options(source, ParseOptions::default())
+}
+
+#[must_use]
+pub fn parse_with_options(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     match source.kind {
-        SourceKind::TypePython => parse_typepython_source(source),
+        SourceKind::TypePython => parse_typepython_source(source, options),
         SourceKind::Python | SourceKind::Stub => parse_python_source(source),
     }
 }
@@ -2188,7 +2198,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
 }
 
-fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
+fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
     let type_ignore_directives = parse_type_ignore_directives(&source.text);
@@ -2208,10 +2218,12 @@ fn parse_typepython_source(source: SourceFile) -> SyntaxTree {
     }
 
     if !diagnostics.has_errors() {
-        let normalized = normalize_conditional_return_source(&normalize_typepython_source(
-            &source.text,
-            &statements,
-        ));
+        let normalized_typepython_source = normalize_typepython_source(&source.text, &statements);
+        let normalized = if options.enable_conditional_returns {
+            normalize_conditional_return_source(&normalized_typepython_source)
+        } else {
+            normalized_typepython_source
+        };
         match parse_module(&normalized) {
             Ok(parsed) => {
                 collect_invalid_annotation_placement_diagnostics(
@@ -5735,9 +5747,10 @@ mod tests {
         ForStatement, FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
         ImportStatement, InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
         MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement,
+        ParseOptions,
         ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
         TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
-        YieldStatement, parse,
+        YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -8611,15 +8624,40 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_conditional_return_syntax() {
+    fn parse_rejects_conditional_return_syntax_by_default() {
         let tree = parse(SourceFile {
             path: PathBuf::from("conditional-return.tpy"),
             kind: SourceKind::TypePython,
             logical_module: String::new(),
             text: String::from(
-                "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+                "def decode(x: str | bytes | None) -> match x:
+    case str: str
+    case bytes: str
+    case None: None
+",
             ),
         });
+
+        assert!(tree.diagnostics.has_errors());
+    }
+
+    #[test]
+    fn parse_accepts_conditional_return_syntax_when_enabled() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("conditional-return.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "def decode(x: str | bytes | None) -> match x:
+    case str: str
+    case bytes: str
+    case None: None
+",
+                ),
+            },
+            ParseOptions { enable_conditional_returns: true },
+        );
 
         assert!(tree.diagnostics.is_empty());
         let sites = crate::collect_conditional_return_sites(&tree.source.text);
@@ -8640,15 +8678,26 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_multiline_conditional_return_syntax() {
-        let tree = parse(SourceFile {
-            path: PathBuf::from("conditional-return-multiline.tpy"),
-            kind: SourceKind::TypePython,
-            logical_module: String::new(),
-            text: String::from(
-                "def decode(\n    x: str | bytes | None,\n) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n\nvalue: int = 1\n",
-            ),
-        });
+    fn parse_accepts_multiline_conditional_return_syntax_when_enabled() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("conditional-return-multiline.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "def decode(
+    x: str | bytes | None,
+) -> match x:
+    case str: str
+    case bytes: str
+    case None: None
+
+value: int = 1
+",
+                ),
+            },
+            ParseOptions { enable_conditional_returns: true },
+        );
 
         assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
         let sites = crate::collect_conditional_return_sites(&tree.source.text);

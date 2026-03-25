@@ -6278,9 +6278,16 @@ mod tests {
     };
     use typepython_config::DiagnosticLevel;
     use typepython_graph::{ModuleGraph, ModuleNode, build};
-    use typepython_syntax::{SourceFile, SourceKind, parse};
+    use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
 
     fn check_temp_typepython_source(source_text: &str) -> super::CheckResult {
+        check_temp_typepython_source_with_options(source_text, ParseOptions::default())
+    }
+
+    fn check_temp_typepython_source_with_options(
+        source_text: &str,
+        options: ParseOptions,
+    ) -> super::CheckResult {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
@@ -6297,7 +6304,7 @@ mod tests {
             logical_module: String::from("app"),
             text: source_text.to_owned(),
         };
-        let tree = parse(source);
+        let tree = parse_with_options(source, options);
         let binding = bind(&tree);
         let graph = build(&[binding]);
         let result = check(&graph);
@@ -6486,8 +6493,9 @@ mod tests {
 
     #[test]
     fn check_reports_incomplete_conditional_return_coverage() {
-        let result = check_temp_typepython_source(
+        let result = check_temp_typepython_source_with_options(
             "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",
+            ParseOptions { enable_conditional_returns: true },
         );
 
         let rendered = result.diagnostics.as_text();
@@ -6497,8 +6505,9 @@ mod tests {
 
     #[test]
     fn check_accepts_complete_conditional_return_coverage() {
-        let result = check_temp_typepython_source(
+        let result = check_temp_typepython_source_with_options(
             "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
+            ParseOptions { enable_conditional_returns: true },
         );
 
         let rendered = result.diagnostics.as_text();
