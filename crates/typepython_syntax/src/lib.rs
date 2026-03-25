@@ -190,8 +190,10 @@ pub struct CallStatement {
     pub callee: String,
     pub arg_count: usize,
     pub arg_types: Vec<String>,
+    pub arg_values: Vec<DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
+    pub keyword_arg_values: Vec<DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -210,8 +212,10 @@ pub struct MethodCallStatement {
     pub through_instance: bool,
     pub arg_count: usize,
     pub arg_types: Vec<String>,
+    pub arg_values: Vec<DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
+    pub keyword_arg_values: Vec<DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -419,7 +423,7 @@ struct ParsedTypeParams<'source> {
     remainder: &'source str,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
     pub value_type: Option<String>,
     pub is_awaited: bool,
@@ -677,8 +681,7 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
                     source,
                     &class_def.decorator_list,
                     &import_bindings,
-                )
-                {
+                ) {
                     providers.push(DataclassTransformProviderSite {
                         name: class_def.name.as_str().to_owned(),
                         metadata,
@@ -1056,7 +1059,10 @@ fn collect_dataclass_transform_class_site(
             .collect(),
         plain_dataclass_frozen: plain_dataclass.as_ref().is_some_and(|metadata| metadata.frozen),
         plain_dataclass_kw_only: plain_dataclass.as_ref().is_some_and(|metadata| metadata.kw_only),
-        plain_dataclass_init: plain_dataclass.as_ref().map(|metadata| metadata.init).unwrap_or(true),
+        plain_dataclass_init: plain_dataclass
+            .as_ref()
+            .map(|metadata| metadata.init)
+            .unwrap_or(true),
         bases: class_def
             .arguments
             .as_ref()
@@ -1106,7 +1112,8 @@ fn extract_dataclass_transform_field(
         return None;
     };
     let value = assign.value.as_deref();
-    let field_specifier = value.and_then(|expr| extract_field_specifier_site(source, expr, import_bindings));
+    let field_specifier =
+        value.and_then(|expr| extract_field_specifier_site(source, expr, import_bindings));
     Some(DataclassTransformFieldSite {
         name: name.id.as_str().to_owned(),
         annotation: slice_range(source, assign.annotation.range())?.to_owned(),
@@ -1370,15 +1377,8 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let mut parts = name.split('.');
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
-    let head = import_bindings
-        .get(head)
-        .cloned()
-        .unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() {
-        head
-    } else {
-        format!("{head}.{}", tail.join("."))
-    }
+    let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
+    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
@@ -3392,6 +3392,7 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
         callee: name.id.as_str().to_owned(),
         arg_count: call.arguments.args.len(),
         arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+        arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
         keyword_names: call
             .arguments
             .keywords
@@ -3404,6 +3405,13 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
             .iter()
             .filter(|keyword| keyword.arg.is_some())
             .map(|keyword| infer_literal_arg_type(&keyword.value))
+            .collect(),
+        keyword_arg_values: call
+            .arguments
+            .keywords
+            .iter()
+            .filter(|keyword| keyword.arg.is_some())
+            .map(|keyword| extract_direct_expr_metadata(&keyword.value))
             .collect(),
         line,
     }))
@@ -3431,6 +3439,7 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
             through_instance: false,
             arg_count: call.arguments.args.len(),
             arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+            arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
             keyword_names: call
                 .arguments
                 .keywords
@@ -3444,6 +3453,13 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                 .filter(|keyword| keyword.arg.is_some())
                 .map(|keyword| infer_literal_arg_type(&keyword.value))
                 .collect(),
+            keyword_arg_values: call
+                .arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_some())
+                .map(|keyword| extract_direct_expr_metadata(&keyword.value))
+                .collect(),
             line,
         })),
         Expr::Call(inner_call) => {
@@ -3456,6 +3472,7 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                 through_instance: true,
                 arg_count: call.arguments.args.len(),
                 arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+                arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
                 keyword_names: call
                     .arguments
                     .keywords
@@ -3468,6 +3485,13 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                     .iter()
                     .filter(|keyword| keyword.arg.is_some())
                     .map(|keyword| infer_literal_arg_type(&keyword.value))
+                    .collect(),
+                keyword_arg_values: call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .filter(|keyword| keyword.arg.is_some())
+                    .map(|keyword| extract_direct_expr_metadata(&keyword.value))
                     .collect(),
                 line,
             }))
@@ -5343,7 +5367,8 @@ fn parse_named_block(
         ));
         return None;
     };
-    let parsed_type_params = parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
+    let parsed_type_params =
+        parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
 
     Some(constructor(NamedBlockStatement {
         name,
@@ -5414,7 +5439,8 @@ fn parse_function(
         ));
         return None;
     };
-    let parsed_type_params = parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
+    let parsed_type_params =
+        parse_type_params(path, line_number, line, suffix, diagnostics, label)?;
 
     Some(constructor(FunctionStatement {
         name,
@@ -5746,8 +5772,7 @@ mod tests {
         AssertStatement, CallStatement, ClassMember, ClassMemberKind, ExceptionHandlerStatement,
         ForStatement, FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
         ImportStatement, InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
-        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement,
-        ParseOptions,
+        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions,
         ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
         TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
         YieldStatement, parse, parse_with_options,
@@ -5825,7 +5850,15 @@ mod tests {
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
                     type_params: Vec::new(),
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -5916,7 +5949,15 @@ mod tests {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
                     }],
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -6047,7 +6088,13 @@ mod tests {
                 type_params: Vec::new(),
                 params: vec![FunctionParam {
                     name: String::from("x"),
-                    annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                    annotation: Some(String::from("str")),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false
+                }],
                 returns: Some(String::from("int")),
                 is_async: false,
                 is_override: false,
@@ -6089,7 +6136,15 @@ mod tests {
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("unsafe"),
                     type_params: Vec::new(),
-                    params: vec![FunctionParam { name: String::from("value"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: None,
                     is_async: false,
                     is_override: false,
@@ -6170,7 +6225,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("x"),
-                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -6259,7 +6320,13 @@ mod tests {
                     type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("T")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("T")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("T")),
                     is_async: false,
                     is_override: false,
@@ -6408,8 +6475,10 @@ mod tests {
                     callee: String::from("helper"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6480,7 +6549,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
@@ -6511,8 +6586,10 @@ mod tests {
                     callee: String::from("helper"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 3,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6568,8 +6645,10 @@ mod tests {
                     callee: String::from("helper"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6653,8 +6732,10 @@ mod tests {
                     callee: String::from("Builder"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6680,8 +6761,10 @@ mod tests {
                     callee: String::from("Factory"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -6704,8 +6787,35 @@ mod tests {
                 callee: String::from("build"),
                 arg_count: 0,
                 arg_types: Vec::new(),
+                arg_values: Vec::new(),
                 keyword_names: vec![String::from("x"), String::from("y")],
                 keyword_arg_types: vec![String::from("int"), String::from("int")],
+                keyword_arg_values: vec![
+                    DirectExprMetadata {
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    },
+                    DirectExprMetadata {
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    },
+                ],
                 line: 1,
             })]
         );
@@ -6727,8 +6837,35 @@ mod tests {
                 callee: String::from("build"),
                 arg_count: 2,
                 arg_types: vec![String::from("int"), String::from("str")],
+                arg_values: vec![
+                    DirectExprMetadata {
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    },
+                    DirectExprMetadata {
+                        value_type: Some(String::from("str")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    },
+                ],
                 keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
+                keyword_arg_types: Vec::new(),
+                keyword_arg_values: Vec::new(),
                 line: 1,
             })]
         );
@@ -6762,8 +6899,10 @@ mod tests {
                     callee: String::from("Factory"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -6945,7 +7084,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("box"),
-                        annotation: Some(String::from("Box")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("Box")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7020,8 +7165,21 @@ mod tests {
                     through_instance: false,
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
+                    arg_values: vec![DirectExprMetadata {
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    }],
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::MethodCall(MethodCallStatement {
@@ -7030,8 +7188,21 @@ mod tests {
                     through_instance: true,
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: vec![String::from("x")],
                     keyword_arg_types: vec![String::from("int")],
+                    keyword_arg_values: vec![DirectExprMetadata {
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                    }],
                     line: 2,
                 }),
             ]
@@ -7107,7 +7278,13 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                            annotation: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        }],
                         returns: Some(String::from("int")),
                         is_async: false,
                         is_override: false,
@@ -7164,10 +7341,24 @@ mod tests {
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam { name: String::from("self"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
+                                FunctionParam {
+                                    name: String::from("self"),
+                                    annotation: None,
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
                                 FunctionParam {
                                     name: String::from("x"),
-                                    annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
+                                    annotation: Some(String::from("str")),
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
                             ],
                             returns: Some(String::from("int")),
                             is_async: false,
@@ -7187,8 +7378,24 @@ mod tests {
                             annotation: None,
                             value_type: None,
                             params: vec![
-                                FunctionParam { name: String::from("self"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
-                                FunctionParam { name: String::from("x"), annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
+                                FunctionParam {
+                                    name: String::from("self"),
+                                    annotation: None,
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
+                                FunctionParam {
+                                    name: String::from("x"),
+                                    annotation: None,
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
                             ],
                             returns: None,
                             is_async: false,
@@ -7336,7 +7543,13 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                            annotation: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: false,
@@ -7707,7 +7920,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("box"),
-                        annotation: Some(String::from("Box")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("Box")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7816,7 +8035,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("values"),
-                        annotation: Some(String::from("list[int]")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("list[int]")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -7880,7 +8105,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("pairs"),
-                        annotation: Some(String::from("tuple[tuple[int, str]]")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("tuple[tuple[int, str]]")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -7944,7 +8175,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("manager"),
-                        annotation: Some(String::from("Manager")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("Manager")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -8007,7 +8244,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("manager"),
-                        annotation: Some(String::from("Manager")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("Manager")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
@@ -8056,10 +8299,22 @@ mod tests {
                     params: vec![
                         FunctionParam {
                             name: String::from("a"),
-                            annotation: Some(String::from("A")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
+                            annotation: Some(String::from("A")),
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        },
                         FunctionParam {
                             name: String::from("b"),
-                            annotation: Some(String::from("B")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false },
+                            annotation: Some(String::from("B")),
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        },
                     ],
                     returns: Some(String::from("str")),
                     is_async: false,
@@ -8200,7 +8455,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("int")),
                     is_async: false,
                     is_override: false,
@@ -8213,7 +8474,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("int")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("int")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
                     returns: Some(String::from("str")),
                     is_async: false,
                     is_override: false,
@@ -8290,7 +8557,13 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                            annotation: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: true,
@@ -8347,7 +8620,13 @@ mod tests {
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
-                            annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                            annotation: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false
+                        }],
                         returns: Some(String::from("None")),
                         is_async: false,
                         is_override: false,
@@ -8398,7 +8677,13 @@ mod tests {
                             value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("cls"),
-                                annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                                annotation: None,
+                                has_default: false,
+                                positional_only: false,
+                                keyword_only: false,
+                                variadic: false,
+                                keyword_variadic: false
+                            }],
                             returns: Some(String::from("None")),
                             is_async: false,
                             is_override: false,
@@ -8436,7 +8721,13 @@ mod tests {
                             value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("self"),
-                                annotation: None, has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                                annotation: None,
+                                has_default: false,
+                                positional_only: false,
+                                keyword_only: false,
+                                variadic: false,
+                                keyword_variadic: false
+                            }],
                             returns: Some(String::from("str")),
                             is_async: false,
                             is_override: false,
@@ -8630,11 +8921,7 @@ mod tests {
             kind: SourceKind::TypePython,
             logical_module: String::new(),
             text: String::from(
-                "def decode(x: str | bytes | None) -> match x:
-    case str: str
-    case bytes: str
-    case None: None
-",
+                "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
             ),
         });
 
@@ -8649,11 +8936,7 @@ mod tests {
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
                 text: String::from(
-                    "def decode(x: str | bytes | None) -> match x:
-    case str: str
-    case bytes: str
-    case None: None
-",
+                    "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
                 ),
             },
             ParseOptions { enable_conditional_returns: true },
@@ -8685,15 +8968,7 @@ mod tests {
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
                 text: String::from(
-                    "def decode(
-    x: str | bytes | None,
-) -> match x:
-    case str: str
-    case bytes: str
-    case None: None
-
-value: int = 1
-",
+                    "def decode(\n    x: str | bytes | None,\n) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n\nvalue: int = 1\n",
                 ),
             },
             ParseOptions { enable_conditional_returns: true },

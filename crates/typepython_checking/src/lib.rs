@@ -3338,8 +3338,10 @@ fn resolve_direct_method_return_type(
             callee: format!("{}.{}", class_decl.name, method_name),
             arg_count: call.arg_count,
             arg_types: call.arg_types.clone(),
+            arg_values: Vec::new(),
             keyword_names: call.keyword_names.clone(),
             keyword_arg_types: call.keyword_arg_types.clone(),
+            keyword_arg_values: Vec::new(),
             line: 1,
         };
         let applicable = methods
@@ -3482,8 +3484,10 @@ fn direct_method_call_diagnostics(
             callee: format!("{}.{}", class_decl.name, call.method),
             arg_count: call.arg_count,
             arg_types: call.arg_types.clone(),
+            arg_values: call.arg_values.clone(),
             keyword_names: call.keyword_names.clone(),
             keyword_arg_types: call.keyword_arg_types.clone(),
+            keyword_arg_values: call.keyword_arg_values.clone(),
             line: 1,
         };
 
@@ -3895,6 +3899,8 @@ fn direct_call_type_diagnostics(
             positional_and_keyword_type_diagnostics(
                 node,
                 call,
+                call.arg_types.as_slice(),
+                call.keyword_arg_types.as_slice(),
                 &param_types,
                 &param_names,
                 None,
@@ -3921,7 +3927,8 @@ fn direct_call_keyword_diagnostics(
         }
         if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee)
         {
-            diagnostics.extend(direct_source_function_keyword_diagnostics(node, nodes, call, &signature));
+            diagnostics
+                .extend(direct_source_function_keyword_diagnostics(node, nodes, call, &signature));
             continue;
         }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee)
@@ -4110,6 +4117,8 @@ fn direct_source_function_type_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
+    let resolved_arg_types = resolved_call_arg_types(node, nodes, call);
+    let resolved_keyword_arg_types = resolved_keyword_arg_types(node, nodes, call);
     let param_types = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
@@ -4130,6 +4139,8 @@ fn direct_source_function_type_diagnostics(
     positional_and_keyword_type_diagnostics(
         node,
         call,
+        &resolved_arg_types,
+        &resolved_keyword_arg_types,
         &param_types,
         &param_names,
         variadic_type,
@@ -4138,17 +4149,58 @@ fn direct_source_function_type_diagnostics(
     )
 }
 
+fn resolved_call_arg_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Vec<String> {
+    if call.arg_values.is_empty() {
+        return call.arg_types.clone();
+    }
+    call.arg_values
+        .iter()
+        .enumerate()
+        .map(|(index, metadata)| {
+            resolve_direct_expression_type_from_metadata(
+                node, nodes, None, None, None, call.line, metadata,
+            )
+            .unwrap_or_else(|| call.arg_types.get(index).cloned().unwrap_or_default())
+        })
+        .collect()
+}
+
+fn resolved_keyword_arg_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Vec<String> {
+    if call.keyword_arg_values.is_empty() {
+        return call.keyword_arg_types.clone();
+    }
+    call.keyword_arg_values
+        .iter()
+        .enumerate()
+        .map(|(index, metadata)| {
+            resolve_direct_expression_type_from_metadata(
+                node, nodes, None, None, None, call.line, metadata,
+            )
+            .unwrap_or_else(|| call.keyword_arg_types.get(index).cloned().unwrap_or_default())
+        })
+        .collect()
+}
+
 fn positional_and_keyword_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     call: &typepython_binding::CallSite,
+    arg_types: &[String],
+    keyword_arg_types: &[String],
     param_types: &[String],
     param_names: &[String],
     variadic_type: Option<&str>,
     keyword_variadic_type: Option<&str>,
     unpack_shape: Option<&TypedDictShape>,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = call
-        .arg_types
+    let mut diagnostics = arg_types
         .iter()
         .take(param_types.len())
         .zip(param_types.iter())
@@ -4169,7 +4221,7 @@ fn positional_and_keyword_type_diagnostics(
         })
         .collect::<Vec<_>>();
 
-    for arg_ty in call.arg_types.iter().skip(param_types.len()) {
+    for arg_ty in arg_types.iter().skip(param_types.len()) {
         let Some(param_ty) = variadic_type else {
             break;
         };
@@ -4187,7 +4239,7 @@ fn positional_and_keyword_type_diagnostics(
         }
     }
 
-    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+    for (keyword, arg_ty) in call.keyword_names.iter().zip(keyword_arg_types) {
         let Some(index) = param_names.iter().position(|param| param == keyword) else {
             if let Some(shape) = unpack_shape
                 && let Some(field) = shape.fields.get(keyword.as_str())
@@ -7411,8 +7463,10 @@ mod tests {
                     callee: String::from("parse"),
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -7430,8 +7484,10 @@ mod tests {
             callee: String::from("parse"),
             arg_count: 0,
             arg_types: Vec::new(),
+            arg_values: Vec::new(),
             keyword_names: vec![String::from("value")],
             keyword_arg_types: vec![String::from("None")],
+            keyword_arg_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -7463,8 +7519,10 @@ mod tests {
             callee: String::from("parse"),
             arg_count: 0,
             arg_types: Vec::new(),
+            arg_values: Vec::new(),
             keyword_names: vec![String::from("value")],
             keyword_arg_types: vec![String::from("int")],
+            keyword_arg_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -7496,8 +7554,10 @@ mod tests {
             callee: String::from("parse"),
             arg_count: 3,
             arg_types: vec![String::from("int"), String::from("int"), String::from("int")],
+            arg_values: Vec::new(),
             keyword_names: Vec::new(),
             keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -7704,8 +7764,10 @@ mod tests {
                         through_instance: false,
                         arg_count: 0,
                         arg_types: Vec::new(),
+                        arg_values: Vec::new(),
                         keyword_names: vec![String::from("value")],
                         keyword_arg_types: vec![String::from("str")],
+                        keyword_arg_values: Vec::new(),
                         line: 1,
                     }],
                     member_accesses: Vec::new(),
@@ -7915,8 +7977,10 @@ mod tests {
                         through_instance: false,
                         arg_count: 0,
                         arg_types: Vec::new(),
+                        arg_values: Vec::new(),
                         keyword_names: vec![String::from("value")],
                         keyword_arg_types: vec![String::from("str")],
+                        keyword_arg_values: Vec::new(),
                         line: 1,
                     }],
                 },
@@ -8009,8 +8073,10 @@ mod tests {
                         callee: String::from("f"),
                         arg_count: 1,
                         arg_types: vec![String::from("int")],
+                        arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -9397,8 +9463,10 @@ mod tests {
                     callee: String::from("Base"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -9515,8 +9583,10 @@ mod tests {
                         callee: String::from("Base"),
                         arg_count: 0,
                         arg_types: Vec::new(),
+                        arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -9635,8 +9705,10 @@ mod tests {
                     callee: String::from("build"),
                     arg_count: 1,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -9690,8 +9762,10 @@ mod tests {
                     callee: String::from("build"),
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -9952,8 +10026,10 @@ mod tests {
                     callee: String::from("helper"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10040,8 +10116,10 @@ mod tests {
                     callee: String::from("helper"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10130,8 +10208,10 @@ mod tests {
                     callee: String::from("Box"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10218,8 +10298,10 @@ mod tests {
                     callee: String::from("Box"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -13878,8 +13960,10 @@ mod tests {
                     callee: String::from("TypeVar"),
                     arg_count: 1,
                     arg_types: vec![String::from("str")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -13947,8 +14031,10 @@ mod tests {
                     callee: String::from("TypeVar"),
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -14024,8 +14110,10 @@ mod tests {
                         callee: String::from("TypeVar"),
                         arg_count: 1,
                         arg_types: vec![String::from("str")],
+                        arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -14718,8 +14806,10 @@ mod tests {
                     callee: String::from("NewType"),
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::new()],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -14787,8 +14877,10 @@ mod tests {
                     callee: String::from("NewType"),
                     arg_count: 2,
                     arg_types: vec![String::from("int"), String::new()],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -16697,8 +16789,10 @@ mod tests {
                     callee: String::from("build"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: vec![String::from("z")],
                     keyword_arg_types: vec![String::from("int")],
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -16807,8 +16901,10 @@ mod tests {
                     through_instance: false,
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 member_accesses: Vec::new(),
@@ -16861,8 +16957,10 @@ mod tests {
                     callee: String::from("external"),
                     arg_count: 0,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -16995,8 +17093,10 @@ mod tests {
                     through_instance: false,
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 member_accesses: Vec::new(),
@@ -17073,8 +17173,10 @@ mod tests {
                     callee: String::from("Box"),
                     arg_count: 1,
                     arg_types: Vec::new(),
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -17152,8 +17254,10 @@ mod tests {
                     callee: String::from("Box"),
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -21317,8 +21421,10 @@ mod tests {
                             callee: String::from("old"),
                             arg_count: 0,
                             arg_types: Vec::new(),
+                            arg_values: Vec::new(),
                             keyword_names: Vec::new(),
                             keyword_arg_types: Vec::new(),
+                            keyword_arg_values: Vec::new(),
                             line: 1,
                         }],
                         method_calls: Vec::new(),
@@ -21419,8 +21525,10 @@ mod tests {
                             callee: String::from("old"),
                             arg_count: 0,
                             arg_types: Vec::new(),
+                            arg_values: Vec::new(),
                             keyword_names: Vec::new(),
                             keyword_arg_types: Vec::new(),
+                            keyword_arg_values: Vec::new(),
                             line: 1,
                         }],
                         method_calls: Vec::new(),
@@ -21708,8 +21816,10 @@ mod tests {
                     through_instance: true,
                     arg_count: 1,
                     arg_types: vec![String::from("Box")],
+                    arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
                     line: 1,
                 }],
             }],

@@ -54,8 +54,10 @@ pub struct CallSite {
     pub callee: String,
     pub arg_count: usize,
     pub arg_types: Vec<String>,
+    pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
+    pub keyword_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -73,8 +75,10 @@ pub struct MethodCallSite {
     pub through_instance: bool,
     pub arg_count: usize,
     pub arg_types: Vec<String>,
+    pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
+    pub keyword_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -316,8 +320,10 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     callee: statement.callee.clone(),
                     arg_count: statement.arg_count,
                     arg_types: statement.arg_types.clone(),
+                    arg_values: statement.arg_values.clone(),
                     keyword_names: statement.keyword_names.clone(),
                     keyword_arg_types: statement.keyword_arg_types.clone(),
+                    keyword_arg_values: statement.keyword_arg_values.clone(),
                     line: statement.line,
                 }),
                 _ => None,
@@ -333,8 +339,10 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     through_instance: statement.through_instance,
                     arg_count: statement.arg_count,
                     arg_types: statement.arg_types.clone(),
+                    arg_values: statement.arg_values.clone(),
                     keyword_names: statement.keyword_names.clone(),
                     keyword_arg_types: statement.keyword_arg_types.clone(),
+                    keyword_arg_values: statement.keyword_arg_values.clone(),
                     line: statement.line,
                 }),
                 _ => None,
