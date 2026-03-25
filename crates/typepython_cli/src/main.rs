@@ -1147,6 +1147,31 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
+    let bindings: Vec<_> = all_syntax_trees.iter().map(bind).collect();
+    let graph = build(&bindings);
+    let mut diagnostics = check_with_options(
+        &graph,
+        config.config.typing.require_explicit_overrides,
+        config.config.typing.enable_sealed_exhaustiveness,
+        config.config.typing.report_deprecated,
+    )
+    .diagnostics;
+    apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
+    diagnostics
+        .diagnostics
+        .extend(public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics);
+
+    if diagnostics.has_errors() {
+        return Ok(PipelineSnapshot {
+            lowered_modules: Vec::new(),
+            emit_plan: Vec::new(),
+            incremental: IncrementalState::default(),
+            tracked_modules: 0,
+            discovered_sources: source_paths.len(),
+            diagnostics,
+        });
+    }
+
     let lowering_options =
         LoweringOptions { target_python: config.config.project.target_python.clone() };
     let lowering_results: Vec<_> =
@@ -1165,19 +1190,6 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
 
     let lowered_modules: Vec<_> =
         lowering_results.into_iter().map(|result| result.module).collect();
-    let bindings: Vec<_> = all_syntax_trees.iter().map(bind).collect();
-    let graph = build(&bindings);
-    let mut diagnostics = check_with_options(
-        &graph,
-        config.config.typing.require_explicit_overrides,
-        config.config.typing.enable_sealed_exhaustiveness,
-        config.config.typing.report_deprecated,
-    )
-    .diagnostics;
-    apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-    diagnostics
-        .diagnostics
-        .extend(public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics);
     let emit_plan = plan_emits(config, &lowered_modules);
     let mut incremental = snapshot(&graph);
     incremental.stdlib_snapshot = Some(bundled_stdlib_snapshot_identity()?);
@@ -3890,6 +3902,29 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn run_pipeline_stops_before_lowering_when_checker_fails() {
+        let project_dir = temp_project_dir("run_pipeline_stops_before_lowering_when_checker_fails");
+        let snapshot = {
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app.tpy"),
+                "def build() -> int:\n    return \"oops\"\n",
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            run_pipeline(&config).expect("test setup should succeed")
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(snapshot.diagnostics.has_errors());
+        assert!(snapshot.lowered_modules.is_empty());
+        assert!(snapshot.emit_plan.is_empty());
+        assert_eq!(snapshot.tracked_modules, 0);
     }
 
     #[test]
