@@ -264,9 +264,7 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
     let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
     if call.keyword_names.iter().any(|keyword| {
-        !params
-            .iter()
-            .any(|param| param.name == **keyword && !param.positional_only)
+        !params.iter().any(|param| param.name == **keyword && !param.positional_only)
             && !accepts_extra_keywords
     }) {
         return false;
@@ -289,42 +287,38 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
     }
 
     let param_types = params.iter().map(|param| param.annotation.clone()).collect::<Vec<_>>();
-    let variadic_type = params
-        .iter()
-        .find(|param| param.variadic)
-        .map(|param| param.annotation.as_str());
-    let keyword_variadic_type = params
-        .iter()
-        .find(|param| param.keyword_variadic)
-        .map(|param| param.annotation.as_str());
-    let positional_ok = call
-        .arg_types
-        .iter()
-        .take(positional_params.len())
-        .zip(param_types.iter())
-        .all(|(arg_ty, param_ty)| {
-            if arg_ty.is_empty() || param_ty.is_empty() {
-                true
-            } else {
-                direct_type_matches(param_ty, arg_ty)
-            }
-        })
-        && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
+    let variadic_type =
+        params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
+    let keyword_variadic_type =
+        params.iter().find(|param| param.keyword_variadic).map(|param| param.annotation.as_str());
+    let positional_ok =
+        call.arg_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
+            |(arg_ty, param_ty)| {
+                if arg_ty.is_empty() || param_ty.is_empty() {
+                    true
+                } else {
+                    direct_type_matches(param_ty, arg_ty)
+                }
+            },
+        ) && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
             };
             arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
         });
-    let keyword_ok = call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
-        let Some(index) = params.iter().position(|param| param.name == *keyword) else {
-            let Some(param_ty) = keyword_variadic_type else {
-                return false;
+    let keyword_ok =
+        call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
+            let Some(index) = params.iter().position(|param| param.name == *keyword) else {
+                let Some(param_ty) = keyword_variadic_type else {
+                    return false;
+                };
+                return arg_ty.is_empty()
+                    || param_ty.is_empty()
+                    || direct_type_matches(param_ty, arg_ty);
             };
-            return arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty);
-        };
-        let param_ty = &param_types[index];
-        arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-    });
+            let param_ty = &param_types[index];
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        });
 
     positional_ok && keyword_ok
 }
@@ -414,9 +408,10 @@ fn plain_dataclass_field_specifier_call(
             .any(|decorator| matches!(decorator.as_str(), "dataclass" | "dataclasses.dataclass"))
             && class_site.fields.iter().any(|field| {
                 field.line == line
-                    && field.field_specifier_name.as_ref().is_some_and(|name| {
-                        matches!(name.as_str(), "field" | "dataclasses.field")
-                    })
+                    && field
+                        .field_specifier_name
+                        .as_ref()
+                        .is_some_and(|name| matches!(name.as_str(), "field" | "dataclasses.field"))
             })
     })
 }
@@ -528,7 +523,10 @@ fn recursive_type_alias_diagnostics(
     diagnostics
 }
 
-#[expect(clippy::too_many_arguments, reason = "recursive alias traversal threads shared state through helper recursion")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "recursive alias traversal threads shared state through helper recursion"
+)]
 fn collect_recursive_type_alias_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
     node: &typepython_graph::ModuleNode,
@@ -1570,7 +1568,8 @@ fn callable_assignment_result(
     expected: &str,
 ) -> Option<Option<Diagnostic>> {
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
-    let (actual_params, actual_return) = resolve_callable_assignment_signature(node, nodes, assignment)?;
+    let (actual_params, actual_return) =
+        resolve_callable_assignment_signature(node, nodes, assignment)?;
 
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
@@ -1641,7 +1640,10 @@ fn resolve_callable_assignment_signature(
     )
 }
 
-#[expect(clippy::too_many_arguments, reason = "member callable resolution needs the current scope and member context")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member callable resolution needs the current scope and member context"
+)]
 fn resolve_direct_member_callable_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2067,7 +2069,10 @@ fn resolve_typing_callable_signature(callee: &str) -> Option<&'static str> {
         .find_map(|(name, signature)| (*name == callee).then_some(*signature))
 }
 
-#[expect(clippy::too_many_arguments, reason = "direct expression resolution is driven by parsed expression metadata fields")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "direct expression resolution is driven by parsed expression metadata fields"
+)]
 fn resolve_direct_expression_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2165,7 +2170,10 @@ fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<
     })
 }
 
-#[expect(clippy::too_many_arguments, reason = "name reference resolution needs scope and source-position context")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
 fn resolve_direct_name_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2366,7 +2374,10 @@ fn find_owned_callable_declarations_with_visited<'a>(
     Vec::new()
 }
 
-#[expect(clippy::too_many_arguments, reason = "unnarrowed name resolution needs scope and source-position context")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "unnarrowed name resolution needs scope and source-position context"
+)]
 fn resolve_unnarrowed_name_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -3205,7 +3216,10 @@ fn join_branch_types(types: Vec<String>) -> String {
     join_type_candidates(types)
 }
 
-#[expect(clippy::too_many_arguments, reason = "member reference resolution needs source metadata and scope context")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member reference resolution needs source metadata and scope context"
+)]
 fn resolve_direct_member_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -3276,7 +3290,10 @@ fn is_enum_like_class(
     })
 }
 
-#[expect(clippy::too_many_arguments, reason = "method return resolution needs source metadata and scope context")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "method return resolution needs source metadata and scope context"
+)]
 fn resolve_direct_method_return_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -3309,7 +3326,8 @@ fn resolve_direct_method_return_type(
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
-    let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload) {
+    let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
+    {
         let call = node.method_calls.iter().find(|call| {
             call.owner_name == owner_name
                 && call.method == method_name
@@ -3327,7 +3345,9 @@ fn resolve_direct_method_return_type(
         let applicable = methods
             .iter()
             .copied()
-            .filter(|declaration| method_overload_is_applicable(&call, declaration, &owner_type_name))
+            .filter(|declaration| {
+                method_overload_is_applicable(&call, declaration, &owner_type_name)
+            })
             .collect::<Vec<_>>();
         if applicable.len() == 1 {
             applicable[0]
@@ -3452,7 +3472,8 @@ fn direct_method_call_diagnostics(
         else {
             continue;
         };
-        let candidates = find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
+        let candidates =
+            find_owned_callable_declarations(nodes, class_node, class_decl, &call.method);
         let Some(target) = candidates.first().copied() else {
             continue;
         };
@@ -3475,7 +3496,9 @@ fn direct_method_call_diagnostics(
             let applicable = overloads
                 .iter()
                 .copied()
-                .filter(|declaration| method_overload_is_applicable(&direct_call, declaration, &owner_type_name))
+                .filter(|declaration| {
+                    method_overload_is_applicable(&direct_call, declaration, &owner_type_name)
+                })
                 .collect::<Vec<_>>();
             if applicable.len() >= 2 {
                 diagnostics.push(Diagnostic::error(
@@ -3492,11 +3515,23 @@ fn direct_method_call_diagnostics(
             }
             if let Some(applicable) = applicable.first().copied() {
                 let signature = direct_method_signature_sites(applicable, &owner_type_name);
-                if let Some(diagnostic) = direct_source_function_arity_diagnostic(node, &direct_call, &signature) {
+                if let Some(diagnostic) =
+                    direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
+                {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(direct_source_function_keyword_diagnostics(node, &direct_call, &signature));
-                diagnostics.extend(direct_source_function_type_diagnostics(node, &direct_call, &signature));
+                diagnostics.extend(direct_source_function_keyword_diagnostics(
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                ));
+                diagnostics.extend(direct_source_function_type_diagnostics(
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                ));
                 continue;
             }
         }
@@ -3504,11 +3539,23 @@ fn direct_method_call_diagnostics(
         if let Some(signature) =
             direct_method_signatures.get(&(class_decl.name.clone(), call.method.clone()))
         {
-            if let Some(diagnostic) = direct_source_function_arity_diagnostic(node, &direct_call, signature) {
+            if let Some(diagnostic) =
+                direct_source_function_arity_diagnostic(node, nodes, &direct_call, signature)
+            {
                 diagnostics.push(diagnostic);
             }
-            diagnostics.extend(direct_source_function_keyword_diagnostics(node, &direct_call, signature));
-            diagnostics.extend(direct_source_function_type_diagnostics(node, &direct_call, signature));
+            diagnostics.extend(direct_source_function_keyword_diagnostics(
+                node,
+                nodes,
+                &direct_call,
+                signature,
+            ));
+            diagnostics.extend(direct_source_function_type_diagnostics(
+                node,
+                nodes,
+                &direct_call,
+                signature,
+            ));
             continue;
         }
 
@@ -3526,27 +3573,27 @@ fn direct_method_call_diagnostics(
                 keyword_variadic: param.keyword_variadic,
             })
             .collect::<Vec<_>>();
-        let fallback_signature = match target
-            .method_kind
-            .unwrap_or(typepython_syntax::MethodKind::Instance)
-        {
-            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                fallback_signature
-            }
-            _ => fallback_signature.into_iter().skip(1).collect(),
-        };
+        let fallback_signature =
+            match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    fallback_signature
+                }
+                _ => fallback_signature.into_iter().skip(1).collect(),
+            };
         if let Some(diagnostic) =
-            direct_source_function_arity_diagnostic(node, &direct_call, &fallback_signature)
+            direct_source_function_arity_diagnostic(node, nodes, &direct_call, &fallback_signature)
         {
             diagnostics.push(diagnostic);
         }
         diagnostics.extend(direct_source_function_keyword_diagnostics(
             node,
+            nodes,
             &direct_call,
             &fallback_signature,
         ));
         diagnostics.extend(direct_source_function_type_diagnostics(
             node,
+            nodes,
             &direct_call,
             &fallback_signature,
         ));
@@ -3609,9 +3656,7 @@ fn method_signature_params_are_applicable(
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
     let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
     if call.keyword_names.iter().any(|keyword| {
-        !params
-            .iter()
-            .any(|param| param.name == **keyword && !param.positional_only)
+        !params.iter().any(|param| param.name == **keyword && !param.positional_only)
             && !accepts_extra_keywords
     }) {
         return false;
@@ -3634,35 +3679,34 @@ fn method_signature_params_are_applicable(
     }
 
     let param_types = params.iter().map(|param| param.annotation.as_str()).collect::<Vec<_>>();
-    let variadic_type = params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
-    let keyword_variadic_type = params
-        .iter()
-        .find(|param| param.keyword_variadic)
-        .map(|param| param.annotation.as_str());
-    let positional_ok = call
-        .arg_types
-        .iter()
-        .take(positional_params.len())
-        .zip(param_types.iter())
-        .all(|(arg_ty, param_ty)| {
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-        })
-        && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
+    let variadic_type =
+        params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
+    let keyword_variadic_type =
+        params.iter().find(|param| param.keyword_variadic).map(|param| param.annotation.as_str());
+    let positional_ok =
+        call.arg_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
+            |(arg_ty, param_ty)| {
+                arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+            },
+        ) && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
             };
             arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
         });
-    let keyword_ok = call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
-        let Some(index) = params.iter().position(|param| param.name == *keyword) else {
-            let Some(param_ty) = keyword_variadic_type else {
-                return false;
+    let keyword_ok =
+        call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
+            let Some(index) = params.iter().position(|param| param.name == *keyword) else {
+                let Some(param_ty) = keyword_variadic_type else {
+                    return false;
+                };
+                return arg_ty.is_empty()
+                    || param_ty.is_empty()
+                    || direct_type_matches(param_ty, arg_ty);
             };
-            return arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty);
-        };
-        let param_ty = param_types[index];
-        arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-    });
+            let param_ty = param_types[index];
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        });
 
     positional_ok && keyword_ok
 }
@@ -3731,7 +3775,7 @@ fn direct_call_arity_diagnostics(
             }
             if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee)
             {
-                return direct_source_function_arity_diagnostic(node, call, &signature);
+                return direct_source_function_arity_diagnostic(node, nodes, call, &signature);
             }
             let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
             (call.arg_count != expected).then(|| {
@@ -3755,12 +3799,7 @@ fn direct_param_count(signature: &str) -> Option<usize> {
 }
 
 fn direct_param_names(signature: &str) -> Option<Vec<String>> {
-    Some(
-        direct_signature_params(signature)?
-            .into_iter()
-            .map(|param| param.name)
-            .collect(),
-    )
+    Some(direct_signature_params(signature)?.into_iter().map(|param| param.name).collect())
 }
 
 fn direct_param_types(signature: &str) -> Option<Vec<String>> {
@@ -3769,12 +3808,7 @@ fn direct_param_types(signature: &str) -> Option<Vec<String>> {
         return Some(Vec::new());
     }
 
-    Some(
-        direct_signature_params(signature)?
-            .into_iter()
-            .map(|param| param.annotation)
-            .collect(),
-    )
+    Some(direct_signature_params(signature)?.into_iter().map(|param| param.annotation).collect())
 }
 
 fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>> {
@@ -3817,7 +3851,9 @@ fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>>
             annotation,
             has_default,
             positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
-            keyword_only: !variadic && !keyword_variadic && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
+            keyword_only: !variadic
+                && !keyword_variadic
+                && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
             variadic,
             keyword_variadic,
         });
@@ -3833,7 +3869,8 @@ fn direct_call_type_diagnostics(
     node.calls
         .iter()
         .flat_map(|call| {
-            if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
+            if let Some(shape) =
+                resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
@@ -3842,21 +3879,25 @@ fn direct_call_type_diagnostics(
                 && let Some(signature) =
                     resolve_instantiated_direct_function_signature(function, call)
             {
-                return direct_source_function_type_diagnostics(node, call, &signature);
+                return direct_source_function_type_diagnostics(node, nodes, call, &signature);
             }
-            if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee) {
-                return direct_source_function_type_diagnostics(node, call, &signature);
+            if let Some(signature) =
+                resolve_direct_callable_signature_sites(node, nodes, &call.callee)
+            {
+                return direct_source_function_type_diagnostics(node, nodes, call, &signature);
             }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee)
             else {
                 return Vec::new();
             };
-            let param_names = direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
+            let param_names =
+                direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
             positional_and_keyword_type_diagnostics(
                 node,
                 call,
                 &param_types,
                 &param_names,
+                None,
                 None,
                 None,
             )
@@ -3878,8 +3919,9 @@ fn direct_call_keyword_diagnostics(
                 .extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
             continue;
         }
-        if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee) {
-            diagnostics.extend(direct_source_function_keyword_diagnostics(node, call, &signature));
+        if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee)
+        {
+            diagnostics.extend(direct_source_function_keyword_diagnostics(node, nodes, call, &signature));
             continue;
         }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee)
@@ -3906,6 +3948,7 @@ fn direct_call_keyword_diagnostics(
 
 fn direct_source_function_arity_diagnostic(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
@@ -3945,6 +3988,18 @@ fn direct_source_function_arity_diagnostic(
         })
         .map(|(_, param)| param.name.clone())
         .collect::<Vec<_>>();
+    let mut missing = missing;
+    if let Some(shape) = unpack_typed_dict_shape_from_signature(node, nodes, signature) {
+        let mut satisfied = positional_params
+            .iter()
+            .take(call.arg_count)
+            .map(|param| param.name.clone())
+            .collect::<BTreeSet<_>>();
+        satisfied.extend(call.keyword_names.iter().cloned());
+        missing.extend(shape.fields.iter().filter_map(|(key, field)| {
+            (field.required && !satisfied.contains(key)).then(|| key.clone())
+        }));
+    }
     (!missing.is_empty()).then(|| {
         Diagnostic::error(
             "TPY4001",
@@ -3960,6 +4015,7 @@ fn direct_source_function_arity_diagnostic(
 
 fn direct_source_function_keyword_diagnostics(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
@@ -3969,6 +4025,7 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
     let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
+    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     let mut diagnostics = call.keyword_names
         .iter()
         .filter_map(|keyword| {
@@ -3994,6 +4051,17 @@ fn direct_source_function_keyword_diagnostics(
                     ),
                 )
                 }
+                None if unpack_shape.as_ref().is_some_and(|shape| !shape.fields.contains_key(keyword.as_str())) => {
+                    Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "call to `{}` in module `{}` uses unknown unpacked keyword `{}`",
+                        call.callee,
+                        node.module_path.display(),
+                        keyword
+                    ),
+                )
+                }
                 _ => return None,
             })
         })
@@ -4005,10 +4073,7 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     for keyword in &call.keyword_names {
-        if positional_param_names
-            .iter()
-            .take(call.arg_count)
-            .any(|name| *name == keyword.as_str())
+        if positional_param_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
         {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
@@ -4035,15 +4100,13 @@ fn keyword_duplicates_positional_arguments(
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     call.keyword_names.iter().any(|keyword| {
-        positional_param_names
-            .iter()
-            .take(call.arg_count)
-            .any(|name| *name == keyword.as_str())
+        positional_param_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
     })
 }
 
 fn direct_source_function_type_diagnostics(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
@@ -4057,14 +4120,13 @@ fn direct_source_function_type_diagnostics(
         .filter(|param| !param.keyword_variadic)
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    let variadic_type = signature
-        .iter()
-        .find(|param| param.variadic)
-        .and_then(|param| param.annotation.as_deref());
+    let variadic_type =
+        signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.as_deref());
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
         .and_then(|param| param.annotation.as_deref());
+    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     positional_and_keyword_type_diagnostics(
         node,
         call,
@@ -4072,6 +4134,7 @@ fn direct_source_function_type_diagnostics(
         &param_names,
         variadic_type,
         keyword_variadic_type,
+        unpack_shape.as_ref(),
     )
 }
 
@@ -4082,6 +4145,7 @@ fn positional_and_keyword_type_diagnostics(
     param_names: &[String],
     variadic_type: Option<&str>,
     keyword_variadic_type: Option<&str>,
+    unpack_shape: Option<&TypedDictShape>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = call
         .arg_types
@@ -4089,9 +4153,7 @@ fn positional_and_keyword_type_diagnostics(
         .take(param_types.len())
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty()
-                && !param_ty.is_empty()
-                && !direct_type_matches(param_ty, arg_ty)
+            !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
             Diagnostic::error(
@@ -4127,10 +4189,32 @@ fn positional_and_keyword_type_diagnostics(
 
     for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
         let Some(index) = param_names.iter().position(|param| param == keyword) else {
+            if let Some(shape) = unpack_shape
+                && let Some(field) = shape.fields.get(keyword.as_str())
+            {
+                if !arg_ty.is_empty()
+                    && !field.value_type.is_empty()
+                    && !direct_type_matches(&field.value_type, arg_ty)
+                {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "call to `{}` in module `{}` passes `{}` for unpacked keyword `{}` where TypedDict key expects `{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            arg_ty,
+                            keyword,
+                            field.value_type
+                        ),
+                    ));
+                }
+                continue;
+            }
             let Some(param_ty) = keyword_variadic_type else {
                 continue;
             };
-            if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+            if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty)
+            {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     format!(
@@ -4164,6 +4248,20 @@ fn positional_and_keyword_type_diagnostics(
     }
 
     diagnostics
+}
+
+fn unpack_typed_dict_shape_from_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Option<TypedDictShape> {
+    let annotation = signature
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.as_deref())?;
+    let annotation = normalize_type_text(annotation);
+    let inner = annotation.strip_prefix("Unpack[")?.strip_suffix(']')?;
+    resolve_known_typed_dict_shape_from_type(node, nodes, inner)
 }
 
 fn load_direct_function_signatures(
@@ -4202,7 +4300,9 @@ fn load_direct_init_signatures(
         .collect()
 }
 
-fn direct_signature_sites_from_detail(detail: &str) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+fn direct_signature_sites_from_detail(
+    detail: &str,
+) -> Vec<typepython_syntax::DirectFunctionParamSite> {
     direct_signature_params(detail)
         .unwrap_or_default()
         .into_iter()
@@ -4243,7 +4343,9 @@ fn resolve_direct_callable_signature_sites(
                 && declaration.name == "__init__"
                 && declaration.kind == DeclarationKind::Function
         })?;
-        return Some(direct_signature_sites_from_detail(&init.detail).into_iter().skip(1).collect());
+        return Some(
+            direct_signature_sites_from_detail(&init.detail).into_iter().skip(1).collect(),
+        );
     }
 
     resolve_typing_callable_signature(callee).map(direct_signature_sites_from_detail)
@@ -4325,11 +4427,7 @@ fn dataclass_transform_constructor_type_diagnostics(
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
 ) -> Vec<Diagnostic> {
-    let positional_fields = shape
-        .fields
-        .iter()
-        .filter(|field| !field.kw_only)
-        .collect::<Vec<_>>();
+    let positional_fields = shape.fields.iter().filter(|field| !field.kw_only).collect::<Vec<_>>();
     let mut diagnostics = positional_fields
         .iter()
         .take(call.arg_count)
@@ -4358,7 +4456,10 @@ fn dataclass_transform_constructor_type_diagnostics(
         let Some(field) = shape.fields.iter().find(|field| field.keyword_name == *keyword) else {
             continue;
         };
-        if !arg_ty.is_empty() && !field.annotation.is_empty() && !direct_type_matches(&field.annotation, arg_ty) {
+        if !arg_ty.is_empty()
+            && !field.annotation.is_empty()
+            && !direct_type_matches(&field.annotation, arg_ty)
+        {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -4407,10 +4508,7 @@ fn dataclass_transform_constructor_keyword_diagnostics(
         .collect::<Vec<_>>();
 
     for keyword in &call.keyword_names {
-        if positional_field_names
-            .iter()
-            .take(call.arg_count)
-            .any(|name| *name == keyword.as_str())
+        if positional_field_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
         {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
@@ -4816,7 +4914,12 @@ fn resolve_plain_dataclass_class_shape(
     callee: &str,
 ) -> Option<DataclassTransformClassShape> {
     let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
-    resolve_plain_dataclass_class_shape_from_decl(nodes, class_node, class_decl, &mut BTreeSet::new())
+    resolve_plain_dataclass_class_shape_from_decl(
+        nodes,
+        class_node,
+        class_decl,
+        &mut BTreeSet::new(),
+    )
 }
 
 fn resolve_plain_dataclass_class_shape_from_decl(
@@ -4883,9 +4986,10 @@ fn resolve_plain_dataclass_class_shape_from_decl(
         .iter()
         .filter(|field| !field.is_class_var)
         .filter_map(|field| {
-            let recognized_field_specifier = field.field_specifier_name.as_ref().is_some_and(|name| {
-                matches!(name.as_str(), "field" | "dataclasses.field")
-            });
+            let recognized_field_specifier = field
+                .field_specifier_name
+                .as_ref()
+                .is_some_and(|name| matches!(name.as_str(), "field" | "dataclasses.field"));
             if recognized_field_specifier && field.field_specifier_init == Some(false) {
                 return None;
             }
@@ -4894,7 +4998,8 @@ fn resolve_plain_dataclass_class_shape_from_decl(
                 keyword_name: field.name.clone(),
                 annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
                 required: if recognized_field_specifier {
-                    !(field.field_specifier_has_default || field.field_specifier_has_default_factory)
+                    !(field.field_specifier_has_default
+                        || field.field_specifier_has_default_factory)
                 } else {
                     !field.has_default
                 },
@@ -4991,7 +5096,12 @@ fn resolve_dataclass_transform_metadata_from_decl(
     class_site.bases.iter().find_map(|base| {
         let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
         let mut branch_visiting = visiting.clone();
-        resolve_dataclass_transform_metadata_from_decl(nodes, base_node, base_decl, &mut branch_visiting)
+        resolve_dataclass_transform_metadata_from_decl(
+            nodes,
+            base_node,
+            base_decl,
+            &mut branch_visiting,
+        )
     })
 }
 
@@ -6618,9 +6728,8 @@ mod tests {
 
     #[test]
     fn check_reports_positional_only_parameter_passed_as_keyword() {
-        let result = check_temp_typepython_source(
-            "def takes(x: int, /):\n    return x\n\ntakes(x=1)\n",
-        );
+        let result =
+            check_temp_typepython_source("def takes(x: int, /):\n    return x\n\ntakes(x=1)\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
@@ -6746,7 +6855,9 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("binds synthesized field `age` both positionally and by keyword"));
+        assert!(
+            rendered.contains("binds synthesized field `age` both positionally and by keyword")
+        );
     }
 
     #[test]
@@ -7424,9 +7535,8 @@ mod tests {
 
     #[test]
     fn check_reports_duplicate_function_parameter_binding() {
-        let result = check_temp_typepython_source(
-            "def takes(x: int):\n    return x\n\ntakes(1, x=2)\n",
-        );
+        let result =
+            check_temp_typepython_source("def takes(x: int):\n    return x\n\ntakes(1, x=2)\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
@@ -9406,8 +9516,8 @@ mod tests {
                         arg_count: 0,
                         arg_types: Vec::new(),
                         keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    line: 1,
+                        keyword_arg_types: Vec::new(),
+                        line: 1,
                     }],
                     method_calls: Vec::new(),
                     member_accesses: Vec::new(),
@@ -12193,11 +12303,7 @@ mod tests {
     #[test]
     fn check_accepts_direct_generic_function_call_inference() {
         let result = check_temp_typepython_source(
-            "def first[T](value: T) -> T:
-    return value
-
-result: int = first(1)
-",
+            "def first[T](value: T) -> T:\n    return value\n\nresult: int = first(1)\n",
         );
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
@@ -12206,16 +12312,55 @@ result: int = first(1)
     #[test]
     fn check_reports_direct_generic_function_call_return_mismatch() {
         let result = check_temp_typepython_source(
-            "def first[T](value: T) -> T:
-    return value
-
-result: str = first(1)
-",
+            "def first[T](value: T) -> T:\n    return value\n\nresult: str = first(1)\n",
         );
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `int` where `result` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_unpack_typeddict_keyword_calls() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict):\n    name: str\n    age: NotRequired[int]\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(name=\"Ada\")\nbuild(name=\"Ada\", age=1)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_unpack_typeddict_missing_required_keyword() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict):\n    name: str\n    age: NotRequired[int]\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(age=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("missing required argument(s): name"));
+    }
+
+    #[test]
+    fn check_reports_unpack_typeddict_unknown_keyword() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict):\n    name: str\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(name=\"Ada\", extra=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("unknown unpacked keyword `extra`"));
+    }
+
+    #[test]
+    fn check_reports_unpack_typeddict_keyword_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict):\n    name: str\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(name=1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes `int` for unpacked keyword `name`"));
+        assert!(rendered.contains("expects `str`"));
     }
 
     #[test]
@@ -13880,8 +14025,8 @@ result: str = first(1)
                         arg_count: 1,
                         arg_types: vec![String::from("str")],
                         keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    line: 1,
+                        keyword_arg_types: Vec::new(),
+                        line: 1,
                     }],
                     method_calls: Vec::new(),
                     member_accesses: Vec::new(),
@@ -21173,8 +21318,8 @@ result: str = first(1)
                             arg_count: 0,
                             arg_types: Vec::new(),
                             keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    line: 1,
+                            keyword_arg_types: Vec::new(),
+                            line: 1,
                         }],
                         method_calls: Vec::new(),
                         member_accesses: Vec::new(),
@@ -21275,8 +21420,8 @@ result: str = first(1)
                             arg_count: 0,
                             arg_types: Vec::new(),
                             keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    line: 1,
+                            keyword_arg_types: Vec::new(),
+                            line: 1,
                         }],
                         method_calls: Vec::new(),
                         member_accesses: Vec::new(),
