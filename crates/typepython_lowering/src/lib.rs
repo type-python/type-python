@@ -18,6 +18,19 @@ pub struct SourceMapEntry {
     pub lowered_line: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SpanMapRange {
+    pub line: usize,
+    pub start_col: usize,
+    pub end_col: usize,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SpanMapEntry {
+    pub original: SpanMapRange,
+    pub emitted: SpanMapRange,
+}
+
 /// Lowered representation consumed by later phases.
 #[derive(Debug, Clone)]
 pub struct LoweredModule {
@@ -29,6 +42,7 @@ pub struct LoweredModule {
     pub python_source: String,
     /// Placeholder source-map rows.
     pub source_map: Vec<SourceMapEntry>,
+    pub span_map: Vec<SpanMapEntry>,
     pub required_imports: Vec<String>,
     pub metadata: LoweringMetadata,
 }
@@ -42,6 +56,7 @@ pub struct LoweringResult {
 struct LoweredText {
     python_source: String,
     source_map: Vec<SourceMapEntry>,
+    span_map: Vec<SpanMapEntry>,
     required_imports: Vec<String>,
     metadata: LoweringMetadata,
 }
@@ -84,6 +99,7 @@ pub fn lower_with_options(tree: &SyntaxTree, options: &LoweringOptions) -> Lower
             source_kind: tree.source.kind,
             python_source: lowered_text.python_source,
             source_map: lowered_text.source_map,
+            span_map: lowered_text.span_map,
             required_imports: lowered_text.required_imports,
             metadata: lowered_text.metadata,
         },
@@ -98,6 +114,14 @@ fn lower_passthrough(source: &str) -> LoweredText {
             .lines()
             .enumerate()
             .map(|(index, _)| SourceMapEntry { original_line: index + 1, lowered_line: index + 1 })
+            .collect(),
+        span_map: source
+            .lines()
+            .enumerate()
+            .map(|(index, line)| SpanMapEntry {
+                original: line_span(index + 1, line),
+                emitted: line_span(index + 1, line),
+            })
             .collect(),
         required_imports: Vec::new(),
         metadata: LoweringMetadata::default(),
@@ -211,6 +235,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let mut required_imports = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
+    let mut span_map = Vec::new();
     if !runtime_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
         push_required_import(
             &mut lowered_lines,
@@ -326,6 +351,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
 
         source_map
             .push(SourceMapEntry { original_line: line_number, lowered_line: lowered_line_number });
+        let original_span = line_span(line_number, line);
+        span_map.extend(replacement_lines.iter().enumerate().map(|(offset, replacement)| {
+            SpanMapEntry {
+                original: original_span,
+                emitted: line_span(lowered_line_number + offset, replacement),
+            }
+        }));
         lowered_line_number += replacement_lines.len();
         lowered_lines.extend(replacement_lines);
     }
@@ -338,6 +370,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     LoweredText {
         python_source: lowered,
         source_map,
+        span_map,
         required_imports,
         metadata: LoweringMetadata {
             has_generic_type_params: !runtime_type_params.is_empty(),
@@ -354,6 +387,10 @@ fn push_required_import(
 ) {
     lowered_lines.push(import_line.clone());
     required_imports.push(import_line);
+}
+
+fn line_span(line_number: usize, text: &str) -> SpanMapRange {
+    SpanMapRange { line: line_number, start_col: 1, end_col: text.chars().count() + 1 }
 }
 
 fn rewrite_notrequired_import_line(options: &LoweringOptions) -> String {
@@ -1125,7 +1162,10 @@ fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagn
 
 #[cfg(test)]
 mod tests {
-    use super::{LoweringOptions, SourceMapEntry, lower, lower_with_options};
+    use super::{
+        LoweringMetadata, LoweringOptions, SourceMapEntry, SpanMapEntry, SpanMapRange, lower,
+        lower_with_options,
+    };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -1539,6 +1579,31 @@ mod tests {
         assert_eq!(
             lowered.module.source_map,
             vec![SourceMapEntry { original_line: 1, lowered_line: 2 }]
+        );
+        assert_eq!(
+            lowered.module.span_map,
+            vec![
+                SpanMapEntry {
+                    original: SpanMapRange { line: 1, start_col: 1, end_col: 39 },
+                    emitted: SpanMapRange { line: 2, start_col: 1, end_col: 10 },
+                },
+                SpanMapEntry {
+                    original: SpanMapRange { line: 1, start_col: 1, end_col: 39 },
+                    emitted: SpanMapRange { line: 3, start_col: 1, end_col: 30 },
+                },
+            ]
+        );
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![String::from("from typing import overload")]
+        );
+        assert_eq!(
+            lowered.module.metadata,
+            LoweringMetadata {
+                has_generic_type_params: false,
+                has_typed_dict_transforms: false,
+                has_sealed_classes: false,
+            }
         );
     }
 
