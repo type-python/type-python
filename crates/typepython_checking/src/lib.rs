@@ -12702,6 +12702,22 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_list_literal_assignment_type_match() {
+        let result = check_temp_typepython_source("values: list[int] = [1, 2]\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_list_literal_assignment_type_mismatch() {
+        let result = check_temp_typepython_source("values: list[str] = [1, 2]\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `list[int]` where `values` expects `list[str]`"));
+    }
+
+    #[test]
     fn check_reports_direct_generic_function_call_return_mismatch() {
         let result = check_temp_typepython_source(
             "def first[T](value: T) -> T:\n    return value\n\nresult: str = first(1)\n",

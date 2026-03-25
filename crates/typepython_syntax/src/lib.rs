@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
+use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam, visitor, visitor::Visitor};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -1436,11 +1436,7 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() {
-        head
-    } else {
-        format!("{head}.{}", tail.join("."))
-    }
+    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
@@ -3762,13 +3758,60 @@ fn extract_method_call_statement(
 }
 
 fn infer_literal_arg_type(expr: &Expr) -> String {
+    infer_direct_literal_type(expr).unwrap_or_default()
+}
+
+fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::NumberLiteral(_) => String::from("int"),
-        Expr::StringLiteral(_) => String::from("str"),
-        Expr::BooleanLiteral(_) => String::from("bool"),
-        Expr::NoneLiteral(_) => String::from("None"),
-        _ => String::new(),
+        Expr::NumberLiteral(_) => Some(String::from("int")),
+        Expr::StringLiteral(_) => Some(String::from("str")),
+        Expr::BooleanLiteral(_) => Some(String::from("bool")),
+        Expr::NoneLiteral(_) => Some(String::from("None")),
+        Expr::List(list) => {
+            let element_types =
+                list.elts.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;
+            Some(format!("list[{}]", join_literal_type_candidates(element_types)))
+        }
+        Expr::Tuple(tuple) => {
+            let element_types =
+                tuple.elts.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;
+            Some(if element_types.is_empty() {
+                String::from("tuple[()]")
+            } else {
+                format!("tuple[{}]", element_types.join(", "))
+            })
+        }
+        Expr::Set(set) => {
+            let element_types =
+                set.elts.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;
+            Some(format!("set[{}]", join_literal_type_candidates(element_types)))
+        }
+        Expr::Dict(dict) => {
+            let mut key_types = Vec::new();
+            let mut value_types = Vec::new();
+            for item in &dict.items {
+                let key = item.key.as_ref()?;
+                key_types.push(infer_direct_literal_type(key)?);
+                value_types.push(infer_direct_literal_type(&item.value)?);
+            }
+            Some(format!(
+                "dict[{}, {}]",
+                join_literal_type_candidates(key_types),
+                join_literal_type_candidates(value_types)
+            ))
+        }
+        _ => None,
     }
+}
+
+fn join_literal_type_candidates(types: Vec<String>) -> String {
+    let mut unique = Vec::new();
+    for value in types {
+        if !unique.contains(&value) {
+            unique.push(value);
+        }
+    }
+    if unique.is_empty() { String::from("Any") } else { unique.join(" | ") }
 }
 
 fn extract_supplemental_call_statement(
@@ -6061,14 +6104,13 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
-        DirectExprMetadata, ExceptionHandlerStatement, ForStatement, FunctionParam,
-        FunctionStatement, GuardCondition, IfStatement, ImportBinding, ImportStatement,
-        InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
-        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions,
-        ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
-        TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
-        YieldStatement,
+        AssertStatement, CallStatement, ClassMember, ClassMemberKind, DirectExprMetadata,
+        ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
+        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, MatchCaseStatement,
+        MatchPattern, MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
+        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
+        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
+        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -7240,6 +7282,97 @@ mod tests {
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                    },
+                ],
+                keyword_names: Vec::new(),
+                keyword_arg_types: Vec::new(),
+                keyword_arg_values: Vec::new(),
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_direct_call_container_literal_arg_types() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("call-container-types.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("build([1, 2], (1, \"x\"), {\"x\": 1}, {1, 2})\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Call(CallStatement {
+                callee: String::from("build"),
+                arg_count: 4,
+                arg_types: vec![
+                    String::from("list[int]"),
+                    String::from("tuple[int, str]"),
+                    String::from("dict[str, int]"),
+                    String::from("set[int]"),
+                ],
+                arg_values: vec![
+                    DirectExprMetadata {
+                        value_type: Some(String::from("list[int]")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                    },
+                    DirectExprMetadata {
+                        value_type: Some(String::from("tuple[int, str]")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                    },
+                    DirectExprMetadata {
+                        value_type: Some(String::from("dict[str, int]")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                    },
+                    DirectExprMetadata {
+                        value_type: Some(String::from("set[int]")),
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
