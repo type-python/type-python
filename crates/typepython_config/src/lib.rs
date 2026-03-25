@@ -366,6 +366,15 @@ impl Config {
     fn validate(&self, config_path: &Path) -> Result<(), ConfigError> {
         validate_target_python(config_path, &self.project.target_python)?;
 
+        if self.typing.infer_passthrough {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: String::from(
+                    "typing.infer_passthrough is experimental and not implemented in this build",
+                ),
+            });
+        }
+
         if let Some(python_executable) = &self.resolution.python_executable {
             validate_python_executable(
                 config_path,
@@ -921,6 +930,23 @@ mod tests {
 
         let handle = load_result.expect("expected conditional return opt-in to load");
         assert!(handle.config.typing.conditional_returns);
+    }
+
+    #[test]
+    fn rejects_infer_passthrough_opt_in_until_implemented() {
+        let project_dir = temp_project_dir("rejects_infer_passthrough_opt_in_until_implemented");
+        fs::write(project_dir.join("typepython.toml"), "[typing]\ninfer_passthrough = true\n")
+            .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected infer_passthrough opt-in to be rejected");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("typing.infer_passthrough"));
+        assert!(message.contains("not implemented"));
     }
 
     #[test]
