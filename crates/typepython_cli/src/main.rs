@@ -121,6 +121,8 @@ struct InitArgs {
     /// Overwrite existing generated files.
     #[arg(long)]
     force: bool,
+    #[arg(long)]
+    embed_pyproject: bool,
 }
 
 #[derive(Debug, Args)]
@@ -302,20 +304,80 @@ fn init_project(args: InitArgs) -> Result<ExitCode> {
     };
 
     let config_path = root.join("typepython.toml");
+    let pyproject_path = root.join("pyproject.toml");
     let source_path = root.join("src/app/__init__.tpy");
 
-    write_file(&config_path, CONFIG_TEMPLATE, args.force)?;
+    if args.embed_pyproject {
+        write_embedded_pyproject_config(&pyproject_path, &config_path)?;
+    } else {
+        write_file(&config_path, CONFIG_TEMPLATE, args.force)?;
+    }
     write_file(&source_path, INIT_SOURCE_TEMPLATE, args.force)?;
 
     println!("initialized TypePython project at {}", root.display());
-    println!("  config: {}", config_path.display());
+    if args.embed_pyproject {
+        println!("  config: {} ([tool.typepython])", pyproject_path.display());
+    } else {
+        println!("  config: {}", config_path.display());
+    }
     println!("  source: {}", source_path.display());
 
-    if root.join("pyproject.toml").is_file() {
+    if pyproject_path.is_file() && !args.embed_pyproject {
         println!("  note: existing pyproject.toml detected; typepython.toml remains authoritative");
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn write_embedded_pyproject_config(pyproject_path: &Path, config_path: &Path) -> Result<()> {
+    if !pyproject_path.is_file() {
+        anyhow::bail!(
+            "--embed-pyproject requires an existing pyproject.toml at {}",
+            pyproject_path.display()
+        );
+    }
+    if config_path.exists() {
+        anyhow::bail!(
+            "{} already exists; remove it before using --embed-pyproject",
+            config_path.display()
+        );
+    }
+
+    let existing = fs::read_to_string(pyproject_path)
+        .with_context(|| format!("unable to read {}", pyproject_path.display()))?;
+    if existing.contains("[tool.typepython]") || existing.contains("[tool.typepython.") {
+        anyhow::bail!(
+            "{} already defines [tool.typepython] configuration",
+            pyproject_path.display()
+        );
+    }
+
+    let mut rewritten = existing;
+    if !rewritten.is_empty() && !rewritten.ends_with('\n') {
+        rewritten.push('\n');
+    }
+    if !rewritten.trim().is_empty() {
+        rewritten.push('\n');
+    }
+    rewritten.push_str(&embedded_config_template());
+
+    fs::write(pyproject_path, rewritten)
+        .with_context(|| format!("unable to write {}", pyproject_path.display()))
+}
+
+fn embedded_config_template() -> String {
+    let mut rendered = String::new();
+    for line in CONFIG_TEMPLATE.lines() {
+        if line.starts_with('[') && line.ends_with(']') {
+            rendered.push_str("[tool.typepython.");
+            rendered.push_str(&line[1..line.len() - 1]);
+            rendered.push(']');
+        } else {
+            rendered.push_str(line);
+        }
+        rendered.push('\n');
+    }
+    rendered
 }
 
 fn run_build(args: RunArgs) -> Result<ExitCode> {
@@ -2486,10 +2548,10 @@ mod tests {
     use super::{
         Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
-        exit_code_for_error, format_watch_rebuild_note, load_syntax_trees, run_pipeline,
-        should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
-        verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
-        write_incremental_snapshot,
+        embedded_config_template, exit_code_for_error, format_watch_rebuild_note, init_project,
+        load_syntax_trees, run_pipeline, should_emit_build_outputs, supplied_verify_artifacts,
+        verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
+        watch_targets, write_incremental_snapshot,
     };
     use clap::Parser;
     use flate2::{Compression, write::GzEncoder};
@@ -2548,6 +2610,44 @@ mod tests {
         let error = anyhow::anyhow!("unexpected internal compiler failure");
 
         assert_eq!(exit_code_for_error(&error), ExitCode::from(2));
+    }
+
+    #[test]
+    fn embedded_config_template_rewrites_sections_under_tool_typepython() {
+        let rendered = embedded_config_template();
+
+        assert!(rendered.contains("[tool.typepython.project]"));
+        assert!(rendered.contains("[tool.typepython.typing]"));
+        assert!(rendered.contains("[tool.typepython.emit]"));
+        assert!(!rendered.contains("\n[project]\n"));
+    }
+
+    #[test]
+    fn init_project_embeds_config_into_existing_pyproject() {
+        let project_dir = temp_project_dir("init_project_embeds_config_into_existing_pyproject");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[build-system]\nrequires = [\"setuptools\"]\n",
+        )
+        .expect("pyproject.toml should be written");
+
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: true,
+        });
+
+        let pyproject =
+            fs::read_to_string(project_dir.join("pyproject.toml")).expect("pyproject should exist");
+        let typepython_toml_exists = project_dir.join("typepython.toml").exists();
+        let source_exists = project_dir.join("src/app/__init__.tpy").exists();
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(init_result.expect("init should succeed"), ExitCode::SUCCESS);
+        assert!(pyproject.contains("[tool.typepython.project]"));
+        assert!(pyproject.contains("[tool.typepython.typing]"));
+        assert!(!typepython_toml_exists);
+        assert!(source_exists);
     }
 
     #[test]
