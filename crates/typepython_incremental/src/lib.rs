@@ -62,7 +62,7 @@ pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
     let fingerprints = graph
         .nodes
         .iter()
-        .map(|node| (node.module_path.to_string_lossy().into_owned(), node.summary_fingerprint))
+        .map(|node| (node.module_key.clone(), node.summary_fingerprint))
         .collect();
 
     IncrementalState { fingerprints }
@@ -118,9 +118,11 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
 mod tests {
     use super::{
         Fingerprint, IncrementalState, SNAPSHOT_SCHEMA_VERSION, SnapshotDecodeError, SnapshotDiff,
-        decode_snapshot, diff, encode_snapshot,
+        decode_snapshot, diff, encode_snapshot, snapshot,
     };
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, path::PathBuf};
+    use typepython_graph::{ModuleGraph, ModuleNode};
+    use typepython_syntax::SourceKind;
 
     #[test]
     fn diff_reports_added_removed_and_changed_modules() {
@@ -170,6 +172,34 @@ mod tests {
         assert!(rendered.contains("schema_version"));
         assert!(rendered.contains(&SNAPSHOT_SCHEMA_VERSION.to_string()));
         assert!(rendered.contains("pkg.a"));
+    }
+
+    #[test]
+    fn snapshot_uses_logical_module_keys() {
+        let state = snapshot(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/pkg/a.tpy"),
+                module_key: String::from("pkg.a"),
+                module_kind: SourceKind::TypePython,
+                declarations: Vec::new(),
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 42,
+            }],
+        });
+
+        assert_eq!(state.fingerprints, BTreeMap::from([(String::from("pkg.a"), 42)]));
     }
 
     #[test]
