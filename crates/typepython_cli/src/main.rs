@@ -2651,6 +2651,48 @@ mod tests {
     }
 
     #[test]
+    fn init_project_rejects_embed_without_existing_pyproject() {
+        let project_dir = temp_project_dir("init_project_rejects_embed_without_existing_pyproject");
+
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: true,
+        });
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = init_result.expect_err("embed should require an existing pyproject");
+        assert!(
+            error.to_string().contains("--embed-pyproject requires an existing pyproject.toml")
+        );
+    }
+
+    #[test]
+    fn init_project_rejects_embed_when_tool_typepython_already_exists() {
+        let project_dir =
+            temp_project_dir("init_project_rejects_embed_when_tool_typepython_already_exists");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[tool.typepython.project]\ntarget_python = \"3.10\"\n",
+        )
+        .expect("pyproject.toml should be written");
+
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: true,
+        });
+
+        let source_exists = project_dir.join("src/app/__init__.tpy").exists();
+        remove_temp_project_dir(&project_dir);
+
+        let error = init_result.expect_err("duplicate embedded config should be rejected");
+        assert!(error.to_string().contains("already defines [tool.typepython] configuration"));
+        assert!(!source_exists);
+    }
+
+    #[test]
     fn collect_source_paths_respects_include_and_exclude_patterns() {
         let project_dir = temp_project_dir("respects_include_and_exclude_patterns");
         let result = {
