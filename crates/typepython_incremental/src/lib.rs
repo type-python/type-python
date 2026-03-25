@@ -173,7 +173,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             name: declaration.name.clone(),
             kind: summary_kind(declaration),
             type_repr: summary_type_repr(declaration),
-            type_params: Vec::new(),
+            type_params: declaration.type_params.clone(),
             public: !declaration.name.starts_with('_'),
         })
         .collect::<Vec<_>>();
@@ -317,7 +317,7 @@ mod tests {
                     name: String::from("Foo"),
                     kind: String::from("class"),
                     type_repr: String::from("Foo"),
-                    type_params: Vec::new(),
+                    type_params: vec![String::from("T")],
                     public: true,
                 }],
                 imports: vec![String::from("pkg.base")],
@@ -364,6 +364,7 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
+                        type_params: vec![String::from("T")],
                     },
                     Declaration {
                         name: String::from("Add"),
@@ -382,6 +383,7 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: vec![String::from("Expr")],
+                        type_params: Vec::new(),
                     },
                     Declaration {
                         name: String::from("helper"),
@@ -400,6 +402,7 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
+                        type_params: vec![String::from("T")],
                     },
                     Declaration {
                         name: String::from("base"),
@@ -418,6 +421,7 @@ mod tests {
                         is_final: false,
                         is_class_var: false,
                         bases: Vec::new(),
+                        type_params: Vec::new(),
                     },
                 ],
                 calls: Vec::new(),
@@ -455,7 +459,7 @@ mod tests {
                         name: String::from("Expr"),
                         kind: String::from("class"),
                         type_repr: String::from("Expr"),
-                        type_params: Vec::new(),
+                        type_params: vec![String::from("T")],
                         public: true,
                     },
                     SummaryExport {
@@ -469,7 +473,7 @@ mod tests {
                         name: String::from("helper"),
                         kind: String::from("function"),
                         type_repr: String::from("()->int"),
-                        type_params: Vec::new(),
+                        type_params: vec![String::from("T")],
                         public: true,
                     },
                 ],

@@ -314,6 +314,7 @@ fn prelude_type_alias(name: &str, detail: &str) -> Declaration {
         is_final: false,
         is_class_var: false,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }
 }
 
@@ -335,6 +336,7 @@ fn prelude_function(name: &str, detail: &str) -> Declaration {
         is_final: false,
         is_class_var: false,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }
 }
 
@@ -356,6 +358,7 @@ fn prelude_protocol_class(name: &str) -> Declaration {
         is_final: false,
         is_class_var: false,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }
 }
 
@@ -377,6 +380,7 @@ fn prelude_class(name: &str) -> Declaration {
         is_final: false,
         is_class_var: false,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }
 }
 
@@ -402,6 +406,7 @@ fn prelude_protocol_class_with_methods(
         is_final: false,
         is_class_var: false,
         bases: bases.iter().map(|base| String::from(*base)).collect(),
+        type_params: Vec::new(),
     }];
 
     declarations.extend(methods.iter().map(|(method_name, detail)| Declaration {
@@ -424,6 +429,7 @@ fn prelude_protocol_class_with_methods(
         is_final: false,
         is_class_var: false,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }));
 
     declarations
@@ -460,6 +466,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
@@ -478,6 +485,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ],
             calls: Vec::new(),
@@ -515,6 +523,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
@@ -533,6 +542,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -561,6 +571,7 @@ mod tests {
                 is_final: false,
                 is_class_var: false,
                 bases: Vec::new(),
+                type_params: Vec::new(),
             }],
             calls: Vec::new(),
             method_calls: Vec::new(),
@@ -598,6 +609,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("User"),
@@ -616,6 +628,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ],
             calls: Vec::new(),

@@ -268,6 +268,7 @@ pub struct Declaration {
     pub is_final: bool,
     pub is_class_var: bool,
     pub bases: Vec<String>,
+    pub type_params: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -593,6 +594,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
+            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
         }],
         SyntaxStatement::Interface(statement) => {
             bind_named_block(statement, DeclarationOwnerKind::Interface)
@@ -623,6 +625,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
+            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
         }],
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
@@ -641,6 +644,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             is_final: false,
             is_class_var: false,
             bases: Vec::new(),
+            type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
         }],
         SyntaxStatement::Import(statement) => statement
             .bindings
@@ -662,6 +666,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 is_final: false,
                 is_class_var: false,
                 bases: Vec::new(),
+                type_params: Vec::new(),
             })
             .collect(),
         SyntaxStatement::Value(statement) => statement
@@ -691,6 +696,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                         is_final: statement.is_final,
                         is_class_var: statement.is_class_var,
                         bases: Vec::new(),
+                        type_params: Vec::new(),
                     })
                     .collect::<Vec<_>>()
             })
@@ -759,6 +765,7 @@ fn bind_named_block(
         is_final: false,
         is_class_var: false,
         bases: statement.bases.clone(),
+        type_params: statement.type_params.iter().map(|param| param.name.clone()).collect(),
     }];
     declarations.extend(statement.members.iter().map(|member| Declaration {
         name: member.name.clone(),
@@ -789,6 +796,7 @@ fn bind_named_block(
         is_final: member.is_final,
         is_class_var: member.is_class_var,
         bases: Vec::new(),
+        type_params: Vec::new(),
     }));
     declarations
 }
@@ -823,11 +831,7 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
         }
     }
 
-    format!(
-        "({})->{}",
-        rendered_params.join(","),
-        returns.unwrap_or("")
-    )
+    format!("({})->{}", rendered_params.join(","), returns.unwrap_or(""))
 }
 
 #[cfg(test)]
@@ -857,13 +861,13 @@ mod tests {
             statements: vec![
                 SyntaxStatement::TypeAlias(TypeAliasStatement {
                     name: String::from("UserId"),
-                    type_params: Vec::new(),
-                    value: String::from("int"),
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    value: String::from("Box[T]"),
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("User"),
-                    type_params: Vec::new(),
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -875,7 +879,7 @@ mod tests {
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("helper"),
-                    type_params: Vec::new(),
+                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
                     params: Vec::new(),
                     returns: None,
                     is_async: false,
@@ -897,7 +901,7 @@ mod tests {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    detail: String::from("int"),
+                    detail: String::from("Box[T]"),
                     value_type: None,
                     method_kind: None,
                     class_kind: None,
@@ -911,6 +915,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: vec![String::from("T")],
                 },
                 Declaration {
                     name: String::from("User"),
@@ -929,6 +934,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: vec![String::from("T")],
                 },
                 Declaration {
                     name: String::from("helper"),
@@ -947,6 +953,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: vec![String::from("T")],
                 },
             ]
         );
@@ -1038,6 +1045,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: vec![String::from("T")],
                 },
                 Declaration {
                     name: String::from("parse"),
@@ -1056,6 +1064,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -1128,6 +1137,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("bar"),
@@ -1146,6 +1156,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("value"),
@@ -1164,6 +1175,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("count"),
@@ -1182,6 +1194,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -1296,7 +1309,13 @@ mod tests {
                     type_params: Vec::new(),
                     params: vec![typepython_syntax::FunctionParam {
                         name: String::from("value"),
-                        annotation: Some(String::from("str")), has_default: false, positional_only: false, keyword_only: false, variadic: false, keyword_variadic: false }],
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    }],
                     returns: Some(String::from("None")),
                     is_async: false,
                     is_override: false,
@@ -1860,6 +1879,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("value"),
@@ -1881,6 +1901,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("close"),
@@ -1902,6 +1923,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("close"),
@@ -1923,6 +1945,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -2011,6 +2034,7 @@ mod tests {
                     is_final: true,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("Box"),
@@ -2029,6 +2053,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("limit"),
@@ -2050,6 +2075,7 @@ mod tests {
                     is_final: true,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -2138,6 +2164,7 @@ mod tests {
                     is_final: false,
                     is_class_var: true,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("Box"),
@@ -2156,6 +2183,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("cache"),
@@ -2177,6 +2205,7 @@ mod tests {
                     is_final: false,
                     is_class_var: true,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
@@ -2257,6 +2286,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("Child"),
@@ -2275,6 +2305,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: vec![String::from("Base")],
+                    type_params: Vec::new(),
                 },
                 Declaration {
                     name: String::from("run"),
@@ -2296,6 +2327,7 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
+                    type_params: Vec::new(),
                 },
             ]
         );
