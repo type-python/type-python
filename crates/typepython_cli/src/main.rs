@@ -2687,6 +2687,28 @@ mod tests {
     }
 
     #[test]
+    fn collect_source_paths_rejects_invalid_include_glob_patterns() {
+        let project_dir = temp_project_dir("rejects_invalid_include_glob_patterns");
+        let result = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!("[project]\n", "src = [\"src\"]\n", "include = [\"src/[*.tpy\"]\n"),
+            )
+            .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            collect_source_paths(&config)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let error = result.expect_err("expected invalid include glob to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("project.include"));
+        assert!(message.contains("invalid glob pattern"));
+    }
+
+    #[test]
     fn collect_source_paths_reports_tpy_python_collisions() {
         let project_dir = temp_project_dir("reports_tpy_python_collisions");
         let result = {
