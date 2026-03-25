@@ -4,6 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
     io::Read,
+    num::Wrapping,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
     sync::mpsc::{self, RecvTimeoutError},
@@ -1175,7 +1176,8 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         .diagnostics
         .extend(public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics);
     let emit_plan = plan_emits(config, &lowered_modules);
-    let incremental = snapshot(&graph);
+    let mut incremental = snapshot(&graph);
+    incremental.stdlib_snapshot = Some(bundled_stdlib_snapshot_identity()?);
     let tracked_modules = incremental.fingerprints.len();
 
     Ok(PipelineSnapshot {
@@ -2127,6 +2129,50 @@ fn bundled_stdlib_sources() -> Result<Vec<DiscoveredSource>> {
     }
     sources.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(sources)
+}
+
+fn bundled_stdlib_snapshot_identity() -> Result<String> {
+    let root = bundled_stdlib_root();
+    let mut files = Vec::new();
+    if root.exists() {
+        collect_stdlib_files(&root, &root, &mut files)?;
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut hash = Wrapping(0xcbf29ce484222325_u64);
+    let prime = Wrapping(0x100000001b3_u64);
+    for (relative, bytes) in files {
+        for byte in relative.as_bytes().iter().chain([0_u8].iter()).chain(bytes.iter()) {
+            hash ^= Wrapping(u64::from(*byte));
+            hash *= prime;
+        }
+    }
+
+    Ok(format!("fnv1a64:{:016x}", hash.0))
+}
+
+fn collect_stdlib_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> Result<()> {
+    for entry in fs::read_dir(directory).with_context(|| {
+        format!("unable to read bundled stdlib directory {}", directory.display())
+    })? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_stdlib_files(root, &path, files)?;
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root)
+            .with_context(|| format!("unable to relativize {}", path.display()))?;
+        files.push((normalize_glob_path(relative), fs::read(&path)?));
+    }
+
+    Ok(())
 }
 
 fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
@@ -3810,6 +3856,7 @@ mod tests {
                             members: vec![String::from("Add"), String::from("Num")],
                         }],
                     }],
+                    stdlib_snapshot: Some(String::from("fnv1a64:demo")),
                 },
             )
             .expect("test setup should succeed");
@@ -3829,6 +3876,7 @@ mod tests {
         assert!(rendered.contains("\"exports\""));
         assert!(rendered.contains("\"imports\""));
         assert!(rendered.contains("\"sealedRoots\""));
+        assert!(rendered.contains("fnv1a64:demo"));
     }
 
     #[test]

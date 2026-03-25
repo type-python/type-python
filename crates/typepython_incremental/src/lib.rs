@@ -24,6 +24,8 @@ pub struct IncrementalState {
     pub fingerprints: BTreeMap<String, u64>,
     #[serde(default)]
     pub summaries: Vec<PublicSummary>,
+    #[serde(default)]
+    pub stdlib_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -32,6 +34,8 @@ struct SnapshotFile {
     fingerprints: BTreeMap<String, u64>,
     #[serde(default)]
     summaries: Vec<PublicSummary>,
+    #[serde(default)]
+    stdlib_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -101,7 +105,7 @@ pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
     let mut summaries = graph.nodes.iter().map(public_summary).collect::<Vec<_>>();
     summaries.sort_by(|left, right| left.module.cmp(&right.module));
 
-    IncrementalState { fingerprints, summaries }
+    IncrementalState { fingerprints, summaries, stdlib_snapshot: None }
 }
 
 #[must_use]
@@ -139,6 +143,7 @@ pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::E
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         fingerprints: state.fingerprints.clone(),
         summaries: state.summaries.clone(),
+        stdlib_snapshot: state.stdlib_snapshot.clone(),
     })
 }
 
@@ -148,7 +153,11 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
     if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION {
         return Err(SnapshotDecodeError::IncompatibleSchemaVersion(snapshot.schema_version));
     }
-    Ok(IncrementalState { fingerprints: snapshot.fingerprints, summaries: snapshot.summaries })
+    Ok(IncrementalState {
+        fingerprints: snapshot.fingerprints,
+        summaries: snapshot.summaries,
+        stdlib_snapshot: snapshot.stdlib_snapshot,
+    })
 }
 
 fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
@@ -260,6 +269,7 @@ mod tests {
                 (String::from("pkg.b"), 20),
             ]),
             summaries: Vec::new(),
+            stdlib_snapshot: None,
         };
         let current = IncrementalState {
             fingerprints: BTreeMap::from([
@@ -267,6 +277,7 @@ mod tests {
                 (String::from("pkg.c"), 40),
             ]),
             summaries: Vec::new(),
+            stdlib_snapshot: None,
         };
 
         let snapshot_diff = diff(&previous, &current);
@@ -286,6 +297,7 @@ mod tests {
         let state = IncrementalState {
             fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
             summaries: Vec::new(),
+            stdlib_snapshot: None,
         };
 
         let snapshot_diff = diff(&state, &state);
@@ -314,6 +326,7 @@ mod tests {
                     members: vec![String::from("Add"), String::from("Num")],
                 }],
             }],
+            stdlib_snapshot: Some(String::from("fnv1a64:demo")),
         })
         .expect("snapshot encoding should succeed");
 
@@ -323,6 +336,7 @@ mod tests {
         assert!(rendered.contains("\"exports\""));
         assert!(rendered.contains("\"imports\""));
         assert!(rendered.contains("\"sealedRoots\""));
+        assert!(rendered.contains("fnv1a64:demo"));
     }
 
     #[test]
@@ -466,6 +480,7 @@ mod tests {
                 }],
             }]
         );
+        assert_eq!(state.stdlib_snapshot, None);
     }
 
     #[test]
