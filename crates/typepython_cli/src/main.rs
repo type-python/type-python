@@ -15,7 +15,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use flate2::read::GzDecoder;
 use glob::Pattern;
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tar::Archive as TarArchive;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
@@ -33,6 +33,40 @@ const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
 const INIT_SOURCE_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/src/app/__init__.tpy"));
+const RUNTIME_PUBLIC_NAMES_SCRIPT: &str = r#"import importlib, json, sys
+sys.path.insert(0, sys.argv[1])
+module_name = sys.argv[2]
+try:
+    module = importlib.import_module(module_name)
+except Exception:
+    print(json.dumps({"importable": False}))
+else:
+    exported = getattr(module, "__all__", None)
+    if isinstance(exported, (list, tuple)) and all(isinstance(name, str) for name in exported):
+        names = sorted(dict.fromkeys(exported))
+    else:
+        names = sorted(name for name in dir(module) if not name.startswith("_"))
+    print(json.dumps({"importable": True, "names": names}))
+"#;
+const STATIC_ALL_NAMES_SCRIPT: &str = r#"import ast, json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    tree = ast.parse(handle.read(), sys.argv[1])
+names = None
+for node in tree.body:
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+        value = node.value
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+        value = node.value
+    else:
+        continue
+    if any(isinstance(target, ast.Name) and target.id == "__all__" for target in targets):
+        if isinstance(value, (ast.List, ast.Tuple)) and all(isinstance(element, ast.Constant) and isinstance(element.value, str) for element in value.elts):
+            names = [element.value for element in value.elts]
+        break
+print(json.dumps(names))
+"#;
 
 #[derive(Debug, Parser)]
 #[command(name = "typepython", version, about = "Rust compiler and tooling for TypePython")]
@@ -382,6 +416,11 @@ fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
         snapshot.diagnostics.clone()
     } else {
         let mut diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+        if !diagnostics.has_errors() {
+            diagnostics.diagnostics.extend(
+                verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
+            );
+        }
         if !diagnostics.has_errors() {
             diagnostics.diagnostics.extend(
                 verify_packaged_artifacts(
@@ -1241,6 +1280,155 @@ fn verify_packaged_artifacts(
     diagnostics
 }
 
+fn verify_runtime_public_name_parity(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+
+    for artifact in artifacts {
+        let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
+        else {
+            continue;
+        };
+        if !(runtime_path.exists() && stub_path.exists()) {
+            continue;
+        }
+        let Some(module_name) = logical_module_name_from_runtime_path(&out_root, runtime_path)
+        else {
+            continue;
+        };
+        let Some(runtime_names) = runtime_public_names(config, &out_root, &module_name) else {
+            continue;
+        };
+        let authoritative_names = match authoritative_public_names(config, stub_path) {
+            Ok(names) => names,
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "unable to determine authoritative public names for `{}` from `{}`: {error}",
+                        module_name,
+                        stub_path.display(),
+                    ),
+                ));
+                continue;
+            }
+        };
+
+        let missing_from_runtime =
+            authoritative_names.difference(&runtime_names).cloned().collect::<Vec<_>>();
+        let missing_from_type_surface =
+            runtime_names.difference(&authoritative_names).cloned().collect::<Vec<_>>();
+
+        if !missing_from_runtime.is_empty() {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "runtime module `{}` is missing public names declared by the authoritative type surface: {}",
+                    module_name,
+                    missing_from_runtime.join(", "),
+                ),
+            ));
+        }
+        if !missing_from_type_surface.is_empty() {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "authoritative type surface for `{}` is missing runtime public names: {}",
+                    module_name,
+                    missing_from_type_surface.join(", "),
+                ),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -> Option<String> {
+    let relative = runtime_path.strip_prefix(out_root).ok()?;
+    let stem = runtime_path.file_stem()?.to_str()?;
+    let mut components = relative
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .components()
+        .map(|component| component.as_os_str().to_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+
+    if stem == "__init__" {
+        return (!components.is_empty()).then(|| components.join("."));
+    }
+
+    components.push(stem.to_owned());
+    Some(components.join("."))
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimePublicNameResult {
+    importable: bool,
+    names: Option<Vec<String>>,
+}
+
+fn runtime_public_names(
+    config: &ConfigHandle,
+    out_root: &Path,
+    module_name: &str,
+) -> Option<BTreeSet<String>> {
+    let interpreter = resolve_python_executable(config);
+    let output = ProcessCommand::new(&interpreter)
+        .args(["-c", RUNTIME_PUBLIC_NAMES_SCRIPT])
+        .arg(out_root)
+        .arg(module_name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let result = serde_json::from_slice::<RuntimePublicNameResult>(&output.stdout).ok()?;
+    result.importable.then(|| result.names.unwrap_or_default().into_iter().collect::<BTreeSet<_>>())
+}
+
+fn authoritative_public_names(
+    config: &ConfigHandle,
+    path: &Path,
+) -> std::result::Result<BTreeSet<String>, String> {
+    if let Some(names) = static_all_names(config, path)? {
+        return Ok(names);
+    }
+
+    let syntax = emitted_syntax(path)
+        .ok_or_else(|| format!("`{}` could not be parsed as a Python module", path.display()))?;
+    Ok(module_level_surface_names(&syntax)
+        .into_iter()
+        .filter(|name| !name.starts_with('_'))
+        .collect())
+}
+
+fn static_all_names(
+    config: &ConfigHandle,
+    path: &Path,
+) -> std::result::Result<Option<BTreeSet<String>>, String> {
+    let interpreter = resolve_python_executable(config);
+    let output = ProcessCommand::new(&interpreter)
+        .args(["-c", STATIC_ALL_NAMES_SCRIPT])
+        .arg(path)
+        .output()
+        .map_err(|error| {
+            format!("unable to run Python parser `{}`: {error}", interpreter.display())
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_suffix =
+            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
+        return Err(format!("Python parser exited with status {}{}", output.status, stderr_suffix));
+    }
+    let names = serde_json::from_slice::<Option<Vec<String>>>(&output.stdout)
+        .map_err(|error| format!("unable to parse `__all__` output: {error}"))?;
+    Ok(names.map(|names| names.into_iter().collect()))
+}
+
 fn expected_published_files(
     config: &ConfigHandle,
     artifacts: &[EmitArtifact],
@@ -1569,6 +1757,14 @@ fn declaration_surface(
     }
 
     surface
+}
+
+fn module_level_surface_names(syntax: &typepython_syntax::SyntaxTree) -> BTreeSet<String> {
+    declaration_surface(syntax)
+        .into_iter()
+        .filter(|entry| entry.owner.is_none())
+        .map(|entry| entry.name)
+        .collect()
 }
 
 fn public_surface_completeness_diagnostics(
@@ -2245,7 +2441,7 @@ mod tests {
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
         format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
         supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
-        watch_targets, write_incremental_snapshot,
+        verify_runtime_public_name_parity, watch_targets, write_incremental_snapshot,
     };
     use clap::Parser;
     use flate2::{Compression, write::GzEncoder};
@@ -2870,6 +3066,112 @@ mod tests {
 
         assert!(rendered.contains("TPY5003"));
         assert!(rendered.contains("contains `app/__init__.py` that diverges"));
+    }
+
+    #[test]
+    fn verify_runtime_public_name_parity_accepts_matching_all_exports() {
+        let project_dir =
+            temp_project_dir("verify_runtime_public_name_parity_accepts_matching_all_exports");
+        let diagnostics = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "__all__ = [\"build_user\"]\n\ndef build_user() -> int:\n    return 1\n\ndef _hidden() -> int:\n    return 0\n",
+            ).expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n\ndef _hidden() -> int: ...\n",
+            ).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_runtime_public_name_parity(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn verify_runtime_public_name_parity_reports_runtime_missing_stub_export() {
+        let project_dir = temp_project_dir(
+            "verify_runtime_public_name_parity_reports_runtime_missing_stub_export",
+        );
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "def build_user() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "__all__ = [\"build_user\", \"extra\"]\n\ndef build_user() -> int: ...\nextra: int\n").expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_runtime_public_name_parity(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("runtime module `app` is missing public names"));
+        assert!(rendered.contains("extra"));
+    }
+
+    #[test]
+    fn verify_runtime_public_name_parity_reports_stub_missing_runtime_export() {
+        let project_dir = temp_project_dir(
+            "verify_runtime_public_name_parity_reports_stub_missing_runtime_export",
+        );
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "__all__ = [\"build_user\", \"extra\"]\n\ndef build_user() -> int:\n    return 1\nextra = 1\n").expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "def build_user() -> int: ...\n",
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_runtime_public_name_parity(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(
+            rendered
+                .contains("authoritative type surface for `app` is missing runtime public names")
+        );
+        assert!(rendered.contains("extra"));
     }
 
     #[test]
