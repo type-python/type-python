@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
     sync::mpsc::{self, RecvTimeoutError},
@@ -11,9 +12,11 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use flate2::read::GzDecoder;
 use glob::Pattern;
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
+use tar::Archive as TarArchive;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
 use typepython_checking::check_with_options;
@@ -24,6 +27,7 @@ use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, encode_snapshot, snapshot};
 use typepython_lowering::{LoweredModule, LoweringResult, lower};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives, parse};
+use zip::ZipArchive;
 
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
@@ -52,7 +56,7 @@ enum Command {
     /// Start the TypePython language server.
     Lsp(RunArgs),
     /// Verify emitted artifacts and incremental state.
-    Verify(RunArgs),
+    Verify(VerifyArgs),
     /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
 }
@@ -90,6 +94,24 @@ struct CleanArgs {
     /// Project directory to search from.
     #[arg(long, value_name = "PATH")]
     project: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct VerifyArgs {
+    #[command(flatten)]
+    run: RunArgs,
+    #[arg(
+        long = "wheel",
+        value_name = "PATH",
+        help = "Verify a published wheel artifact against the build output"
+    )]
+    wheels: Vec<PathBuf>,
+    #[arg(
+        long = "sdist",
+        value_name = "PATH",
+        help = "Verify a published source distribution against the build output"
+    )]
+    sdists: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -353,14 +375,36 @@ fn run_lsp(args: RunArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn run_verify(args: RunArgs) -> Result<ExitCode> {
-    let config = load_project(args.project.as_ref())?;
+fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
+    let config = load_project(args.run.project.as_ref())?;
     let snapshot = run_pipeline(&config)?;
     let diagnostics = if snapshot.diagnostics.has_errors() {
         snapshot.diagnostics.clone()
     } else {
-        verify_build_artifacts(&config, &snapshot.emit_plan)
+        let mut diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+        if !diagnostics.has_errors() {
+            diagnostics.diagnostics.extend(
+                verify_packaged_artifacts(
+                    &config,
+                    &snapshot.emit_plan,
+                    &supplied_verify_artifacts(&args),
+                )
+                .diagnostics,
+            );
+        }
+        diagnostics
     };
+
+    let supplied_artifact_count = args.wheels.len() + args.sdists.len();
+    let mut notes = vec![String::from(
+        "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
+    )];
+    if supplied_artifact_count > 0 {
+        notes.push(format!(
+            "verified {} supplied wheel/sdist artifact(s) against the authoritative build tree",
+            supplied_artifact_count
+        ));
+    }
 
     let summary = CommandSummary {
         command: String::from("verify"),
@@ -370,13 +414,48 @@ fn run_verify(args: RunArgs) -> Result<ExitCode> {
         lowered_modules: snapshot.lowered_modules.len(),
         planned_artifacts: snapshot.emit_plan.len(),
         tracked_modules: snapshot.tracked_modules,
-        notes: vec![String::from(
-            "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
-        )],
+        notes,
     };
 
-    print_summary(args.format, &summary, &diagnostics)?;
+    print_summary(args.run.format, &summary, &diagnostics)?;
     Ok(exit_code(&diagnostics))
+}
+
+#[derive(Debug, Clone)]
+struct SuppliedVerifyArtifact {
+    kind: SuppliedArtifactKind,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SuppliedArtifactKind {
+    Wheel,
+    Sdist,
+}
+
+impl SuppliedArtifactKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Wheel => "wheel",
+            Self::Sdist => "sdist",
+        }
+    }
+}
+
+fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerifyArtifact> {
+    let mut artifacts = args
+        .wheels
+        .iter()
+        .cloned()
+        .map(|path| SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path })
+        .collect::<Vec<_>>();
+    artifacts.extend(
+        args.sdists
+            .iter()
+            .cloned()
+            .map(|path| SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path }),
+    );
+    artifacts
 }
 
 fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
@@ -965,9 +1044,9 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     )
     .diagnostics;
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-    diagnostics.diagnostics.extend(
-        public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics,
-    );
+    diagnostics
+        .diagnostics
+        .extend(public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics);
     let emit_plan = plan_emits(config, &lowered_modules);
     let incremental = snapshot(&graph);
     let tracked_modules = incremental.fingerprints.len();
@@ -1098,6 +1177,226 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
     }
 
     diagnostics
+}
+
+fn verify_packaged_artifacts(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+    supplied_artifacts: &[SuppliedVerifyArtifact],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    if supplied_artifacts.is_empty() {
+        return diagnostics;
+    }
+
+    let expected_files = match expected_published_files(config, artifacts) {
+        Ok(files) => files,
+        Err(error) => {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!("unable to collect authoritative build artifacts for publication verification: {error}"),
+            ));
+            return diagnostics;
+        }
+    };
+
+    for artifact in supplied_artifacts {
+        match read_supplied_artifact_entries(artifact) {
+            Ok(entries) => {
+                for (relative_path, expected_bytes) in &expected_files {
+                    match entries.get(relative_path) {
+                        None => diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "{} artifact `{}` is missing published file `{relative_path}`",
+                                artifact.kind.label(),
+                                artifact.path.display(),
+                            ),
+                        )),
+                        Some(actual_bytes) if actual_bytes != expected_bytes => {
+                            diagnostics.push(Diagnostic::error(
+                                "TPY5003",
+                                format!(
+                                    "{} artifact `{}` contains `{relative_path}` that diverges from the authoritative build output",
+                                    artifact.kind.label(),
+                                    artifact.path.display(),
+                                ),
+                            ));
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+            Err(error) => diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "unable to inspect {} artifact `{}`: {error}",
+                    artifact.kind.label(),
+                    artifact.path.display(),
+                ),
+            )),
+        }
+    }
+
+    diagnostics
+}
+
+fn expected_published_files(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+) -> Result<BTreeMap<String, Vec<u8>>> {
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    let mut expected_files = BTreeMap::new();
+    let mut package_roots = BTreeSet::new();
+
+    for artifact in artifacts {
+        if let Some(runtime_path) = &artifact.runtime_path {
+            expected_files
+                .insert(relative_publish_path(&out_root, runtime_path)?, fs::read(runtime_path)?);
+            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+                if let Some(parent) = runtime_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
+            }
+        }
+        if let Some(stub_path) = &artifact.stub_path {
+            expected_files
+                .insert(relative_publish_path(&out_root, stub_path)?, fs::read(stub_path)?);
+        }
+    }
+
+    if config.config.emit.write_py_typed {
+        for package_root in package_roots {
+            let marker_path = package_root.join("py.typed");
+            expected_files
+                .insert(relative_publish_path(&out_root, &marker_path)?, fs::read(marker_path)?);
+        }
+    }
+
+    Ok(expected_files)
+}
+
+fn relative_publish_path(out_root: &Path, path: &Path) -> Result<String> {
+    let relative = path
+        .strip_prefix(out_root)
+        .with_context(|| format!("{} is not inside {}", path.display(), out_root.display()))?;
+    Ok(normalize_glob_path(relative))
+}
+
+fn read_supplied_artifact_entries(
+    artifact: &SuppliedVerifyArtifact,
+) -> std::result::Result<BTreeMap<String, Vec<u8>>, String> {
+    let path_text = artifact.path.to_string_lossy().to_ascii_lowercase();
+    let entries = match artifact.kind {
+        SuppliedArtifactKind::Wheel => {
+            if !(path_text.ends_with(".whl") || path_text.ends_with(".zip")) {
+                return Err(String::from("expected a .whl or .zip file"));
+            }
+            read_zip_entries(&artifact.path)?
+        }
+        SuppliedArtifactKind::Sdist => {
+            if path_text.ends_with(".tar.gz") || path_text.ends_with(".tgz") {
+                read_tar_gz_entries(&artifact.path)?
+            } else if path_text.ends_with(".zip") {
+                read_zip_entries(&artifact.path)?
+            } else {
+                return Err(String::from("expected a .tar.gz, .tgz, or .zip file"));
+            }
+        }
+    };
+
+    Ok(strip_common_archive_root(entries))
+}
+
+fn read_zip_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
+    let file = fs::File::open(path).map_err(|error| format!("unable to open archive: {error}"))?;
+    let mut archive =
+        ZipArchive::new(file).map_err(|error| format!("unable to read zip archive: {error}"))?;
+    let mut entries = Vec::new();
+
+    for index in 0..archive.len() {
+        let mut file = archive
+            .by_index(index)
+            .map_err(|error| format!("unable to read zip entry {index}: {error}"))?;
+        if file.is_dir() {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|error| format!("unable to read zip entry `{}`: {error}", file.name()))?;
+        entries.push((normalize_archive_path(file.name()), bytes));
+    }
+
+    Ok(entries)
+}
+
+fn read_tar_gz_entries(path: &Path) -> std::result::Result<Vec<(String, Vec<u8>)>, String> {
+    let file = fs::File::open(path).map_err(|error| format!("unable to open archive: {error}"))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = TarArchive::new(decoder);
+    let mut entries = Vec::new();
+
+    for entry in
+        archive.entries().map_err(|error| format!("unable to read tar archive: {error}"))?
+    {
+        let mut entry = entry.map_err(|error| format!("unable to read tar entry: {error}"))?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let entry_path = entry
+            .path()
+            .map_err(|error| format!("unable to read tar entry path: {error}"))?
+            .display()
+            .to_string();
+        let mut bytes = Vec::new();
+        entry
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("unable to read tar entry `{entry_path}`: {error}"))?;
+        entries.push((normalize_archive_path(&entry_path), bytes));
+    }
+
+    Ok(entries)
+}
+
+fn strip_common_archive_root(entries: Vec<(String, Vec<u8>)>) -> BTreeMap<String, Vec<u8>> {
+    let Some(common_root) = common_archive_root(&entries) else {
+        return entries.into_iter().collect();
+    };
+
+    entries
+        .into_iter()
+        .map(|(path, bytes)| {
+            let normalized =
+                path.strip_prefix(&format!("{common_root}/")).map(str::to_owned).unwrap_or(path);
+            (normalized, bytes)
+        })
+        .collect()
+}
+
+fn common_archive_root(entries: &[(String, Vec<u8>)]) -> Option<String> {
+    let mut root: Option<&str> = None;
+
+    for (path, _) in entries {
+        let mut components = path.split('/').filter(|component| !component.is_empty());
+        let first = components.next()?;
+        if components.next().is_none() {
+            return None;
+        }
+        match root {
+            Some(existing) if existing != first => return None,
+            Some(_) => {}
+            None => root = Some(first),
+        }
+    }
+
+    root.map(str::to_owned)
+}
+
+fn normalize_archive_path(path: &str) -> String {
+    path.split('/')
+        .filter(|component| !component.is_empty() && *component != ".")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn verify_incremental_snapshot(path: &Path) -> Result<(), String> {
@@ -1942,10 +2241,14 @@ fn exit_code(diagnostics: &DiagnosticReport) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_diagnostics, build_migration_report, collect_source_paths, compile_runtime_bytecode,
+        Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
+        build_migration_report, collect_source_paths, compile_runtime_bytecode,
         format_watch_rebuild_note, load_syntax_trees, run_pipeline, should_emit_build_outputs,
-        verify_build_artifacts, watch_targets, write_incremental_snapshot,
+        supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
+        watch_targets, write_incremental_snapshot,
     };
+    use clap::Parser;
+    use flate2::{Compression, write::GzEncoder};
     use notify::RecursiveMode;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -1960,15 +2263,20 @@ mod tests {
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::EmitArtifact;
     use typepython_incremental::IncrementalState;
+    use zip::{ZipWriter, write::FileOptions};
 
     #[test]
     fn collect_source_paths_skips_implicit_namespace_packages() {
         let project_dir = temp_project_dir("skips_implicit_namespace_packages");
         let result = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join("src/pkg/subpkg")).expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg/subpkg"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n")
+                .expect("test setup should succeed");
 
             let config = load(&project_dir).expect("test setup should succeed");
             collect_source_paths(&config)
@@ -1993,12 +2301,18 @@ mod tests {
                     "include = [\"src/**/*.tpy\"]\n",
                     "exclude = [\"src/pkg/excluded/**\"]\n"
                 ),
-            ).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join("src/pkg/excluded")).expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/kept.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/excluded/__init__.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/excluded/hidden.tpy"), "pass\n").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/pkg/excluded"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/kept.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/excluded/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/excluded/hidden.tpy"), "pass\n")
+                .expect("test setup should succeed");
 
             let config = load(&project_dir).expect("test setup should succeed");
             collect_source_paths(&config)
@@ -2015,11 +2329,15 @@ mod tests {
     fn collect_source_paths_reports_tpy_python_collisions() {
         let project_dir = temp_project_dir("reports_tpy_python_collisions");
         let result = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n")
+                .expect("test setup should succeed");
 
             let config = load(&project_dir).expect("test setup should succeed");
             collect_source_paths(&config)
@@ -2037,11 +2355,15 @@ mod tests {
     fn collect_source_paths_allows_python_with_companion_stub() {
         let project_dir = temp_project_dir("allows_python_with_companion_stub");
         let result = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/__init__.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/value.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/value.pyi"), "...\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/value.pyi"), "...\n")
+                .expect("test setup should succeed");
 
             let config = load(&project_dir).expect("test setup should succeed");
             collect_source_paths(&config)
@@ -2064,11 +2386,14 @@ mod tests {
                     "src = [\"src\", \"vendor\"]\n",
                     "include = [\"src/**/*.tpy\", \"vendor/**/*.tpy\"]\n"
                 ),
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::create_dir_all(project_dir.join("src/pkg")).expect("test setup should succeed");
             fs::create_dir_all(project_dir.join("vendor/pkg")).expect("test setup should succeed");
-            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join("vendor/pkg/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("vendor/pkg/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
 
             let config = load(&project_dir).expect("test setup should succeed");
             collect_source_paths(&config)
@@ -2085,7 +2410,8 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_missing_runtime_and_marker_files");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2114,22 +2440,32 @@ mod tests {
             fs::write(
                 project_dir.join("typepython.toml"),
                 "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
-            ).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
             fs::write(
                 project_dir.join(".typepython/build/app/helpers.pyi"),
                 "def helper() -> int: ...\n",
-            ).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app/__pycache__"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__pycache__/__init__.pyc"), "pyc")
+                .expect("test setup should succeed");
             write_incremental_snapshot(
                 &project_dir.join(".typepython/cache"),
                 &IncrementalState::default(),
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2161,11 +2497,16 @@ mod tests {
             fs::write(
                 project_dir.join("typepython.toml"),
                 "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
-            ).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2189,11 +2530,16 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_missing_incremental_snapshot");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2217,16 +2563,23 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_invalid_emitted_python_syntax");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def broken(:\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
             write_incremental_snapshot(
                 &project_dir.join(".typepython/cache"),
                 &IncrementalState::default(),
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2250,19 +2603,26 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_runtime_stub_surface_mismatch");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
             fs::write(
                 project_dir.join(".typepython/build/app/__init__.py"),
                 "def build_user() -> int:\n    return 1\n",
-            ).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
             write_incremental_snapshot(
                 &project_dir.join(".typepython/cache"),
                 &IncrementalState::default(),
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2286,22 +2646,29 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
             fs::write(
                 project_dir.join(".typepython/build/app/__init__.py"),
                 "class Box:\n    @classmethod\n    def build(cls) -> None:\n        pass\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::write(
                 project_dir.join(".typepython/build/app/__init__.pyi"),
                 "class Box:\n    def build(self) -> None: ...\n",
-            ).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
             write_incremental_snapshot(
                 &project_dir.join(".typepython/cache"),
                 &IncrementalState::default(),
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2325,13 +2692,20 @@ mod tests {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_corrupt_incremental_snapshot");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/build/app")).expect("test setup should succeed");
-            fs::create_dir_all(project_dir.join(".typepython/cache")).expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/build/app/py.typed"), "").expect("test setup should succeed");
-            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{not-json\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/cache/snapshot.json"), "{not-json\n")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             verify_build_artifacts(
@@ -2351,6 +2725,182 @@ mod tests {
     }
 
     #[test]
+    fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
+        let project_dir =
+            temp_project_dir("verify_packaged_artifacts_accepts_matching_wheel_and_sdist");
+        let diagnostics = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "def build_user() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "def build_user() -> int: ...\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+            let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+            write_zip_archive(
+                &wheel_path,
+                &[
+                    ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
+                    ("app/__init__.pyi", "def build_user() -> int: ...\n"),
+                    ("app/py.typed", ""),
+                    ("type_python-0.1.0.dist-info/METADATA", "Metadata-Version: 2.1\n"),
+                ],
+            );
+            write_tar_gz_archive(
+                &sdist_path,
+                "type-python-0.1.0",
+                &[
+                    ("app/__init__.py", "def build_user() -> int:\n    return 1\n"),
+                    ("app/__init__.pyi", "def build_user() -> int: ...\n"),
+                    ("app/py.typed", ""),
+                    ("README.md", "type-python\n"),
+                ],
+            );
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_packaged_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+                &[
+                    SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path },
+                    SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path },
+                ],
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn verify_packaged_artifacts_reports_missing_stub_in_wheel() {
+        let project_dir =
+            temp_project_dir("verify_packaged_artifacts_reports_missing_stub_in_wheel");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+            write_zip_archive(&wheel_path, &[("app/__init__.py", "pass\n"), ("app/py.typed", "")]);
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_packaged_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+                &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing published file `app/__init__.pyi`"));
+    }
+
+    #[test]
+    fn verify_packaged_artifacts_reports_divergent_runtime_in_sdist() {
+        let project_dir =
+            temp_project_dir("verify_packaged_artifacts_reports_divergent_runtime_in_sdist");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.py"),
+                "def build_user() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "def build_user() -> int: ...\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+            write_tar_gz_archive(
+                &sdist_path,
+                "type-python-0.1.0",
+                &[
+                    ("app/__init__.py", "def build_user() -> int:\n    return 2\n"),
+                    ("app/__init__.pyi", "def build_user() -> int: ...\n"),
+                    ("app/py.typed", ""),
+                ],
+            );
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_packaged_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+                &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("contains `app/__init__.py` that diverges"));
+    }
+
+    #[test]
+    fn verify_command_parses_supplied_artifact_flags() {
+        let cli = Cli::parse_from([
+            "typepython",
+            "verify",
+            "--project",
+            "examples/hello-world",
+            "--wheel",
+            "dist/pkg.whl",
+            "--sdist",
+            "dist/pkg.tar.gz",
+        ]);
+
+        let super::Command::Verify(args) = cli.command else {
+            panic!("expected verify command");
+        };
+        let supplied = supplied_verify_artifacts(&args);
+        assert_eq!(supplied.len(), 2);
+        assert!(supplied.iter().any(|artifact| {
+            matches!(artifact.kind, SuppliedArtifactKind::Wheel)
+                && artifact.path == PathBuf::from("dist/pkg.whl")
+        }));
+        assert!(supplied.iter().any(|artifact| {
+            matches!(artifact.kind, SuppliedArtifactKind::Sdist)
+                && artifact.path == PathBuf::from("dist/pkg.tar.gz")
+        }));
+    }
+
+    #[test]
     fn run_pipeline_reports_incomplete_public_surface_when_required() {
         let project_dir =
             temp_project_dir("run_pipeline_reports_incomplete_public_surface_when_required");
@@ -2359,11 +2909,13 @@ mod tests {
             fs::write(
                 project_dir.join("typepython.toml"),
                 "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/__init__.tpy"),
                 "def leak(value: dynamic) -> int:\n    return 0\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             run_pipeline(&config).expect("test setup should succeed").diagnostics.as_text()
@@ -2383,11 +2935,13 @@ mod tests {
             fs::write(
                 project_dir.join("typepython.toml"),
                 "[project]\nsrc = [\"src\"]\n\n[typing]\nrequire_known_public_types = true\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/__init__.tpy"),
                 "def _leak(value: dynamic) -> int:\n    return 0\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
 
             run_pipeline(&config).expect("test setup should succeed").diagnostics
@@ -2402,7 +2956,8 @@ mod tests {
         let project_dir =
             temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
         let rendered = {
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
@@ -2422,7 +2977,8 @@ mod tests {
             fs::write(
                 project_dir.join("typepython.toml"),
                 "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             let mut diagnostics = DiagnosticReport::default();
             diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
@@ -2446,11 +3002,13 @@ mod tests {
                         (String::from("pkg.b"), 20),
                     ]),
                 },
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
 
             (
                 snapshot_path,
-                fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json")).expect("test setup should succeed"),
+                fs::read_to_string(project_dir.join(".typepython/cache/snapshot.json"))
+                    .expect("test setup should succeed"),
             )
         };
         remove_temp_project_dir(&project_dir);
@@ -2486,7 +3044,8 @@ mod tests {
             ).expect("test setup should succeed");
             #[cfg(unix)]
             {
-                let mut permissions = fs::metadata(&fake_python).expect("test setup should succeed").permissions();
+                let mut permissions =
+                    fs::metadata(&fake_python).expect("test setup should succeed").permissions();
                 permissions.set_mode(0o755);
                 fs::set_permissions(&fake_python, permissions).expect("test setup should succeed");
             }
@@ -2496,9 +3055,11 @@ mod tests {
                 runtime_path: Some(project_dir.join("out/app/__init__.py")),
                 stub_path: None,
             }];
-            fs::write(project_dir.join("out/app/__init__.py"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("out/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
 
-            let compiled = compile_runtime_bytecode(&config, &artifacts).expect("test setup should succeed");
+            let compiled =
+                compile_runtime_bytecode(&config, &artifacts).expect("test setup should succeed");
             let log = fs::read_to_string(&log_path).expect("test setup should succeed");
             (compiled, log)
         };
@@ -2517,7 +3078,8 @@ mod tests {
             temp_project_dir("watch_targets_include_config_and_existing_source_roots");
         let targets = {
             fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             watch_targets(&config)
         };
@@ -2554,14 +3116,16 @@ mod tests {
             temp_project_dir("build_migration_report_counts_file_coverage_and_boundaries");
         let report = {
             fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/__init__.tpy"),
                 "def typed(value: int) -> int:\n    return value\n\ndef untyped(value) -> int:\n    return 0\n\nleak: dynamic = 1\n",
             ).expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             let discovery = collect_source_paths(&config).expect("test setup should succeed");
-            let syntax_trees = load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+            let syntax_trees =
+                load_syntax_trees(&discovery.sources).expect("test setup should succeed");
             build_migration_report(&config, &syntax_trees)
         };
         remove_temp_project_dir(&project_dir);
@@ -2580,23 +3144,29 @@ mod tests {
             temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
         let report = {
             fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
-            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n").expect("test setup should succeed");
-            fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n").expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n")
+                .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/a.tpy"),
                 "def untyped(value) -> int:\n    return 0\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/b.tpy"),
                 "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             fs::write(
                 project_dir.join("src/app/c.tpy"),
                 "def clean(value: int) -> int:\n    return value\n",
-            ).expect("test setup should succeed");
+            )
+            .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             let discovery = collect_source_paths(&config).expect("test setup should succeed");
-            let syntax_trees = load_syntax_trees(&discovery.sources).expect("test setup should succeed");
+            let syntax_trees =
+                load_syntax_trees(&discovery.sources).expect("test setup should succeed");
             build_migration_report(&config, &syntax_trees)
         };
         remove_temp_project_dir(&project_dir);
@@ -2620,5 +3190,45 @@ mod tests {
         if path.exists() {
             fs::remove_dir_all(path).expect("temp project directory should be removed");
         }
+    }
+
+    fn write_zip_archive(path: &Path, files: &[(&str, &str)]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("archive parent should be created");
+        }
+        let file = fs::File::create(path).expect("zip archive should be created");
+        let mut writer = ZipWriter::new(file);
+        let options = FileOptions::default();
+        for (relative_path, contents) in files {
+            writer
+                .start_file(relative_path.replace('\\', "/"), options)
+                .expect("zip file entry should be created");
+            std::io::Write::write_all(&mut writer, contents.as_bytes())
+                .expect("zip file entry should be written");
+        }
+        writer.finish().expect("zip archive should finish");
+    }
+
+    fn write_tar_gz_archive(path: &Path, root: &str, files: &[(&str, &str)]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("archive parent should be created");
+        }
+        let file = fs::File::create(path).expect("tar.gz archive should be created");
+        let encoder = GzEncoder::new(file, Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        for (relative_path, contents) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_mode(0o644);
+            header.set_size(contents.len() as u64);
+            header.set_cksum();
+            builder
+                .append_data(
+                    &mut header,
+                    format!("{}/{}", root, relative_path.replace('\\', "/")),
+                    contents.as_bytes(),
+                )
+                .expect("tar.gz entry should be written");
+        }
+        builder.finish().expect("tar.gz archive should finish");
     }
 }
