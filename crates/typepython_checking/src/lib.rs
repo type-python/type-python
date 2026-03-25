@@ -170,9 +170,12 @@ pub fn check_with_options(
             diagnostics.push(implementation_violation);
         }
         if enable_sealed_exhaustiveness {
-            for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-                diagnostics.push(match_violation);
-            }
+        for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+            diagnostics.push(match_violation);
+        }
+        for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+            diagnostics.push(match_violation);
+        }
         }
         for conditional_return_diagnostic in conditional_return_coverage_diagnostics(node) {
             diagnostics.push(conditional_return_diagnostic);
@@ -2018,6 +2021,10 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
         return branches.into_iter().any(|branch| direct_type_matches_normalized(&branch, actual));
     }
 
+    if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
+        return true;
+    }
+
     match (split_generic_type(expected), split_generic_type(actual)) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
             if expected_head == actual_head && expected_args.len() == actual_args.len() =>
@@ -2028,6 +2035,12 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
         }
         _ => false,
     }
+}
+
+fn enum_member_owner_name(text: &str) -> Option<String> {
+    let inner = text.strip_prefix("Literal[")?.strip_suffix(']')?;
+    let (owner, _member) = inner.rsplit_once('.')?;
+    Some(normalize_type_text(owner))
 }
 
 fn union_branches(text: &str) -> Option<Vec<String>> {
@@ -3401,7 +3414,7 @@ fn resolve_direct_member_reference_type(
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let member = find_owned_value_declaration(nodes, class_node, class_decl, member_name)?;
     if is_enum_like_class(nodes, class_node, class_decl) {
-        return Some(class_decl.name.clone());
+        return Some(format!("Literal[{}.{}]", class_decl.name, member_name));
     }
     let detail = rewrite_imported_typing_aliases(
         node,
@@ -3427,14 +3440,28 @@ fn is_enum_like_class(
             base.as_str(),
             "Enum"
                 | "IntEnum"
+                | "StrEnum"
                 | "Flag"
                 | "IntFlag"
                 | "enum.Enum"
                 | "enum.IntEnum"
+                | "enum.StrEnum"
                 | "enum.Flag"
                 | "enum.IntFlag"
         ) || resolve_direct_base(nodes, node, base)
             .is_some_and(|(base_node, base_decl)| is_enum_like_class(nodes, base_node, base_decl))
+    })
+}
+
+fn is_flag_enum_like_class(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> bool {
+    declaration.bases.iter().any(|base| {
+        matches!(base.as_str(), "Flag" | "IntFlag" | "enum.Flag" | "enum.IntFlag")
+            || resolve_direct_base(nodes, node, base)
+                .is_some_and(|(base_node, base_decl)| is_flag_enum_like_class(nodes, base_node, base_decl))
     })
 }
 
@@ -6129,6 +6156,75 @@ fn sealed_match_exhaustiveness_diagnostics(
         .collect()
 }
 
+fn enum_match_exhaustiveness_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.matches
+        .iter()
+        .filter_map(|match_site| {
+            if match_site.cases.iter().any(|case| {
+                !case.has_guard
+                    && case
+                        .patterns
+                        .iter()
+                        .any(|pattern| matches!(pattern, typepython_binding::MatchPatternSite::Wildcard))
+            }) {
+                return None;
+            }
+
+            let subject_type = normalize_type_text(&resolve_match_subject_type(node, nodes, match_site)?);
+            let enum_type = enum_member_owner_name(&subject_type).unwrap_or(subject_type);
+            let (enum_node, enum_decl) = resolve_direct_base(nodes, node, &enum_type)?;
+            if !is_enum_like_class(nodes, enum_node, enum_decl)
+                || is_flag_enum_like_class(nodes, enum_node, enum_decl)
+            {
+                return None;
+            }
+
+            let members = enum_node
+                .declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.kind == DeclarationKind::Value
+                        && declaration.owner.as_ref().is_some_and(|owner| owner.name == enum_decl.name)
+                })
+                .map(|declaration| declaration.name.clone())
+                .collect::<BTreeSet<_>>();
+            if members.is_empty() {
+                return None;
+            }
+
+            let mut covered = BTreeSet::new();
+            for case in match_site.cases.iter().filter(|case| !case.has_guard) {
+                for pattern in &case.patterns {
+                    if let Some(member_name) = enum_member_name_from_pattern(pattern, &enum_decl.name) {
+                        covered.insert(member_name);
+                    }
+                }
+            }
+
+            let missing = members
+                .into_iter()
+                .filter(|member| !covered.contains(member))
+                .collect::<Vec<_>>();
+            if missing.is_empty() {
+                return None;
+            }
+
+            Some(Diagnostic::error(
+                "TPY4009",
+                format!(
+                    "non-exhaustive `match` over enum `{}` in module `{}`; missing members: {}",
+                    enum_decl.name,
+                    node.module_path.display(),
+                    missing.join(", ")
+                ),
+            ))
+        })
+        .collect()
+}
+
 fn resolve_match_subject_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -6258,6 +6354,17 @@ fn pattern_class_name(pattern: &typepython_binding::MatchPatternSite) -> Option<
         typepython_binding::MatchPatternSite::Class(name) => Some(name.as_str()),
         _ => None,
     }
+}
+
+fn enum_member_name_from_pattern(
+    pattern: &typepython_binding::MatchPatternSite,
+    enum_name: &str,
+) -> Option<String> {
+    let typepython_binding::MatchPatternSite::Literal(value) = pattern else {
+        return None;
+    };
+    let (owner, member) = value.rsplit_once('.')?;
+    (owner == enum_name).then(|| member.to_owned())
 }
 
 fn is_interface_like_declaration(
@@ -22618,6 +22725,285 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_strenum_member_access_as_enum_type() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("StrEnum"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("enum.StrEnum"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Color"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("StrEnum")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("RED"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("str")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Color"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("()->Color"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("Color")),
+                    value_member_name: Some(String::from("RED")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_non_exhaustive_enum_match() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Enum"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("enum.Enum"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Color"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Enum")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("RED"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Color"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("BLUE"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Color"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(color:Color)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: vec![typepython_binding::MatchSite {
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    subject_type: Some(String::new()),
+                    subject_is_awaited: false,
+                    subject_callee: None,
+                    subject_name: Some(String::from("color")),
+                    subject_member_owner_name: None,
+                    subject_member_name: None,
+                    subject_member_through_instance: false,
+                    subject_method_owner_name: None,
+                    subject_method_name: None,
+                    subject_method_through_instance: false,
+                    cases: vec![typepython_binding::MatchCaseSite {
+                        patterns: vec![typepython_binding::MatchPatternSite::Literal(String::from(
+                            "Color.RED",
+                        ))],
+                        has_guard: false,
+                        line: 3,
+                    }],
+                    line: 2,
+                }],
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4009"));
+        assert!(rendered.contains("non-exhaustive `match` over enum `Color`"));
+        assert!(rendered.contains("missing members: BLUE"));
     }
 
     #[test]
