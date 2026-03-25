@@ -178,6 +178,9 @@ pub struct ValueStatement {
     pub value_method_owner_name: Option<String>,
     pub value_method_name: Option<String>,
     pub value_method_through_instance: bool,
+    pub value_subscript_target: Option<Box<DirectExprMetadata>>,
+    pub value_subscript_string_key: Option<String>,
+    pub value_subscript_index: Option<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub is_final: bool,
@@ -233,6 +236,9 @@ pub struct ReturnStatement {
     pub value_method_owner_name: Option<String>,
     pub value_method_name: Option<String>,
     pub value_method_through_instance: bool,
+    pub value_subscript_target: Option<Box<DirectExprMetadata>>,
+    pub value_subscript_string_key: Option<String>,
+    pub value_subscript_index: Option<String>,
     pub line: usize,
 }
 
@@ -249,6 +255,9 @@ pub struct YieldStatement {
     pub value_method_owner_name: Option<String>,
     pub value_method_name: Option<String>,
     pub value_method_through_instance: bool,
+    pub value_subscript_target: Option<Box<DirectExprMetadata>>,
+    pub value_subscript_string_key: Option<String>,
+    pub value_subscript_index: Option<String>,
     pub is_yield_from: bool,
     pub line: usize,
 }
@@ -435,6 +444,9 @@ pub struct DirectExprMetadata {
     pub value_method_owner_name: Option<String>,
     pub value_method_name: Option<String>,
     pub value_method_through_instance: bool,
+    pub value_subscript_target: Option<Box<DirectExprMetadata>>,
+    pub value_subscript_string_key: Option<String>,
+    pub value_subscript_index: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -884,6 +896,7 @@ fn collect_frozen_field_mutation_sites_in_suite(
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
         sites.extend(extract_frozen_field_mutation_sites_from_stmt(
+            source,
             stmt,
             line,
             owner_name,
@@ -1018,6 +1031,7 @@ fn collect_frozen_field_mutation_sites_in_suite(
 }
 
 fn extract_frozen_field_mutation_sites_from_stmt(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: Option<&str>,
@@ -1029,6 +1043,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
             .iter()
             .filter_map(|target| {
                 extract_frozen_field_mutation_site(
+                    source,
                     target,
                     FrozenFieldMutationKind::Assignment,
                     line,
@@ -1038,6 +1053,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
             })
             .collect(),
         Stmt::AugAssign(assign) => extract_frozen_field_mutation_site(
+            source,
             &assign.target,
             FrozenFieldMutationKind::AugmentedAssignment,
             line,
@@ -1051,6 +1067,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
             .iter()
             .filter_map(|target| {
                 extract_frozen_field_mutation_site(
+                    source,
                     target,
                     FrozenFieldMutationKind::Delete,
                     line,
@@ -1064,6 +1081,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
 }
 
 fn extract_frozen_field_mutation_site(
+    source: &str,
     expr: &Expr,
     kind: FrozenFieldMutationKind,
     line: usize,
@@ -1076,7 +1094,7 @@ fn extract_frozen_field_mutation_site(
     Some(FrozenFieldMutationSite {
         kind,
         field_name: attribute.attr.as_str().to_owned(),
-        target: extract_direct_expr_metadata(&attribute.value),
+        target: extract_direct_expr_metadata(source, &attribute.value),
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         line,
@@ -1158,7 +1176,7 @@ fn extract_dataclass_transform_field(
         name: name.id.as_str().to_owned(),
         annotation: slice_range(source, assign.annotation.range())?.to_owned(),
         value_type: value.map(infer_literal_arg_type),
-        value_metadata: value.map(extract_direct_expr_metadata),
+        value_metadata: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         has_default: value.is_some(),
         is_class_var: is_classvar_annotation(&assign.annotation),
         field_specifier_name: field_specifier.as_ref().and_then(|site| site.name.clone()),
@@ -1785,7 +1803,7 @@ fn extract_typed_dict_mutation_site(
     Some(TypedDictMutationSite {
         kind,
         key: extract_string_literal_value(source, &subscript.slice),
-        target: extract_direct_expr_metadata(&subscript.value),
+        target: extract_direct_expr_metadata(source, &subscript.value),
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         line,
@@ -2258,7 +2276,7 @@ fn extract_typed_dict_literal_site(
         .map(|item| TypedDictLiteralEntry {
             key: item.key.as_ref().and_then(|key| extract_string_literal_value(source, key)),
             is_expansion: item.key.is_none(),
-            value: extract_direct_expr_metadata(&item.value),
+            value: extract_direct_expr_metadata(source, &item.value),
         })
         .collect::<Vec<_>>();
     Some(TypedDictLiteralSite {
@@ -3174,13 +3192,13 @@ fn extract_ast_backed_statements(
         ) {
             statements.push(statement);
         }
-        if let Some(call_statement) = extract_supplemental_call_statement(stmt, line) {
+        if let Some(call_statement) = extract_supplemental_call_statement(source, stmt, line) {
             statements.push(call_statement);
         }
-        if let Some(method_call) = extract_method_call_statement(stmt, line) {
+        if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
             statements.push(method_call);
         }
-        if let Some(member_access) = extract_member_access_statement(stmt, line) {
+        if let Some(member_access) = extract_member_access_statement(source, stmt, line) {
             statements.push(member_access);
         }
     }
@@ -3317,7 +3335,7 @@ fn extract_ast_backed_statement(
         Stmt::Assign(stmt) => {
             let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
             if !names.is_empty() {
-                let value = extract_direct_expr_metadata(&stmt.value);
+                let value = extract_direct_expr_metadata(source, &stmt.value);
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: None,
@@ -3331,6 +3349,9 @@ fn extract_ast_backed_statement(
                     value_method_owner_name: value.value_method_owner_name,
                     value_method_name: value.value_method_name,
                     value_method_through_instance: value.value_method_through_instance,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -3344,8 +3365,11 @@ fn extract_ast_backed_statement(
         Stmt::AnnAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
             if !names.is_empty() {
-                let value = stmt.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
-                    DirectExprMetadata {
+                let value = stmt
+                    .value
+                    .as_deref()
+                    .map(|expr| extract_direct_expr_metadata(source, expr))
+                    .unwrap_or(DirectExprMetadata {
                         value_type: None,
                         is_awaited: false,
                         value_callee: None,
@@ -3356,8 +3380,10 @@ fn extract_ast_backed_statement(
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
-                    },
-                );
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                    });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
@@ -3371,6 +3397,9 @@ fn extract_ast_backed_statement(
                     value_method_owner_name: value.value_method_owner_name,
                     value_method_name: value.value_method_name,
                     value_method_through_instance: value.value_method_through_instance,
+                    value_subscript_target: value.value_subscript_target,
+                    value_subscript_string_key: value.value_subscript_string_key,
+                    value_subscript_index: value.value_subscript_index,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: is_final_annotation(&stmt.annotation),
@@ -3433,7 +3462,7 @@ fn extract_ast_backed_statement(
                 line,
             }))
         }
-        Stmt::Expr(stmt) => extract_call_statement(&stmt.value, line),
+        Stmt::Expr(stmt) => extract_call_statement(source, &stmt.value, line),
         _ => None,
     }
 }
@@ -3547,7 +3576,7 @@ fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl Fn
     }
 }
 
-fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     let Expr::Call(call) = expr else {
         return None;
     };
@@ -3559,7 +3588,12 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
         callee: name.id.as_str().to_owned(),
         arg_count: call.arguments.args.len(),
         arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
-        arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
+        arg_values: call
+            .arguments
+            .args
+            .iter()
+            .map(|expr| extract_direct_expr_metadata(source, expr))
+            .collect(),
         keyword_names: call
             .arguments
             .keywords
@@ -3578,13 +3612,17 @@ fn extract_call_statement(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
             .keywords
             .iter()
             .filter(|keyword| keyword.arg.is_some())
-            .map(|keyword| extract_direct_expr_metadata(&keyword.value))
+            .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
             .collect(),
         line,
     }))
 }
 
-fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+fn extract_method_call_statement(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+) -> Option<SyntaxStatement> {
     let expr = match stmt {
         Stmt::Expr(expr) => expr.value.as_ref(),
         Stmt::Assign(assign) => &assign.value,
@@ -3606,7 +3644,12 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
             through_instance: false,
             arg_count: call.arguments.args.len(),
             arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
-            arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
+            arg_values: call
+                .arguments
+                .args
+                .iter()
+                .map(|expr| extract_direct_expr_metadata(source, expr))
+                .collect(),
             keyword_names: call
                 .arguments
                 .keywords
@@ -3625,7 +3668,7 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                 .keywords
                 .iter()
                 .filter(|keyword| keyword.arg.is_some())
-                .map(|keyword| extract_direct_expr_metadata(&keyword.value))
+                .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
                 .collect(),
             line,
         })),
@@ -3639,7 +3682,12 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                 through_instance: true,
                 arg_count: call.arguments.args.len(),
                 arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
-                arg_values: call.arguments.args.iter().map(extract_direct_expr_metadata).collect(),
+                arg_values: call
+                    .arguments
+                    .args
+                    .iter()
+                    .map(|expr| extract_direct_expr_metadata(source, expr))
+                    .collect(),
                 keyword_names: call
                     .arguments
                     .keywords
@@ -3658,7 +3706,7 @@ fn extract_method_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxState
                     .keywords
                     .iter()
                     .filter(|keyword| keyword.arg.is_some())
-                    .map(|keyword| extract_direct_expr_metadata(&keyword.value))
+                    .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
                     .collect(),
                 line,
             }))
@@ -3677,28 +3725,41 @@ fn infer_literal_arg_type(expr: &Expr) -> String {
     }
 }
 
-fn extract_supplemental_call_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+fn extract_supplemental_call_statement(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+) -> Option<SyntaxStatement> {
     match stmt {
-        Stmt::Assign(assign) => extract_call_statement(&assign.value, line),
+        Stmt::Assign(assign) => extract_call_statement(source, &assign.value, line),
         Stmt::AnnAssign(assign) => {
-            assign.value.as_deref().and_then(|value| extract_call_statement(value, line))
+            assign.value.as_deref().and_then(|value| extract_call_statement(source, value, line))
         }
         _ => None,
     }
 }
 
-fn extract_member_access_statement(stmt: &Stmt, line: usize) -> Option<SyntaxStatement> {
+fn extract_member_access_statement(
+    source: &str,
+    stmt: &Stmt,
+    line: usize,
+) -> Option<SyntaxStatement> {
     match stmt {
-        Stmt::Expr(expr) => extract_member_access_from_expr(&expr.value, line),
-        Stmt::Assign(assign) => extract_member_access_from_expr(&assign.value, line),
-        Stmt::AnnAssign(assign) => {
-            assign.value.as_deref().and_then(|value| extract_member_access_from_expr(value, line))
-        }
+        Stmt::Expr(expr) => extract_member_access_from_expr(source, &expr.value, line),
+        Stmt::Assign(assign) => extract_member_access_from_expr(source, &assign.value, line),
+        Stmt::AnnAssign(assign) => assign
+            .value
+            .as_deref()
+            .and_then(|value| extract_member_access_from_expr(source, value, line)),
         _ => None,
     }
 }
 
-fn extract_member_access_from_expr(expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+fn extract_member_access_from_expr(
+    _source: &str,
+    expr: &Expr,
+    line: usize,
+) -> Option<SyntaxStatement> {
     let Expr::Attribute(attribute) = expr else {
         return None;
     };
@@ -3854,7 +3915,7 @@ fn collect_return_statements(
                 };
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
                 if let Some(return_statement) =
-                    extract_return_statement(stmt, line, owner_name, owner_type_name)
+                    extract_return_statement(source, stmt, line, owner_name, owner_type_name)
                 {
                     statements.push(return_statement);
                 }
@@ -3876,6 +3937,7 @@ fn collect_yield_statements(
                     let line =
                         offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
                     if let Some(yield_statement) = extract_yield_statement(
+                        source,
                         body_stmt,
                         line,
                         function.name.as_str(),
@@ -4374,7 +4436,7 @@ fn collect_for_statements(
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
                 if let Some(for_statement) =
-                    extract_for_statement(stmt, line, owner_name, owner_type_name)
+                    extract_for_statement(source, stmt, line, owner_name, owner_type_name)
                 {
                     statements.push(for_statement);
                 }
@@ -4423,7 +4485,13 @@ fn collect_with_statements(
             }
             _ => {
                 let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                statements.extend(extract_with_statements(stmt, line, owner_name, owner_type_name));
+                statements.extend(extract_with_statements(
+                    source,
+                    stmt,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                ));
             }
         }
     }
@@ -4580,6 +4648,7 @@ fn collect_function_body_bare_assignments(
                     let line =
                         offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
                     if let Some(assignment) = extract_function_body_bare_assignment_statement(
+                        source,
                         body_stmt,
                         line,
                         function.name.as_str(),
@@ -4633,18 +4702,23 @@ fn extract_function_body_assignment_statement(
         return None;
     }
     let value =
-        assign.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(DirectExprMetadata {
-            value_type: None,
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-        });
+        assign.value.as_deref().map(|expr| extract_direct_expr_metadata(source, expr)).unwrap_or(
+            DirectExprMetadata {
+                value_type: None,
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+            },
+        );
     Some(SyntaxStatement::Value(ValueStatement {
         names,
         annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
@@ -4658,6 +4732,9 @@ fn extract_function_body_assignment_statement(
         value_method_owner_name: value.value_method_owner_name,
         value_method_name: value.value_method_name,
         value_method_through_instance: value.value_method_through_instance,
+        value_subscript_target: value.value_subscript_target,
+        value_subscript_string_key: value.value_subscript_string_key,
+        value_subscript_index: value.value_subscript_index,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: is_final_annotation(&assign.annotation),
@@ -4667,6 +4744,7 @@ fn extract_function_body_assignment_statement(
 }
 
 fn extract_function_body_bare_assignment_statement(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: &str,
@@ -4679,7 +4757,7 @@ fn extract_function_body_bare_assignment_statement(
     if names.is_empty() {
         return None;
     }
-    let value = extract_direct_expr_metadata(&assign.value);
+    let value = extract_direct_expr_metadata(source, &assign.value);
     Some(SyntaxStatement::Value(ValueStatement {
         names,
         annotation: None,
@@ -4693,6 +4771,9 @@ fn extract_function_body_bare_assignment_statement(
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
+        value_subscript_target: value.value_subscript_target,
+        value_subscript_string_key: value.value_subscript_string_key,
+        value_subscript_index: value.value_subscript_index,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
@@ -4702,6 +4783,7 @@ fn extract_function_body_bare_assignment_statement(
 }
 
 fn extract_yield_statement(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: &str,
@@ -4713,8 +4795,11 @@ fn extract_yield_statement(
 
     let (value, is_yield_from) = match expr_stmt.value.as_ref() {
         Expr::Yield(yield_expr) => (
-            yield_expr.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
-                DirectExprMetadata {
+            yield_expr
+                .value
+                .as_deref()
+                .map(|expr| extract_direct_expr_metadata(source, expr))
+                .unwrap_or(DirectExprMetadata {
                     value_type: None,
                     is_awaited: false,
                     value_callee: None,
@@ -4725,11 +4810,15 @@ fn extract_yield_statement(
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
-                },
-            ),
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                }),
             false,
         ),
-        Expr::YieldFrom(yield_expr) => (extract_direct_expr_metadata(&yield_expr.value), true),
+        Expr::YieldFrom(yield_expr) => {
+            (extract_direct_expr_metadata(source, &yield_expr.value), true)
+        }
         _ => return None,
     };
 
@@ -4745,6 +4834,9 @@ fn extract_yield_statement(
         value_method_owner_name: value.value_method_owner_name,
         value_method_name: value.value_method_name,
         value_method_through_instance: value.value_method_through_instance,
+        value_subscript_target: value.value_subscript_target,
+        value_subscript_string_key: value.value_subscript_string_key,
+        value_subscript_index: value.value_subscript_index,
         is_yield_from,
         line,
     }))
@@ -4760,7 +4852,7 @@ fn extract_match_statement(
     let Stmt::Match(match_stmt) = stmt else {
         return None;
     };
-    let subject = extract_direct_expr_metadata(&match_stmt.subject);
+    let subject = extract_direct_expr_metadata(source, &match_stmt.subject);
     Some(SyntaxStatement::Match(MatchStatement {
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
@@ -4814,6 +4906,7 @@ fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> V
 }
 
 fn extract_for_statement(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: Option<&str>,
@@ -4842,7 +4935,7 @@ fn extract_for_statement(
         }
         _ => return None,
     };
-    let iter = extract_direct_expr_metadata(&for_stmt.iter);
+    let iter = extract_direct_expr_metadata(source, &for_stmt.iter);
     Some(SyntaxStatement::For(ForStatement {
         target_name,
         target_names,
@@ -4863,6 +4956,7 @@ fn extract_for_statement(
 }
 
 fn extract_with_statements(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: Option<&str>,
@@ -4883,7 +4977,7 @@ fn extract_with_statements(
                 Some(_) => return None,
                 None => None,
             };
-            let context = extract_direct_expr_metadata(&item.context_expr);
+            let context = extract_direct_expr_metadata(source, &item.context_expr);
             Some(SyntaxStatement::With(WithStatement {
                 target_name,
                 owner_name: owner_name.map(str::to_owned),
@@ -4930,16 +5024,19 @@ fn extract_except_handler_statement(
 fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-        if let Some(call) = extract_supplemental_call_statement(stmt, line).or_else(|| match stmt {
-            Stmt::Expr(expr) => extract_call_statement(&expr.value, line),
-            _ => None,
-        }) {
+        if let Some(call) =
+            extract_supplemental_call_statement(source, stmt, line).or_else(|| match stmt {
+                Stmt::Expr(expr) => extract_call_statement(source, &expr.value, line),
+                _ => None,
+            })
+        {
             statements.push(call);
         }
     }
 }
 
 fn extract_return_statement(
+    source: &str,
     stmt: &Stmt,
     line: usize,
     owner_name: &str,
@@ -4949,8 +5046,11 @@ fn extract_return_statement(
         return None;
     };
 
-    let value = return_stmt.value.as_deref().map(extract_direct_expr_metadata).unwrap_or(
-        DirectExprMetadata {
+    let value = return_stmt
+        .value
+        .as_deref()
+        .map(|expr| extract_direct_expr_metadata(source, expr))
+        .unwrap_or(DirectExprMetadata {
             value_type: None,
             is_awaited: false,
             value_callee: None,
@@ -4961,8 +5061,10 @@ fn extract_return_statement(
             value_method_owner_name: None,
             value_method_name: None,
             value_method_through_instance: false,
-        },
-    );
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+        });
 
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
@@ -4977,13 +5079,16 @@ fn extract_return_statement(
         value_method_owner_name: value.value_method_owner_name,
         value_method_name: value.value_method_name,
         value_method_through_instance: value.value_method_through_instance,
+        value_subscript_target: value.value_subscript_target,
+        value_subscript_string_key: value.value_subscript_string_key,
+        value_subscript_index: value.value_subscript_index,
         line,
     }))
 }
 
-fn extract_direct_expr_metadata(expr: &Expr) -> DirectExprMetadata {
+fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata {
     if let Expr::Await(await_expr) = expr {
-        let mut metadata = extract_direct_expr_metadata(&await_expr.value);
+        let mut metadata = extract_direct_expr_metadata(source, &await_expr.value);
         metadata.is_awaited = true;
         return metadata;
     }
@@ -5000,6 +5105,33 @@ fn extract_direct_expr_metadata(expr: &Expr) -> DirectExprMetadata {
             value_method_owner_name: Some(owner_name),
             value_method_name: Some(method_name),
             value_method_through_instance: through_instance,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+        };
+    }
+
+    if let Expr::Subscript(subscript) = expr {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: Some(Box::new(extract_direct_expr_metadata(
+                source,
+                &subscript.value,
+            ))),
+            value_subscript_string_key: extract_string_literal_value(source, &subscript.slice),
+            value_subscript_index: match infer_literal_arg_type(&subscript.slice).as_str() {
+                "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
+                _ => None,
+            },
         };
     }
 
@@ -5018,6 +5150,9 @@ fn extract_direct_expr_metadata(expr: &Expr) -> DirectExprMetadata {
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
     }
 }
 
@@ -5936,13 +6071,13 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssertStatement, CallStatement, ClassMember, ClassMemberKind, ExceptionHandlerStatement,
-        ForStatement, FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
-        ImportStatement, InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
-        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions,
-        ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
-        TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
-        YieldStatement, parse, parse_with_options,
+        AssertStatement, CallStatement, ClassMember, ClassMemberKind, DirectExprMetadata,
+        ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
+        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, MatchCaseStatement,
+        MatchPattern, MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
+        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
+        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
+        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -6332,6 +6467,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 })
             ]
@@ -6514,6 +6652,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 5,
                 }),
             ]
@@ -6575,6 +6716,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6594,6 +6738,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6632,6 +6779,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6661,6 +6811,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6680,6 +6833,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6743,6 +6899,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -6772,6 +6931,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -6831,6 +6993,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -6850,6 +7015,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -6918,6 +7086,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6969,6 +7140,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
@@ -6981,6 +7155,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     },
                 ],
                 line: 1,
@@ -7016,6 +7193,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
@@ -7028,6 +7208,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     },
                 ],
                 keyword_names: Vec::new(),
@@ -7113,6 +7296,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
             ]
@@ -7158,6 +7344,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -7184,6 +7373,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 5,
                 }),
             ]
@@ -7227,6 +7419,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
             ]
@@ -7278,6 +7473,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
             ]
@@ -7343,6 +7541,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     }],
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
@@ -7369,6 +7570,9 @@ mod tests {
                         value_method_owner_name: None,
                         value_method_name: None,
                         value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
                     }],
                     line: 2,
                 }),
@@ -7591,6 +7795,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 8,
                 }),
             ]
@@ -7632,6 +7839,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: true,
@@ -7769,6 +7979,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7919,6 +8132,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
             ]
@@ -7964,6 +8180,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -7990,6 +8209,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 5,
                 }),
             ]
@@ -8034,6 +8256,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     is_yield_from: false,
                     line: 2,
                 }),
@@ -8060,6 +8285,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     is_yield_from: true,
                     line: 5,
                 }),
@@ -8114,6 +8342,9 @@ mod tests {
                     value_method_owner_name: Some(String::from("box")),
                     value_method_name: Some(String::from("get")),
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -8133,6 +8364,9 @@ mod tests {
                     value_method_owner_name: Some(String::from("box")),
                     value_method_name: Some(String::from("get")),
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 3,
                 }),
             ]
@@ -8176,6 +8410,9 @@ mod tests {
                     value_method_owner_name: Some(String::from("make_box")),
                     value_method_name: Some(String::from("get")),
                     value_method_through_instance: true,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 2,
                 }),
             ]
@@ -8246,6 +8483,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 4,
                 }),
             ]
@@ -8316,6 +8556,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 4,
                 }),
             ]
@@ -8385,6 +8628,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 4,
                 }),
             ]
@@ -8535,6 +8781,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 4,
                 }),
             ]
@@ -8588,6 +8837,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 5,
                 }),
             ]
@@ -8668,6 +8920,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 7,
                 }),
             ]
@@ -8922,6 +9177,9 @@ mod tests {
                     value_method_owner_name: None,
                     value_method_name: None,
                     value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
                     line: 12,
                 })
             ]
