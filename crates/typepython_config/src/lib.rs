@@ -901,6 +901,48 @@ mod tests {
         assert_eq!(handle.config.resolution.python_executable, None);
     }
 
+    #[test]
+    fn rejects_unknown_typepython_toml_keys_during_load() {
+        let project_dir = temp_project_dir("rejects_unknown_typepython_toml_keys_during_load");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!("[project]\n", "target_python = \"3.10\"\n", "mystery = true\n"),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unknown keys to fail loading");
+        let message = error.to_string();
+        assert!(message.contains("TPY1001"));
+        assert!(message.contains("unknown field `mystery`"));
+    }
+
+    #[test]
+    fn rejects_unknown_embedded_pyproject_keys_during_load() {
+        let project_dir = temp_project_dir("rejects_unknown_embedded_pyproject_keys_during_load");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            concat!(
+                "[tool.typepython.project]\n",
+                "target_python = \"3.10\"\n",
+                "mystery = true\n"
+            ),
+        )
+        .expect("pyproject.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unknown embedded keys to fail loading");
+        let message = error.to_string();
+        assert!(message.contains("TPY1001"));
+        assert!(message.contains("unknown field `mystery`"));
+    }
+
     fn temp_project_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
