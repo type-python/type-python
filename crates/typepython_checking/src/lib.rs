@@ -170,12 +170,12 @@ pub fn check_with_options(
             diagnostics.push(implementation_violation);
         }
         if enable_sealed_exhaustiveness {
-        for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-            diagnostics.push(match_violation);
-        }
-        for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-            diagnostics.push(match_violation);
-        }
+            for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+                diagnostics.push(match_violation);
+            }
+            for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+                diagnostics.push(match_violation);
+            }
         }
         for conditional_return_diagnostic in conditional_return_coverage_diagnostics(node) {
             diagnostics.push(conditional_return_diagnostic);
@@ -251,7 +251,9 @@ fn ambiguous_overload_call_diagnostics(
 
             let applicable = overloads
                 .into_iter()
-                .filter(|declaration| overload_is_applicable(call, declaration))
+                .filter(|declaration| {
+                    overload_is_applicable_with_context(node, nodes, call, declaration)
+                })
                 .collect::<Vec<_>>();
             if applicable.len() < 2 {
                 return None;
@@ -311,36 +313,127 @@ fn resolve_direct_overloads<'a>(
         .collect()
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Declaration) -> bool {
+    let node = typepython_graph::ModuleNode {
+        module_path: std::path::PathBuf::from("<overload-test>"),
+        module_key: String::new(),
+        module_kind: SourceKind::Python,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    overload_is_applicable_with_context(&node, &[], call, declaration)
+}
+
+fn overload_is_applicable_with_context(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    declaration: &Declaration,
+) -> bool {
     let params = direct_signature_params(&declaration.detail).unwrap_or_default();
+    call_signature_params_are_applicable(node, nodes, call, &params)
+}
+
+fn call_signature_params_are_applicable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    params: &[DirectSignatureParam],
+) -> bool {
     let positional_params = params
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
-    if !has_variadic && call.arg_count > positional_params.len() {
+    let starred_positional = resolved_starred_positional_expansions(node, nodes, call);
+    let mut positional_types = call.arg_types.clone();
+    let mut variadic_starred_types = Vec::new();
+    for expansion in &starred_positional {
+        match expansion {
+            PositionalExpansion::Fixed(types) => positional_types.extend(types.clone()),
+            PositionalExpansion::Variadic(element_type) => {
+                variadic_starred_types.push(element_type.clone())
+            }
+        }
+    }
+    if !has_variadic
+        && (positional_types.len() > positional_params.len() || !variadic_starred_types.is_empty())
+    {
         return false;
     }
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
     let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
+    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     if call.keyword_names.iter().any(|keyword| {
         !params.iter().any(|param| param.name == **keyword && !param.positional_only)
             && !accepts_extra_keywords
     }) {
         return false;
     }
+    if keyword_expansions.iter().any(|expansion| match expansion {
+        KeywordExpansion::TypedDict(shape) => shape.fields.keys().any(|key| {
+            !params.iter().any(|param| param.name == *key && !param.positional_only)
+                && !accepts_extra_keywords
+        }),
+        KeywordExpansion::Mapping(_) => !accepts_extra_keywords,
+    }) {
+        return false;
+    }
     if keyword_duplicates_positional_arguments(call, &params) {
+        return false;
+    }
+    let positional_param_names =
+        positional_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
+    if keyword_expansions.iter().any(|expansion| match expansion {
+        KeywordExpansion::TypedDict(shape) => shape.fields.keys().any(|key| {
+            call.keyword_names.iter().any(|existing| existing == key)
+                || positional_param_names
+                    .iter()
+                    .take(positional_types.len())
+                    .any(|name| *name == key.as_str())
+        }),
+        KeywordExpansion::Mapping(_) => false,
+    }) {
         return false;
     }
     if params.iter().enumerate().any(|(index, param)| {
         !param.has_default
             && if param.keyword_only {
                 !provided_keywords.contains(&param.name)
+                    && !keyword_expansions.iter().any(|expansion| match expansion {
+                        KeywordExpansion::TypedDict(shape) => {
+                            shape.fields.get(&param.name).is_some_and(|field| field.required)
+                        }
+                        KeywordExpansion::Mapping(_) => false,
+                    })
             } else if param.variadic || param.keyword_variadic {
                 false
             } else {
-                index >= call.arg_count
-                    && (param.positional_only || !provided_keywords.contains(&param.name))
+                index >= positional_types.len()
+                    && (param.positional_only
+                        || (!provided_keywords.contains(&param.name)
+                            && !keyword_expansions.iter().any(|expansion| match expansion {
+                                KeywordExpansion::TypedDict(shape) => shape
+                                    .fields
+                                    .get(&param.name)
+                                    .is_some_and(|field| field.required),
+                                KeywordExpansion::Mapping(_) => false,
+                            })))
             }
     }) {
         return false;
@@ -352,7 +445,7 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
     let keyword_variadic_type =
         params.iter().find(|param| param.keyword_variadic).map(|param| param.annotation.as_str());
     let positional_ok =
-        call.arg_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
+        positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
             |(arg_ty, param_ty)| {
                 if arg_ty.is_empty() || param_ty.is_empty() {
                     true
@@ -360,7 +453,12 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
                     direct_type_matches(param_ty, arg_ty)
                 }
             },
-        ) && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
+        ) && positional_types.iter().skip(positional_params.len()).all(|arg_ty| {
+            let Some(param_ty) = variadic_type else {
+                return false;
+            };
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        }) && variadic_starred_types.iter().all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
             };
@@ -378,9 +476,137 @@ fn overload_is_applicable(call: &typepython_binding::CallSite, declaration: &Dec
             };
             let param_ty = &param_types[index];
             arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+        }) && keyword_expansions.iter().all(|expansion| match expansion {
+            KeywordExpansion::TypedDict(shape) => shape.fields.iter().all(|(key, field)| {
+                if let Some(index) = params.iter().position(|param| param.name == *key) {
+                    let param = &params[index];
+                    if param.positional_only {
+                        return false;
+                    }
+                    if !field.required && !param.has_default {
+                        return false;
+                    }
+                    let param_ty = &param_types[index];
+                    return field.value_type.is_empty()
+                        || param_ty.is_empty()
+                        || direct_type_matches(param_ty, &field.value_type);
+                }
+                let Some(param_ty) = keyword_variadic_type else {
+                    return false;
+                };
+                field.value_type.is_empty()
+                    || param_ty.is_empty()
+                    || direct_type_matches(param_ty, &field.value_type)
+            }),
+            KeywordExpansion::Mapping(value_ty) => {
+                let Some(param_ty) = keyword_variadic_type else {
+                    return false;
+                };
+                value_ty.is_empty()
+                    || param_ty.is_empty()
+                    || direct_type_matches(param_ty, value_ty)
+            }
         });
 
     positional_ok && keyword_ok
+}
+
+#[derive(Debug, Clone)]
+enum PositionalExpansion {
+    Fixed(Vec<String>),
+    Variadic(String),
+}
+
+#[derive(Debug, Clone)]
+enum KeywordExpansion {
+    TypedDict(TypedDictShape),
+    Mapping(String),
+}
+
+fn resolved_starred_positional_expansions(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Vec<PositionalExpansion> {
+    let mut expansions = Vec::new();
+    let count = call.starred_arg_values.len().max(call.starred_arg_types.len());
+    for index in 0..count {
+        let value_type = call
+            .starred_arg_values
+            .get(index)
+            .and_then(|metadata| {
+                resolve_direct_expression_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
+            .unwrap_or_else(|| call.starred_arg_types.get(index).cloned().unwrap_or_default());
+        if let Some(expansion) = parse_positional_expansion(&value_type) {
+            expansions.push(expansion);
+        }
+    }
+    expansions
+}
+
+fn parse_positional_expansion(value_type: &str) -> Option<PositionalExpansion> {
+    let normalized = normalize_type_text(value_type);
+    if normalized == "tuple[()]" {
+        return Some(PositionalExpansion::Fixed(Vec::new()));
+    }
+    let (head, args) = split_generic_type(&normalized)?;
+    match head {
+        "tuple" if args.len() == 2 && args[1] == "..." => {
+            Some(PositionalExpansion::Variadic(args[0].clone()))
+        }
+        "tuple" => Some(PositionalExpansion::Fixed(args)),
+        "list" | "Sequence" if args.len() == 1 => {
+            Some(PositionalExpansion::Variadic(args[0].clone()))
+        }
+        _ => None,
+    }
+}
+
+fn resolved_keyword_expansions(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Vec<KeywordExpansion> {
+    let mut expansions = Vec::new();
+    let count = call.keyword_expansion_values.len().max(call.keyword_expansion_types.len());
+    for index in 0..count {
+        let value_type = call
+            .keyword_expansion_values
+            .get(index)
+            .and_then(|metadata| {
+                resolve_direct_expression_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
+            .unwrap_or_else(|| {
+                call.keyword_expansion_types.get(index).cloned().unwrap_or_default()
+            });
+        if let Some(expansion) = parse_keyword_expansion(node, nodes, &value_type) {
+            expansions.push(expansion);
+        }
+    }
+    expansions
+}
+
+fn parse_keyword_expansion(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    value_type: &str,
+) -> Option<KeywordExpansion> {
+    let normalized = normalize_type_text(value_type);
+    if let Some(shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &normalized) {
+        return Some(KeywordExpansion::TypedDict(shape));
+    }
+    let (head, args) = split_generic_type(&normalized)?;
+    match head {
+        "dict" if args.len() == 2 && args[0] == "str" => {
+            Some(KeywordExpansion::Mapping(args[1].clone()))
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3460,8 +3686,9 @@ fn is_flag_enum_like_class(
 ) -> bool {
     declaration.bases.iter().any(|base| {
         matches!(base.as_str(), "Flag" | "IntFlag" | "enum.Flag" | "enum.IntFlag")
-            || resolve_direct_base(nodes, node, base)
-                .is_some_and(|(base_node, base_decl)| is_flag_enum_like_class(nodes, base_node, base_decl))
+            || resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+                is_flag_enum_like_class(nodes, base_node, base_decl)
+            })
     })
 }
 
@@ -3513,17 +3740,21 @@ fn resolve_direct_method_return_type(
             callee: format!("{}.{}", class_decl.name, method_name),
             arg_count: call.arg_count,
             arg_types: call.arg_types.clone(),
-            arg_values: Vec::new(),
+            arg_values: call.arg_values.clone(),
+            starred_arg_types: call.starred_arg_types.clone(),
+            starred_arg_values: call.starred_arg_values.clone(),
             keyword_names: call.keyword_names.clone(),
             keyword_arg_types: call.keyword_arg_types.clone(),
-            keyword_arg_values: Vec::new(),
+            keyword_arg_values: call.keyword_arg_values.clone(),
+            keyword_expansion_types: call.keyword_expansion_types.clone(),
+            keyword_expansion_values: call.keyword_expansion_values.clone(),
             line: 1,
         };
         let applicable = methods
             .iter()
             .copied()
             .filter(|declaration| {
-                method_overload_is_applicable(&call, declaration, &owner_type_name)
+                method_overload_is_applicable(node, nodes, &call, declaration, &owner_type_name)
             })
             .collect::<Vec<_>>();
         if applicable.len() == 1 {
@@ -3660,9 +3891,13 @@ fn direct_method_call_diagnostics(
             arg_count: call.arg_count,
             arg_types: call.arg_types.clone(),
             arg_values: call.arg_values.clone(),
+            starred_arg_types: call.starred_arg_types.clone(),
+            starred_arg_values: call.starred_arg_values.clone(),
             keyword_names: call.keyword_names.clone(),
             keyword_arg_types: call.keyword_arg_types.clone(),
             keyword_arg_values: call.keyword_arg_values.clone(),
+            keyword_expansion_types: call.keyword_expansion_types.clone(),
+            keyword_expansion_values: call.keyword_expansion_values.clone(),
             line: 1,
         };
 
@@ -3676,7 +3911,13 @@ fn direct_method_call_diagnostics(
                 .iter()
                 .copied()
                 .filter(|declaration| {
-                    method_overload_is_applicable(&direct_call, declaration, &owner_type_name)
+                    method_overload_is_applicable(
+                        node,
+                        nodes,
+                        &direct_call,
+                        declaration,
+                        &owner_type_name,
+                    )
                 })
                 .collect::<Vec<_>>();
             if applicable.len() >= 2 {
@@ -3807,6 +4048,8 @@ fn direct_method_signature_sites(
 }
 
 fn method_overload_is_applicable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     declaration: &Declaration,
     owner_type_name: &str,
@@ -3817,77 +4060,7 @@ fn method_overload_is_applicable(
         typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
         _ => params.into_iter().skip(1).collect(),
     };
-    method_signature_params_are_applicable(call, &params)
-}
-
-fn method_signature_params_are_applicable(
-    call: &typepython_binding::CallSite,
-    params: &[DirectSignatureParam],
-) -> bool {
-    let positional_params = params
-        .iter()
-        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
-        .collect::<Vec<_>>();
-    let has_variadic = params.iter().any(|param| param.variadic);
-    if !has_variadic && call.arg_count > positional_params.len() {
-        return false;
-    }
-    let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
-    let accepts_extra_keywords = params.iter().any(|param| param.keyword_variadic);
-    if call.keyword_names.iter().any(|keyword| {
-        !params.iter().any(|param| param.name == **keyword && !param.positional_only)
-            && !accepts_extra_keywords
-    }) {
-        return false;
-    }
-    if keyword_duplicates_positional_arguments(call, params) {
-        return false;
-    }
-    if params.iter().enumerate().any(|(index, param)| {
-        !param.has_default
-            && if param.keyword_only {
-                !provided_keywords.contains(&param.name)
-            } else if param.variadic || param.keyword_variadic {
-                false
-            } else {
-                index >= call.arg_count
-                    && (param.positional_only || !provided_keywords.contains(&param.name))
-            }
-    }) {
-        return false;
-    }
-
-    let param_types = params.iter().map(|param| param.annotation.as_str()).collect::<Vec<_>>();
-    let variadic_type =
-        params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
-    let keyword_variadic_type =
-        params.iter().find(|param| param.keyword_variadic).map(|param| param.annotation.as_str());
-    let positional_ok =
-        call.arg_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
-            |(arg_ty, param_ty)| {
-                arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-            },
-        ) && call.arg_types.iter().skip(positional_params.len()).all(|arg_ty| {
-            let Some(param_ty) = variadic_type else {
-                return false;
-            };
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-        });
-    let keyword_ok =
-        call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
-            let Some(index) = params.iter().position(|param| param.name == *keyword) else {
-                let Some(param_ty) = keyword_variadic_type else {
-                    return false;
-                };
-                return arg_ty.is_empty()
-                    || param_ty.is_empty()
-                    || direct_type_matches(param_ty, arg_ty);
-            };
-            let param_ty = param_types[index];
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
-        });
-
-    positional_ok && keyword_ok
+    call_signature_params_are_applicable(node, nodes, call, &params)
 }
 
 fn load_direct_method_signatures(
@@ -4081,6 +4254,8 @@ fn direct_call_type_diagnostics(
                 None,
                 None,
                 None,
+                &[],
+                &[],
             )
         })
         .collect()
@@ -4139,7 +4314,11 @@ fn direct_source_function_arity_diagnostic(
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let has_variadic = signature.iter().any(|param| param.variadic);
-    if !has_variadic && call.arg_count > positional_params.len() {
+    let (positional_types, variadic_starred_types) =
+        expanded_positional_arg_types(node, nodes, call);
+    if !has_variadic
+        && (positional_types.len() > positional_params.len() || !variadic_starred_types.is_empty())
+    {
         return Some(Diagnostic::error(
             "TPY4001",
             format!(
@@ -4147,12 +4326,14 @@ fn direct_source_function_arity_diagnostic(
                 call.callee,
                 node.module_path.display(),
                 positional_params.len(),
-                call.arg_count
+                positional_types.len()
             ),
         ));
     }
 
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
+    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
+    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     let missing = signature
         .iter()
         .enumerate()
@@ -4161,25 +4342,32 @@ fn direct_source_function_arity_diagnostic(
                 return false;
             }
             if param.keyword_only {
-                return !provided_keywords.contains(&param.name);
+                return !provided_keywords.contains(&param.name)
+                    && !keyword_expansions.iter().any(|expansion| match expansion {
+                        KeywordExpansion::TypedDict(shape) => {
+                            shape.fields.get(&param.name).is_some_and(|field| field.required)
+                        }
+                        KeywordExpansion::Mapping(_) => false,
+                    });
             }
             if param.variadic || param.keyword_variadic {
                 return false;
             }
-            *index >= call.arg_count && !provided_keywords.contains(&param.name)
+            *index >= positional_types.len()
+                && !provided_keywords.contains(&param.name)
+                && !keyword_expansions.iter().any(|expansion| match expansion {
+                    KeywordExpansion::TypedDict(shape) => {
+                        shape.fields.get(&param.name).is_some_and(|field| field.required)
+                    }
+                    KeywordExpansion::Mapping(_) => false,
+                })
         })
         .map(|(_, param)| param.name.clone())
         .collect::<Vec<_>>();
     let mut missing = missing;
-    if let Some(shape) = unpack_typed_dict_shape_from_signature(node, nodes, signature) {
-        let mut satisfied = positional_params
-            .iter()
-            .take(call.arg_count)
-            .map(|param| param.name.clone())
-            .collect::<BTreeSet<_>>();
-        satisfied.extend(call.keyword_names.iter().cloned());
+    if let Some(shape) = unpack_shape {
         missing.extend(shape.fields.iter().filter_map(|(key, field)| {
-            (field.required && !satisfied.contains(key)).then(|| key.clone())
+            (field.required && !provided_keywords.contains(key)).then(|| key.clone())
         }));
     }
     (!missing.is_empty()).then(|| {
@@ -4207,7 +4395,9 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
     let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
+    let (positional_types, _) = expanded_positional_arg_types(node, nodes, call);
     let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     let mut diagnostics = call.keyword_names
         .iter()
         .filter_map(|keyword| {
@@ -4255,7 +4445,10 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<Vec<_>>();
     for keyword in &call.keyword_names {
-        if positional_param_names.iter().take(call.arg_count).any(|name| *name == keyword.as_str())
+        if positional_param_names
+            .iter()
+            .take(positional_types.len())
+            .any(|name| *name == keyword.as_str())
         {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
@@ -4268,6 +4461,73 @@ fn direct_source_function_keyword_diagnostics(
             ));
         }
     }
+
+    diagnostics.extend(keyword_expansions.into_iter().flat_map(|expansion| match expansion {
+        KeywordExpansion::TypedDict(shape) => shape
+            .fields
+            .iter()
+            .filter_map(|(key, field)| {
+                let duplicate = call.keyword_names.iter().any(|keyword| keyword == key)
+                    || positional_param_names.iter().take(positional_types.len()).any(|name| *name == key.as_str());
+                if duplicate {
+                    return Some(Diagnostic::error(
+                        "TPY4013",
+                        format!(
+                            "call to `{}` in module `{}` expands `**{}` with duplicate key `{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            shape.name,
+                            key
+                        ),
+                    ));
+                }
+                match signature.iter().find(|param| param.name == *key) {
+                    Some(param) if param.positional_only => Some(Diagnostic::error(
+                        "TPY4013",
+                        format!(
+                            "call to `{}` in module `{}` cannot satisfy positional-only parameter `{}` via `**{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            key,
+                            shape.name
+                        ),
+                    )),
+                    Some(param) if !field.required && !param.has_default => Some(Diagnostic::error(
+                        "TPY4013",
+                        format!(
+                            "call to `{}` in module `{}` cannot satisfy required parameter `{}` from optional TypedDict key in `**{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            key,
+                            shape.name
+                        ),
+                    )),
+                    None if !accepts_extra_keywords => Some(Diagnostic::error(
+                        "TPY4013",
+                        format!(
+                            "call to `{}` in module `{}` uses unknown `**{}` key `{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            shape.name,
+                            key
+                        ),
+                    )),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>(),
+        KeywordExpansion::Mapping(value_ty) => (!accepts_extra_keywords).then(|| {
+            Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` cannot expand `**dict[str, {}]` without `**kwargs`",
+                    call.callee,
+                    node.module_path.display(),
+                    value_ty
+                ),
+            )
+        }).into_iter().collect(),
+    }));
 
     diagnostics
 }
@@ -4292,8 +4552,10 @@ fn direct_source_function_type_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let resolved_arg_types = resolved_call_arg_types(node, nodes, call);
     let resolved_keyword_arg_types = resolved_keyword_arg_types(node, nodes, call);
+    let (expanded_arg_types, variadic_starred_types) =
+        expanded_positional_arg_types(node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     let param_types = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
@@ -4314,14 +4576,38 @@ fn direct_source_function_type_diagnostics(
     positional_and_keyword_type_diagnostics(
         node,
         call,
-        &resolved_arg_types,
+        &expanded_arg_types,
         &resolved_keyword_arg_types,
         &param_types,
         &param_names,
         variadic_type,
         keyword_variadic_type,
         unpack_shape.as_ref(),
+        &variadic_starred_types,
+        &keyword_expansions,
     )
+}
+
+fn expanded_positional_arg_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> (Vec<String>, Vec<String>) {
+    let mut positional_types = resolved_call_arg_types(node, nodes, call);
+    if positional_types.len() < call.arg_count {
+        positional_types
+            .extend(std::iter::repeat(String::new()).take(call.arg_count - positional_types.len()));
+    }
+    let mut variadic_starred_types = Vec::new();
+    for expansion in resolved_starred_positional_expansions(node, nodes, call) {
+        match expansion {
+            PositionalExpansion::Fixed(types) => positional_types.extend(types),
+            PositionalExpansion::Variadic(element_type) => {
+                variadic_starred_types.push(element_type)
+            }
+        }
+    }
+    (positional_types, variadic_starred_types)
 }
 
 fn resolved_call_arg_types(
@@ -4374,6 +4660,8 @@ fn positional_and_keyword_type_diagnostics(
     variadic_type: Option<&str>,
     keyword_variadic_type: Option<&str>,
     unpack_shape: Option<&TypedDictShape>,
+    variadic_starred_types: &[String],
+    keyword_expansions: &[KeywordExpansion],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = arg_types
         .iter()
@@ -4405,6 +4693,24 @@ fn positional_and_keyword_type_diagnostics(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where variadic parameter expects `{}`",
+                    call.callee,
+                    node.module_path.display(),
+                    arg_ty,
+                    param_ty
+                ),
+            ));
+        }
+    }
+
+    for arg_ty in variadic_starred_types {
+        let Some(param_ty) = variadic_type else {
+            continue;
+        };
+        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                format!(
+                    "call to `{}` in module `{}` expands `*args` element type `{}` where variadic parameter expects `{}`",
                     call.callee,
                     node.module_path.display(),
                     arg_ty,
@@ -4471,6 +4777,71 @@ fn positional_and_keyword_type_diagnostics(
                     param_ty
                 ),
             ));
+        }
+    }
+
+    for expansion in keyword_expansions {
+        match expansion {
+            KeywordExpansion::TypedDict(shape) => {
+                for (key, field) in &shape.fields {
+                    if let Some(index) = param_names.iter().position(|param| param == key) {
+                        let param_ty = &param_types[index];
+                        if !field.value_type.is_empty()
+                            && !param_ty.is_empty()
+                            && !direct_type_matches(param_ty, &field.value_type)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                "TPY4013",
+                                format!(
+                                    "call to `{}` in module `{}` expands `**{}` key `{}` with type `{}` where parameter expects `{}`",
+                                    call.callee,
+                                    node.module_path.display(),
+                                    shape.name,
+                                    key,
+                                    field.value_type,
+                                    param_ty
+                                ),
+                            ));
+                        }
+                    } else if let Some(param_ty) = keyword_variadic_type {
+                        if !field.value_type.is_empty()
+                            && !param_ty.is_empty()
+                            && !direct_type_matches(param_ty, &field.value_type)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                "TPY4013",
+                                format!(
+                                    "call to `{}` in module `{}` expands `**{}` key `{}` with type `{}` where `**kwargs` expects `{}`",
+                                    call.callee,
+                                    node.module_path.display(),
+                                    shape.name,
+                                    key,
+                                    field.value_type,
+                                    param_ty
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            KeywordExpansion::Mapping(value_ty) => {
+                if let Some(param_ty) = keyword_variadic_type
+                    && !value_ty.is_empty()
+                    && !param_ty.is_empty()
+                    && !direct_type_matches(param_ty, value_ty)
+                {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "call to `{}` in module `{}` expands `**dict[str, {}]` where `**kwargs` expects `{}`",
+                            call.callee,
+                            node.module_path.display(),
+                            value_ty,
+                            param_ty
+                        ),
+                    ));
+                }
+            }
         }
     }
 
@@ -6165,15 +6536,15 @@ fn enum_match_exhaustiveness_diagnostics(
         .filter_map(|match_site| {
             if match_site.cases.iter().any(|case| {
                 !case.has_guard
-                    && case
-                        .patterns
-                        .iter()
-                        .any(|pattern| matches!(pattern, typepython_binding::MatchPatternSite::Wildcard))
+                    && case.patterns.iter().any(|pattern| {
+                        matches!(pattern, typepython_binding::MatchPatternSite::Wildcard)
+                    })
             }) {
                 return None;
             }
 
-            let subject_type = normalize_type_text(&resolve_match_subject_type(node, nodes, match_site)?);
+            let subject_type =
+                normalize_type_text(&resolve_match_subject_type(node, nodes, match_site)?);
             let enum_type = enum_member_owner_name(&subject_type).unwrap_or(subject_type);
             let (enum_node, enum_decl) = resolve_direct_base(nodes, node, &enum_type)?;
             if !is_enum_like_class(nodes, enum_node, enum_decl)
@@ -6187,7 +6558,10 @@ fn enum_match_exhaustiveness_diagnostics(
                 .iter()
                 .filter(|declaration| {
                     declaration.kind == DeclarationKind::Value
-                        && declaration.owner.as_ref().is_some_and(|owner| owner.name == enum_decl.name)
+                        && declaration
+                            .owner
+                            .as_ref()
+                            .is_some_and(|owner| owner.name == enum_decl.name)
                 })
                 .map(|declaration| declaration.name.clone())
                 .collect::<BTreeSet<_>>();
@@ -6198,16 +6572,16 @@ fn enum_match_exhaustiveness_diagnostics(
             let mut covered = BTreeSet::new();
             for case in match_site.cases.iter().filter(|case| !case.has_guard) {
                 for pattern in &case.patterns {
-                    if let Some(member_name) = enum_member_name_from_pattern(pattern, &enum_decl.name) {
+                    if let Some(member_name) =
+                        enum_member_name_from_pattern(pattern, &enum_decl.name)
+                    {
                         covered.insert(member_name);
                     }
                 }
             }
 
-            let missing = members
-                .into_iter()
-                .filter(|member| !covered.contains(member))
-                .collect::<Vec<_>>();
+            let missing =
+                members.into_iter().filter(|member| !covered.contains(member)).collect::<Vec<_>>();
             if missing.is_empty() {
                 return None;
             }
@@ -7749,9 +8123,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -7770,9 +8148,13 @@ mod tests {
             arg_count: 0,
             arg_types: Vec::new(),
             arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
             keyword_names: vec![String::from("value")],
             keyword_arg_types: vec![String::from("None")],
             keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -7805,9 +8187,13 @@ mod tests {
             arg_count: 0,
             arg_types: Vec::new(),
             arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
             keyword_names: vec![String::from("value")],
             keyword_arg_types: vec![String::from("int")],
             keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -7840,9 +8226,13 @@ mod tests {
             arg_count: 3,
             arg_types: vec![String::from("int"), String::from("int"), String::from("int")],
             arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
             keyword_names: Vec::new(),
             keyword_arg_types: Vec::new(),
             keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
             line: 1,
         };
         let declaration = Declaration {
@@ -8050,9 +8440,13 @@ mod tests {
                         arg_count: 0,
                         arg_types: Vec::new(),
                         arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
                         keyword_names: vec![String::from("value")],
                         keyword_arg_types: vec![String::from("str")],
                         keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
                         line: 1,
                     }],
                     member_accesses: Vec::new(),
@@ -8266,9 +8660,13 @@ mod tests {
                         arg_count: 0,
                         arg_types: Vec::new(),
                         arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
                         keyword_names: vec![String::from("value")],
                         keyword_arg_types: vec![String::from("str")],
                         keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
                         line: 1,
                     }],
                 },
@@ -8362,9 +8760,13 @@ mod tests {
                         arg_count: 1,
                         arg_types: vec![String::from("int")],
                         arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
                         keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -9761,9 +10163,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -9881,9 +10287,13 @@ mod tests {
                         arg_count: 0,
                         arg_types: Vec::new(),
                         arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
                         keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -10006,9 +10416,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10063,9 +10477,13 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10336,9 +10754,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10429,9 +10851,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10524,9 +10950,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -10617,9 +11047,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -12825,6 +13259,148 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_starred_tuple_call_expansion() {
+        let result = check_temp_typepython_source(
+            "def takes(x: int, y: int) -> None:\n    return None\n\nxs: tuple[int, int] = (1, 2)\ntakes(*xs)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_starred_tuple_call_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "def takes(x: int) -> None:\n    return None\n\nxs: tuple[str] = (\"oops\",)\ntakes(*xs)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes `str` where parameter expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_dict_keyword_expansion_into_kwargs() {
+        let result = check_temp_typepython_source(
+            "def build(**kwargs: int) -> None:\n    return None\n\nvalues: dict[str, int] = {\"x\": 1}\nbuild(**values)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_dict_keyword_expansion_without_kwargs() {
+        let result = check_temp_typepython_source(
+            "def build(x: int) -> None:\n    return None\n\nvalues: dict[str, int] = {\"x\": 1}\nbuild(**values)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("cannot expand `**dict[str, int]` without `**kwargs`"));
+    }
+
+    #[test]
+    fn check_accepts_typed_dict_keyword_expansion_callsite() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("UserKw"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("TypedDict")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("str"),
+                        value_type: Some(String::from("str")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("UserKw"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(*,name:str)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("build"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: vec![String::from("UserKw")],
+                    keyword_expansion_values: Vec::new(),
+                    line: 4,
+                }],
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_direct_generic_function_call_return_mismatch() {
         let result = check_temp_typepython_source(
             "def first[T](value: T) -> T:\n    return value\n\nresult: str = first(1)\n",
@@ -14483,9 +15059,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("str")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -14557,9 +15137,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -14636,9 +15220,13 @@ mod tests {
                         arg_count: 1,
                         arg_types: vec![String::from("str")],
                         arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
                         keyword_names: Vec::new(),
                         keyword_arg_types: Vec::new(),
                         keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
                         line: 1,
                     }],
                     method_calls: Vec::new(),
@@ -15335,9 +15923,13 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::new()],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -15409,9 +16001,13 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("int"), String::new()],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -17348,9 +17944,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: vec![String::from("z")],
                     keyword_arg_types: vec![String::from("int")],
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -17460,9 +18060,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 member_accesses: Vec::new(),
@@ -17516,9 +18120,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -17652,9 +18260,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 member_accesses: Vec::new(),
@@ -17732,9 +18344,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -17813,9 +18429,13 @@ mod tests {
                     arg_count: 2,
                     arg_types: vec![String::from("str"), String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
                 method_calls: Vec::new(),
@@ -22083,9 +22703,13 @@ mod tests {
                             arg_count: 0,
                             arg_types: Vec::new(),
                             arg_values: Vec::new(),
+                            starred_arg_types: Vec::new(),
+                            starred_arg_values: Vec::new(),
                             keyword_names: Vec::new(),
                             keyword_arg_types: Vec::new(),
                             keyword_arg_values: Vec::new(),
+                            keyword_expansion_types: Vec::new(),
+                            keyword_expansion_values: Vec::new(),
                             line: 1,
                         }],
                         method_calls: Vec::new(),
@@ -22189,9 +22813,13 @@ mod tests {
                             arg_count: 0,
                             arg_types: Vec::new(),
                             arg_values: Vec::new(),
+                            starred_arg_types: Vec::new(),
+                            starred_arg_values: Vec::new(),
                             keyword_names: Vec::new(),
                             keyword_arg_types: Vec::new(),
                             keyword_arg_values: Vec::new(),
+                            keyword_expansion_types: Vec::new(),
+                            keyword_expansion_values: Vec::new(),
                             line: 1,
                         }],
                         method_calls: Vec::new(),
@@ -22485,9 +23113,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("Box")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }],
             }],
@@ -22982,9 +23614,9 @@ mod tests {
                     subject_method_name: None,
                     subject_method_through_instance: false,
                     cases: vec![typepython_binding::MatchCaseSite {
-                        patterns: vec![typepython_binding::MatchPatternSite::Literal(String::from(
-                            "Color.RED",
-                        ))],
+                        patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                            String::from("Color.RED"),
+                        )],
                         has_guard: false,
                         line: 3,
                     }],

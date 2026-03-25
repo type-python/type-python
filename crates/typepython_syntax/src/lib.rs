@@ -194,9 +194,13 @@ pub struct CallStatement {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub arg_values: Vec<DirectExprMetadata>,
+    pub starred_arg_types: Vec<String>,
+    pub starred_arg_values: Vec<DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
     pub keyword_arg_values: Vec<DirectExprMetadata>,
+    pub keyword_expansion_types: Vec<String>,
+    pub keyword_expansion_values: Vec<DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -216,9 +220,13 @@ pub struct MethodCallStatement {
     pub arg_count: usize,
     pub arg_types: Vec<String>,
     pub arg_values: Vec<DirectExprMetadata>,
+    pub starred_arg_types: Vec<String>,
+    pub starred_arg_values: Vec<DirectExprMetadata>,
     pub keyword_names: Vec<String>,
     pub keyword_arg_types: Vec<String>,
     pub keyword_arg_values: Vec<DirectExprMetadata>,
+    pub keyword_expansion_types: Vec<String>,
+    pub keyword_expansion_values: Vec<DirectExprMetadata>,
     pub line: usize,
 }
 
@@ -3628,13 +3636,45 @@ fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<Synt
 
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
-        arg_count: call.arguments.args.len(),
-        arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+        arg_count: call
+            .arguments
+            .args
+            .iter()
+            .filter(|expr| !matches!(expr, Expr::Starred(_)))
+            .count(),
+        arg_types: call
+            .arguments
+            .args
+            .iter()
+            .filter(|expr| !matches!(expr, Expr::Starred(_)))
+            .map(infer_literal_arg_type)
+            .collect(),
         arg_values: call
             .arguments
             .args
             .iter()
+            .filter(|expr| !matches!(expr, Expr::Starred(_)))
             .map(|expr| extract_direct_expr_metadata(source, expr))
+            .collect(),
+        starred_arg_types: call
+            .arguments
+            .args
+            .iter()
+            .filter_map(|expr| match expr {
+                Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
+                _ => None,
+            })
+            .collect(),
+        starred_arg_values: call
+            .arguments
+            .args
+            .iter()
+            .filter_map(|expr| match expr {
+                Expr::Starred(starred) => {
+                    Some(extract_direct_expr_metadata(source, &starred.value))
+                }
+                _ => None,
+            })
             .collect(),
         keyword_names: call
             .arguments
@@ -3654,6 +3694,20 @@ fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<Synt
             .keywords
             .iter()
             .filter(|keyword| keyword.arg.is_some())
+            .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
+            .collect(),
+        keyword_expansion_types: call
+            .arguments
+            .keywords
+            .iter()
+            .filter(|keyword| keyword.arg.is_none())
+            .map(|keyword| infer_literal_arg_type(&keyword.value))
+            .collect(),
+        keyword_expansion_values: call
+            .arguments
+            .keywords
+            .iter()
+            .filter(|keyword| keyword.arg.is_none())
             .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
             .collect(),
         line,
@@ -3684,13 +3738,45 @@ fn extract_method_call_statement(
             owner_name: name.id.as_str().to_owned(),
             method: attribute.attr.as_str().to_owned(),
             through_instance: false,
-            arg_count: call.arguments.args.len(),
-            arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+            arg_count: call
+                .arguments
+                .args
+                .iter()
+                .filter(|expr| !matches!(expr, Expr::Starred(_)))
+                .count(),
+            arg_types: call
+                .arguments
+                .args
+                .iter()
+                .filter(|expr| !matches!(expr, Expr::Starred(_)))
+                .map(infer_literal_arg_type)
+                .collect(),
             arg_values: call
                 .arguments
                 .args
                 .iter()
+                .filter(|expr| !matches!(expr, Expr::Starred(_)))
                 .map(|expr| extract_direct_expr_metadata(source, expr))
+                .collect(),
+            starred_arg_types: call
+                .arguments
+                .args
+                .iter()
+                .filter_map(|expr| match expr {
+                    Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
+                    _ => None,
+                })
+                .collect(),
+            starred_arg_values: call
+                .arguments
+                .args
+                .iter()
+                .filter_map(|expr| match expr {
+                    Expr::Starred(starred) => {
+                        Some(extract_direct_expr_metadata(source, &starred.value))
+                    }
+                    _ => None,
+                })
                 .collect(),
             keyword_names: call
                 .arguments
@@ -3712,6 +3798,20 @@ fn extract_method_call_statement(
                 .filter(|keyword| keyword.arg.is_some())
                 .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
                 .collect(),
+            keyword_expansion_types: call
+                .arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_none())
+                .map(|keyword| infer_literal_arg_type(&keyword.value))
+                .collect(),
+            keyword_expansion_values: call
+                .arguments
+                .keywords
+                .iter()
+                .filter(|keyword| keyword.arg.is_none())
+                .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
+                .collect(),
             line,
         })),
         Expr::Call(inner_call) => {
@@ -3722,13 +3822,45 @@ fn extract_method_call_statement(
                 owner_name: name.id.as_str().to_owned(),
                 method: attribute.attr.as_str().to_owned(),
                 through_instance: true,
-                arg_count: call.arguments.args.len(),
-                arg_types: call.arguments.args.iter().map(infer_literal_arg_type).collect(),
+                arg_count: call
+                    .arguments
+                    .args
+                    .iter()
+                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
+                    .count(),
+                arg_types: call
+                    .arguments
+                    .args
+                    .iter()
+                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
+                    .map(infer_literal_arg_type)
+                    .collect(),
                 arg_values: call
                     .arguments
                     .args
                     .iter()
+                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
                     .map(|expr| extract_direct_expr_metadata(source, expr))
+                    .collect(),
+                starred_arg_types: call
+                    .arguments
+                    .args
+                    .iter()
+                    .filter_map(|expr| match expr {
+                        Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
+                        _ => None,
+                    })
+                    .collect(),
+                starred_arg_values: call
+                    .arguments
+                    .args
+                    .iter()
+                    .filter_map(|expr| match expr {
+                        Expr::Starred(starred) => {
+                            Some(extract_direct_expr_metadata(source, &starred.value))
+                        }
+                        _ => None,
+                    })
                     .collect(),
                 keyword_names: call
                     .arguments
@@ -3748,6 +3880,20 @@ fn extract_method_call_statement(
                     .keywords
                     .iter()
                     .filter(|keyword| keyword.arg.is_some())
+                    .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
+                    .collect(),
+                keyword_expansion_types: call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .filter(|keyword| keyword.arg.is_none())
+                    .map(|keyword| infer_literal_arg_type(&keyword.value))
+                    .collect(),
+                keyword_expansion_values: call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .filter(|keyword| keyword.arg.is_none())
                     .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
                     .collect(),
                 line,
@@ -6826,9 +6972,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -6946,9 +7096,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 3,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -7008,9 +7162,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 2,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -7101,9 +7259,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::Value(ValueStatement {
@@ -7133,9 +7295,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -7159,6 +7325,8 @@ mod tests {
                 arg_count: 0,
                 arg_types: Vec::new(),
                 arg_values: Vec::new(),
+                starred_arg_types: Vec::new(),
+                starred_arg_values: Vec::new(),
                 keyword_names: vec![String::from("x"), String::from("y")],
                 keyword_arg_types: vec![String::from("int"), String::from("int")],
                 keyword_arg_values: vec![
@@ -7193,6 +7361,8 @@ mod tests {
                         value_subscript_index: None,
                     },
                 ],
+                keyword_expansion_types: Vec::new(),
+                keyword_expansion_values: Vec::new(),
                 line: 1,
             })]
         );
@@ -7296,9 +7466,13 @@ mod tests {
                         value_subscript_index: None,
                     },
                 ],
+                starred_arg_types: Vec::new(),
+                starred_arg_values: Vec::new(),
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
                 keyword_arg_values: Vec::new(),
+                keyword_expansion_types: Vec::new(),
+                keyword_expansion_values: Vec::new(),
                 line: 1,
             })]
         );
@@ -7387,9 +7561,70 @@ mod tests {
                         value_subscript_index: None,
                     },
                 ],
+                starred_arg_types: Vec::new(),
+                starred_arg_values: Vec::new(),
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
                 keyword_arg_values: Vec::new(),
+                keyword_expansion_types: Vec::new(),
+                keyword_expansion_values: Vec::new(),
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_starred_call_expansion_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("call-starred.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("build(*[1, 2], **{\"x\": 1})\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Call(CallStatement {
+                callee: String::from("build"),
+                arg_count: 0,
+                arg_types: Vec::new(),
+                arg_values: Vec::new(),
+                starred_arg_types: vec![String::from("list[int]")],
+                starred_arg_values: vec![DirectExprMetadata {
+                    value_type: Some(String::from("list[int]")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                }],
+                keyword_names: Vec::new(),
+                keyword_arg_types: Vec::new(),
+                keyword_arg_values: Vec::new(),
+                keyword_expansion_types: vec![String::from("dict[str, int]")],
+                keyword_expansion_values: vec![DirectExprMetadata {
+                    value_type: Some(String::from("dict[str, int]")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                }],
                 line: 1,
             })]
         );
@@ -7424,9 +7659,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -7719,9 +7958,13 @@ mod tests {
                         value_subscript_string_key: None,
                         value_subscript_index: None,
                     }],
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 1,
                 }),
                 SyntaxStatement::MethodCall(MethodCallStatement {
@@ -7731,6 +7974,8 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: vec![String::from("x")],
                     keyword_arg_types: vec![String::from("int")],
                     keyword_arg_values: vec![DirectExprMetadata {
@@ -7748,6 +7993,8 @@ mod tests {
                         value_subscript_string_key: None,
                         value_subscript_index: None,
                     }],
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 2,
                 }),
             ]
@@ -8995,9 +9242,13 @@ mod tests {
                     arg_count: 0,
                     arg_types: Vec::new(),
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 3,
                 }),
                 SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {

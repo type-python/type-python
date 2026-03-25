@@ -273,9 +273,9 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Fingerprint, IncrementalState, PublicSummary, SNAPSHOT_SCHEMA_VERSION, SealedRootSummary,
-        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam, decode_snapshot, diff,
-        encode_snapshot, snapshot,
+        decode_snapshot, diff, encode_snapshot, snapshot, Fingerprint, IncrementalState,
+        PublicSummary, SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SummaryExport,
+        SummaryTypeParam, SNAPSHOT_SCHEMA_VERSION,
     };
     use std::{collections::BTreeMap, path::PathBuf};
     use typepython_binding::{
@@ -556,9 +556,13 @@ mod tests {
                     arg_count: 1,
                     arg_types: vec![String::from("int")],
                     arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
                     keyword_names: Vec::new(),
                     keyword_arg_types: Vec::new(),
                     keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
                     line: 3,
                 }],
                 method_calls: Vec::new(),
