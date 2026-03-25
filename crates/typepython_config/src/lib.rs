@@ -943,6 +943,45 @@ mod tests {
         assert!(message.contains("unknown field `mystery`"));
     }
 
+    #[test]
+    fn discovers_parent_typepython_toml_from_nested_directory() {
+        let project_dir =
+            temp_project_dir("discovers_parent_typepython_toml_from_nested_directory");
+        let nested_dir = project_dir.join("packages/app/src");
+        fs::create_dir_all(&nested_dir).expect("nested directory should be created");
+        fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.11\"\n")
+            .expect("typepython.toml should be written");
+
+        let load_result = load(&nested_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected parent typepython.toml to be discovered");
+        assert_eq!(handle.source, ConfigSource::TypePythonToml);
+        assert_eq!(handle.config.project.target_python, "3.11");
+    }
+
+    #[test]
+    fn discovers_parent_embedded_pyproject_from_nested_directory() {
+        let project_dir =
+            temp_project_dir("discovers_parent_embedded_pyproject_from_nested_directory");
+        let nested_dir = project_dir.join("packages/app/src");
+        fs::create_dir_all(&nested_dir).expect("nested directory should be created");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[tool.typepython.project]\ntarget_python = \"3.12\"\n",
+        )
+        .expect("pyproject.toml should be written");
+
+        let load_result = load(&nested_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected parent embedded pyproject to be discovered");
+        assert_eq!(handle.source, ConfigSource::PyProject);
+        assert_eq!(handle.config.project.target_python, "3.12");
+    }
+
     fn temp_project_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
