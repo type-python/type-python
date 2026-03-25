@@ -3739,6 +3739,22 @@ mod tests {
                         (String::from("pkg.a"), 10),
                         (String::from("pkg.b"), 20),
                     ]),
+                    summaries: vec![typepython_incremental::PublicSummary {
+                        module: String::from("pkg.a"),
+                        is_package_entry: false,
+                        exports: vec![typepython_incremental::SummaryExport {
+                            name: String::from("Foo"),
+                            kind: String::from("class"),
+                            type_repr: String::from("Foo"),
+                            type_params: Vec::new(),
+                            public: true,
+                        }],
+                        imports: vec![String::from("pkg.base")],
+                        sealed_roots: vec![typepython_incremental::SealedRootSummary {
+                            root: String::from("Expr"),
+                            members: vec![String::from("Add"), String::from("Num")],
+                        }],
+                    }],
                 },
             )
             .expect("test setup should succeed");
@@ -3755,6 +3771,9 @@ mod tests {
         assert!(snapshot_path.ends_with("snapshot.json"));
         assert!(rendered.contains("pkg.a"));
         assert!(rendered.contains("pkg.b"));
+        assert!(rendered.contains("\"exports\""));
+        assert!(rendered.contains("\"imports\""));
+        assert!(rendered.contains("\"sealedRoots\""));
     }
 
     #[test]

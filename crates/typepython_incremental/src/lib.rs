@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_graph::ModuleGraph;
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -21,12 +22,44 @@ pub struct Fingerprint {
 pub struct IncrementalState {
     /// Tracked fingerprints by module key.
     pub fingerprints: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub summaries: Vec<PublicSummary>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 struct SnapshotFile {
     schema_version: u32,
     fingerprints: BTreeMap<String, u64>,
+    #[serde(default)]
+    summaries: Vec<PublicSummary>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PublicSummary {
+    pub module: String,
+    #[serde(rename = "isPackageEntry")]
+    pub is_package_entry: bool,
+    pub exports: Vec<SummaryExport>,
+    pub imports: Vec<String>,
+    #[serde(rename = "sealedRoots")]
+    pub sealed_roots: Vec<SealedRootSummary>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryExport {
+    pub name: String,
+    pub kind: String,
+    #[serde(rename = "type")]
+    pub type_repr: String,
+    #[serde(rename = "typeParams")]
+    pub type_params: Vec<String>,
+    pub public: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SealedRootSummary {
+    pub root: String,
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -65,7 +98,10 @@ pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
         .map(|node| (node.module_key.clone(), node.summary_fingerprint))
         .collect();
 
-    IncrementalState { fingerprints }
+    let mut summaries = graph.nodes.iter().map(public_summary).collect::<Vec<_>>();
+    summaries.sort_by(|left, right| left.module.cmp(&right.module));
+
+    IncrementalState { fingerprints, summaries }
 }
 
 #[must_use]
@@ -102,6 +138,7 @@ pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::E
     serde_json::to_string_pretty(&SnapshotFile {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         fingerprints: state.fingerprints.clone(),
+        summaries: state.summaries.clone(),
     })
 }
 
@@ -111,16 +148,107 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
     if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION {
         return Err(SnapshotDecodeError::IncompatibleSchemaVersion(snapshot.schema_version));
     }
-    Ok(IncrementalState { fingerprints: snapshot.fingerprints })
+    Ok(IncrementalState { fingerprints: snapshot.fingerprints, summaries: snapshot.summaries })
+}
+
+fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
+    let top_level_declarations = node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .collect::<Vec<_>>();
+
+    let mut exports = top_level_declarations
+        .iter()
+        .map(|declaration| SummaryExport {
+            name: declaration.name.clone(),
+            kind: summary_kind(declaration),
+            type_repr: summary_type_repr(declaration),
+            type_params: Vec::new(),
+            public: !declaration.name.starts_with('_'),
+        })
+        .collect::<Vec<_>>();
+    exports.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut imports = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .map(|declaration| declaration.detail.clone())
+        .collect::<Vec<_>>();
+    imports.sort();
+    imports.dedup();
+
+    let mut sealed_roots = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.class_kind == Some(DeclarationOwnerKind::SealedClass))
+        .map(|declaration| {
+            let mut members = top_level_declarations
+                .iter()
+                .filter(|candidate| {
+                    candidate.name != declaration.name
+                        && candidate.bases.iter().any(|base| base == &declaration.name)
+                })
+                .map(|candidate| candidate.name.clone())
+                .collect::<Vec<_>>();
+            members.sort();
+            SealedRootSummary { root: declaration.name.clone(), members }
+        })
+        .collect::<Vec<_>>();
+    sealed_roots.sort_by(|left, right| left.root.cmp(&right.root));
+
+    PublicSummary {
+        module: node.module_key.clone(),
+        is_package_entry: is_package_entry_path(&node.module_path),
+        exports,
+        imports,
+        sealed_roots,
+    }
+}
+
+fn summary_kind(declaration: &Declaration) -> String {
+    match declaration.kind {
+        DeclarationKind::TypeAlias => String::from("typealias"),
+        DeclarationKind::Class => String::from("class"),
+        DeclarationKind::Function => String::from("function"),
+        DeclarationKind::Overload => String::from("overload"),
+        DeclarationKind::Value => String::from("value"),
+        DeclarationKind::Import => String::from("import"),
+    }
+}
+
+fn summary_type_repr(declaration: &Declaration) -> String {
+    match declaration.kind {
+        DeclarationKind::Class => declaration.name.clone(),
+        DeclarationKind::Value => declaration
+            .value_type
+            .clone()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| declaration.detail.clone()),
+        _ => {
+            if declaration.detail.is_empty() {
+                declaration.name.clone()
+            } else {
+                declaration.detail.clone()
+            }
+        }
+    }
+}
+
+fn is_package_entry_path(path: &std::path::Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        name == "__init__.py" || name == "__init__.pyi" || name == "__init__.tpy"
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Fingerprint, IncrementalState, SNAPSHOT_SCHEMA_VERSION, SnapshotDecodeError, SnapshotDiff,
-        decode_snapshot, diff, encode_snapshot, snapshot,
+        Fingerprint, IncrementalState, PublicSummary, SNAPSHOT_SCHEMA_VERSION, SealedRootSummary,
+        SnapshotDecodeError, SnapshotDiff, SummaryExport, decode_snapshot, diff, encode_snapshot,
+        snapshot,
     };
     use std::{collections::BTreeMap, path::PathBuf};
+    use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
     use typepython_graph::{ModuleGraph, ModuleNode};
     use typepython_syntax::SourceKind;
 
@@ -131,12 +259,14 @@ mod tests {
                 (String::from("pkg.a"), 10),
                 (String::from("pkg.b"), 20),
             ]),
+            summaries: Vec::new(),
         };
         let current = IncrementalState {
             fingerprints: BTreeMap::from([
                 (String::from("pkg.b"), 30),
                 (String::from("pkg.c"), 40),
             ]),
+            summaries: Vec::new(),
         };
 
         let snapshot_diff = diff(&previous, &current);
@@ -153,8 +283,10 @@ mod tests {
 
     #[test]
     fn diff_reports_no_changes_for_identical_snapshots() {
-        let state =
-            IncrementalState { fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]) };
+        let state = IncrementalState {
+            fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
+            summaries: Vec::new(),
+        };
 
         let snapshot_diff = diff(&state, &state);
         assert!(snapshot_diff.added.is_empty());
@@ -166,12 +298,31 @@ mod tests {
     fn encode_snapshot_includes_schema_version() {
         let rendered = encode_snapshot(&IncrementalState {
             fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
+            summaries: vec![PublicSummary {
+                module: String::from("pkg.a"),
+                is_package_entry: false,
+                exports: vec![SummaryExport {
+                    name: String::from("Foo"),
+                    kind: String::from("class"),
+                    type_repr: String::from("Foo"),
+                    type_params: Vec::new(),
+                    public: true,
+                }],
+                imports: vec![String::from("pkg.base")],
+                sealed_roots: vec![SealedRootSummary {
+                    root: String::from("Expr"),
+                    members: vec![String::from("Add"), String::from("Num")],
+                }],
+            }],
         })
         .expect("snapshot encoding should succeed");
 
         assert!(rendered.contains("schema_version"));
         assert!(rendered.contains(&SNAPSHOT_SCHEMA_VERSION.to_string()));
         assert!(rendered.contains("pkg.a"));
+        assert!(rendered.contains("\"exports\""));
+        assert!(rendered.contains("\"imports\""));
+        assert!(rendered.contains("\"sealedRoots\""));
     }
 
     #[test]
@@ -181,7 +332,80 @@ mod tests {
                 module_path: PathBuf::from("src/pkg/a.tpy"),
                 module_key: String::from("pkg.a"),
                 module_kind: SourceKind::TypePython,
-                declarations: Vec::new(),
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Expr"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::SealedClass),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Add"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Expr")],
+                    },
+                    Declaration {
+                        name: String::from("helper"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("()->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("base"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.base"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                    },
+                ],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -200,6 +424,48 @@ mod tests {
         });
 
         assert_eq!(state.fingerprints, BTreeMap::from([(String::from("pkg.a"), 42)]));
+        assert_eq!(
+            state.summaries,
+            vec![PublicSummary {
+                module: String::from("pkg.a"),
+                is_package_entry: false,
+                exports: vec![
+                    SummaryExport {
+                        name: String::from("Add"),
+                        kind: String::from("class"),
+                        type_repr: String::from("Add"),
+                        type_params: Vec::new(),
+                        public: true,
+                    },
+                    SummaryExport {
+                        name: String::from("Expr"),
+                        kind: String::from("class"),
+                        type_repr: String::from("Expr"),
+                        type_params: Vec::new(),
+                        public: true,
+                    },
+                    SummaryExport {
+                        name: String::from("base"),
+                        kind: String::from("import"),
+                        type_repr: String::from("pkg.base"),
+                        type_params: Vec::new(),
+                        public: true,
+                    },
+                    SummaryExport {
+                        name: String::from("helper"),
+                        kind: String::from("function"),
+                        type_repr: String::from("()->int"),
+                        type_params: Vec::new(),
+                        public: true,
+                    },
+                ],
+                imports: vec![String::from("pkg.base")],
+                sealed_roots: vec![SealedRootSummary {
+                    root: String::from("Expr"),
+                    members: vec![String::from("Add")],
+                }],
+            }]
+        );
     }
 
     #[test]
