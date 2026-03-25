@@ -8,6 +8,7 @@ use std::{
 
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
+use ruff_text_size::Ranged;
 use typepython_config::ConfigHandle;
 use typepython_lowering::LoweredModule;
 use typepython_syntax::SourceKind;
@@ -583,16 +584,15 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
                 let end_offset = function.range.end().to_usize().saturating_sub(1);
                 let end_line =
                     offset_to_line(source, end_offset.max(function.range.start().to_usize()));
-                let line = source.lines().nth(start_line - 1).unwrap_or("");
                 edits.push(StubEdit {
                     start_line,
                     end_line,
                     replacement: if function.decorator_list.iter().any(is_overload_decorator) {
-                        Some(rewrite_stub_signature_line(line))
+                        Some(rewrite_stub_function_signature(source, function))
                     } else if overloaded_names.contains(function.name.as_str()) {
                         None
                     } else {
-                        Some(rewrite_stub_signature_line(line))
+                        Some(rewrite_stub_function_signature(source, function))
                     },
                 });
             }
@@ -618,11 +618,10 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
                     let end_offset = class_def.range.end().to_usize().saturating_sub(1);
                     let end_line =
                         offset_to_line(source, end_offset.max(class_def.range.start().to_usize()));
-                    let line = source.lines().nth(start_line - 1).unwrap_or("");
                     edits.push(StubEdit {
                         start_line,
                         end_line,
-                        replacement: Some(rewrite_stub_class_line(line)),
+                        replacement: Some(rewrite_stub_class_line(source, class_def)),
                     });
                 } else {
                     collect_stub_edits(source, &class_def.body, edits)
@@ -633,8 +632,16 @@ fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
     }
 }
 
-fn rewrite_stub_signature_line(line: &str) -> String {
-    let trimmed = line.trim_end();
+fn rewrite_stub_function_signature(
+    source: &str,
+    function: &ruff_python_ast::StmtFunctionDef,
+) -> String {
+    let header = source_header_text(source, function.name.range.start().to_usize(), &function.body);
+    rewrite_stub_header_text(&header)
+}
+
+fn rewrite_stub_header_text(header: &str) -> String {
+    let trimmed = header.trim_end();
     if trimmed.contains(": ...") {
         trimmed.to_owned()
     } else if trimmed.ends_with(':') {
@@ -652,15 +659,26 @@ fn rewrite_stub_annotated_assignment_line(line: &str) -> Option<String> {
     Some(head.trim_end().to_owned())
 }
 
-fn rewrite_stub_class_line(line: &str) -> String {
-    let trimmed = line.trim_end();
-    if trimmed.contains(": ...") {
-        trimmed.to_owned()
-    } else if trimmed.ends_with(':') {
-        format!("{trimmed} ...")
-    } else {
-        trimmed.to_owned()
-    }
+fn rewrite_stub_class_line(source: &str, class_def: &ruff_python_ast::StmtClassDef) -> String {
+    let header =
+        source_header_text(source, class_def.name.range.start().to_usize(), &class_def.body);
+    rewrite_stub_header_text(&header)
+}
+
+fn source_header_text(source: &str, start_offset: usize, body: &[Stmt]) -> String {
+    let start_line = offset_to_line(source, start_offset);
+    let header_end_line = body
+        .first()
+        .map(|statement| {
+            offset_to_line(source, statement.range().start().to_usize()).saturating_sub(1)
+        })
+        .unwrap_or(start_line);
+    source
+        .lines()
+        .skip(start_line.saturating_sub(1))
+        .take(header_end_line.saturating_sub(start_line) + 1)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn is_empty_stub_class_body(body: &[Stmt]) -> bool {
@@ -1008,6 +1026,36 @@ mod tests {
         assert_eq!(summary.py_typed_written, 1);
         assert_eq!(stub, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");
+    }
+
+    #[test]
+    fn write_runtime_outputs_preserves_multiline_stub_headers() {
+        let temp_dir = temp_dir("write_runtime_outputs_preserves_multiline_stub_headers");
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class Box(\n    Generic[T],\n):\n    pass\n\ndef build(\n    value: int,\n) -> int:\n    return value\n",
+            ),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+            stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+        }];
+
+        write_runtime_outputs(&artifacts, &modules, false)
+            .expect("multiline runtime outputs should be written");
+        let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+            .expect("multiline stub should be readable");
+        remove_temp_dir(&temp_dir);
+
+        assert!(stub.contains("class Box(\n    Generic[T],\n): ..."));
+        assert!(stub.contains("def build(\n    value: int,\n) -> int: ..."));
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {
