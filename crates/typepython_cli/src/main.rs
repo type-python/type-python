@@ -25,7 +25,7 @@ use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
-use typepython_incremental::{IncrementalState, decode_snapshot, encode_snapshot, snapshot};
+use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot, snapshot};
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 use zip::ZipArchive;
@@ -1174,6 +1174,31 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
+    let mut incremental = snapshot(&graph);
+    incremental.stdlib_snapshot = Some(bundled_stdlib_snapshot_identity()?);
+    let tracked_modules = incremental.fingerprints.len();
+    let planned_modules = placeholder_lowered_modules(&syntax_trees);
+    let emit_plan = plan_emits(config, &planned_modules);
+    if let Some(previous) = load_previous_incremental_state(config)? {
+        let snapshot_diff = diff(&previous, &incremental);
+        if snapshot_diff.added.is_empty()
+            && snapshot_diff.removed.is_empty()
+            && snapshot_diff.changed.is_empty()
+            && previous.summaries == incremental.summaries
+            && previous.stdlib_snapshot == incremental.stdlib_snapshot
+            && !verify_build_artifacts(config, &emit_plan).has_errors()
+        {
+            return Ok(PipelineSnapshot {
+                lowered_modules: Vec::new(),
+                emit_plan,
+                incremental,
+                tracked_modules,
+                discovered_sources: source_paths.len(),
+                diagnostics,
+            });
+        }
+    }
+
     let lowering_options =
         LoweringOptions { target_python: config.config.project.target_python.clone() };
     let lowering_results: Vec<_> =
@@ -1193,9 +1218,6 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowered_modules: Vec<_> =
         lowering_results.into_iter().map(|result| result.module).collect();
     let emit_plan = plan_emits(config, &lowered_modules);
-    let mut incremental = snapshot(&graph);
-    incremental.stdlib_snapshot = Some(bundled_stdlib_snapshot_identity()?);
-    let tracked_modules = incremental.fingerprints.len();
 
     Ok(PipelineSnapshot {
         lowered_modules,
@@ -1205,6 +1227,36 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         discovered_sources: source_paths.len(),
         diagnostics,
     })
+}
+
+fn placeholder_lowered_modules(
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> Vec<LoweredModule> {
+    syntax_trees
+        .iter()
+        .map(|tree| LoweredModule {
+            source_path: tree.source.path.clone(),
+            source_kind: tree.source.kind,
+            python_source: String::new(),
+            source_map: Vec::new(),
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        })
+        .collect()
+}
+
+fn load_previous_incremental_state(config: &ConfigHandle) -> Result<Option<IncrementalState>> {
+    let snapshot_path =
+        config.resolve_relative_path(&config.config.project.cache_dir).join("snapshot.json");
+    if !snapshot_path.is_file() {
+        return Ok(None);
+    }
+    let rendered = fs::read_to_string(&snapshot_path)
+        .with_context(|| format!("unable to read {}", snapshot_path.display()))?;
+    decode_snapshot(&rendered)
+        .map(Some)
+        .map_err(|error| anyhow::anyhow!("unable to decode {}: {}", snapshot_path.display(), error))
 }
 
 fn collect_parse_diagnostics(syntax_trees: &[typepython_syntax::SyntaxTree]) -> DiagnosticReport {
@@ -2706,7 +2758,7 @@ mod tests {
     };
     use typepython_config::load;
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-    use typepython_emit::EmitArtifact;
+    use typepython_emit::{EmitArtifact, write_runtime_outputs};
     use typepython_incremental::IncrementalState;
     use zip::{ZipWriter, write::FileOptions};
 
@@ -3972,6 +4024,68 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
+    }
+
+    #[test]
+    fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
+        let project_dir =
+            temp_project_dir("run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged");
+        let second = {
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+                .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            let first = run_pipeline(&config).expect("test setup should succeed");
+            write_runtime_outputs(&first.emit_plan, &first.lowered_modules, false)
+                .expect("test setup should succeed");
+            write_incremental_snapshot(
+                &config.resolve_relative_path(&config.config.project.cache_dir),
+                &first.incremental,
+            )
+            .expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed")
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(second.diagnostics.is_empty());
+        assert!(second.lowered_modules.is_empty());
+        assert_eq!(second.emit_plan.len(), 1);
+    }
+
+    #[test]
+    fn run_pipeline_invalidates_cache_when_public_summary_changes() {
+        let project_dir =
+            temp_project_dir("run_pipeline_invalidates_cache_when_public_summary_changes");
+        let second = {
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+                .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            let first = run_pipeline(&config).expect("test setup should succeed");
+            write_runtime_outputs(&first.emit_plan, &first.lowered_modules, false)
+                .expect("test setup should succeed");
+            write_incremental_snapshot(
+                &config.resolve_relative_path(&config.config.project.cache_dir),
+                &first.incremental,
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app.tpy"), "def build() -> str:\n    return \"one\"\n")
+                .expect("test setup should succeed");
+
+            run_pipeline(&config).expect("test setup should succeed")
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(second.diagnostics.is_empty());
+        assert_eq!(second.lowered_modules.len(), 1);
+        assert_eq!(second.emit_plan.len(), 1);
     }
 
     #[test]

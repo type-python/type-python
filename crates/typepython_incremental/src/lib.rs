@@ -102,14 +102,13 @@ pub struct SnapshotDiff {
 /// Captures an incremental snapshot from the module graph.
 #[must_use]
 pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
-    let fingerprints = graph
-        .nodes
-        .iter()
-        .map(|node| (node.module_key.clone(), node.summary_fingerprint))
-        .collect();
-
     let mut summaries = graph.nodes.iter().map(public_summary).collect::<Vec<_>>();
     summaries.sort_by(|left, right| left.module.cmp(&right.module));
+
+    let fingerprints = summaries
+        .iter()
+        .map(|summary| (summary.module.clone(), summary_fingerprint(summary)))
+        .collect();
 
     IncrementalState { fingerprints, summaries, stdlib_snapshot: None }
 }
@@ -251,6 +250,18 @@ fn summary_type_repr(declaration: &Declaration) -> String {
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
     SummaryTypeParam { name: type_param.name.clone(), bound: type_param.bound.clone() }
+}
+
+fn summary_fingerprint(summary: &PublicSummary) -> u64 {
+    let Ok(serialized) = serde_json::to_vec(summary) else {
+        return 0;
+    };
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in serialized {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn is_package_entry_path(path: &std::path::Path) -> bool {
@@ -462,7 +473,7 @@ mod tests {
             }],
         });
 
-        assert_eq!(state.fingerprints, BTreeMap::from([(String::from("pkg.a"), 42)]));
+        assert!(state.fingerprints.contains_key("pkg.a"));
         assert_eq!(
             state.summaries,
             vec![PublicSummary {
@@ -512,6 +523,65 @@ mod tests {
             }]
         );
         assert_eq!(state.stdlib_snapshot, None);
+    }
+
+    #[test]
+    fn snapshot_fingerprints_ignore_non_public_graph_noise() {
+        let make_graph = |fingerprint| ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/pkg/a.tpy"),
+                module_key: String::from("pkg.a"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->int"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("helper"),
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    line: 3,
+                }],
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: fingerprint,
+            }],
+        };
+
+        let left = snapshot(&make_graph(1));
+        let right = snapshot(&make_graph(99));
+
+        assert_eq!(left.summaries, right.summaries);
+        assert_eq!(left.fingerprints, right.fingerprints);
     }
 
     #[test]
