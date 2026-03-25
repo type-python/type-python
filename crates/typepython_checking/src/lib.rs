@@ -2093,7 +2093,10 @@ fn resolve_direct_expression_type(
         .map(normalize_type_text)
         .or_else(|| {
             value_callee
-                .and_then(|callee| resolve_direct_callable_return_type(node, nodes, callee))
+                .and_then(|callee| {
+                    resolve_direct_callable_return_type_for_line(node, nodes, callee, current_line)
+                        .or_else(|| resolve_direct_callable_return_type(node, nodes, callee))
+                })
                 .map(|return_type| normalize_type_text(&return_type))
         })
         .or_else(|| {
@@ -3835,6 +3838,12 @@ fn direct_call_type_diagnostics(
             {
                 return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
             }
+            if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
+                && let Some(signature) =
+                    resolve_instantiated_direct_function_signature(function, call)
+            {
+                return direct_source_function_type_diagnostics(node, call, &signature);
+            }
             if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee) {
                 return direct_source_function_type_diagnostics(node, call, &signature);
             }
@@ -4545,6 +4554,135 @@ fn resolve_direct_callable_param_types(
     None
 }
 
+fn resolve_instantiated_direct_function_signature(
+    function: &Declaration,
+    call: &typepython_binding::CallSite,
+) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    if function.type_params.is_empty() {
+        return None;
+    }
+
+    let signature = direct_signature_sites_from_detail(&function.detail);
+    let substitutions = infer_generic_type_param_substitutions(function, &signature, call)?;
+    Some(
+        signature
+            .into_iter()
+            .map(|param| typepython_syntax::DirectFunctionParamSite {
+                annotation: param
+                    .annotation
+                    .as_deref()
+                    .map(|annotation| substitute_generic_type_params(annotation, &substitutions)),
+                ..param
+            })
+            .collect(),
+    )
+}
+
+fn infer_generic_type_param_substitutions(
+    function: &Declaration,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    call: &typepython_binding::CallSite,
+) -> Option<BTreeMap<String, String>> {
+    let generic_names = function
+        .type_params
+        .iter()
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut substitutions = BTreeMap::new();
+
+    for (annotation, actual) in signature
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .filter_map(|param| param.annotation.as_deref())
+        .zip(call.arg_types.iter())
+    {
+        bind_generic_type_params(annotation, actual, &generic_names, &mut substitutions)?;
+    }
+
+    for (keyword, actual) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+        let Some(param) = signature.iter().find(|param| param.name == *keyword) else {
+            continue;
+        };
+        let Some(annotation) = param.annotation.as_deref() else {
+            continue;
+        };
+        bind_generic_type_params(annotation, actual, &generic_names, &mut substitutions)?;
+    }
+
+    for type_param in &function.type_params {
+        let Some(actual) = substitutions.get(&type_param.name) else {
+            continue;
+        };
+        if let Some(bound) = &type_param.bound
+            && !actual.is_empty()
+            && !direct_type_matches(bound, actual)
+        {
+            return None;
+        }
+    }
+
+    Some(substitutions)
+}
+
+fn bind_generic_type_params(
+    annotation: &str,
+    actual: &str,
+    generic_names: &BTreeSet<String>,
+    substitutions: &mut BTreeMap<String, String>,
+) -> Option<()> {
+    let annotation = normalize_type_text(annotation);
+    let actual = normalize_type_text(actual);
+    if actual.is_empty() {
+        return Some(());
+    }
+
+    if generic_names.contains(&annotation) {
+        match substitutions.get(&annotation) {
+            Some(existing) if existing != &actual => return None,
+            Some(_) => return Some(()),
+            None => {
+                substitutions.insert(annotation, actual);
+                return Some(());
+            }
+        }
+    }
+
+    match (split_generic_type(&annotation), split_generic_type(&actual)) {
+        (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
+            if expected_head == actual_head && expected_args.len() == actual_args.len() =>
+        {
+            for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
+                bind_generic_type_params(expected_arg, actual_arg, generic_names, substitutions)?;
+            }
+            Some(())
+        }
+        _ => Some(()),
+    }
+}
+
+fn substitute_generic_type_params(
+    annotation: &str,
+    substitutions: &BTreeMap<String, String>,
+) -> String {
+    let mut output = String::new();
+    let mut token = String::new();
+    for character in annotation.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+            continue;
+        }
+        if !token.is_empty() {
+            output.push_str(substitutions.get(&token).map(String::as_str).unwrap_or(&token));
+            token.clear();
+        }
+        output.push(character);
+    }
+    if !token.is_empty() {
+        output.push_str(substitutions.get(&token).map(String::as_str).unwrap_or(&token));
+    }
+    output
+}
+
 fn resolve_direct_callable_return_type<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
@@ -4571,6 +4709,23 @@ fn resolve_direct_callable_return_type<'a>(
     }
 
     resolve_builtin_return_type(callee).map(str::to_owned)
+}
+
+fn resolve_direct_callable_return_type_for_line(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+    line: usize,
+) -> Option<String> {
+    let call = node
+        .calls
+        .iter()
+        .find(|call| call.callee == callee && call.line == line)
+        .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
+    let function = resolve_direct_function(node, nodes, callee)?;
+    let signature = direct_signature_sites_from_detail(&function.detail);
+    let substitutions = infer_generic_type_param_substitutions(function, &signature, call)?;
+    Some(substitute_generic_type_params(function.detail.split_once("->")?.1.trim(), &substitutions))
 }
 
 fn resolve_direct_function<'a>(
@@ -12033,6 +12188,34 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_direct_generic_function_call_inference() {
+        let result = check_temp_typepython_source(
+            "def first[T](value: T) -> T:
+    return value
+
+result: int = first(1)
+",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_direct_generic_function_call_return_mismatch() {
+        let result = check_temp_typepython_source(
+            "def first[T](value: T) -> T:
+    return value
+
+result: str = first(1)
+",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `int` where `result` expects `str`"));
     }
 
     #[test]
