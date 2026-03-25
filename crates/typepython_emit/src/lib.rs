@@ -733,12 +733,16 @@ mod tests {
                     "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n",
                 ),
                 source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata::default(),
             },
             LoweredModule {
                 source_path: PathBuf::from("src/app/helpers.py"),
                 source_kind: SourceKind::Python,
                 python_source: String::from("def helper():\n    return 1\n"),
                 source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata::default(),
             },
             LoweredModule {
                 source_path: PathBuf::from("src/app/parse.tpy"),
@@ -747,18 +751,24 @@ mod tests {
                     "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n\ndef parse(x):\n    return 0\n",
                 ),
                 source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata::default(),
             },
             LoweredModule {
                 source_path: PathBuf::from("src/app/empty.tpy"),
                 source_kind: SourceKind::TypePython,
                 python_source: String::from("class Empty:\n    pass\n"),
                 source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata::default(),
             },
             LoweredModule {
                 source_path: PathBuf::from("src/app/helpers.pyi"),
                 source_kind: SourceKind::Stub,
                 python_source: String::from("def helper() -> int: ...\n"),
                 source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata::default(),
             },
         ];
         let artifacts = vec![
@@ -884,6 +894,8 @@ mod tests {
                 "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n    age: int\n    email: str | None = None\n",
             ),
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
         }];
         let artifacts = vec![EmitArtifact {
             source_path: PathBuf::from("src/app/__init__.tpy"),
@@ -916,6 +928,8 @@ mod tests {
                 "from dataclasses import dataclass\n\n@dataclass\nclass UserInput:\n    name: str\n",
             ),
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
         }];
         let artifacts = vec![EmitArtifact {
             source_path: PathBuf::from("src/app/__init__.tpy"),
@@ -939,6 +953,8 @@ mod tests {
             source_kind: SourceKind::TypePython,
             python_source: String::from("def broken(:\n"),
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
         }];
         let artifacts = vec![EmitArtifact {
             source_path: PathBuf::from("src/app/__init__.tpy"),
@@ -962,6 +978,8 @@ mod tests {
             source_kind: SourceKind::Stub,
             python_source: String::from("def helper() -> int: ...\n"),
             source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
         }];
         let artifacts = vec![EmitArtifact {
             source_path: PathBuf::from("src/app/__init__.pyi"),

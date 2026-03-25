@@ -29,6 +29,8 @@ pub struct LoweredModule {
     pub python_source: String,
     /// Placeholder source-map rows.
     pub source_map: Vec<SourceMapEntry>,
+    pub required_imports: Vec<String>,
+    pub metadata: LoweringMetadata,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +42,15 @@ pub struct LoweringResult {
 struct LoweredText {
     python_source: String,
     source_map: Vec<SourceMapEntry>,
+    required_imports: Vec<String>,
+    metadata: LoweringMetadata,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct LoweringMetadata {
+    pub has_generic_type_params: bool,
+    pub has_typed_dict_transforms: bool,
+    pub has_sealed_classes: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -73,6 +84,8 @@ pub fn lower_with_options(tree: &SyntaxTree, options: &LoweringOptions) -> Lower
             source_kind: tree.source.kind,
             python_source: lowered_text.python_source,
             source_map: lowered_text.source_map,
+            required_imports: lowered_text.required_imports,
+            metadata: lowered_text.metadata,
         },
         diagnostics,
     }
@@ -86,6 +99,8 @@ fn lower_passthrough(source: &str) -> LoweredText {
             .enumerate()
             .map(|(index, _)| SourceMapEntry { original_line: index + 1, lowered_line: index + 1 })
             .collect(),
+        required_imports: Vec::new(),
+        metadata: LoweringMetadata::default(),
     }
 }
 
@@ -186,16 +201,30 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         &sealed_classes,
         &class_defs,
     );
+    let has_typed_dict_transforms = type_aliases.values().any(|statement| {
+        parse_transform_expr(statement.value.trim())
+            .is_some_and(|(transform, _)| TYPEDICT_TRANSFORMS.contains(&transform))
+    });
+    let has_sealed_classes = !sealed_classes.is_empty();
 
     let mut lowered_lines = Vec::new();
+    let mut required_imports = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     if !runtime_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing import TypeVar"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import TypeVar"),
+        );
         lowered_line_number += 1;
     }
     if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing import Generic"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import Generic"),
+        );
         lowered_line_number += 1;
     }
     for (name, bound) in &runtime_type_params {
@@ -203,19 +232,35 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_line_number += 1;
     }
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing import TypeAlias"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import TypeAlias"),
+        );
         lowered_line_number += 1;
     }
     if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing import Protocol"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import Protocol"),
+        );
         lowered_line_number += 1;
     }
     if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
-        lowered_lines.push(String::from("from dataclasses import dataclass"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from dataclasses import dataclass"),
+        );
         lowered_line_number += 1;
     }
     if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing import overload"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import overload"),
+        );
         lowered_line_number += 1;
     }
     // Check if any type alias uses a transform that generates NotRequired
@@ -227,7 +272,11 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             || v.starts_with("Required_[")
     });
     if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
-        lowered_lines.push(rewrite_notrequired_import_line(options));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            rewrite_notrequired_import_line(options),
+        );
         lowered_line_number += 1;
     }
     // Check if any type alias uses a transform that generates ReadOnly
@@ -239,7 +288,11 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             || v.starts_with("Mutable[")
     });
     if needs_readonly_import && !has_readonly_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing_extensions import ReadOnly"));
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing_extensions import ReadOnly"),
+        );
         lowered_line_number += 1;
     }
 
@@ -282,7 +335,25 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered.push('\n');
     }
 
-    LoweredText { python_source: lowered, source_map }
+    LoweredText {
+        python_source: lowered,
+        source_map,
+        required_imports,
+        metadata: LoweringMetadata {
+            has_generic_type_params: !runtime_type_params.is_empty(),
+            has_typed_dict_transforms,
+            has_sealed_classes,
+        },
+    }
+}
+
+fn push_required_import(
+    lowered_lines: &mut Vec<String>,
+    required_imports: &mut Vec<String>,
+    import_line: String,
+) {
+    lowered_lines.push(import_line.clone());
+    required_imports.push(import_line);
 }
 
 fn rewrite_notrequired_import_line(options: &LoweringOptions) -> String {
@@ -1663,6 +1734,14 @@ mod tests {
         assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
         assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
         assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![
+                String::from("from typing import TypeAlias"),
+                String::from("from typing_extensions import NotRequired"),
+            ]
+        );
+        assert!(lowered.module.metadata.has_typed_dict_transforms);
     }
 
     #[test]
@@ -1745,6 +1824,14 @@ mod tests {
         assert!(
             !lowered.module.python_source.contains("from typing_extensions import NotRequired")
         );
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![
+                String::from("from typing import TypeAlias"),
+                String::from("from typing import NotRequired"),
+            ]
+        );
+        assert!(lowered.module.metadata.has_typed_dict_transforms);
     }
 
     #[test]
