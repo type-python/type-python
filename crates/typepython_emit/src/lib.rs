@@ -118,6 +118,11 @@ pub fn write_runtime_outputs(
                 module.python_source.clone()
             };
             fs::write(stub_path, stub_source)?;
+            if is_package_init_path(stub_path) {
+                if let Some(parent) = stub_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
+            }
             stub_files_written += 1;
         }
     }
@@ -129,6 +134,10 @@ pub fn write_runtime_outputs(
     }
 
     Ok(RuntimeWriteSummary { runtime_files_written, stub_files_written, py_typed_written })
+}
+
+fn is_package_init_path(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.pyi")
 }
 
 fn inject_runtime_validators(python: &str) -> Result<String, io::Error> {
@@ -943,6 +952,35 @@ mod tests {
         let error = result.expect_err("invalid lowered python should fail stub generation");
         assert!(error.to_string().contains("TPY5001"));
         assert!(error.to_string().contains("unable to generate `.pyi`"));
+    }
+
+    #[test]
+    fn write_runtime_outputs_writes_py_typed_for_stub_only_package() {
+        let temp_dir = temp_dir("write_runtime_outputs_writes_py_typed_for_stub_only_package");
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.pyi"),
+            source_kind: SourceKind::Stub,
+            python_source: String::from("def helper() -> int: ...\n"),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.pyi"),
+            runtime_path: None,
+            stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+        }];
+
+        let summary = write_runtime_outputs(&artifacts, &modules, false)
+            .expect("stub-only package outputs should be written");
+        let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
+            .expect("stub-only __init__.pyi should be readable");
+        let py_typed =
+            fs::read_to_string(temp_dir.join("build/app/py.typed")).expect("py.typed should exist");
+        remove_temp_dir(&temp_dir);
+
+        assert_eq!(summary.stub_files_written, 1);
+        assert_eq!(summary.py_typed_written, 1);
+        assert_eq!(stub, "def helper() -> int: ...\n");
+        assert_eq!(py_typed, "");
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {

@@ -1171,7 +1171,7 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                     ));
                 }
             }
-            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+            if is_package_init_path(runtime_path) {
                 if let Some(parent) = runtime_path.parent() {
                     package_roots.insert(parent.to_path_buf());
                 }
@@ -1186,6 +1186,11 @@ fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> 
                 ));
             } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
                 diagnostics.push(diagnostic);
+            }
+            if is_package_init_path(stub_path) {
+                if let Some(parent) = stub_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
             }
         }
 
@@ -1471,7 +1476,7 @@ fn expected_published_files(
         if let Some(runtime_path) = &artifact.runtime_path {
             expected_files
                 .insert(relative_publish_path(&out_root, runtime_path)?, fs::read(runtime_path)?);
-            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
+            if is_package_init_path(runtime_path) {
                 if let Some(parent) = runtime_path.parent() {
                     package_roots.insert(parent.to_path_buf());
                 }
@@ -1480,6 +1485,11 @@ fn expected_published_files(
         if let Some(stub_path) = &artifact.stub_path {
             expected_files
                 .insert(relative_publish_path(&out_root, stub_path)?, fs::read(stub_path)?);
+            if is_package_init_path(stub_path) {
+                if let Some(parent) = stub_path.parent() {
+                    package_roots.insert(parent.to_path_buf());
+                }
+            }
         }
     }
 
@@ -1503,6 +1513,10 @@ fn relative_publish_path(out_root: &Path, path: &Path) -> Result<String> {
 
 fn is_authoritative_publication_file(path: &str) -> bool {
     path.ends_with(".py") || path.ends_with(".pyi")
+}
+
+fn is_package_init_path(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.pyi")
 }
 
 fn read_supplied_artifact_entries(
@@ -2969,6 +2983,45 @@ mod tests {
 
         assert!(rendered.contains("TPY6001"));
         assert!(rendered.contains("incompatible or corrupt"));
+    }
+
+    #[test]
+    fn verify_build_artifacts_requires_py_typed_for_stub_only_package() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_requires_py_typed_for_stub_only_package");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "def helper() -> int: ...\n",
+            )
+            .expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.pyi"),
+                    runtime_path: None,
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
+            .as_text()
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(rendered.contains("TPY5003"));
+        assert!(rendered.contains("missing package marker"));
     }
 
     #[test]
