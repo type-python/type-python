@@ -856,6 +856,51 @@ mod tests {
         assert!(handle.config.typing.require_known_public_types);
     }
 
+    #[test]
+    fn accepts_null_python_executable_in_typepython_toml() {
+        let project_dir = temp_project_dir("accepts_null_python_executable_in_typepython_toml");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "target_python = \"3.10\"\n\n",
+                "[resolution]\n",
+                "python_executable = null\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected null python_executable to load");
+        assert_eq!(handle.config.resolution.python_executable, None);
+    }
+
+    #[test]
+    fn accepts_null_python_executable_in_embedded_pyproject() {
+        let project_dir = temp_project_dir("accepts_null_python_executable_in_embedded_pyproject");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            concat!(
+                "[tool.typepython.project]\n",
+                "target_python = \"3.11\"\n\n",
+                "[tool.typepython.resolution]\n",
+                "python_executable = null\n"
+            ),
+        )
+        .expect("pyproject.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected embedded null python_executable to load");
+        assert_eq!(handle.source, ConfigSource::PyProject);
+        assert_eq!(handle.config.resolution.python_executable, None);
+    }
+
     fn temp_project_dir(test_name: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
