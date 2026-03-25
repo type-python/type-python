@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam, visitor, visitor::Visitor};
+use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -1436,7 +1436,11 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head}.{}", tail.join("."))
+    }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
@@ -2356,10 +2360,17 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 &mut statements,
             );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
-            collect_function_body_assignments(&source.text, parsed.suite(), None, &mut statements);
+            collect_function_body_assignments(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             collect_function_body_bare_assignments(
                 &source.text,
                 parsed.suite(),
+                None,
                 None,
                 &mut statements,
             );
@@ -2466,11 +2477,13 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                     &normalized,
                     parsed.suite(),
                     None,
+                    None,
                     &mut statements,
                 );
                 collect_function_body_bare_assignments(
                     &normalized,
                     parsed.suite(),
+                    None,
                     None,
                     &mut statements,
                 );
@@ -3576,6 +3589,39 @@ fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl Fn
     }
 }
 
+fn for_each_nested_suite(stmt: &Stmt, mut callback: impl FnMut(&[Stmt])) {
+    match stmt {
+        Stmt::If(if_stmt) => {
+            callback(&if_stmt.body);
+            for_each_if_false_suite(if_stmt, |suite| callback(suite));
+        }
+        Stmt::Try(try_stmt) => {
+            callback(&try_stmt.body);
+            for handler in &try_stmt.handlers {
+                let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                callback(&handler.body);
+            }
+            callback(&try_stmt.orelse);
+            callback(&try_stmt.finalbody);
+        }
+        Stmt::Match(match_stmt) => {
+            for case in &match_stmt.cases {
+                callback(&case.body);
+            }
+        }
+        Stmt::For(for_stmt) => {
+            callback(&for_stmt.body);
+            callback(&for_stmt.orelse);
+        }
+        Stmt::While(while_stmt) => {
+            callback(&while_stmt.body);
+            callback(&while_stmt.orelse);
+        }
+        Stmt::With(with_stmt) => callback(&with_stmt.body),
+        _ => {}
+    }
+}
+
 fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     let Expr::Call(call) = expr else {
         return None;
@@ -3801,21 +3847,12 @@ fn collect_nested_call_statements(
                 collect_calls_from_suite(source, &class_def.body, statements);
                 collect_nested_call_statements(source, &class_def.body, statements);
             }
-            Stmt::If(if_stmt) => {
-                collect_calls_from_suite(source, &if_stmt.body, statements);
-                collect_nested_call_statements(source, &if_stmt.body, statements);
-                for_each_if_false_suite(if_stmt, |suite| {
+            _ => {
+                for_each_nested_suite(stmt, |suite| {
                     collect_calls_from_suite(source, suite, statements);
                     collect_nested_call_statements(source, suite, statements);
                 });
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_calls_from_suite(source, &case.body, statements);
-                    collect_nested_call_statements(source, &case.body, statements);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -3847,48 +3884,8 @@ fn collect_return_statements(
                     statements,
                 );
             }
-            Stmt::Try(try_stmt) => {
-                collect_return_statements(
-                    source,
-                    &try_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_return_statements(
-                        source,
-                        &handler.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-                collect_return_statements(
-                    source,
-                    &try_stmt.orelse,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                collect_return_statements(
-                    source,
-                    &try_stmt.finalbody,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-            }
-            Stmt::If(if_stmt) => {
-                collect_return_statements(
-                    source,
-                    &if_stmt.body,
-                    owner_name,
-                    owner_type_name,
-                    statements,
-                );
-                for_each_if_false_suite(if_stmt, |suite| {
+            _ => {
+                for_each_nested_suite(stmt, |suite| {
                     collect_return_statements(
                         source,
                         suite,
@@ -3897,19 +3894,6 @@ fn collect_return_statements(
                         statements,
                     );
                 });
-            }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
-                    collect_return_statements(
-                        source,
-                        &case.body,
-                        owner_name,
-                        owner_type_name,
-                        statements,
-                    );
-                }
-            }
-            _ => {
                 let Some(owner_name) = owner_name else {
                     continue;
                 };
@@ -4586,28 +4570,17 @@ fn collect_except_handler_statements(
 fn collect_function_body_assignments(
     source: &str,
     suite: &[Stmt],
+    owner_name: Option<&str>,
     owner_type_name: Option<&str>,
     statements: &mut Vec<SyntaxStatement>,
 ) {
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                for body_stmt in &function.body {
-                    let line =
-                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
-                    if let Some(assignment) = extract_function_body_assignment_statement(
-                        source,
-                        body_stmt,
-                        line,
-                        function.name.as_str(),
-                        owner_type_name,
-                    ) {
-                        statements.push(assignment);
-                    }
-                }
                 collect_function_body_assignments(
                     source,
                     &function.body,
+                    Some(function.name.as_str()),
                     owner_type_name,
                     statements,
                 );
@@ -4616,21 +4589,35 @@ fn collect_function_body_assignments(
                 collect_function_body_assignments(
                     source,
                     &class_def.body,
+                    owner_name,
                     Some(class_def.name.as_str()),
                     statements,
                 );
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
+            _ => {
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                let Some(owner_name) = owner_name else {
+                    continue;
+                };
+                if let Some(assignment) = extract_function_body_assignment_statement(
+                    source,
+                    stmt,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                ) {
+                    statements.push(assignment);
+                }
+                for_each_nested_suite(stmt, |suite| {
                     collect_function_body_assignments(
                         source,
-                        &case.body,
+                        suite,
+                        Some(owner_name),
                         owner_type_name,
                         statements,
-                    );
-                }
+                    )
+                });
             }
-            _ => {}
         }
     }
 }
@@ -4638,28 +4625,17 @@ fn collect_function_body_assignments(
 fn collect_function_body_bare_assignments(
     source: &str,
     suite: &[Stmt],
+    owner_name: Option<&str>,
     owner_type_name: Option<&str>,
     statements: &mut Vec<SyntaxStatement>,
 ) {
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                for body_stmt in &function.body {
-                    let line =
-                        offset_to_line_column(source, body_stmt.range().start().to_usize()).0;
-                    if let Some(assignment) = extract_function_body_bare_assignment_statement(
-                        source,
-                        body_stmt,
-                        line,
-                        function.name.as_str(),
-                        owner_type_name,
-                    ) {
-                        statements.push(assignment);
-                    }
-                }
                 collect_function_body_bare_assignments(
                     source,
                     &function.body,
+                    Some(function.name.as_str()),
                     owner_type_name,
                     statements,
                 );
@@ -4668,21 +4644,35 @@ fn collect_function_body_bare_assignments(
                 collect_function_body_bare_assignments(
                     source,
                     &class_def.body,
+                    owner_name,
                     Some(class_def.name.as_str()),
                     statements,
                 );
             }
-            Stmt::Match(match_stmt) => {
-                for case in &match_stmt.cases {
+            _ => {
+                let Some(owner_name) = owner_name else {
+                    continue;
+                };
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if let Some(assignment) = extract_function_body_bare_assignment_statement(
+                    source,
+                    stmt,
+                    line,
+                    owner_name,
+                    owner_type_name,
+                ) {
+                    statements.push(assignment);
+                }
+                for_each_nested_suite(stmt, |suite| {
                     collect_function_body_bare_assignments(
                         source,
-                        &case.body,
+                        suite,
+                        Some(owner_name),
                         owner_type_name,
                         statements,
-                    );
-                }
+                    )
+                });
             }
-            _ => {}
         }
     }
 }
@@ -6071,13 +6061,14 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssertStatement, CallStatement, ClassMember, ClassMemberKind, DirectExprMetadata,
-        ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
-        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, MatchCaseStatement,
-        MatchPattern, MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
-        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
-        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
+        parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
+        DirectExprMetadata, ExceptionHandlerStatement, ForStatement, FunctionParam,
+        FunctionStatement, GuardCondition, IfStatement, ImportBinding, ImportStatement,
+        InvalidationStatement, MatchCaseStatement, MatchPattern, MatchStatement,
+        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions,
+        ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
+        TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
+        YieldStatement,
     };
     use std::path::PathBuf;
 
@@ -7163,6 +7154,56 @@ mod tests {
                 line: 1,
             })]
         );
+    }
+
+    #[test]
+    fn parse_collects_nested_calls_returns_and_assignments_in_control_flow_suites() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("nested-control-flow.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(flag, items, ctx):\n    while flag:\n        helper()\n        value = helper()\n    for item in items:\n        helper()\n    with ctx:\n        helper()\n    try:\n        helper()\n    except Exception:\n        helper()\n    finally:\n        return 1\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let call_lines = tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Call(statement) if statement.callee == "helper" => {
+                    Some(statement.line)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let value_lines = tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Value(statement)
+                    if statement.names == vec![String::from("value")] =>
+                {
+                    Some(statement.line)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let return_lines = tree
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                SyntaxStatement::Return(statement) if statement.owner_name == "build" => {
+                    Some(statement.line)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(call_lines, vec![3, 4, 6, 8, 10, 12]);
+        assert_eq!(value_lines, vec![4]);
+        assert_eq!(return_lines, vec![14]);
     }
 
     #[test]
@@ -8815,6 +8856,16 @@ mod tests {
                     is_deprecated: false,
                     deprecation_message: None,
                     line: 1,
+                }),
+                SyntaxStatement::Call(CallStatement {
+                    callee: String::from("risky"),
+                    arg_count: 0,
+                    arg_types: Vec::new(),
+                    arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    line: 3,
                 }),
                 SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {
                     exception_type: String::from("ValueError"),
