@@ -26,7 +26,7 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, encode_snapshot, snapshot};
-use typepython_lowering::{LoweredModule, LoweringResult, lower};
+use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 use zip::ZipArchive;
 
@@ -1147,7 +1147,10 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
-    let lowering_results: Vec<_> = syntax_trees.iter().map(lower).collect();
+    let lowering_options =
+        LoweringOptions { target_python: config.config.project.target_python.clone() };
+    let lowering_results: Vec<_> =
+        syntax_trees.iter().map(|tree| lower_with_options(tree, &lowering_options)).collect();
     let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
     if lowering_diagnostics.has_errors() {
         return Ok(PipelineSnapshot {

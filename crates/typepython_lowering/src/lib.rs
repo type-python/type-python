@@ -42,11 +42,27 @@ struct LoweredText {
     source_map: Vec<SourceMapEntry>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct LoweringOptions {
+    pub target_python: String,
+}
+
+impl Default for LoweringOptions {
+    fn default() -> Self {
+        Self { target_python: String::from("3.10") }
+    }
+}
+
 /// Lowers a parsed module into its Python-facing form.
 #[must_use]
 pub fn lower(tree: &SyntaxTree) -> LoweringResult {
+    lower_with_options(tree, &LoweringOptions::default())
+}
+
+#[must_use]
+pub fn lower_with_options(tree: &SyntaxTree, options: &LoweringOptions) -> LoweringResult {
     let lowered_text = match tree.source.kind {
-        SourceKind::TypePython => lower_typepython(tree),
+        SourceKind::TypePython => lower_typepython(tree, options),
         SourceKind::Python | SourceKind::Stub => lower_passthrough(&tree.source.text),
     };
     let diagnostics = collect_lowering_diagnostics(tree);
@@ -73,7 +89,7 @@ fn lower_passthrough(source: &str) -> LoweredText {
     }
 }
 
-fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
+fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText {
     let unsafe_lines: BTreeSet<_> = tree
         .statements
         .iter()
@@ -211,7 +227,7 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
             || v.starts_with("Required_[")
     });
     if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
-        lowered_lines.push(String::from("from typing_extensions import NotRequired"));
+        lowered_lines.push(rewrite_notrequired_import_line(options));
         lowered_line_number += 1;
     }
     // Check if any type alias uses a transform that generates ReadOnly
@@ -267,6 +283,18 @@ fn lower_typepython(tree: &SyntaxTree) -> LoweredText {
     }
 
     LoweredText { python_source: lowered, source_map }
+}
+
+fn rewrite_notrequired_import_line(options: &LoweringOptions) -> String {
+    if prefers_typing_notrequired(&options.target_python) {
+        String::from("from typing import NotRequired")
+    } else {
+        String::from("from typing_extensions import NotRequired")
+    }
+}
+
+fn prefers_typing_notrequired(target_python: &str) -> bool {
+    matches!(target_python.trim(), "3.11" | "3.12")
 }
 
 fn header_line_for_statement(source: &str, start_line: usize) -> usize {
@@ -760,9 +788,8 @@ fn apply_transform_to_members<'a>(
             .into_iter()
             .map(|m| {
                 let ann = m.annotation.as_deref().unwrap_or("object");
-                let new_ann = if let Some(inner) = ann
-                    .strip_prefix("NotRequired[")
-                    .and_then(|inner| inner.strip_suffix(']'))
+                let new_ann = if let Some(inner) =
+                    ann.strip_prefix("NotRequired[").and_then(|inner| inner.strip_suffix(']'))
                 {
                     inner.trim().to_owned()
                 } else {
@@ -809,11 +836,7 @@ fn apply_transform_to_members<'a>(
                         .to_owned()
                 })
                 .collect();
-            fields
-                .into_iter()
-                .filter(|m| keys.contains(&m.name))
-                .cloned()
-                .collect()
+            fields.into_iter().filter(|m| keys.contains(&m.name)).cloned().collect()
         }
         "Omit" => {
             let keys: std::collections::BTreeSet<_> = key_args
@@ -827,11 +850,7 @@ fn apply_transform_to_members<'a>(
                         .to_owned()
                 })
                 .collect();
-            fields
-                .into_iter()
-                .filter(|m| !keys.contains(&m.name))
-                .cloned()
-                .collect()
+            fields.into_iter().filter(|m| !keys.contains(&m.name)).cloned().collect()
         }
         _ => fields.into_iter().cloned().collect(),
     }
@@ -1035,7 +1054,7 @@ fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagn
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceMapEntry, lower};
+    use super::{LoweringOptions, SourceMapEntry, lower, lower_with_options};
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
@@ -1644,6 +1663,88 @@ mod tests {
         assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
         assert!(lowered.module.python_source.contains("name: NotRequired[str]"));
         assert!(lowered.module.python_source.contains("from typing_extensions import NotRequired"));
+    }
+
+    #[test]
+    fn lower_prefers_typing_notrequired_for_target_python_311() {
+        let lowered = lower_with_options(
+            &SyntaxTree {
+                source: SourceFile {
+                    path: PathBuf::from("partial-311.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: String::from(
+                        "class User(TypedDict):\n    id: int\n    name: str\n\ntypealias UserUpdate = Partial[User]\n",
+                    ),
+                },
+                statements: vec![
+                    SyntaxStatement::ClassDef(NamedBlockStatement {
+                        name: String::from("User"),
+                        type_params: Vec::new(),
+                        header_suffix: String::from("(TypedDict)"),
+                        bases: vec![String::from("TypedDict")],
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_abstract_class: false,
+                        members: vec![
+                            ClassMember {
+                                name: String::from("id"),
+                                kind: ClassMemberKind::Field,
+                                method_kind: None,
+                                annotation: Some(String::from("int")),
+                                value_type: None,
+                                params: Vec::new(),
+                                returns: None,
+                                is_async: false,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_deprecated: false,
+                                deprecation_message: None,
+                                is_final: false,
+                                is_class_var: false,
+                                line: 2,
+                            },
+                            ClassMember {
+                                name: String::from("name"),
+                                kind: ClassMemberKind::Field,
+                                method_kind: None,
+                                annotation: Some(String::from("str")),
+                                value_type: None,
+                                params: Vec::new(),
+                                returns: None,
+                                is_async: false,
+                                is_override: false,
+                                is_abstract_method: false,
+                                is_final_decorator: false,
+                                is_deprecated: false,
+                                deprecation_message: None,
+                                is_final: false,
+                                is_class_var: false,
+                                line: 3,
+                            },
+                        ],
+                        line: 1,
+                    }),
+                    SyntaxStatement::TypeAlias(TypeAliasStatement {
+                        name: String::from("UserUpdate"),
+                        type_params: Vec::new(),
+                        value: String::from("Partial[User]"),
+                        line: 5,
+                    }),
+                ],
+                type_ignore_directives: Vec::new(),
+                diagnostics: DiagnosticReport::default(),
+            },
+            &LoweringOptions { target_python: String::from("3.11") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("from typing import NotRequired"));
+        assert!(
+            !lowered.module.python_source.contains("from typing_extensions import NotRequired")
+        );
     }
 
     #[test]
