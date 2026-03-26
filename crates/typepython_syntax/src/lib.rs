@@ -183,6 +183,11 @@ pub struct ValueStatement {
     pub value_subscript_index: Option<String>,
     pub value_if_true: Option<Box<DirectExprMetadata>>,
     pub value_if_false: Option<Box<DirectExprMetadata>>,
+    pub value_bool_left: Option<Box<DirectExprMetadata>>,
+    pub value_bool_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_left: Option<Box<DirectExprMetadata>>,
+    pub value_binop_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_operator: Option<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub is_final: bool,
@@ -251,6 +256,11 @@ pub struct ReturnStatement {
     pub value_subscript_index: Option<String>,
     pub value_if_true: Option<Box<DirectExprMetadata>>,
     pub value_if_false: Option<Box<DirectExprMetadata>>,
+    pub value_bool_left: Option<Box<DirectExprMetadata>>,
+    pub value_bool_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_left: Option<Box<DirectExprMetadata>>,
+    pub value_binop_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_operator: Option<String>,
     pub line: usize,
 }
 
@@ -272,6 +282,11 @@ pub struct YieldStatement {
     pub value_subscript_index: Option<String>,
     pub value_if_true: Option<Box<DirectExprMetadata>>,
     pub value_if_false: Option<Box<DirectExprMetadata>>,
+    pub value_bool_left: Option<Box<DirectExprMetadata>>,
+    pub value_bool_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_left: Option<Box<DirectExprMetadata>>,
+    pub value_binop_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_operator: Option<String>,
     pub is_yield_from: bool,
     pub line: usize,
 }
@@ -463,6 +478,11 @@ pub struct DirectExprMetadata {
     pub value_subscript_index: Option<String>,
     pub value_if_true: Option<Box<DirectExprMetadata>>,
     pub value_if_false: Option<Box<DirectExprMetadata>>,
+    pub value_bool_left: Option<Box<DirectExprMetadata>>,
+    pub value_bool_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_left: Option<Box<DirectExprMetadata>>,
+    pub value_binop_right: Option<Box<DirectExprMetadata>>,
+    pub value_binop_operator: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3379,6 +3399,11 @@ fn extract_ast_backed_statement(
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -3412,6 +3437,11 @@ fn extract_ast_backed_statement(
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
@@ -3431,6 +3461,11 @@ fn extract_ast_backed_statement(
                     value_subscript_index: value.value_subscript_index,
                     value_if_true: value.value_if_true,
                     value_if_false: value.value_if_false,
+                    value_bool_left: value.value_bool_left,
+                    value_bool_right: value.value_bool_right,
+                    value_binop_left: value.value_binop_left,
+                    value_binop_right: value.value_binop_right,
+                    value_binop_operator: value.value_binop_operator,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: is_final_annotation(&stmt.annotation),
@@ -3931,6 +3966,24 @@ fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
         Expr::UnaryOp(unary) if unary.op == ruff_python_ast::UnaryOp::Not => {
             Some(String::from("bool"))
         }
+        Expr::BoolOp(bool_op) => {
+            let mut types =
+                bool_op.values.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;
+            if types.is_empty() {
+                None
+            } else {
+                Some(
+                    if bool_op.op == ruff_python_ast::BoolOp::And
+                        || bool_op.op == ruff_python_ast::BoolOp::Or
+                    {
+                        join_union_literal_type_candidates(types)
+                    } else {
+                        types.remove(0)
+                    },
+                )
+            }
+        }
+        Expr::BinOp(bin_op) => infer_direct_binop_type(bin_op),
         Expr::List(list) => {
             let element_types =
                 list.elts.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;
@@ -3966,6 +4019,74 @@ fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn infer_direct_binop_type(bin_op: &ruff_python_ast::ExprBinOp) -> Option<String> {
+    let left = infer_direct_literal_type(&bin_op.left)?;
+    let right = infer_direct_literal_type(&bin_op.right)?;
+    match bin_op.op {
+        ruff_python_ast::Operator::Add => {
+            if left == "str" && right == "str" {
+                return Some(String::from("str"));
+            }
+            if is_direct_numeric_type(&left) && is_direct_numeric_type(&right) {
+                return Some(join_numeric_type(&left, &right));
+            }
+            let (left_head, left_args) = split_direct_generic_type(&left)?;
+            let (right_head, right_args) = split_direct_generic_type(&right)?;
+            match (left_head.as_str(), right_head.as_str()) {
+                ("list", "list") if left_args.len() == 1 && right_args.len() == 1 => Some(format!(
+                    "list[{}]",
+                    join_literal_type_candidates(vec![left_args[0].clone(), right_args[0].clone()])
+                )),
+                ("tuple", "tuple") => {
+                    let mut args = left_args;
+                    args.extend(right_args);
+                    Some(format!("tuple[{}]", args.join(", ")))
+                }
+                _ => None,
+            }
+        }
+        ruff_python_ast::Operator::Sub
+        | ruff_python_ast::Operator::Mult
+        | ruff_python_ast::Operator::Div
+        | ruff_python_ast::Operator::FloorDiv
+        | ruff_python_ast::Operator::Mod
+            if is_direct_numeric_type(&left) && is_direct_numeric_type(&right) =>
+        {
+            Some(if bin_op.op == ruff_python_ast::Operator::Div {
+                String::from("float")
+            } else {
+                join_numeric_type(&left, &right)
+            })
+        }
+        _ => None,
+    }
+}
+
+fn is_direct_numeric_type(text: &str) -> bool {
+    matches!(text, "int" | "float" | "complex")
+}
+
+fn join_numeric_type(left: &str, right: &str) -> String {
+    if left == "complex" || right == "complex" {
+        String::from("complex")
+    } else if left == "float" || right == "float" {
+        String::from("float")
+    } else {
+        String::from("int")
+    }
+}
+
+fn split_direct_generic_type(text: &str) -> Option<(String, Vec<String>)> {
+    let (head, inner) = text.split_once('[')?;
+    let inner = inner.strip_suffix(']')?;
+    Some((head.to_owned(), inner.split(',').map(|part| part.trim().to_owned()).collect()))
+}
+
+fn join_union_literal_type_candidates(types: Vec<String>) -> String {
+    let joined = join_literal_type_candidates(types);
+    if joined.contains(" | ") { format!("Union[{}]", joined.replace(" | ", ", ")) } else { joined }
 }
 
 fn join_literal_type_candidates(types: Vec<String>) -> String {
@@ -4916,6 +5037,11 @@ fn extract_function_body_assignment_statement(
                 value_subscript_index: None,
                 value_if_true: None,
                 value_if_false: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
             },
         );
     Some(SyntaxStatement::Value(ValueStatement {
@@ -4936,6 +5062,11 @@ fn extract_function_body_assignment_statement(
         value_subscript_index: value.value_subscript_index,
         value_if_true: value.value_if_true,
         value_if_false: value.value_if_false,
+        value_bool_left: value.value_bool_left,
+        value_bool_right: value.value_bool_right,
+        value_binop_left: value.value_binop_left,
+        value_binop_right: value.value_binop_right,
+        value_binop_operator: value.value_binop_operator,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: is_final_annotation(&assign.annotation),
@@ -4977,6 +5108,11 @@ fn extract_function_body_bare_assignment_statement(
         value_subscript_index: value.value_subscript_index,
         value_if_true: value.value_if_true,
         value_if_false: value.value_if_false,
+        value_bool_left: value.value_bool_left,
+        value_bool_right: value.value_bool_right,
+        value_binop_left: value.value_binop_left,
+        value_binop_right: value.value_binop_right,
+        value_binop_operator: value.value_binop_operator,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
@@ -5018,6 +5154,11 @@ fn extract_yield_statement(
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                 }),
             false,
         ),
@@ -5044,6 +5185,11 @@ fn extract_yield_statement(
         value_subscript_index: value.value_subscript_index,
         value_if_true: value.value_if_true,
         value_if_false: value.value_if_false,
+        value_bool_left: value.value_bool_left,
+        value_bool_right: value.value_bool_right,
+        value_binop_left: value.value_binop_left,
+        value_binop_right: value.value_binop_right,
+        value_binop_operator: value.value_binop_operator,
         is_yield_from,
         line,
     }))
@@ -5273,6 +5419,11 @@ fn extract_return_statement(
             value_subscript_index: None,
             value_if_true: None,
             value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
         });
 
     Some(SyntaxStatement::Return(ReturnStatement {
@@ -5293,6 +5444,11 @@ fn extract_return_statement(
         value_subscript_index: value.value_subscript_index,
         value_if_true: value.value_if_true,
         value_if_false: value.value_if_false,
+        value_bool_left: value.value_bool_left,
+        value_bool_right: value.value_bool_right,
+        value_binop_left: value.value_binop_left,
+        value_binop_right: value.value_binop_right,
+        value_binop_operator: value.value_binop_operator,
         line,
     }))
 }
@@ -5325,6 +5481,75 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_subscript_index: None,
             value_if_true: None,
             value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+        };
+    }
+
+    if let Expr::BoolOp(bool_op) = expr {
+        let mut values = bool_op.values.iter();
+        let left = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
+        let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: left.map(Box::new),
+            value_bool_right: right.map(Box::new),
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: Some(match bool_op.op {
+                ruff_python_ast::BoolOp::And => String::from("and"),
+                ruff_python_ast::BoolOp::Or => String::from("or"),
+            }),
+        };
+    }
+
+    if let Expr::BinOp(bin_op) = expr {
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
+            value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
+            value_binop_operator: Some(match bin_op.op {
+                ruff_python_ast::Operator::Add => String::from("+"),
+                ruff_python_ast::Operator::Sub => String::from("-"),
+                ruff_python_ast::Operator::Mult => String::from("*"),
+                ruff_python_ast::Operator::Div => String::from("/"),
+                ruff_python_ast::Operator::FloorDiv => String::from("//"),
+                ruff_python_ast::Operator::Mod => String::from("%"),
+                _ => String::new(),
+            }),
         };
     }
 
@@ -5345,6 +5570,11 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_subscript_index: None,
             value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
             value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
         };
     }
 
@@ -5371,6 +5601,11 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             },
             value_if_true: None,
             value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
         };
     }
 
@@ -5394,6 +5629,11 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_subscript_index: None,
         value_if_true: None,
         value_if_false: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
     }
 }
 
@@ -6713,6 +6953,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 })
             ]
@@ -6900,6 +7145,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 5,
                 }),
             ]
@@ -6966,6 +7216,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6990,6 +7245,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7033,6 +7293,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7071,6 +7336,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7095,6 +7365,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7163,6 +7438,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7201,6 +7481,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7269,6 +7554,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7293,6 +7583,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7370,6 +7665,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7432,6 +7732,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
@@ -7449,6 +7754,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                 ],
                 keyword_expansion_types: Vec::new(),
@@ -7541,6 +7851,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
@@ -7558,6 +7873,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7610,6 +7930,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("tuple[int, str]")),
@@ -7627,6 +7952,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("dict[str, int]")),
@@ -7644,6 +7974,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("set[int]")),
@@ -7661,6 +7996,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7709,6 +8049,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                 }],
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
@@ -7730,6 +8075,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                 }],
                 line: 1,
             })]
@@ -7780,6 +8130,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                 })),
                 value_if_false: Some(Box::new(DirectExprMetadata {
                     value_type: Some(String::from("int")),
@@ -7797,7 +8152,17 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                 })),
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
                 owner_name: None,
                 owner_type_name: None,
                 is_final: false,
@@ -7891,6 +8256,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
             ]
@@ -7941,6 +8311,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -7972,6 +8347,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 5,
                 }),
             ]
@@ -8020,6 +8400,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
             ]
@@ -8076,6 +8461,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
             ]
@@ -8146,6 +8536,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     }],
                     starred_arg_types: Vec::new(),
                     starred_arg_values: Vec::new(),
@@ -8183,6 +8578,11 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
                     }],
                     keyword_expansion_types: Vec::new(),
                     keyword_expansion_values: Vec::new(),
@@ -8412,6 +8812,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 8,
                 }),
             ]
@@ -8458,6 +8863,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: true,
@@ -8600,6 +9010,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -8755,6 +9170,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
             ]
@@ -8805,6 +9225,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -8836,6 +9261,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 5,
                 }),
             ]
@@ -8885,6 +9315,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     is_yield_from: false,
                     line: 2,
                 }),
@@ -8916,6 +9351,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     is_yield_from: true,
                     line: 5,
                 }),
@@ -8975,6 +9415,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -8999,6 +9444,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 3,
                 }),
             ]
@@ -9047,6 +9497,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 2,
                 }),
             ]
@@ -9122,6 +9577,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 4,
                 }),
             ]
@@ -9197,6 +9657,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 4,
                 }),
             ]
@@ -9271,6 +9736,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 4,
                 }),
             ]
@@ -9426,6 +9896,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 4,
                 }),
             ]
@@ -9498,6 +9973,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 5,
                 }),
             ]
@@ -9583,6 +10063,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 7,
                 }),
             ]
@@ -9842,6 +10327,11 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
                     line: 12,
                 })
             ]
