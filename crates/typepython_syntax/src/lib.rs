@@ -3927,6 +3927,10 @@ fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
         Expr::StringLiteral(_) => Some(String::from("str")),
         Expr::BooleanLiteral(_) => Some(String::from("bool")),
         Expr::NoneLiteral(_) => Some(String::from("None")),
+        Expr::Compare(_) => Some(String::from("bool")),
+        Expr::UnaryOp(unary) if unary.op == ruff_python_ast::UnaryOp::Not => {
+            Some(String::from("bool"))
+        }
         Expr::List(list) => {
             let element_types =
                 list.elts.iter().map(infer_direct_literal_type).collect::<Option<Vec<_>>>()?;

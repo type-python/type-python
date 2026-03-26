@@ -457,7 +457,9 @@ fn call_signature_params_are_applicable(
             let Some(param_ty) = variadic_type else {
                 return false;
             };
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            arg_ty.is_empty()
+                || param_ty.is_empty()
+                || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         }) && variadic_starred_types.iter().all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
@@ -475,7 +477,9 @@ fn call_signature_params_are_applicable(
                     || direct_type_is_assignable(node, nodes, param_ty, arg_ty);
             };
             let param_ty = &param_types[index];
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            arg_ty.is_empty()
+                || param_ty.is_empty()
+                || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         }) && keyword_expansions.iter().all(|expansion| match expansion {
             KeywordExpansion::TypedDict(shape) => shape.fields.iter().all(|(key, field)| {
                 if let Some(index) = params.iter().position(|param| param.name == *key) {
@@ -2297,8 +2301,13 @@ fn direct_type_is_assignable_normalized(
         return direct_type_is_assignable_normalized(node, nodes, expected, &inner);
     }
 
-    if expected == actual || expected == "Any" || expected == "unknown" || expected == "dynamic"
-        || actual == "Any" || actual == "unknown" || actual == "dynamic"
+    if expected == actual
+        || expected == "Any"
+        || expected == "unknown"
+        || expected == "dynamic"
+        || actual == "Any"
+        || actual == "unknown"
+        || actual == "dynamic"
     {
         return true;
     }
@@ -2307,13 +2316,18 @@ fn direct_type_is_assignable_normalized(
         if let Some(actual_branches) = union_branches(actual) {
             return actual_branches.iter().all(|actual_branch| {
                 branches.iter().any(|expected_branch| {
-                    direct_type_is_assignable_normalized(node, nodes, expected_branch, actual_branch)
+                    direct_type_is_assignable_normalized(
+                        node,
+                        nodes,
+                        expected_branch,
+                        actual_branch,
+                    )
                 })
             });
         }
-        return branches.into_iter().any(|branch| {
-            direct_type_is_assignable_normalized(node, nodes, &branch, actual)
-        });
+        return branches
+            .into_iter()
+            .any(|branch| direct_type_is_assignable_normalized(node, nodes, &branch, actual));
     }
 
     if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
@@ -2378,9 +2392,9 @@ fn type_satisfies_interface(
     interface_node: &typepython_graph::ModuleNode,
     interface_decl: &Declaration,
 ) -> bool {
-    collect_interface_members(interface_node, interface_decl, nodes)
-        .into_iter()
-        .all(|required| actual_member_satisfies_requirement(nodes, actual_node, actual_decl, &required))
+    collect_interface_members(interface_node, interface_decl, nodes).into_iter().all(|required| {
+        actual_member_satisfies_requirement(nodes, actual_node, actual_decl, &required)
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -2396,7 +2410,13 @@ fn collect_interface_members(
 ) -> Vec<InterfaceMemberRequirement> {
     let mut visited = BTreeSet::new();
     let mut requirements = BTreeMap::new();
-    collect_interface_members_with_visited(node, declaration, nodes, &mut visited, &mut requirements);
+    collect_interface_members_with_visited(
+        node,
+        declaration,
+        nodes,
+        &mut visited,
+        &mut requirements,
+    );
     requirements.into_values().collect()
 }
 
@@ -2426,7 +2446,13 @@ fn collect_interface_members_with_visited(
         if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base)
             && is_interface_like_declaration(base_node, base_decl, nodes)
         {
-            collect_interface_members_with_visited(base_node, base_decl, nodes, visited, requirements);
+            collect_interface_members_with_visited(
+                base_node,
+                base_decl,
+                nodes,
+                visited,
+                requirements,
+            );
         }
     }
 }
@@ -2438,26 +2464,27 @@ fn actual_member_satisfies_requirement(
     requirement: &InterfaceMemberRequirement,
 ) -> bool {
     match requirement.declaration.kind {
-        DeclarationKind::Function => find_apparent_callable_declaration(
-            nodes,
-            actual_node,
-            actual_decl,
-            &requirement.name,
-        )
-        .is_some_and(|member| {
-            methods_are_compatible_for_override(actual_node, nodes, member, &requirement.declaration)
-        }),
-        DeclarationKind::Value => find_apparent_value_declaration(
-            nodes,
-            actual_node,
-            actual_decl,
-            &requirement.name,
-        )
-        .is_some_and(|member| {
-            let expected = normalize_type_text(requirement.declaration.detail.as_str());
-            let actual = normalize_type_text(member.detail.as_str());
-            expected.is_empty() || actual.is_empty() || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
-        }),
+        DeclarationKind::Function => {
+            find_apparent_callable_declaration(nodes, actual_node, actual_decl, &requirement.name)
+                .is_some_and(|member| {
+                    methods_are_compatible_for_override(
+                        actual_node,
+                        nodes,
+                        member,
+                        &requirement.declaration,
+                    )
+                })
+        }
+        DeclarationKind::Value => {
+            find_apparent_value_declaration(nodes, actual_node, actual_decl, &requirement.name)
+                .is_some_and(|member| {
+                    let expected = normalize_type_text(requirement.declaration.detail.as_str());
+                    let actual = normalize_type_text(member.detail.as_str());
+                    expected.is_empty()
+                        || actual.is_empty()
+                        || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
+                })
+        }
         _ => false,
     }
 }
@@ -2555,9 +2582,11 @@ fn assignable_generic_bridge(
     let (actual_head, actual_args) = split_generic_type(actual)?;
 
     if expected_head == actual_head && expected_args.len() == actual_args.len() {
-        return Some(expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
-            direct_type_is_assignable_normalized(node, nodes, expected_arg, actual_arg)
-        }));
+        return Some(expected_args.iter().zip(actual_args.iter()).all(
+            |(expected_arg, actual_arg)| {
+                direct_type_is_assignable_normalized(node, nodes, expected_arg, actual_arg)
+            },
+        ));
     }
 
     match (expected_head, actual_head) {
@@ -2584,8 +2613,17 @@ fn assignable_generic_bridge(
         }
         ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
             return Some(
-                direct_type_is_assignable_normalized(node, nodes, &expected_args[0], &actual_args[0])
-                    && direct_type_is_assignable_normalized(node, nodes, &expected_args[1], &actual_args[1]),
+                direct_type_is_assignable_normalized(
+                    node,
+                    nodes,
+                    &expected_args[0],
+                    &actual_args[0],
+                ) && direct_type_is_assignable_normalized(
+                    node,
+                    nodes,
+                    &expected_args[1],
+                    &actual_args[1],
+                ),
             );
         }
         _ => {}
@@ -5688,7 +5726,7 @@ fn infer_generic_type_param_substitutions(
         };
         if let Some(bound) = &type_param.bound
             && !actual.is_empty()
-                    && !direct_type_is_assignable(node, nodes, bound, actual)
+            && !direct_type_is_assignable(node, nodes, bound, actual)
         {
             return None;
         }
@@ -5797,7 +5835,8 @@ fn resolve_direct_callable_return_type_for_line(
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
     let function = resolve_direct_function(node, nodes, callee)?;
     let signature = direct_signature_sites_from_detail(&function.detail);
-    let substitutions = infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
+    let substitutions =
+        infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
     Some(substitute_generic_type_params(function.detail.split_once("->")?.1.trim(), &substitutions))
 }
 
@@ -6575,11 +6614,8 @@ fn methods_are_compatible_for_override(
     }
 
     let child_return = member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
-    let base_return = base_member
-        .detail
-        .split_once("->")
-        .map(|(_, right)| right.trim())
-        .unwrap_or("");
+    let base_return =
+        base_member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
     child_return.is_empty()
         || base_return.is_empty()
         || direct_type_is_assignable(node, nodes, base_return, child_return)
@@ -7312,7 +7348,12 @@ fn interface_implementation_diagnostics<'a>(
             }
 
             for requirement in collect_interface_members(base_node, base_decl, nodes) {
-                if !actual_member_satisfies_requirement(nodes, node, class_declaration, &requirement) {
+                if !actual_member_satisfies_requirement(
+                    nodes,
+                    node,
+                    class_declaration,
+                    &requirement,
+                ) {
                     diagnostics.push(Diagnostic::error(
                         "TPY4008",
                         format!(
@@ -8724,7 +8765,12 @@ mod tests {
             method_calls: Vec::new(),
         };
 
-        assert!(crate::overload_is_applicable_with_context(&node, &[node.clone()], &call, &declaration));
+        assert!(crate::overload_is_applicable_with_context(
+            &node,
+            &[node.clone()],
+            &call,
+            &declaration
+        ));
     }
 
     #[test]
@@ -8784,7 +8830,12 @@ mod tests {
             method_calls: Vec::new(),
         };
 
-        assert!(crate::overload_is_applicable_with_context(&node, &[node.clone()], &call, &declaration));
+        assert!(crate::overload_is_applicable_with_context(
+            &node,
+            &[node.clone()],
+            &call,
+            &declaration
+        ));
     }
 
     #[test]
@@ -13864,6 +13915,38 @@ mod tests {
         let result = check_temp_typepython_source("values: list[int] = [1, 2]\n");
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_compare_annotated_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "left: int = 1\nright: int = 2\nvalue: int = left < right\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `bool` where `value` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_unary_not_return_type_mismatch() {
+        let result =
+            check_temp_typepython_source("def build(flag: bool) -> int:\n    return not flag\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("returns `bool` where `build` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_compare_call_arg_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "left: int = 1\nright: int = 2\n\ndef takes(value: int) -> None:\n    return None\n\ntakes(left < right)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes `bool` where parameter expects `int`"));
     }
 
     #[test]
