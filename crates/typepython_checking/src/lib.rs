@@ -450,14 +450,14 @@ fn call_signature_params_are_applicable(
                 if arg_ty.is_empty() || param_ty.is_empty() {
                     true
                 } else {
-                    direct_type_matches(param_ty, arg_ty)
+                    direct_type_is_assignable(node, nodes, param_ty, arg_ty)
                 }
             },
         ) && positional_types.iter().skip(positional_params.len()).all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
             };
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         }) && variadic_starred_types.iter().all(|arg_ty| {
             let Some(param_ty) = variadic_type else {
                 return false;
@@ -472,10 +472,10 @@ fn call_signature_params_are_applicable(
                 };
                 return arg_ty.is_empty()
                     || param_ty.is_empty()
-                    || direct_type_matches(param_ty, arg_ty);
+                    || direct_type_is_assignable(node, nodes, param_ty, arg_ty);
             };
             let param_ty = &param_types[index];
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+            arg_ty.is_empty() || param_ty.is_empty() || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         }) && keyword_expansions.iter().all(|expansion| match expansion {
             KeywordExpansion::TypedDict(shape) => shape.fields.iter().all(|(key, field)| {
                 if let Some(index) = params.iter().position(|param| param.name == *key) {
@@ -2230,6 +2230,17 @@ fn direct_type_matches(expected: &str, actual: &str) -> bool {
     direct_type_matches_normalized(&expected, &actual)
 }
 
+fn direct_type_is_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> bool {
+    let expected = normalize_type_text(expected);
+    let actual = normalize_type_text(actual);
+    direct_type_is_assignable_normalized(node, nodes, &expected, &actual)
+}
+
 fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
     if let Some(inner) = annotated_inner(expected) {
         return direct_type_matches_normalized(&inner, actual);
@@ -2271,6 +2282,120 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
         }
         _ => false,
     }
+}
+
+fn direct_type_is_assignable_normalized(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> bool {
+    if let Some(inner) = annotated_inner(expected) {
+        return direct_type_is_assignable_normalized(node, nodes, &inner, actual);
+    }
+    if let Some(inner) = annotated_inner(actual) {
+        return direct_type_is_assignable_normalized(node, nodes, expected, &inner);
+    }
+
+    if expected == actual || expected == "Any" || expected == "unknown" || expected == "dynamic"
+        || actual == "Any" || actual == "unknown" || actual == "dynamic"
+    {
+        return true;
+    }
+
+    if let Some(branches) = union_branches(expected) {
+        if let Some(actual_branches) = union_branches(actual) {
+            return actual_branches.iter().all(|actual_branch| {
+                branches.iter().any(|expected_branch| {
+                    direct_type_is_assignable_normalized(node, nodes, expected_branch, actual_branch)
+                })
+            });
+        }
+        return branches.into_iter().any(|branch| {
+            direct_type_is_assignable_normalized(node, nodes, &branch, actual)
+        });
+    }
+
+    if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
+        return true;
+    }
+
+    if nominal_subclass_assignable(node, nodes, expected, actual) {
+        return true;
+    }
+
+    if let Some(result) = assignable_generic_bridge(node, nodes, expected, actual) {
+        return result;
+    }
+
+    direct_type_matches_normalized(expected, actual)
+}
+
+fn nominal_subclass_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> bool {
+    if expected == actual {
+        return true;
+    }
+    let Some((actual_node, actual_decl)) = resolve_direct_base(nodes, node, actual) else {
+        return false;
+    };
+    actual_decl.bases.iter().any(|base| {
+        normalize_type_text(base) == expected
+            || direct_type_is_assignable_normalized(actual_node, nodes, expected, base)
+    })
+}
+
+fn assignable_generic_bridge(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> Option<bool> {
+    let (expected_head, expected_args) = split_generic_type(expected)?;
+    let (actual_head, actual_args) = split_generic_type(actual)?;
+
+    if expected_head == actual_head && expected_args.len() == actual_args.len() {
+        return Some(expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
+            direct_type_is_assignable_normalized(node, nodes, expected_arg, actual_arg)
+        }));
+    }
+
+    match (expected_head, actual_head) {
+        ("Sequence", "list") | ("Sequence", "tuple") if !expected_args.is_empty() => {
+            if actual_head == "tuple" && actual_args.len() == 2 && actual_args[1] == "..." {
+                return Some(direct_type_is_assignable_normalized(
+                    node,
+                    nodes,
+                    &expected_args[0],
+                    &actual_args[0],
+                ));
+            }
+            let element = if actual_head == "tuple" {
+                join_branch_types(actual_args)
+            } else {
+                actual_args.first().cloned().unwrap_or_default()
+            };
+            return Some(direct_type_is_assignable_normalized(
+                node,
+                nodes,
+                &expected_args[0],
+                &element,
+            ));
+        }
+        ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
+            return Some(
+                direct_type_is_assignable_normalized(node, nodes, &expected_args[0], &actual_args[0])
+                    && direct_type_is_assignable_normalized(node, nodes, &expected_args[1], &actual_args[1]),
+            );
+        }
+        _ => {}
+    }
+
+    None
 }
 
 fn enum_member_owner_name(text: &str) -> Option<String> {
@@ -4269,7 +4394,7 @@ fn direct_call_type_diagnostics(
             }
             if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
                 && let Some(signature) =
-                    resolve_instantiated_direct_function_signature(function, call)
+                    resolve_instantiated_direct_function_signature(node, nodes, function, call)
             {
                 return direct_source_function_type_diagnostics(node, nodes, call, &signature);
             }
@@ -4286,6 +4411,7 @@ fn direct_call_type_diagnostics(
                 direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
             positional_and_keyword_type_diagnostics(
                 node,
+                nodes,
                 call,
                 call.arg_types.as_slice(),
                 call.keyword_arg_types.as_slice(),
@@ -4615,6 +4741,7 @@ fn direct_source_function_type_diagnostics(
     let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     positional_and_keyword_type_diagnostics(
         node,
+        nodes,
         call,
         &expanded_arg_types,
         &resolved_keyword_arg_types,
@@ -4692,6 +4819,7 @@ fn resolved_keyword_arg_types(
 
 fn positional_and_keyword_type_diagnostics(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     arg_types: &[String],
     keyword_arg_types: &[String],
@@ -4708,7 +4836,9 @@ fn positional_and_keyword_type_diagnostics(
         .take(param_types.len())
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty)
+            !arg_ty.is_empty()
+                && !param_ty.is_empty()
+                && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
             Diagnostic::error(
@@ -4728,7 +4858,10 @@ fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = variadic_type else {
             break;
         };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+        if !arg_ty.is_empty()
+            && !param_ty.is_empty()
+            && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+        {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -4746,7 +4879,10 @@ fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = variadic_type else {
             continue;
         };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+        if !arg_ty.is_empty()
+            && !param_ty.is_empty()
+            && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+        {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -4828,7 +4964,7 @@ fn positional_and_keyword_type_diagnostics(
                         let param_ty = &param_types[index];
                         if !field.value_type.is_empty()
                             && !param_ty.is_empty()
-                            && !direct_type_matches(param_ty, &field.value_type)
+                            && !direct_type_is_assignable(node, nodes, param_ty, &field.value_type)
                         {
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
@@ -4846,7 +4982,7 @@ fn positional_and_keyword_type_diagnostics(
                     } else if let Some(param_ty) = keyword_variadic_type {
                         if !field.value_type.is_empty()
                             && !param_ty.is_empty()
-                            && !direct_type_matches(param_ty, &field.value_type)
+                            && !direct_type_is_assignable(node, nodes, param_ty, &field.value_type)
                         {
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
@@ -4868,7 +5004,7 @@ fn positional_and_keyword_type_diagnostics(
                 if let Some(param_ty) = keyword_variadic_type
                     && !value_ty.is_empty()
                     && !param_ty.is_empty()
-                    && !direct_type_matches(param_ty, value_ty)
+                    && !direct_type_is_assignable(node, nodes, param_ty, value_ty)
                 {
                     diagnostics.push(Diagnostic::error(
                         "TPY4001",
@@ -5291,6 +5427,8 @@ fn resolve_direct_callable_param_types(
 }
 
 fn resolve_instantiated_direct_function_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     function: &Declaration,
     call: &typepython_binding::CallSite,
 ) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
@@ -5299,7 +5437,8 @@ fn resolve_instantiated_direct_function_signature(
     }
 
     let signature = direct_signature_sites_from_detail(&function.detail);
-    let substitutions = infer_generic_type_param_substitutions(function, &signature, call)?;
+    let substitutions =
+        infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
     Some(
         signature
             .into_iter()
@@ -5315,6 +5454,8 @@ fn resolve_instantiated_direct_function_signature(
 }
 
 fn infer_generic_type_param_substitutions(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     function: &Declaration,
     signature: &[typepython_syntax::DirectFunctionParamSite],
     call: &typepython_binding::CallSite,
@@ -5351,7 +5492,7 @@ fn infer_generic_type_param_substitutions(
         };
         if let Some(bound) = &type_param.bound
             && !actual.is_empty()
-            && !direct_type_matches(bound, actual)
+                    && !direct_type_is_assignable(node, nodes, bound, actual)
         {
             return None;
         }
@@ -5460,7 +5601,7 @@ fn resolve_direct_callable_return_type_for_line(
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
     let function = resolve_direct_function(node, nodes, callee)?;
     let signature = direct_signature_sites_from_detail(&function.detail);
-    let substitutions = infer_generic_type_param_substitutions(function, &signature, call)?;
+    let substitutions = infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
     Some(substitute_generic_type_params(function.detail.split_once("->")?.1.trim(), &substitutions))
 }
 
@@ -6167,7 +6308,7 @@ fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     }) {
-                        if !methods_are_compatible_for_override(member, base_member) {
+                        if !methods_are_compatible_for_override(node, nodes, member, base_member) {
                             diagnostics.push(Diagnostic::error(
                             "TPY4005",
                             format!(
@@ -6188,7 +6329,12 @@ fn override_compatibility_diagnostics<'a>(
     diagnostics
 }
 
-fn methods_are_compatible_for_override(member: &Declaration, base_member: &Declaration) -> bool {
+fn methods_are_compatible_for_override(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    member: &Declaration,
+    base_member: &Declaration,
+) -> bool {
     if base_member.detail == member.detail && base_member.method_kind == member.method_kind {
         return true;
     }
@@ -6203,7 +6349,44 @@ fn methods_are_compatible_for_override(member: &Declaration, base_member: &Decla
         return direct_param_count(&member.detail) == direct_param_count(&base_member.detail);
     }
 
-    false
+    if member.method_kind != base_member.method_kind {
+        return false;
+    }
+
+    let Some(member_params) = direct_signature_params(&member.detail) else {
+        return false;
+    };
+    let Some(base_params) = direct_signature_params(&base_member.detail) else {
+        return false;
+    };
+    if member_params.len() != base_params.len() {
+        return false;
+    }
+
+    let params_compatible = member_params.iter().zip(base_params.iter()).all(|(child, base)| {
+        child.positional_only == base.positional_only
+            && child.keyword_only == base.keyword_only
+            && child.variadic == base.variadic
+            && child.keyword_variadic == base.keyword_variadic
+            && child.has_default == base.has_default
+            && child.name == base.name
+            && (child.annotation.is_empty()
+                || base.annotation.is_empty()
+                || direct_type_is_assignable(node, nodes, &child.annotation, &base.annotation))
+    });
+    if !params_compatible {
+        return false;
+    }
+
+    let child_return = member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
+    let base_return = base_member
+        .detail
+        .split_once("->")
+        .map(|(_, right)| right.trim())
+        .unwrap_or("");
+    child_return.is_empty()
+        || base_return.is_empty()
+        || direct_type_is_assignable(node, nodes, base_return, child_return)
 }
 
 fn missing_override_diagnostics<'a>(
@@ -8298,6 +8481,165 @@ mod tests {
         };
 
         assert!(crate::overload_is_applicable(&call, &declaration));
+    }
+
+    #[test]
+    fn overload_applicability_accepts_nominal_subclass_arguments() {
+        let call = typepython_binding::CallSite {
+            callee: String::from("parse"),
+            arg_count: 1,
+            arg_types: vec![String::from("Child")],
+            arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
+            line: 1,
+        };
+        let declaration = Declaration {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(value:Base)->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        };
+
+        let node = typepython_graph::ModuleNode {
+            module_path: PathBuf::from("src/app/module.tpy"),
+            module_key: String::new(),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![
+                Declaration {
+                    name: String::from("Base"),
+                    kind: DeclarationKind::Class,
+                    detail: String::new(),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("Child"),
+                    kind: DeclarationKind::Class,
+                    detail: String::new(),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: vec![String::from("Base")],
+                    type_params: Vec::new(),
+                },
+            ],
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+        };
+
+        assert!(crate::overload_is_applicable_with_context(&node, &[node.clone()], &call, &declaration));
+    }
+
+    #[test]
+    fn overload_applicability_accepts_list_for_sequence_parameter() {
+        let call = typepython_binding::CallSite {
+            callee: String::from("parse"),
+            arg_count: 1,
+            arg_types: vec![String::from("list[int]")],
+            arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
+            line: 1,
+        };
+        let declaration = Declaration {
+            name: String::from("parse"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(value:Sequence[int])->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        };
+
+        let node = typepython_graph::ModuleNode {
+            module_path: PathBuf::from("src/app/module.tpy"),
+            module_key: String::new(),
+            module_kind: SourceKind::TypePython,
+            declarations: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+        };
+
+        assert!(crate::overload_is_applicable_with_context(&node, &[node.clone()], &call, &declaration));
     }
 
     #[test]
@@ -18936,6 +19278,117 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4005"));
         assert!(rendered.contains("incompatible signature or annotation"));
+    }
+
+    #[test]
+    fn check_accepts_variance_compatible_override_signature() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:Child)->Base"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        detail: String::from("Base"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:Base)->Child"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Child"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: true,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
     }
 
     #[test]
