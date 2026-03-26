@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam, visitor, visitor::Visitor};
+use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -188,6 +188,7 @@ pub struct ValueStatement {
     pub value_binop_left: Option<Box<DirectExprMetadata>>,
     pub value_binop_right: Option<Box<DirectExprMetadata>>,
     pub value_binop_operator: Option<String>,
+    pub value_lambda: Option<Box<LambdaMetadata>>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub is_final: bool,
@@ -319,7 +320,7 @@ pub struct InvalidationStatement {
     pub line: usize,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum GuardCondition {
     IsNone { name: String, negated: bool },
     IsInstance { name: String, types: Vec<String> },
@@ -468,6 +469,20 @@ pub struct LambdaMetadata {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ComprehensionClauseMetadata {
+    pub target_name: String,
+    pub target_names: Vec<String>,
+    pub iter: Box<DirectExprMetadata>,
+    pub filters: Vec<GuardCondition>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct ComprehensionMetadata {
+    pub clauses: Vec<ComprehensionClauseMetadata>,
+    pub element: Box<DirectExprMetadata>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
     pub value_type: Option<String>,
     pub is_awaited: bool,
@@ -490,6 +505,7 @@ pub struct DirectExprMetadata {
     pub value_binop_right: Option<Box<DirectExprMetadata>>,
     pub value_binop_operator: Option<String>,
     pub value_lambda: Option<Box<LambdaMetadata>>,
+    pub value_list_comprehension: Option<Box<ComprehensionMetadata>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1479,7 +1495,11 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head}.{}", tail.join("."))
+    }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
@@ -3411,6 +3431,7 @@ fn extract_ast_backed_statement(
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: value.value_lambda,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -3450,6 +3471,7 @@ fn extract_ast_backed_statement(
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
@@ -3474,6 +3496,7 @@ fn extract_ast_backed_statement(
                     value_binop_left: value.value_binop_left,
                     value_binop_right: value.value_binop_right,
                     value_binop_operator: value.value_binop_operator,
+                    value_lambda: value.value_lambda,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: is_final_annotation(&stmt.annotation),
@@ -4029,6 +4052,28 @@ fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
     }
 }
 
+fn extract_list_comprehension_clauses(
+    source: &str,
+    generators: &[ruff_python_ast::Comprehension],
+) -> Vec<ComprehensionClauseMetadata> {
+    generators
+        .iter()
+        .map(|generator| {
+            let target_names = extract_assignment_names(&generator.target);
+            ComprehensionClauseMetadata {
+                target_name: target_names.first().cloned().unwrap_or_default(),
+                target_names,
+                iter: Box::new(extract_direct_expr_metadata(source, &generator.iter)),
+                filters: generator
+                    .ifs
+                    .iter()
+                    .filter_map(|expr| extract_guard_condition(source, expr))
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
 fn infer_direct_binop_type(bin_op: &ruff_python_ast::ExprBinOp) -> Option<String> {
     let left = infer_direct_literal_type(&bin_op.left)?;
     let right = infer_direct_literal_type(&bin_op.right)?;
@@ -4094,7 +4139,11 @@ fn split_direct_generic_type(text: &str) -> Option<(String, Vec<String>)> {
 
 fn join_union_literal_type_candidates(types: Vec<String>) -> String {
     let joined = join_literal_type_candidates(types);
-    if joined.contains(" | ") { format!("Union[{}]", joined.replace(" | ", ", ")) } else { joined }
+    if joined.contains(" | ") {
+        format!("Union[{}]", joined.replace(" | ", ", "))
+    } else {
+        joined
+    }
 }
 
 fn join_literal_type_candidates(types: Vec<String>) -> String {
@@ -4104,7 +4153,11 @@ fn join_literal_type_candidates(types: Vec<String>) -> String {
             unique.push(value);
         }
     }
-    if unique.is_empty() { String::from("Any") } else { unique.join(" | ") }
+    if unique.is_empty() {
+        String::from("Any")
+    } else {
+        unique.join(" | ")
+    }
 }
 
 fn extract_supplemental_call_statement(
@@ -5051,6 +5104,7 @@ fn extract_function_body_assignment_statement(
                 value_binop_right: None,
                 value_binop_operator: None,
                 value_lambda: None,
+                value_list_comprehension: None,
             },
         );
     Some(SyntaxStatement::Value(ValueStatement {
@@ -5076,6 +5130,7 @@ fn extract_function_body_assignment_statement(
         value_binop_left: value.value_binop_left,
         value_binop_right: value.value_binop_right,
         value_binop_operator: value.value_binop_operator,
+        value_lambda: value.value_lambda,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: is_final_annotation(&assign.annotation),
@@ -5122,6 +5177,7 @@ fn extract_function_body_bare_assignment_statement(
         value_binop_left: value.value_binop_left,
         value_binop_right: value.value_binop_right,
         value_binop_operator: value.value_binop_operator,
+        value_lambda: None,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
@@ -5169,6 +5225,7 @@ fn extract_yield_statement(
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                 }),
             false,
         ),
@@ -5435,6 +5492,7 @@ fn extract_return_statement(
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: None,
+            value_list_comprehension: None,
         });
 
     Some(SyntaxStatement::Return(ReturnStatement {
@@ -5507,6 +5565,37 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 param_names,
                 body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
             })),
+            value_list_comprehension: None,
+        };
+    }
+
+    if let Expr::ListComp(comp) = expr {
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
         };
     }
 
@@ -5533,6 +5622,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: None,
+            value_list_comprehension: None,
         };
     }
 
@@ -5565,6 +5655,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 ruff_python_ast::BoolOp::Or => String::from("or"),
             }),
             value_lambda: None,
+            value_list_comprehension: None,
         };
     }
 
@@ -5599,6 +5690,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 _ => String::new(),
             }),
             value_lambda: None,
+            value_list_comprehension: None,
         };
     }
 
@@ -5625,6 +5717,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: None,
+            value_list_comprehension: None,
         };
     }
 
@@ -5657,6 +5750,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: None,
+            value_list_comprehension: None,
         };
     }
 
@@ -5686,6 +5780,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_binop_right: None,
         value_binop_operator: None,
         value_lambda: None,
+        value_list_comprehension: None,
     }
 }
 
@@ -6604,14 +6699,14 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssertStatement, CallStatement, ClassMember, ClassMemberKind, DirectExprMetadata,
-        ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
-        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, LambdaMetadata,
-        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
-        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
-        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective,
-        TypeParam, UnsafeStatement, ValueStatement, WithStatement, YieldStatement, parse,
-        parse_with_options,
+        parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
+        DirectExprMetadata, ExceptionHandlerStatement, ForStatement, FunctionParam,
+        FunctionStatement, GuardCondition, IfStatement, ImportBinding, ImportStatement,
+        InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern, MatchStatement,
+        MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions,
+        ReturnStatement, SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement,
+        TypeIgnoreDirective, TypeParam, UnsafeStatement, ValueStatement, WithStatement,
+        YieldStatement,
     };
     use std::path::PathBuf;
 
@@ -7274,6 +7369,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7303,6 +7399,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7351,6 +7448,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7394,6 +7492,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7423,6 +7522,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7496,6 +7596,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7539,6 +7640,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7612,6 +7714,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7641,6 +7744,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7723,6 +7827,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7791,6 +7896,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
@@ -7814,6 +7920,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                 ],
                 keyword_expansion_types: Vec::new(),
@@ -7912,6 +8019,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
@@ -7935,6 +8043,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7993,6 +8102,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("tuple[int, str]")),
@@ -8016,6 +8126,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("dict[str, int]")),
@@ -8039,6 +8150,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("set[int]")),
@@ -8062,6 +8174,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -8116,6 +8229,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                 }],
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
@@ -8143,6 +8257,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                 }],
                 line: 1,
             })]
@@ -8210,8 +8325,10 @@ mod tests {
                             value_binop_right: None,
                             value_binop_operator: None,
                             value_lambda: None,
+                            value_list_comprehension: None,
                         }),
                     })),
+                    value_list_comprehension: None,
                 }],
                 starred_arg_types: Vec::new(),
                 starred_arg_values: Vec::new(),
@@ -8275,6 +8392,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                 })),
                 value_if_false: Some(Box::new(DirectExprMetadata {
                     value_type: Some(String::from("int")),
@@ -8298,12 +8416,14 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                 })),
                 value_bool_left: None,
                 value_bool_right: None,
                 value_binop_left: None,
                 value_binop_right: None,
                 value_binop_operator: None,
+                value_lambda: None,
                 owner_name: None,
                 owner_type_name: None,
                 is_final: false,
@@ -8683,6 +8803,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     }],
                     starred_arg_types: Vec::new(),
                     starred_arg_values: Vec::new(),
@@ -8726,6 +8847,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                     }],
                     keyword_expansion_types: Vec::new(),
                     keyword_expansion_values: Vec::new(),
@@ -9011,6 +9133,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: true,
@@ -9158,6 +9281,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -9563,6 +9687,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
