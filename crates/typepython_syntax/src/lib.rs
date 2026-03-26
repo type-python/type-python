@@ -462,6 +462,12 @@ struct ParsedTypeParams<'source> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct LambdaMetadata {
+    pub param_names: Vec<String>,
+    pub body: Box<DirectExprMetadata>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
     pub value_type: Option<String>,
     pub is_awaited: bool,
@@ -483,6 +489,7 @@ pub struct DirectExprMetadata {
     pub value_binop_left: Option<Box<DirectExprMetadata>>,
     pub value_binop_right: Option<Box<DirectExprMetadata>>,
     pub value_binop_operator: Option<String>,
+    pub value_lambda: Option<Box<LambdaMetadata>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3442,6 +3449,7 @@ fn extract_ast_backed_statement(
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
@@ -5042,6 +5050,7 @@ fn extract_function_body_assignment_statement(
                 value_binop_left: None,
                 value_binop_right: None,
                 value_binop_operator: None,
+                value_lambda: None,
             },
         );
     Some(SyntaxStatement::Value(ValueStatement {
@@ -5159,6 +5168,7 @@ fn extract_yield_statement(
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                 }),
             false,
         ),
@@ -5424,6 +5434,7 @@ fn extract_return_statement(
             value_binop_left: None,
             value_binop_right: None,
             value_binop_operator: None,
+            value_lambda: None,
         });
 
     Some(SyntaxStatement::Return(ReturnStatement {
@@ -5464,6 +5475,41 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         return extract_direct_expr_metadata(source, &named_expr.value);
     }
 
+    if let Expr::Lambda(lambda) = expr {
+        let param_names = lambda
+            .parameters
+            .iter()
+            .flat_map(|parameters| parameters.iter_non_variadic_params())
+            .map(|param| param.name().as_str().to_owned())
+            .collect::<Vec<_>>();
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: Some(Box::new(LambdaMetadata {
+                param_names,
+                body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
+            })),
+        };
+    }
+
     if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
         return DirectExprMetadata {
             value_type: Some(infer_literal_arg_type(expr)),
@@ -5486,6 +5532,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_left: None,
             value_binop_right: None,
             value_binop_operator: None,
+            value_lambda: None,
         };
     }
 
@@ -5517,6 +5564,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 ruff_python_ast::BoolOp::And => String::from("and"),
                 ruff_python_ast::BoolOp::Or => String::from("or"),
             }),
+            value_lambda: None,
         };
     }
 
@@ -5550,6 +5598,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 ruff_python_ast::Operator::Mod => String::from("%"),
                 _ => String::new(),
             }),
+            value_lambda: None,
         };
     }
 
@@ -5575,6 +5624,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_left: None,
             value_binop_right: None,
             value_binop_operator: None,
+            value_lambda: None,
         };
     }
 
@@ -5606,6 +5656,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_left: None,
             value_binop_right: None,
             value_binop_operator: None,
+            value_lambda: None,
         };
     }
 
@@ -5634,6 +5685,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_binop_left: None,
         value_binop_right: None,
         value_binop_operator: None,
+        value_lambda: None,
     }
 }
 
@@ -6554,11 +6606,12 @@ mod tests {
     use super::{
         AssertStatement, CallStatement, ClassMember, ClassMemberKind, DirectExprMetadata,
         ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
-        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, MatchCaseStatement,
-        MatchPattern, MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
-        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
-        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
+        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, LambdaMetadata,
+        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
+        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
+        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective,
+        TypeParam, UnsafeStatement, ValueStatement, WithStatement, YieldStatement, parse,
+        parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -7737,6 +7790,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
@@ -7759,6 +7813,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                 ],
                 keyword_expansion_types: Vec::new(),
@@ -7856,6 +7911,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
@@ -7878,6 +7934,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7935,6 +7992,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("tuple[int, str]")),
@@ -7957,6 +8015,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("dict[str, int]")),
@@ -7979,6 +8038,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("set[int]")),
@@ -8001,6 +8061,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -8054,6 +8115,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                 }],
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
@@ -8080,7 +8142,84 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                 }],
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_lambda_metadata_in_call_args() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("lambda.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("build(lambda x: x)\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Call(CallStatement {
+                callee: String::from("build"),
+                arg_count: 1,
+                arg_types: vec![String::new()],
+                arg_values: vec![DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: Some(Box::new(LambdaMetadata {
+                        param_names: vec![String::from("x")],
+                        body: Box::new(DirectExprMetadata {
+                            value_type: Some(String::new()),
+                            is_awaited: false,
+                            value_callee: None,
+                            value_name: Some(String::from("x")),
+                            value_member_owner_name: None,
+                            value_member_name: None,
+                            value_member_through_instance: false,
+                            value_method_owner_name: None,
+                            value_method_name: None,
+                            value_method_through_instance: false,
+                            value_subscript_target: None,
+                            value_subscript_string_key: None,
+                            value_subscript_index: None,
+                            value_if_true: None,
+                            value_if_false: None,
+                            value_bool_left: None,
+                            value_bool_right: None,
+                            value_binop_left: None,
+                            value_binop_right: None,
+                            value_binop_operator: None,
+                            value_lambda: None,
+                        }),
+                    })),
+                }],
+                starred_arg_types: Vec::new(),
+                starred_arg_values: Vec::new(),
+                keyword_names: Vec::new(),
+                keyword_arg_types: Vec::new(),
+                keyword_arg_values: Vec::new(),
+                keyword_expansion_types: Vec::new(),
+                keyword_expansion_values: Vec::new(),
                 line: 1,
             })]
         );
@@ -8135,6 +8274,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                 })),
                 value_if_false: Some(Box::new(DirectExprMetadata {
                     value_type: Some(String::from("int")),
@@ -8157,6 +8297,7 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
                 })),
                 value_bool_left: None,
                 value_bool_right: None,
@@ -8541,6 +8682,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     }],
                     starred_arg_types: Vec::new(),
                     starred_arg_values: Vec::new(),
@@ -8583,6 +8725,7 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
                     }],
                     keyword_expansion_types: Vec::new(),
                     keyword_expansion_values: Vec::new(),
