@@ -2320,6 +2320,10 @@ fn direct_type_is_assignable_normalized(
         return true;
     }
 
+    if protocol_assignable(node, nodes, expected, actual) {
+        return true;
+    }
+
     if nominal_subclass_assignable(node, nodes, expected, actual) {
         return true;
     }
@@ -2347,6 +2351,198 @@ fn nominal_subclass_assignable(
         normalize_type_text(base) == expected
             || direct_type_is_assignable_normalized(actual_node, nodes, expected, base)
     })
+}
+
+fn protocol_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> bool {
+    let Some((interface_node, interface_decl)) = resolve_direct_base(nodes, node, expected) else {
+        return false;
+    };
+    if !is_interface_like_declaration(interface_node, interface_decl, nodes) {
+        return false;
+    }
+    let Some((actual_node, actual_decl)) = resolve_direct_base(nodes, node, actual) else {
+        return false;
+    };
+    type_satisfies_interface(nodes, actual_node, actual_decl, interface_node, interface_decl)
+}
+
+fn type_satisfies_interface(
+    nodes: &[typepython_graph::ModuleNode],
+    actual_node: &typepython_graph::ModuleNode,
+    actual_decl: &Declaration,
+    interface_node: &typepython_graph::ModuleNode,
+    interface_decl: &Declaration,
+) -> bool {
+    collect_interface_members(interface_node, interface_decl, nodes)
+        .into_iter()
+        .all(|required| actual_member_satisfies_requirement(nodes, actual_node, actual_decl, &required))
+}
+
+#[derive(Debug, Clone)]
+struct InterfaceMemberRequirement {
+    name: String,
+    declaration: Declaration,
+}
+
+fn collect_interface_members(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<InterfaceMemberRequirement> {
+    let mut visited = BTreeSet::new();
+    let mut requirements = BTreeMap::new();
+    collect_interface_members_with_visited(node, declaration, nodes, &mut visited, &mut requirements);
+    requirements.into_values().collect()
+}
+
+fn collect_interface_members_with_visited(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    nodes: &[typepython_graph::ModuleNode],
+    visited: &mut BTreeSet<(String, String)>,
+    requirements: &mut BTreeMap<String, InterfaceMemberRequirement>,
+) {
+    let key = (node.module_key.clone(), declaration.name.clone());
+    if !visited.insert(key) {
+        return;
+    }
+
+    for member in node.declarations.iter().filter(|candidate| {
+        candidate.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
+            && matches!(candidate.kind, DeclarationKind::Value | DeclarationKind::Function)
+    }) {
+        requirements.entry(member.name.clone()).or_insert_with(|| InterfaceMemberRequirement {
+            name: member.name.clone(),
+            declaration: member.clone(),
+        });
+    }
+
+    for base in &declaration.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base)
+            && is_interface_like_declaration(base_node, base_decl, nodes)
+        {
+            collect_interface_members_with_visited(base_node, base_decl, nodes, visited, requirements);
+        }
+    }
+}
+
+fn actual_member_satisfies_requirement(
+    nodes: &[typepython_graph::ModuleNode],
+    actual_node: &typepython_graph::ModuleNode,
+    actual_decl: &Declaration,
+    requirement: &InterfaceMemberRequirement,
+) -> bool {
+    match requirement.declaration.kind {
+        DeclarationKind::Function => find_apparent_callable_declaration(
+            nodes,
+            actual_node,
+            actual_decl,
+            &requirement.name,
+        )
+        .is_some_and(|member| {
+            methods_are_compatible_for_override(actual_node, nodes, member, &requirement.declaration)
+        }),
+        DeclarationKind::Value => find_apparent_value_declaration(
+            nodes,
+            actual_node,
+            actual_decl,
+            &requirement.name,
+        )
+        .is_some_and(|member| {
+            let expected = normalize_type_text(requirement.declaration.detail.as_str());
+            let actual = normalize_type_text(member.detail.as_str());
+            expected.is_empty() || actual.is_empty() || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
+        }),
+        _ => false,
+    }
+}
+
+fn find_apparent_value_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_apparent_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+    })
+}
+
+fn find_apparent_callable_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_apparent_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Function
+    })
+}
+
+fn find_apparent_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+) -> Option<&'a Declaration> {
+    let mut visited = BTreeSet::new();
+    find_apparent_member_declaration_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        predicate,
+        &mut visited,
+    )
+}
+
+fn find_apparent_member_declaration_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<&'a Declaration> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return None;
+    }
+
+    if let Some(local) = class_node.declarations.iter().find(|declaration| {
+        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && declaration.name == member_name
+            && predicate(declaration)
+    }) {
+        return Some(local);
+    }
+
+    for base in &class_decl.bases {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+            continue;
+        };
+        if is_interface_like_declaration(base_node, base_decl, nodes) {
+            continue;
+        }
+        if let Some(inherited) = find_apparent_member_declaration_with_visited(
+            nodes,
+            base_node,
+            base_decl,
+            member_name,
+            predicate,
+            visited,
+        ) {
+            return Some(inherited);
+        }
+    }
+
+    None
 }
 
 fn assignable_generic_bridge(
@@ -7115,69 +7311,18 @@ fn interface_implementation_diagnostics<'a>(
                 continue;
             }
 
-            let interface_members: BTreeMap<_, _> = base_node
-                .declarations
-                .iter()
-                .filter(|declaration| {
-                    declaration.kind == DeclarationKind::Value
-                        || declaration.kind == DeclarationKind::Function
-                })
-                .filter_map(|declaration| {
-                    let owner = declaration.owner.as_ref()?;
-                    (owner.name == base_decl.name).then(|| {
-                        (
-                            (owner.name.clone(), declaration.name.clone()),
-                            (declaration.kind, declaration.method_kind, declaration.detail.clone()),
-                        )
-                    })
-                })
-                .collect::<BTreeMap<_, _>>();
-
-            for ((interface_name, member_name), (member_kind, member_method_kind, member_detail)) in
-                &interface_members
-            {
-                if interface_name != &base_decl.name {
-                    continue;
-                }
-
-                let implemented = declarations.iter().find(|declaration| {
-                    declaration
-                        .owner
-                        .as_ref()
-                        .is_some_and(|owner| owner.name == class_declaration.name)
-                        && declaration.name == *member_name
-                        && declaration.kind == *member_kind
-                });
-
-                match implemented {
-                    None => {
-                        diagnostics.push(Diagnostic::error(
-                            "TPY4008",
-                            format!(
-                                "type `{}` in module `{}` does not implement interface member `{}` from `{}`",
-                                class_declaration.name,
-                                node.module_path.display(),
-                                member_name,
-                                base_decl.name
-                            ),
-                        ));
-                    }
-                    Some(implementation)
-                        if implementation.detail != *member_detail
-                            || implementation.method_kind != *member_method_kind =>
-                    {
-                        diagnostics.push(Diagnostic::error(
-                            "TPY4008",
-                            format!(
-                                "type `{}` in module `{}` implements interface member `{}` from `{}` with an incompatible signature or annotation",
-                                class_declaration.name,
-                                node.module_path.display(),
-                                member_name,
-                                base_decl.name
-                            ),
-                        ));
-                    }
-                    Some(_) => {}
+            for requirement in collect_interface_members(base_node, base_decl, nodes) {
+                if !actual_member_satisfies_requirement(nodes, node, class_declaration, &requirement) {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4008",
+                        format!(
+                            "type `{}` in module `{}` does not implement interface member `{}` from `{}`",
+                            class_declaration.name,
+                            node.module_path.display(),
+                            requirement.name,
+                            base_decl.name
+                        ),
+                    ));
                 }
             }
         }
@@ -19357,6 +19502,336 @@ mod tests {
                         class_kind: None,
                         owner: Some(DeclarationOwner {
                             name: String::from("Child"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: true,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_structural_protocol_argument_without_inheritance() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Protocol"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("typing.Protocol"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("SupportsClose"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Interface),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Protocol")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("close"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("SupportsClose"),
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("FileHandle"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("close"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("FileHandle"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("consume"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:SupportsClose)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("consume"),
+                    arg_count: 1,
+                    arg_types: vec![String::from("FileHandle")],
+                    arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
+                    line: 1,
+                }],
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_structural_interface_implementation_signature() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::new(),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Protocol"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("typing.Protocol"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Runner"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Interface),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Protocol")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:Child)->Base"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Runner"),
+                            kind: DeclarationOwnerKind::Interface,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Child"),
+                        kind: DeclarationKind::Class,
+                        detail: String::from("Base"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Impl"),
+                        kind: DeclarationKind::Class,
+                        detail: String::from("Runner"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Runner")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("run"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self,x:Base)->Child"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Impl"),
                             kind: DeclarationOwnerKind::Class,
                         }),
                         is_async: false,
