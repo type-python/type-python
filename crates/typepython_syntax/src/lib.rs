@@ -181,6 +181,8 @@ pub struct ValueStatement {
     pub value_subscript_target: Option<Box<DirectExprMetadata>>,
     pub value_subscript_string_key: Option<String>,
     pub value_subscript_index: Option<String>,
+    pub value_if_true: Option<Box<DirectExprMetadata>>,
+    pub value_if_false: Option<Box<DirectExprMetadata>>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub is_final: bool,
@@ -247,6 +249,8 @@ pub struct ReturnStatement {
     pub value_subscript_target: Option<Box<DirectExprMetadata>>,
     pub value_subscript_string_key: Option<String>,
     pub value_subscript_index: Option<String>,
+    pub value_if_true: Option<Box<DirectExprMetadata>>,
+    pub value_if_false: Option<Box<DirectExprMetadata>>,
     pub line: usize,
 }
 
@@ -266,6 +270,8 @@ pub struct YieldStatement {
     pub value_subscript_target: Option<Box<DirectExprMetadata>>,
     pub value_subscript_string_key: Option<String>,
     pub value_subscript_index: Option<String>,
+    pub value_if_true: Option<Box<DirectExprMetadata>>,
+    pub value_if_false: Option<Box<DirectExprMetadata>>,
     pub is_yield_from: bool,
     pub line: usize,
 }
@@ -455,6 +461,8 @@ pub struct DirectExprMetadata {
     pub value_subscript_target: Option<Box<DirectExprMetadata>>,
     pub value_subscript_string_key: Option<String>,
     pub value_subscript_index: Option<String>,
+    pub value_if_true: Option<Box<DirectExprMetadata>>,
+    pub value_if_false: Option<Box<DirectExprMetadata>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3369,6 +3377,8 @@ fn extract_ast_backed_statement(
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -3400,6 +3410,8 @@ fn extract_ast_backed_statement(
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
@@ -3417,6 +3429,8 @@ fn extract_ast_backed_statement(
                     value_subscript_target: value.value_subscript_target,
                     value_subscript_string_key: value.value_subscript_string_key,
                     value_subscript_index: value.value_subscript_index,
+                    value_if_true: value.value_if_true,
+                    value_if_false: value.value_if_false,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: is_final_annotation(&stmt.annotation),
@@ -4896,6 +4910,8 @@ fn extract_function_body_assignment_statement(
                 value_subscript_target: None,
                 value_subscript_string_key: None,
                 value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
             },
         );
     Some(SyntaxStatement::Value(ValueStatement {
@@ -4914,6 +4930,8 @@ fn extract_function_body_assignment_statement(
         value_subscript_target: value.value_subscript_target,
         value_subscript_string_key: value.value_subscript_string_key,
         value_subscript_index: value.value_subscript_index,
+        value_if_true: value.value_if_true,
+        value_if_false: value.value_if_false,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: is_final_annotation(&assign.annotation),
@@ -4953,6 +4971,8 @@ fn extract_function_body_bare_assignment_statement(
         value_subscript_target: value.value_subscript_target,
         value_subscript_string_key: value.value_subscript_string_key,
         value_subscript_index: value.value_subscript_index,
+        value_if_true: value.value_if_true,
+        value_if_false: value.value_if_false,
         owner_name: Some(owner_name.to_owned()),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
@@ -4992,6 +5012,8 @@ fn extract_yield_statement(
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                 }),
             false,
         ),
@@ -5016,6 +5038,8 @@ fn extract_yield_statement(
         value_subscript_target: value.value_subscript_target,
         value_subscript_string_key: value.value_subscript_string_key,
         value_subscript_index: value.value_subscript_index,
+        value_if_true: value.value_if_true,
+        value_if_false: value.value_if_false,
         is_yield_from,
         line,
     }))
@@ -5243,6 +5267,8 @@ fn extract_return_statement(
             value_subscript_target: None,
             value_subscript_string_key: None,
             value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
         });
 
     Some(SyntaxStatement::Return(ReturnStatement {
@@ -5261,6 +5287,8 @@ fn extract_return_statement(
         value_subscript_target: value.value_subscript_target,
         value_subscript_string_key: value.value_subscript_string_key,
         value_subscript_index: value.value_subscript_index,
+        value_if_true: value.value_if_true,
+        value_if_false: value.value_if_false,
         line,
     }))
 }
@@ -5270,6 +5298,10 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         let mut metadata = extract_direct_expr_metadata(source, &await_expr.value);
         metadata.is_awaited = true;
         return metadata;
+    }
+
+    if let Expr::Named(named_expr) = expr {
+        return extract_direct_expr_metadata(source, &named_expr.value);
     }
 
     if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
@@ -5287,6 +5319,28 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_subscript_target: None,
             value_subscript_string_key: None,
             value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+        };
+    }
+
+    if let Expr::If(if_expr) = expr {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
+            value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
         };
     }
 
@@ -5311,6 +5365,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
                 _ => None,
             },
+            value_if_true: None,
+            value_if_false: None,
         };
     }
 
@@ -5332,6 +5388,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_subscript_target: None,
         value_subscript_string_key: None,
         value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
     }
 }
 
@@ -6649,6 +6707,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 })
             ]
@@ -6834,6 +6894,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 5,
                 }),
             ]
@@ -6898,6 +6960,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6920,6 +6984,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6961,6 +7027,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -6997,6 +7065,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7019,6 +7089,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7085,6 +7157,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7121,6 +7195,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7187,6 +7263,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7209,6 +7287,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -7284,6 +7364,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -7344,6 +7426,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
@@ -7359,6 +7443,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                 ],
                 keyword_expansion_types: Vec::new(),
@@ -7449,6 +7535,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
@@ -7464,6 +7552,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7514,6 +7604,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("tuple[int, str]")),
@@ -7529,6 +7621,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("dict[str, int]")),
@@ -7544,6 +7638,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("set[int]")),
@@ -7559,6 +7655,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     },
                 ],
                 starred_arg_types: Vec::new(),
@@ -7605,6 +7703,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                 }],
                 keyword_names: Vec::new(),
                 keyword_arg_types: Vec::new(),
@@ -7624,7 +7724,80 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                 }],
+                line: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn parse_retains_ifexp_metadata() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("ifexp.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("value: int = 1 if True else 2\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert_eq!(
+            tree.statements,
+            vec![SyntaxStatement::Value(ValueStatement {
+                names: vec![String::from("value")],
+                annotation: Some(String::from("int")),
+                value_type: Some(String::new()),
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: Some(Box::new(DirectExprMetadata {
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                })),
+                value_if_false: Some(Box::new(DirectExprMetadata {
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                })),
+                owner_name: None,
+                owner_type_name: None,
+                is_final: false,
+                is_class_var: false,
                 line: 1,
             })]
         );
@@ -7712,6 +7885,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
             ]
@@ -7760,6 +7935,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -7789,6 +7966,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 5,
                 }),
             ]
@@ -7835,6 +8014,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
             ]
@@ -7889,6 +8070,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
             ]
@@ -7957,6 +8140,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     }],
                     starred_arg_types: Vec::new(),
                     starred_arg_values: Vec::new(),
@@ -7992,6 +8177,8 @@ mod tests {
                         value_subscript_target: None,
                         value_subscript_string_key: None,
                         value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
                     }],
                     keyword_expansion_types: Vec::new(),
                     keyword_expansion_values: Vec::new(),
@@ -8219,6 +8406,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 8,
                 }),
             ]
@@ -8263,6 +8452,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: true,
@@ -8403,6 +8594,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: None,
                     owner_type_name: None,
                     is_final: false,
@@ -8556,6 +8749,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
             ]
@@ -8604,6 +8799,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -8633,6 +8830,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 5,
                 }),
             ]
@@ -8680,6 +8879,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     is_yield_from: false,
                     line: 2,
                 }),
@@ -8709,6 +8910,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     is_yield_from: true,
                     line: 5,
                 }),
@@ -8766,6 +8969,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     is_final: false,
@@ -8788,6 +8993,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 3,
                 }),
             ]
@@ -8834,6 +9041,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 2,
                 }),
             ]
@@ -8907,6 +9116,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 4,
                 }),
             ]
@@ -8980,6 +9191,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 4,
                 }),
             ]
@@ -9052,6 +9265,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 4,
                 }),
             ]
@@ -9205,6 +9420,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 4,
                 }),
             ]
@@ -9275,6 +9492,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 5,
                 }),
             ]
@@ -9358,6 +9577,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 7,
                 }),
             ]
@@ -9615,6 +9836,8 @@ mod tests {
                     value_subscript_target: None,
                     value_subscript_string_key: None,
                     value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
                     line: 12,
                 })
             ]
