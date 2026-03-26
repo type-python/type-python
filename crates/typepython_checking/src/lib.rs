@@ -1252,35 +1252,7 @@ fn annotated_assignment_type_diagnostics(
                 return callable_result;
             }
             let signature = resolve_assignment_owner_signature(node, assignment);
-            let actual = resolve_direct_expression_type(
-                node,
-                nodes,
-                signature,
-                Some(&assignment.name),
-                assignment.owner_name.as_deref(),
-                assignment.owner_type_name.as_deref(),
-                assignment.line,
-                assignment.value_type.as_deref(),
-                assignment.is_awaited,
-                assignment.value_callee.as_deref(),
-                assignment.value_name.as_deref(),
-                assignment.value_member_owner_name.as_deref(),
-                assignment.value_member_name.as_deref(),
-                assignment.value_member_through_instance,
-                assignment.value_method_owner_name.as_deref(),
-                assignment.value_method_name.as_deref(),
-                assignment.value_method_through_instance,
-                assignment.value_subscript_target.as_deref(),
-                assignment.value_subscript_string_key.as_deref(),
-                assignment.value_subscript_index.as_deref(),
-                assignment.value_if_true.as_deref(),
-                assignment.value_if_false.as_deref(),
-                assignment.value_bool_left.as_deref(),
-                assignment.value_bool_right.as_deref(),
-                assignment.value_binop_left.as_deref(),
-                assignment.value_binop_right.as_deref(),
-                assignment.value_binop_operator.as_deref(),
-            )?;
+            let actual = resolve_assignment_site_type(node, nodes, signature, assignment)?;
             (!direct_type_matches(&expected, &actual)).then(|| {
                 Diagnostic::error(
                     "TPY4001",
@@ -3082,6 +3054,16 @@ fn resolve_direct_subscript_reference_type(
         current_line,
         target,
     )?;
+    resolve_subscript_type_from_target_type(node, nodes, &target_type, string_key, index_text)
+}
+
+fn resolve_subscript_type_from_target_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &str,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<String> {
     if let Some(key) = string_key
         && let Some(shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &target_type)
     {
@@ -4066,10 +4048,16 @@ fn resolve_assignment_site_type(
     signature: Option<&str>,
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<String> {
-    if let Some(annotation) = assignment.annotation.as_deref() {
-        if let Some(annotation) = normalized_assignment_annotation(annotation) {
-            return Some(normalize_type_text(annotation));
-        }
+    if let Some(comprehension) = assignment.value_list_comprehension.as_deref() {
+        return resolve_list_comprehension_type(
+            node,
+            nodes,
+            signature,
+            assignment.owner_name.as_deref(),
+            assignment.owner_type_name.as_deref(),
+            assignment.line,
+            comprehension,
+        );
     }
 
     resolve_direct_expression_type(
@@ -4101,6 +4089,247 @@ fn resolve_assignment_site_type(
         assignment.value_binop_right.as_deref(),
         assignment.value_binop_operator.as_deref(),
     )
+}
+
+fn resolve_list_comprehension_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    comprehension: &typepython_syntax::ComprehensionMetadata,
+) -> Option<String> {
+    let mut local_bindings = BTreeMap::new();
+    for clause in &comprehension.clauses {
+        let iter_type = resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            clause.iter.as_ref(),
+        )?;
+        let element_type = unwrap_for_iterable_type(&iter_type)?;
+        bind_list_comprehension_targets(&mut local_bindings, &clause.target_names, &element_type);
+        for guard in &clause.filters {
+            for (name, value_type) in local_bindings.clone() {
+                local_bindings.insert(
+                    name.clone(),
+                    apply_guard_condition(node, nodes, &value_type, &name, &guard_to_site(guard), true),
+                );
+            }
+        }
+    }
+
+    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension.element.as_ref(),
+        &local_bindings,
+    )?;
+    Some(format!("list[{element_type}]"))
+}
+
+fn resolve_direct_expression_type_from_metadata_with_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    local_bindings: &BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some(value_name) = metadata.value_name.as_deref()
+        && let Some(bound_type) = local_bindings.get(value_name)
+    {
+        return Some(bound_type.clone());
+    }
+    if let Some(target) = metadata.value_subscript_target.as_deref() {
+        let target_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            target,
+            local_bindings,
+        )?;
+        return resolve_subscript_type_from_target_type(
+            node,
+            nodes,
+            &target_type,
+            metadata.value_subscript_string_key.as_deref(),
+            metadata.value_subscript_index.as_deref(),
+        );
+    }
+    if let (Some(true_branch), Some(false_branch)) = (
+        metadata.value_if_true.as_deref(),
+        metadata.value_if_false.as_deref(),
+    ) {
+        let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            true_branch,
+            local_bindings,
+        )?;
+        let false_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            false_branch,
+            local_bindings,
+        )?;
+        return Some(join_branch_types(vec![true_type, false_type]));
+    }
+    if let (Some(left), Some(right), Some(operator)) = (
+        metadata.value_bool_left.as_deref(),
+        metadata.value_bool_right.as_deref(),
+        metadata.value_binop_operator.as_deref(),
+    ) && (operator == "and" || operator == "or") {
+        let left_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            left,
+            local_bindings,
+        )?;
+        let right_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right,
+            local_bindings,
+        )?;
+        return Some(join_branch_types(vec![left_type, right_type]));
+    }
+    if let (Some(left), Some(right), Some(operator)) = (
+        metadata.value_binop_left.as_deref(),
+        metadata.value_binop_right.as_deref(),
+        metadata.value_binop_operator.as_deref(),
+    ) {
+        let left_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            left,
+            local_bindings,
+        )?;
+        let right_type = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right,
+            local_bindings,
+        )?;
+        if let Some(result) = match operator {
+            "+" => resolve_plus_result_type(&left_type, &right_type),
+            "-" | "*" | "/" | "//" | "%"
+                if is_numeric_type(&left_type) && is_numeric_type(&right_type) =>
+            {
+                Some(join_numeric_result_type(&left_type, &right_type))
+            }
+            _ => None,
+        } {
+            return Some(result);
+        }
+    }
+
+    resolve_direct_expression_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+    )
+}
+
+fn bind_list_comprehension_targets(
+    local_bindings: &mut BTreeMap<String, String>,
+    target_names: &[String],
+    element_type: &str,
+) {
+    if target_names.is_empty() {
+        return;
+    }
+    if target_names.len() == 1 {
+        local_bindings.insert(target_names[0].clone(), normalize_type_text(element_type));
+        return;
+    }
+    if let Some(tuple_elements) = unwrap_fixed_tuple_elements(element_type)
+        && tuple_elements.len() == target_names.len()
+    {
+        for (name, value_type) in target_names.iter().zip(tuple_elements) {
+            local_bindings.insert(name.clone(), value_type);
+        }
+        return;
+    }
+    for name in target_names {
+        local_bindings.insert(name.clone(), normalize_type_text(element_type));
+    }
+}
+
+fn guard_to_site(guard: &typepython_syntax::GuardCondition) -> typepython_binding::GuardConditionSite {
+    match guard {
+        typepython_syntax::GuardCondition::IsNone { name, negated } => {
+            typepython_binding::GuardConditionSite::IsNone {
+                name: name.clone(),
+                negated: *negated,
+            }
+        }
+        typepython_syntax::GuardCondition::IsInstance { name, types } => {
+            typepython_binding::GuardConditionSite::IsInstance {
+                name: name.clone(),
+                types: types.clone(),
+            }
+        }
+        typepython_syntax::GuardCondition::PredicateCall { name, callee } => {
+            typepython_binding::GuardConditionSite::PredicateCall {
+                name: name.clone(),
+                callee: callee.clone(),
+            }
+        }
+        typepython_syntax::GuardCondition::TruthyName { name } => {
+            typepython_binding::GuardConditionSite::TruthyName { name: name.clone() }
+        }
+        typepython_syntax::GuardCondition::Not(inner) => {
+            typepython_binding::GuardConditionSite::Not(Box::new(guard_to_site(inner)))
+        }
+        typepython_syntax::GuardCondition::And(parts) => {
+            typepython_binding::GuardConditionSite::And(parts.iter().map(guard_to_site).collect())
+        }
+        typepython_syntax::GuardCondition::Or(parts) => {
+            typepython_binding::GuardConditionSite::Or(parts.iter().map(guard_to_site).collect())
+        }
+    }
 }
 
 fn resolve_post_if_joined_assignment_type(
@@ -8005,7 +8234,7 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
-        assert!(rendered.contains("expands unknown key `name`"));
+        assert!(rendered.contains("invalid `**` expansion"));
     }
 
     #[test]
@@ -9427,6 +9656,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -10172,6 +10402,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -10422,6 +10653,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -10653,6 +10885,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -11184,6 +11417,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12615,6 +12849,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12690,6 +12925,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12786,6 +13022,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12880,6 +13117,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12976,6 +13214,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13111,6 +13350,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13186,6 +13426,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 1,
@@ -13306,6 +13547,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -13401,6 +13643,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -13429,6 +13672,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -13546,6 +13790,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -13574,6 +13819,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -13689,6 +13935,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -13717,6 +13964,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -13815,6 +14063,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -13843,6 +14092,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -13871,6 +14121,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -13991,6 +14242,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -14019,6 +14271,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -14153,6 +14406,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -14181,6 +14435,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -14209,6 +14464,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -14330,6 +14586,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -14353,6 +14610,35 @@ mod tests {
     #[test]
     fn check_accepts_list_literal_assignment_type_match() {
         let result = check_temp_typepython_source("values: list[int] = [1, 2]\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_list_comprehension_assignment_type_match() {
+        let result = check_temp_typepython_source(
+            "values: list[int] = [x + 1 for x in [1, 2]]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_list_comprehension_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "values: list[str] = [x + 1 for x in [1, 2]]\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `list[int]` where `values` expects `list[str]`"));
+    }
+
+    #[test]
+    fn check_does_not_leak_list_comprehension_target_name() {
+        let result = check_temp_typepython_source(
+            "x: str = \"outer\"\nvalues: list[str] = [x for x in [\"inner\"]]\nvalue: str = x\n",
+        );
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
@@ -14414,7 +14700,7 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns `Union[int, None]` where `value` expects `str`"));
+        assert!(rendered.contains("assigns `int` where `value` expects `str`"));
     }
 
     #[test]
@@ -14768,6 +15054,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -14864,6 +15151,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -14958,6 +15246,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15122,6 +15411,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15220,6 +15510,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15314,6 +15605,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15451,6 +15743,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15586,6 +15879,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15725,6 +16019,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15860,6 +16155,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15939,6 +16235,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16096,6 +16393,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -16124,6 +16422,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -16152,6 +16451,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -16226,6 +16526,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16365,6 +16666,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16472,6 +16774,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16641,6 +16944,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -17352,6 +17656,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18793,6 +19098,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18887,6 +19193,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -21514,6 +21821,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -21649,6 +21957,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -22164,6 +22473,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -22253,6 +22563,7 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -24677,6 +24988,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -24705,6 +25017,7 @@ mod tests {
                         value_binop_right: None,
                         value_binop_operator: None,
                         value_lambda: None,
+                        value_list_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 4,
