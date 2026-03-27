@@ -1886,11 +1886,14 @@ fn callable_assignment_result(
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
             && expected_params.iter().zip(actual_params.iter()).all(
-                |(expected_param, actual_param)| direct_type_matches(expected_param, actual_param),
+                |(expected_param, actual_param)| {
+                    direct_type_is_assignable(node, nodes, expected_param, actual_param)
+                },
             )
     });
 
-    let matches = params_match && direct_type_matches(&expected_return, &actual_return);
+    let matches =
+        params_match && direct_type_is_assignable(node, nodes, &expected_return, &actual_return);
 
     Some((!matches).then(|| {
         let actual_signature = format!("({})->{}", actual_params.join(","), actual_return);
@@ -1931,6 +1934,32 @@ fn resolve_callable_assignment_signature(
     nodes: &[typepython_graph::ModuleNode],
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<(Vec<String>, String)> {
+    if let Some(lambda) = assignment.value_lambda.as_deref() {
+        let expected = normalized_assignment_annotation(assignment.annotation.as_deref()?)?;
+        let (expected_params, _expected_return) = parse_callable_annotation(expected)?;
+        let expected_params = expected_params?;
+        if expected_params.len() != lambda.param_names.len() {
+            return None;
+        }
+        let local_bindings = lambda
+            .param_names
+            .iter()
+            .cloned()
+            .zip(expected_params.iter().cloned())
+            .collect::<BTreeMap<_, _>>();
+        let actual_return = resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            None,
+            assignment.owner_name.as_deref(),
+            assignment.owner_type_name.as_deref(),
+            assignment.line,
+            &lambda.body,
+            &local_bindings,
+        )?;
+        return Some((expected_params, actual_return));
+    }
+
     if let Some(value_name) = assignment.value_name.as_deref() {
         let function = resolve_direct_function(node, nodes, value_name)?;
         let actual_params = direct_param_types(&function.detail).unwrap_or_default();
@@ -4117,7 +4146,14 @@ fn resolve_list_comprehension_type(
             for (name, value_type) in local_bindings.clone() {
                 local_bindings.insert(
                     name.clone(),
-                    apply_guard_condition(node, nodes, &value_type, &name, &guard_to_site(guard), true),
+                    apply_guard_condition(
+                        node,
+                        nodes,
+                        &value_type,
+                        &name,
+                        &guard_to_site(guard),
+                        true,
+                    ),
                 );
             }
         }
@@ -4170,10 +4206,9 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
             metadata.value_subscript_index.as_deref(),
         );
     }
-    if let (Some(true_branch), Some(false_branch)) = (
-        metadata.value_if_true.as_deref(),
-        metadata.value_if_false.as_deref(),
-    ) {
+    if let (Some(true_branch), Some(false_branch)) =
+        (metadata.value_if_true.as_deref(), metadata.value_if_false.as_deref())
+    {
         let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
             node,
             nodes,
@@ -4200,7 +4235,8 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
         metadata.value_bool_left.as_deref(),
         metadata.value_bool_right.as_deref(),
         metadata.value_binop_operator.as_deref(),
-    ) && (operator == "and" || operator == "or") {
+    ) && (operator == "and" || operator == "or")
+    {
         let left_type = resolve_direct_expression_type_from_metadata_with_bindings(
             node,
             nodes,
@@ -4297,13 +4333,12 @@ fn bind_list_comprehension_targets(
     }
 }
 
-fn guard_to_site(guard: &typepython_syntax::GuardCondition) -> typepython_binding::GuardConditionSite {
+fn guard_to_site(
+    guard: &typepython_syntax::GuardCondition,
+) -> typepython_binding::GuardConditionSite {
     match guard {
         typepython_syntax::GuardCondition::IsNone { name, negated } => {
-            typepython_binding::GuardConditionSite::IsNone {
-                name: name.clone(),
-                negated: *negated,
-            }
+            typepython_binding::GuardConditionSite::IsNone { name: name.clone(), negated: *negated }
         }
         typepython_syntax::GuardCondition::IsInstance { name, types } => {
             typepython_binding::GuardConditionSite::IsInstance {
@@ -14616,18 +14651,14 @@ mod tests {
 
     #[test]
     fn check_accepts_list_comprehension_assignment_type_match() {
-        let result = check_temp_typepython_source(
-            "values: list[int] = [x + 1 for x in [1, 2]]\n",
-        );
+        let result = check_temp_typepython_source("values: list[int] = [x + 1 for x in [1, 2]]\n");
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
 
     #[test]
     fn check_reports_list_comprehension_assignment_type_mismatch() {
-        let result = check_temp_typepython_source(
-            "values: list[str] = [x + 1 for x in [1, 2]]\n",
-        );
+        let result = check_temp_typepython_source("values: list[str] = [x + 1 for x in [1, 2]]\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
@@ -14753,6 +14784,23 @@ mod tests {
         let result = check_temp_typepython_source("value: int = (tmp := 1)\n");
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_contextual_lambda_callable_assignment() {
+        let result =
+            check_temp_typepython_source("handler: Callable[[int], str] = lambda x: \"ok\"\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_callable_assignment_mismatch() {
+        let result = check_temp_typepython_source("handler: Callable[[int], str] = lambda x: 1\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
     }
 
     #[test]
