@@ -365,6 +365,30 @@ fn call_signature_params_are_applicable(
         expected_positional_arg_types_from_direct_signature(params, call.arg_count);
     let expected_keyword_arg_types =
         expected_keyword_arg_types_from_direct_signature(params, &call.keyword_names);
+    if call.arg_values.iter().enumerate().any(|(index, metadata)| {
+        resolve_contextual_typed_dict_literal_type(
+            node,
+            nodes,
+            call.line,
+            metadata,
+            expected_positional_arg_types.get(index).and_then(|expected| expected.as_deref()),
+        )
+        .is_some_and(|result| !result.diagnostics.is_empty())
+    }) {
+        return false;
+    }
+    if call.keyword_arg_values.iter().enumerate().any(|(index, metadata)| {
+        resolve_contextual_typed_dict_literal_type(
+            node,
+            nodes,
+            call.line,
+            metadata,
+            expected_keyword_arg_types.get(index).and_then(|expected| expected.as_deref()),
+        )
+        .is_some_and(|result| !result.diagnostics.is_empty())
+    }) {
+        return false;
+    }
     let resolved_keyword_arg_types =
         resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
     let mut positional_types = resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types);
@@ -1358,144 +1382,164 @@ fn typed_dict_literal_diagnostics(
             site.owner_name.as_deref(),
             site.owner_type_name.as_deref(),
         );
-        let mut guaranteed_keys = BTreeSet::new();
+        diagnostics.extend(typed_dict_literal_entry_diagnostics(
+            node,
+            nodes,
+            site.line,
+            &site.entries,
+            &target_shape,
+            signature,
+            site.owner_name.as_deref(),
+            site.owner_type_name.as_deref(),
+        ));
+    }
 
-        for entry in &site.entries {
-            if entry.is_expansion {
-                let Some(expansion_type) = resolve_direct_expression_type_from_metadata(
-                    node,
-                    nodes,
-                    signature,
-                    site.owner_name.as_deref(),
-                    site.owner_type_name.as_deref(),
-                    site.line,
-                    &entry.value,
-                ) else {
-                    diagnostics.push(typed_dict_literal_diagnostic(
-                        node,
-                        site.line,
-                        format!(
-                            "TypedDict literal for `{}` uses invalid `**` expansion",
-                            target_shape.name
-                        ),
-                    ));
-                    continue;
-                };
+    diagnostics
+}
 
-                let Some(expansion_shape) =
-                    resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
-                else {
-                    diagnostics.push(typed_dict_literal_diagnostic(
-                        node,
-                        site.line,
-                        format!(
-                            "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
-                            target_shape.name, expansion_type
-                        ),
-                    ));
-                    continue;
-                };
+fn typed_dict_literal_entry_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    line: usize,
+    entries: &[typepython_syntax::TypedDictLiteralEntry],
+    target_shape: &TypedDictShape,
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut guaranteed_keys = BTreeSet::new();
 
-                for (key, field) in &expansion_shape.fields {
-                    let Some(target_field) = target_shape.fields.get(key) else {
-                        diagnostics.push(typed_dict_literal_diagnostic(
-                            node,
-                            site.line,
-                            format!(
-                                "TypedDict literal for `{}` expands unknown key `{}`",
-                                target_shape.name, key
-                            ),
-                        ));
-                        continue;
-                    };
-
-                    if !direct_type_matches(&target_field.value_type, &field.value_type) {
-                        diagnostics.push(
-                            typed_dict_literal_diagnostic(
-                                node,
-                                site.line,
-                                format!(
-                                    "TypedDict literal for `{}` expands `{}` with `{}` where `{}` expects `{}`",
-                                    target_shape.name,
-                                    key,
-                                    field.value_type,
-                                    key,
-                                    target_field.value_type
-                                ),
-                            ),
-                        );
-                    }
-
-                    if field.required {
-                        guaranteed_keys.insert(key.clone());
-                    }
-                }
-
-                continue;
-            }
-
-            let Some(key) = entry.key.as_deref() else {
-                diagnostics.push(typed_dict_literal_diagnostic(
-                    node,
-                    site.line,
-                    format!("TypedDict literal for `{}` uses a non-literal key", target_shape.name),
-                ));
-                continue;
-            };
-
-            let Some(target_field) = target_shape.fields.get(key) else {
-                diagnostics.push(typed_dict_literal_diagnostic(
-                    node,
-                    site.line,
-                    format!(
-                        "TypedDict literal for `{}` uses unknown key `{}`",
-                        target_shape.name, key
-                    ),
-                ));
-                continue;
-            };
-
-            if let Some(actual_type) = resolve_direct_expression_type_from_metadata(
+    for entry in entries {
+        if entry.is_expansion {
+            let Some(expansion_type) = resolve_direct_expression_type_from_metadata(
                 node,
                 nodes,
                 signature,
-                site.owner_name.as_deref(),
-                site.owner_type_name.as_deref(),
-                site.line,
+                current_owner_name,
+                current_owner_type_name,
+                line,
                 &entry.value,
-            ) {
-                if !direct_type_matches(&target_field.value_type, &actual_type) {
-                    diagnostics.push(
-                        typed_dict_literal_diagnostic(
-                            node,
-                            site.line,
-                            format!(
-                                "TypedDict literal for `{}` assigns `{}` to key `{}` where `{}` expects `{}`",
-                                target_shape.name,
-                                actual_type,
-                                key,
-                                key,
-                                target_field.value_type
-                            ),
+            ) else {
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    line,
+                    format!(
+                        "TypedDict literal for `{}` uses invalid `**` expansion",
+                        target_shape.name
+                    ),
+                ));
+                continue;
+            };
+
+            let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
+            else {
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    line,
+                    format!(
+                        "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
+                        target_shape.name, expansion_type
+                    ),
+                ));
+                continue;
+            };
+
+            for (key, field) in &expansion_shape.fields {
+                let Some(target_field) = target_shape.fields.get(key) else {
+                    diagnostics.push(typed_dict_literal_diagnostic(
+                        node,
+                        line,
+                        format!(
+                            "TypedDict literal for `{}` expands unknown key `{}`",
+                            target_shape.name, key
                         ),
-                    );
+                    ));
+                    continue;
+                };
+
+                if !direct_type_matches(&target_field.value_type, &field.value_type) {
+                    diagnostics.push(typed_dict_literal_diagnostic(
+                        node,
+                        line,
+                        format!(
+                            "TypedDict literal for `{}` expands `{}` with `{}` where `{}` expects `{}`",
+                            target_shape.name,
+                            key,
+                            field.value_type,
+                            key,
+                            target_field.value_type
+                        ),
+                    ));
+                }
+
+                if field.required {
+                    guaranteed_keys.insert(key.clone());
                 }
             }
 
-            guaranteed_keys.insert(key.to_owned());
+            continue;
         }
 
-        for (key, field) in &target_shape.fields {
-            if field.required && !guaranteed_keys.contains(key) {
+        let Some(key) = entry.key.as_deref() else {
+            diagnostics.push(typed_dict_literal_diagnostic(
+                node,
+                line,
+                format!("TypedDict literal for `{}` uses a non-literal key", target_shape.name),
+            ));
+            continue;
+        };
+
+        let Some(target_field) = target_shape.fields.get(key) else {
+            diagnostics.push(typed_dict_literal_diagnostic(
+                node,
+                line,
+                format!(
+                    "TypedDict literal for `{}` uses unknown key `{}`",
+                    target_shape.name, key
+                ),
+            ));
+            continue;
+        };
+
+        if let Some(actual_type) = resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            line,
+            &entry.value,
+        ) {
+            if !direct_type_matches(&target_field.value_type, &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
-                    site.line,
+                    line,
                     format!(
-                        "TypedDict literal for `{}` is missing required key `{}`",
-                        target_shape.name, key
+                        "TypedDict literal for `{}` assigns `{}` to key `{}` where `{}` expects `{}`",
+                        target_shape.name,
+                        actual_type,
+                        key,
+                        key,
+                        target_field.value_type
                     ),
                 ));
             }
+        }
+
+        guaranteed_keys.insert(key.to_owned());
+    }
+
+    for (key, field) in &target_shape.fields {
+        if field.required && !guaranteed_keys.contains(key) {
+            diagnostics.push(typed_dict_literal_diagnostic(
+                node,
+                line,
+                format!(
+                    "TypedDict literal for `{}` is missing required key `{}`",
+                    target_shape.name, key
+                ),
+            ));
         }
     }
 
@@ -2099,6 +2143,11 @@ fn format_callable_annotation(param_types: &[String], return_type: &str) -> Stri
     normalize_type_text(&format!("Callable[[{}], {}]", param_types.join(", "), return_type))
 }
 
+struct ContextualTypedDictLiteralResult {
+    actual_type: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
 fn resolve_contextual_lambda_callable_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2118,6 +2167,30 @@ fn resolve_contextual_lambda_callable_type(
         expected,
     )?;
     Some(format_callable_annotation(&param_types, &return_type))
+}
+
+fn resolve_contextual_typed_dict_literal_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualTypedDictLiteralResult> {
+    let entries = metadata.value_dict_entries.as_ref()?;
+    let expected = expected?;
+    let actual_type = normalize_type_text(expected);
+    let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &actual_type)?;
+    let diagnostics = typed_dict_literal_entry_diagnostics(
+        node,
+        nodes,
+        current_line,
+        entries,
+        &target_shape,
+        None,
+        None,
+        None,
+    );
+    Some(ContextualTypedDictLiteralResult { actual_type, diagnostics })
 }
 
 fn expected_positional_arg_types_from_direct_signature(
@@ -5870,6 +5943,33 @@ fn direct_source_function_type_diagnostics(
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let expected_keyword_arg_types =
         expected_keyword_arg_types_from_signature_sites(signature, &call.keyword_names);
+    let mut diagnostics = call
+        .arg_values
+        .iter()
+        .enumerate()
+        .flat_map(|(index, metadata)| {
+            resolve_contextual_typed_dict_literal_type(
+                node,
+                nodes,
+                call.line,
+                metadata,
+                expected_positional_arg_types.get(index).and_then(|expected| expected.as_deref()),
+            )
+            .into_iter()
+            .flat_map(|result| result.diagnostics)
+        })
+        .collect::<Vec<_>>();
+    diagnostics.extend(call.keyword_arg_values.iter().enumerate().flat_map(|(index, metadata)| {
+        resolve_contextual_typed_dict_literal_type(
+            node,
+            nodes,
+            call.line,
+            metadata,
+            expected_keyword_arg_types.get(index).and_then(|expected| expected.as_deref()),
+        )
+        .into_iter()
+        .flat_map(|result| result.diagnostics)
+    }));
     let resolved_keyword_arg_types =
         resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
     let (expanded_arg_types, variadic_starred_types) =
@@ -5892,7 +5992,7 @@ fn direct_source_function_type_diagnostics(
         .find(|param| param.keyword_variadic)
         .and_then(|param| param.annotation.as_deref());
     let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
-    positional_and_keyword_type_diagnostics(
+    diagnostics.extend(positional_and_keyword_type_diagnostics(
         node,
         nodes,
         call,
@@ -5905,7 +6005,8 @@ fn direct_source_function_type_diagnostics(
         unpack_shape.as_ref(),
         &variadic_starred_types,
         &keyword_expansions,
-    )
+    ));
+    diagnostics
 }
 
 fn expanded_positional_arg_types(
@@ -5952,6 +6053,16 @@ fn resolved_call_arg_types(
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
             .or_else(|| {
+                resolve_contextual_typed_dict_literal_type(
+                    node,
+                    nodes,
+                    call.line,
+                    metadata,
+                    expected_types.get(index).and_then(|expected| expected.as_deref()),
+                )
+                .map(|result| result.actual_type)
+            })
+            .or_else(|| {
                 resolve_direct_expression_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
                 )
@@ -5981,6 +6092,16 @@ fn resolved_keyword_arg_types(
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
+            .or_else(|| {
+                resolve_contextual_typed_dict_literal_type(
+                    node,
+                    nodes,
+                    call.line,
+                    metadata,
+                    expected_types.get(index).and_then(|expected| expected.as_deref()),
+                )
+                .map(|result| result.actual_type)
+            })
             .or_else(|| {
                 resolve_direct_expression_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
@@ -8763,6 +8884,233 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_contextual_typed_dict_literal_call_argument() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef takes_user(user: User) -> None:\n    return None\n\ntakes_user({\"id\": 1, \"name\": \"Ada\"})\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_missing_key_in_call_argument() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef takes_user(user: User) -> None:\n    return None\n\ntakes_user({\"id\": 1})\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_keyword_value_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef takes_user(*, user: User) -> None:\n    return None\n\ntakes_user(user={\"id\": \"oops\", \"name\": \"Ada\"})\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("assigns `str` to key `id`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_typed_dict_literal_method_keyword_argument() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nclass Service:\n    def takes(self, *, user: User) -> None:\n        return None\n\nService().takes(user={\"id\": 1, \"name\": \"Ada\"})\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
+        fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
+            typepython_syntax::DirectExprMetadata {
+                value_type: Some(String::from(value_type)),
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_dict_entries: None,
+            }
+        }
+
+        let call = typepython_binding::CallSite {
+            callee: String::from("choose"),
+            arg_count: 1,
+            arg_types: vec![String::from("dict[str, object]")],
+            arg_values: vec![typepython_syntax::DirectExprMetadata {
+                value_type: Some(String::from("dict[str, object]")),
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_dict_entries: Some(vec![
+                    typepython_syntax::TypedDictLiteralEntry {
+                        key: Some(String::from("id")),
+                        is_expansion: false,
+                        value: direct_expr("int"),
+                    },
+                    typepython_syntax::TypedDictLiteralEntry {
+                        key: Some(String::from("name")),
+                        is_expansion: false,
+                        value: direct_expr("str"),
+                    },
+                ]),
+            }],
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
+            line: 1,
+        };
+        let typed_dict_overload = Declaration {
+            name: String::from("choose"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(user:User)->int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        };
+        let string_overload = Declaration {
+            detail: String::from("(user:str)->str"),
+            ..typed_dict_overload.clone()
+        };
+        let typed_dict_class = Declaration {
+            name: String::from("User"),
+            kind: DeclarationKind::Class,
+            detail: String::new(),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: vec![String::from("TypedDict")],
+            type_params: Vec::new(),
+        };
+        let id_field = Declaration {
+            name: String::from("id"),
+            kind: DeclarationKind::Value,
+            detail: String::from("int"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: Some(DeclarationOwner {
+                name: String::from("User"),
+                kind: DeclarationOwnerKind::Class,
+            }),
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        };
+        let name_field = Declaration {
+            name: String::from("name"),
+            detail: String::from("str"),
+            ..id_field.clone()
+        };
+        let node = typepython_graph::ModuleNode {
+            module_path: PathBuf::from("src/app/module.tpy"),
+            module_key: String::new(),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![typed_dict_class, id_field, name_field],
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+        };
+
+        assert!(crate::overload_is_applicable_with_context(
+            &node,
+            &[node.clone()],
+            &call,
+            &typed_dict_overload
+        ));
+        assert!(!crate::overload_is_applicable_with_context(
+            &node,
+            &[node.clone()],
+            &call,
+            &string_overload
+        ));
+    }
+
+    #[test]
     fn check_reports_unresolved_paramspec_call() {
         let result = check_temp_typepython_source(
             "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",
@@ -9812,6 +10160,7 @@ mod tests {
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: None,
+                value_dict_entries: None,
             }
         }
 
@@ -9843,6 +10192,7 @@ mod tests {
             })),
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_dict_entries: None,
         };
         let call = typepython_binding::CallSite {
             callee: String::from("choose"),
