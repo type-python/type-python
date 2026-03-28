@@ -5525,6 +5525,26 @@ fn name_reassigned_after_line(
     })
 }
 
+fn latest_delete_invalidation_line(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<usize> {
+    node.invalidations
+        .iter()
+        .rev()
+        .find(|site| {
+            site.kind == typepython_binding::InvalidationKind::Delete
+                && site.names.iter().any(|name| name == value_name)
+                && site.owner_name.as_deref() == current_owner_name
+                && site.owner_type_name.as_deref() == current_owner_type_name
+                && site.line < current_line
+        })
+        .map(|site| site.line)
+}
+
 fn apply_guard_condition(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -5958,6 +5978,13 @@ fn resolve_local_assignment_reference_type(
     value_name: &str,
 ) -> Option<String> {
     let owner_name = current_owner_name?;
+    let deleted_after_line = latest_delete_invalidation_line(
+        node,
+        Some(owner_name),
+        current_owner_type_name,
+        current_line,
+        value_name,
+    );
     if let Some(joined) = resolve_post_if_joined_assignment_type(
         node,
         nodes,
@@ -5966,7 +5993,9 @@ fn resolve_local_assignment_reference_type(
         current_owner_type_name,
         current_line,
         value_name,
-    ) {
+    )
+    .filter(|_| deleted_after_line.is_none())
+    {
         return Some(joined);
     }
     let assignment = node.assignments.iter().rev().find(|assignment| {
@@ -5974,6 +6003,7 @@ fn resolve_local_assignment_reference_type(
             && assignment.owner_name.as_deref() == Some(owner_name)
             && assignment.owner_type_name.as_deref() == current_owner_type_name
             && assignment.line < current_line
+            && deleted_after_line.is_none_or(|deleted_line| assignment.line > deleted_line)
     })?;
     resolve_assignment_site_type(node, nodes, signature, assignment)
 }
@@ -5985,6 +6015,7 @@ fn resolve_module_level_assignment_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    let deleted_after_line = latest_delete_invalidation_line(node, None, None, current_line, value_name);
     if let Some(joined) = resolve_post_if_joined_assignment_type(
         node,
         nodes,
@@ -5993,13 +6024,16 @@ fn resolve_module_level_assignment_reference_type(
         None,
         current_line,
         value_name,
-    ) {
+    )
+    .filter(|_| deleted_after_line.is_none())
+    {
         return Some(joined);
     }
     let assignment = node.assignments.iter().rev().find(|assignment| {
         assignment.name == value_name
             && assignment.owner_name.is_none()
             && assignment.line < current_line
+            && deleted_after_line.is_none_or(|deleted_line| assignment.line > deleted_line)
     })?;
     resolve_assignment_site_type(node, nodes, signature, assignment)
 }
@@ -17170,6 +17204,132 @@ mod tests {
     }
 
     #[test]
+    fn check_does_not_reuse_deleted_local_assignment_type() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: vec![typepython_binding::InvalidationSite {
+                    kind: typepython_binding::InvalidationKind::Delete,
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 3,
+                }],
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: vec![
+                    typepython_binding::AssignmentSite {
+                        name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
+                        annotation: None,
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                        owner_name: Some(String::from("build")),
+                        owner_type_name: None,
+                        line: 2,
+                    },
+                    typepython_binding::AssignmentSite {
+                        name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
+                        annotation: Some(String::from("str")),
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: Some(String::from("value")),
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                        owner_name: Some(String::from("build")),
+                        owner_type_name: None,
+                        line: 4,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!rendered.contains("assigns `int` where local `result` expects `str`"), "{rendered}");
+    }
+
+    #[test]
     fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -17468,6 +17628,153 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_does_not_reuse_deleted_module_assignment_type() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("value"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("result"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: vec![typepython_binding::InvalidationSite {
+                    kind: typepython_binding::InvalidationKind::Delete,
+                    owner_name: None,
+                    owner_type_name: None,
+                    names: vec![String::from("value")],
+                    line: 2,
+                }],
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: vec![
+                    typepython_binding::AssignmentSite {
+                        name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
+                        annotation: None,
+                        value_type: Some(String::from("int")),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                        owner_name: None,
+                        owner_type_name: None,
+                        line: 1,
+                    },
+                    typepython_binding::AssignmentSite {
+                        name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
+                        annotation: Some(String::from("str")),
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: Some(String::from("value")),
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                        owner_name: None,
+                        owner_type_name: None,
+                        line: 3,
+                    },
+                ],
+                summary_fingerprint: 1,
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!rendered.contains("assigns `int` where `result` expects `str`"), "{rendered}");
     }
 
     #[test]
@@ -29596,6 +29903,7 @@ mod tests {
                 }],
                 asserts: Vec::new(),
                 invalidations: vec![typepython_binding::InvalidationSite {
+                    kind: typepython_binding::InvalidationKind::RebindLike,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],

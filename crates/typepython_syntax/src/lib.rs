@@ -330,7 +330,15 @@ pub struct AssertStatement {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub enum InvalidationKind {
+    RebindLike,
+    Delete,
+    ScopeChange,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct InvalidationStatement {
+    pub kind: InvalidationKind,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub names: Vec<String>,
@@ -3652,6 +3660,7 @@ fn extract_ast_backed_statement(
         Stmt::AugAssign(stmt) => {
             let names = extract_assignment_names(&stmt.target);
             (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                kind: InvalidationKind::RebindLike,
                 owner_name: None,
                 owner_type_name: None,
                 names,
@@ -3661,6 +3670,7 @@ fn extract_ast_backed_statement(
         Stmt::Delete(stmt) => {
             let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                kind: InvalidationKind::Delete,
                 owner_name: None,
                 owner_type_name: None,
                 names,
@@ -3670,6 +3680,7 @@ fn extract_ast_backed_statement(
         Stmt::Global(stmt) => {
             let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                kind: InvalidationKind::ScopeChange,
                 owner_name: None,
                 owner_type_name: None,
                 names,
@@ -3679,6 +3690,7 @@ fn extract_ast_backed_statement(
         Stmt::Nonlocal(stmt) => {
             let names = stmt.names.iter().map(|name| name.as_str().to_owned()).collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
+                kind: InvalidationKind::ScopeChange,
                 owner_name: None,
                 owner_type_name: None,
                 names,
@@ -4771,6 +4783,7 @@ fn collect_invalidation_statements(
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        kind: InvalidationKind::RebindLike,
                         owner_name: owner_name.map(str::to_owned),
                         owner_type_name: owner_type_name.map(str::to_owned),
                         names,
@@ -4784,6 +4797,7 @@ fn collect_invalidation_statements(
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        kind: InvalidationKind::Delete,
                         owner_name: owner_name.map(str::to_owned),
                         owner_type_name: owner_type_name.map(str::to_owned),
                         names,
@@ -4797,6 +4811,7 @@ fn collect_invalidation_statements(
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        kind: InvalidationKind::ScopeChange,
                         owner_name: owner_name.map(str::to_owned),
                         owner_type_name: owner_type_name.map(str::to_owned),
                         names,
@@ -4810,6 +4825,7 @@ fn collect_invalidation_statements(
                 if !names.is_empty() {
                     let line = offset_to_line_column(source, stmt.range.start().to_usize()).0;
                     statements.push(SyntaxStatement::Invalidate(InvalidationStatement {
+                        kind: InvalidationKind::ScopeChange,
                         owner_name: owner_name.map(str::to_owned),
                         owner_type_name: owner_type_name.map(str::to_owned),
                         names,
@@ -7268,11 +7284,11 @@ mod tests {
         parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
         ComprehensionKind, DirectExprMetadata, ExceptionHandlerStatement, ForStatement,
         FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
-        ImportStatement, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
-        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
-        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
-        ValueStatement, WithStatement, YieldStatement,
+        ImportStatement, InvalidationKind, InvalidationStatement, LambdaMetadata,
+        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
+        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
+        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective,
+        TypeParam, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
     };
     use std::path::PathBuf;
 
@@ -11643,24 +11659,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 SyntaxStatement::Invalidate(InvalidationStatement {
+                    kind: InvalidationKind::RebindLike,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],
                     line: 3,
                 }),
                 SyntaxStatement::Invalidate(InvalidationStatement {
+                    kind: InvalidationKind::Delete,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],
                     line: 4,
                 }),
                 SyntaxStatement::Invalidate(InvalidationStatement {
+                    kind: InvalidationKind::ScopeChange,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],
                     line: 5,
                 }),
                 SyntaxStatement::Invalidate(InvalidationStatement {
+                    kind: InvalidationKind::ScopeChange,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],

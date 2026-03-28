@@ -175,7 +175,15 @@ pub struct AssertGuardSite {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum InvalidationKind {
+    RebindLike,
+    Delete,
+    ScopeChange,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct InvalidationSite {
+    pub kind: InvalidationKind,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub names: Vec<String>,
@@ -534,6 +542,15 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
             .iter()
             .filter_map(|statement| match statement {
                 SyntaxStatement::Invalidate(statement) => Some(InvalidationSite {
+                    kind: match statement.kind {
+                        typepython_syntax::InvalidationKind::RebindLike => {
+                            InvalidationKind::RebindLike
+                        }
+                        typepython_syntax::InvalidationKind::Delete => InvalidationKind::Delete,
+                        typepython_syntax::InvalidationKind::ScopeChange => {
+                            InvalidationKind::ScopeChange
+                        }
+                    },
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     names: statement.names.clone(),
@@ -979,8 +996,8 @@ mod tests {
     use super::{
         bind, AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
         DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GuardConditionSite,
-        IfGuardSite, InvalidationSite, MatchCaseSite, MatchPatternSite, MatchSite, WithSite,
-        YieldSite,
+        IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite, MatchPatternSite,
+        MatchSite, WithSite, YieldSite,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
@@ -2070,6 +2087,7 @@ mod tests {
             },
             statements: vec![SyntaxStatement::Invalidate(
                 typepython_syntax::InvalidationStatement {
+                    kind: typepython_syntax::InvalidationKind::Delete,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     names: vec![String::from("value")],
@@ -2083,6 +2101,7 @@ mod tests {
         assert_eq!(
             table.invalidations,
             vec![InvalidationSite {
+                kind: InvalidationKind::Delete,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 names: vec![String::from("value")],
