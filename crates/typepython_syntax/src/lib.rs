@@ -167,6 +167,7 @@ pub struct ImportBinding {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValueStatement {
     pub names: Vec<String>,
+    pub destructuring_target_names: Option<Vec<String>>,
     pub annotation: Option<String>,
     pub value_type: Option<String>,
     pub is_awaited: bool,
@@ -3458,11 +3459,17 @@ fn extract_ast_backed_statement(
                 .then_some(SyntaxStatement::Import(ImportStatement { bindings, line }))
         }
         Stmt::Assign(stmt) => {
-            let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+            let destructuring_target_names = (stmt.targets.len() == 1)
+                .then(|| extract_simple_destructuring_target_names(&stmt.targets[0]))
+                .flatten();
+            let names = destructuring_target_names.clone().unwrap_or_else(|| {
+                stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>()
+            });
             if !names.is_empty() {
                 let value = extract_direct_expr_metadata(source, &stmt.value);
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
+                    destructuring_target_names,
                     annotation: None,
                     value_type: value.value_type,
                     is_awaited: value.is_awaited,
@@ -3536,6 +3543,7 @@ fn extract_ast_backed_statement(
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
+                    destructuring_target_names: None,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
                     value_type: value.value_type,
                     is_awaited: value.is_awaited,
@@ -5190,6 +5198,7 @@ impl<'a> NamedExprAssignmentCollector<'a> {
         let value = extract_direct_expr_metadata(self.source, &named_expr.value);
         self.statements.push(SyntaxStatement::Value(ValueStatement {
             names: vec![name.id.as_str().to_owned()],
+            destructuring_target_names: None,
             annotation: None,
             value_type: value.value_type,
             is_awaited: value.is_awaited,
@@ -5298,6 +5307,7 @@ fn extract_function_body_assignment_statement(
         );
     Some(SyntaxStatement::Value(ValueStatement {
         names,
+        destructuring_target_names: None,
         annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
         value_type: value.value_type,
         is_awaited: value.is_awaited,
@@ -5341,13 +5351,19 @@ fn extract_function_body_bare_assignment_statement(
     let Stmt::Assign(assign) = stmt else {
         return None;
     };
-    let names = assign.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
+    let destructuring_target_names = (assign.targets.len() == 1)
+        .then(|| extract_simple_destructuring_target_names(&assign.targets[0]))
+        .flatten();
+    let names = destructuring_target_names.clone().unwrap_or_else(|| {
+        assign.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>()
+    });
     if names.is_empty() {
         return None;
     }
     let value = extract_direct_expr_metadata(source, &assign.value);
     Some(SyntaxStatement::Value(ValueStatement {
         names,
+        destructuring_target_names,
         annotation: None,
         value_type: value.value_type,
         is_awaited: value.is_awaited,
@@ -6466,6 +6482,28 @@ fn extract_assignment_names(expr: &Expr) -> Vec<String> {
         Expr::List(list) => list.elts.iter().flat_map(extract_assignment_names).collect(),
         Expr::Starred(starred) => extract_assignment_names(&starred.value),
         _ => Vec::new(),
+    }
+}
+
+fn extract_simple_destructuring_target_names(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::Tuple(tuple) => tuple
+            .elts
+            .iter()
+            .map(|element| match element {
+                Expr::Name(name) => Some(name.id.as_str().to_owned()),
+                _ => None,
+            })
+            .collect(),
+        Expr::List(list) => list
+            .elts
+            .iter()
+            .map(|element| match element {
+                Expr::Name(name) => Some(name.id.as_str().to_owned()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
     }
 }
 
@@ -7816,6 +7854,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -7849,6 +7888,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("a"), String::from("b")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -7901,6 +7941,7 @@ mod tests {
             vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -7948,6 +7989,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("copy")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -7981,6 +8023,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("field")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8058,6 +8101,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("result")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8105,6 +8149,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("item")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8182,6 +8227,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8215,6 +8261,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("field")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8247,6 +8294,30 @@ mod tests {
                     line: 3,
                 }),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_distinguishes_destructuring_from_chained_assignment() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("destructure.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("a = b = pair\nleft, right = pair\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let [SyntaxStatement::Value(chain), SyntaxStatement::Value(destructure)] =
+            tree.statements.as_slice()
+        else {
+            panic!("expected two value statements");
+        };
+        assert_eq!(chain.names, vec![String::from("a"), String::from("b")]);
+        assert_eq!(chain.destructuring_target_names, None);
+        assert_eq!(destructure.names, vec![String::from("left"), String::from("right")]);
+        assert_eq!(
+            destructure.destructuring_target_names,
+            Some(vec![String::from("left"), String::from("right")])
         );
     }
 
@@ -8343,6 +8414,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -8909,6 +8981,7 @@ mod tests {
             tree.statements,
             vec![SyntaxStatement::Value(ValueStatement {
                 names: vec![String::from("value")],
+                destructuring_target_names: None,
                 annotation: Some(String::from("int")),
                 value_type: Some(String::new()),
                 is_awaited: false,
@@ -9725,6 +9798,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("MAX_SIZE")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("Final")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -9876,6 +9950,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("VALUE")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("ClassVar[int]")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -10296,6 +10371,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("result")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,

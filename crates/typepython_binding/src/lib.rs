@@ -270,6 +270,8 @@ pub struct ExceptHandlerSite {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AssignmentSite {
     pub name: String,
+    pub destructuring_target_names: Option<Vec<String>>,
+    pub destructuring_index: Option<usize>,
     pub annotation: Option<String>,
     pub value_type: Option<String>,
     pub is_awaited: bool,
@@ -642,9 +644,14 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 SyntaxStatement::Value(statement) => statement
                     .names
                     .iter()
-                    .cloned()
-                    .map(|name| AssignmentSite {
-                        name,
+                    .enumerate()
+                    .map(|(index, name)| AssignmentSite {
+                        name: name.clone(),
+                        destructuring_target_names: statement.destructuring_target_names.clone(),
+                        destructuring_index: statement
+                            .destructuring_target_names
+                            .as_ref()
+                            .map(|_| index),
                         annotation: statement.annotation.clone(),
                         value_type: statement.value_type.clone(),
                         is_awaited: statement.is_awaited,
@@ -1211,6 +1218,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value"), String::from("count")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: None,
                     is_awaited: false,
@@ -1342,6 +1350,7 @@ mod tests {
             statements: vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("value")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1375,6 +1384,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("copy")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1416,6 +1426,8 @@ mod tests {
             vec![
                 AssignmentSite {
                     name: String::from("value"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1447,6 +1459,8 @@ mod tests {
                 },
                 AssignmentSite {
                     name: String::from("copy"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1511,6 +1525,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("result")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1553,6 +1568,8 @@ mod tests {
             table.assignments,
             vec![AssignmentSite {
                 name: String::from("result"),
+                destructuring_target_names: None,
+                destructuring_index: None,
                 annotation: Some(String::from("int")),
                 value_type: Some(String::new()),
                 is_awaited: false,
@@ -1608,6 +1625,7 @@ mod tests {
                 }),
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("result")],
+                    destructuring_target_names: None,
                     annotation: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -1650,6 +1668,8 @@ mod tests {
             table.assignments,
             vec![AssignmentSite {
                 name: String::from("result"),
+                destructuring_target_names: None,
+                destructuring_index: None,
                 annotation: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
@@ -1680,6 +1700,64 @@ mod tests {
                 line: 2,
             }]
         );
+    }
+
+    #[test]
+    fn bind_tracks_destructuring_assignment_indexes() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/helpers.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Value(ValueStatement {
+                names: vec![String::from("left"), String::from("right")],
+                destructuring_target_names: Some(vec![String::from("left"), String::from("right")]),
+                annotation: None,
+                value_type: Some(String::from("tuple[int, str]")),
+                is_awaited: false,
+                value_callee: None,
+                value_name: Some(String::from("pair")),
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                owner_name: Some(String::from("build")),
+                owner_type_name: None,
+                is_final: false,
+                is_class_var: false,
+                line: 2,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.assignments.len(), 2);
+        assert_eq!(table.assignments[0].name, "left");
+        assert_eq!(table.assignments[0].destructuring_index, Some(0));
+        assert_eq!(
+            table.assignments[0].destructuring_target_names,
+            Some(vec![String::from("left"), String::from("right")])
+        );
+        assert_eq!(table.assignments[1].name, "right");
+        assert_eq!(table.assignments[1].destructuring_index, Some(1));
     }
 
     #[test]
@@ -2227,6 +2305,7 @@ mod tests {
             statements: vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("MAX_SIZE")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("Final")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -2371,6 +2450,7 @@ mod tests {
             statements: vec![
                 SyntaxStatement::Value(ValueStatement {
                     names: vec![String::from("VALUE")],
+                    destructuring_target_names: None,
                     annotation: Some(String::from("ClassVar[int]")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,

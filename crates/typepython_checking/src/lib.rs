@@ -105,6 +105,9 @@ pub fn check_with_options(
         for for_diagnostic in for_loop_target_diagnostics(node, &graph.nodes) {
             diagnostics.push(for_diagnostic);
         }
+        for destructuring_diagnostic in destructuring_assignment_diagnostics(node, &graph.nodes) {
+            diagnostics.push(destructuring_diagnostic);
+        }
         for with_diagnostic in with_statement_diagnostics(node, &graph.nodes) {
             diagnostics.push(with_diagnostic);
         }
@@ -1325,6 +1328,85 @@ fn for_loop_target_diagnostics(
                             for_loop.target_names.join(", "),
                             for_loop.target_names.len(),
                             element_type,
+                            tuple_elements.len(),
+                        ),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn destructuring_assignment_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.assignments
+        .iter()
+        .filter(|assignment| assignment.destructuring_index == Some(0))
+        .filter_map(|assignment| {
+            let target_names = assignment.destructuring_target_names.as_ref()?;
+            let signature = resolve_assignment_owner_signature(node, assignment);
+            let actual = resolve_direct_expression_type(
+                node,
+                nodes,
+                signature,
+                Some(assignment.name.as_str()),
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                assignment.value_type.as_deref(),
+                assignment.is_awaited,
+                assignment.value_callee.as_deref(),
+                assignment.value_name.as_deref(),
+                assignment.value_member_owner_name.as_deref(),
+                assignment.value_member_name.as_deref(),
+                assignment.value_member_through_instance,
+                assignment.value_method_owner_name.as_deref(),
+                assignment.value_method_name.as_deref(),
+                assignment.value_method_through_instance,
+                assignment.value_subscript_target.as_deref(),
+                assignment.value_subscript_string_key.as_deref(),
+                assignment.value_subscript_index.as_deref(),
+                assignment.value_if_true.as_deref(),
+                assignment.value_if_false.as_deref(),
+                assignment.value_if_guard.as_ref(),
+                assignment.value_bool_left.as_deref(),
+                assignment.value_bool_right.as_deref(),
+                assignment.value_binop_left.as_deref(),
+                assignment.value_binop_right.as_deref(),
+                assignment.value_binop_operator.as_deref(),
+            )?;
+            let tuple_elements = unwrap_fixed_tuple_elements(&actual)?;
+            (tuple_elements.len() != target_names.len()).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    match (&assignment.owner_type_name, &assignment.owner_name) {
+                        (Some(owner_type_name), Some(owner_name)) => format!(
+                            "type `{}` in module `{}` destructures assignment target `({})` with {} name(s) from tuple type `{}` with {} element(s) in `{}`",
+                            owner_type_name,
+                            node.module_path.display(),
+                            target_names.join(", "),
+                            target_names.len(),
+                            actual,
+                            tuple_elements.len(),
+                            owner_name,
+                        ),
+                        (None, Some(owner_name)) => format!(
+                            "function `{}` in module `{}` destructures assignment target `({})` with {} name(s) from tuple type `{}` with {} element(s)",
+                            owner_name,
+                            node.module_path.display(),
+                            target_names.join(", "),
+                            target_names.len(),
+                            actual,
+                            tuple_elements.len(),
+                        ),
+                        _ => format!(
+                            "module `{}` destructures assignment target `({})` with {} name(s) from tuple type `{}` with {} element(s)",
+                            node.module_path.display(),
+                            target_names.join(", "),
+                            target_names.len(),
+                            actual,
                             tuple_elements.len(),
                         ),
                     },
@@ -4637,6 +4719,43 @@ fn resolve_assignment_site_type(
     signature: Option<&str>,
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<String> {
+    if let Some(index) = assignment.destructuring_index {
+        let tuple_elements = unwrap_fixed_tuple_elements(&resolve_direct_expression_type(
+            node,
+            nodes,
+            signature,
+            Some(assignment.name.as_str()),
+            assignment.owner_name.as_deref(),
+            assignment.owner_type_name.as_deref(),
+            assignment.line,
+            assignment.value_type.as_deref(),
+            assignment.is_awaited,
+            assignment.value_callee.as_deref(),
+            assignment.value_name.as_deref(),
+            assignment.value_member_owner_name.as_deref(),
+            assignment.value_member_name.as_deref(),
+            assignment.value_member_through_instance,
+            assignment.value_method_owner_name.as_deref(),
+            assignment.value_method_name.as_deref(),
+            assignment.value_method_through_instance,
+            assignment.value_subscript_target.as_deref(),
+            assignment.value_subscript_string_key.as_deref(),
+            assignment.value_subscript_index.as_deref(),
+            assignment.value_if_true.as_deref(),
+            assignment.value_if_false.as_deref(),
+            assignment.value_if_guard.as_ref(),
+            assignment.value_bool_left.as_deref(),
+            assignment.value_bool_right.as_deref(),
+            assignment.value_binop_left.as_deref(),
+            assignment.value_binop_right.as_deref(),
+            assignment.value_binop_operator.as_deref(),
+        )?)?;
+        let target_names = assignment.destructuring_target_names.as_ref()?;
+        if tuple_elements.len() == target_names.len() {
+            return tuple_elements.get(index).cloned();
+        }
+        return None;
+    }
     if let Some(comprehension) = assignment.value_list_comprehension.as_deref() {
         return match comprehension.kind {
             typepython_syntax::ComprehensionKind::List => resolve_list_comprehension_type(
@@ -11038,6 +11157,8 @@ mod tests {
                     except_handlers: Vec::new(),
                     assignments: vec![typepython_binding::AssignmentSite {
                         name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("str")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -11786,6 +11907,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("flag"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("bool")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -12039,6 +12162,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("missing"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("None")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -12273,6 +12398,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("flag"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("bool")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -12807,6 +12934,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("missing"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("None")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -14280,6 +14409,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("flag"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("bool")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -14358,6 +14489,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("missing"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("None")),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
@@ -14457,6 +14590,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("value"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -14554,6 +14689,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("value"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -14653,6 +14790,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("target"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -14791,6 +14930,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("target"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -14869,6 +15010,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -14995,6 +15138,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("value"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -15093,6 +15238,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15124,6 +15271,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("int")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15244,6 +15393,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15275,6 +15426,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("int")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15393,6 +15546,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("value"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15424,6 +15579,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("int")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15525,6 +15682,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("x"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15556,6 +15715,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("y"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15587,6 +15748,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("int")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15713,6 +15876,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("x"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15744,6 +15909,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("y"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15881,6 +16048,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("x"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15912,6 +16081,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("y"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -15943,6 +16114,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("int")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -16070,6 +16243,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("size"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -16651,6 +16826,26 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_fixed_tuple_destructuring_for_later_flow() {
+        let result = check_temp_typepython_source(
+            "pair: tuple[int, str] = (1, \"x\")\nleft, right = pair\nvalue: str = right\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_fixed_tuple_destructuring_arity_mismatch() {
+        let result = check_temp_typepython_source(
+            "pair: tuple[int] = (1,)\nleft, right = pair\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("destructures assignment target `(left, right)` with 2 name(s) from tuple type `tuple[int]` with 1 element(s)"));
+    }
+
+    #[test]
     fn check_reports_namedexpr_binding_mismatch_for_later_assignment() {
         let result = check_temp_typepython_source(
             "def build() -> None:\n    if (tmp := 1):\n        pass\n    value: str = tmp\n",
@@ -16929,6 +17124,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("name"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17028,6 +17225,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("items"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("list[int]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17125,6 +17324,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17295,6 +17496,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17396,6 +17599,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[..., str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17493,6 +17698,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[..., int]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17633,6 +17840,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17771,6 +17980,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -17913,6 +18124,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18051,6 +18264,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("handler"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Callable[[int], str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18133,6 +18348,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("items"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("list[str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18296,6 +18513,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("anything"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("Any")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -18327,6 +18546,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("maybe"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("Optional[int]")),
                         value_type: Some(String::from("None")),
                         is_awaited: false,
@@ -18358,6 +18579,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("choice"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("Union[int, str]")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -18435,6 +18658,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("name"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Optional[str]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18580,6 +18805,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("text"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18690,6 +18917,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("T"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("TypeVar")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -18862,6 +19091,8 @@ mod tests {
                     except_handlers: Vec::new(),
                     assignments: vec![typepython_binding::AssignmentSite {
                         name: String::from("T"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: Some(String::from("TypeVar")),
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -19576,6 +19807,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("UserId"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("NewType")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -21020,6 +21253,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("task"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("Awaitable[int]")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -21117,6 +21352,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -23765,6 +24002,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -23903,6 +24142,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -24430,6 +24671,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("int")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -24522,6 +24765,8 @@ mod tests {
                 except_handlers: Vec::new(),
                 assignments: vec![typepython_binding::AssignmentSite {
                     name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
                     annotation: Some(String::from("str")),
                     value_type: Some(String::new()),
                     is_awaited: false,
@@ -27018,6 +27263,8 @@ mod tests {
                 assignments: vec![
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::from("str")),
                         is_awaited: false,
@@ -27049,6 +27296,8 @@ mod tests {
                     },
                     typepython_binding::AssignmentSite {
                         name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
                         annotation: None,
                         value_type: Some(String::from("int")),
                         is_awaited: false,
