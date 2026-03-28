@@ -2339,6 +2339,41 @@ fn subscript_assignment_type_diagnostics(
                     }
 
                     let value = site.value.as_ref()?;
+                    let contextual = resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        site.line,
+                        value,
+                        Some(&value_type),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual_value = result.actual_type;
+                        if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                            return Some(
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
+                                        owner_type,
+                                        node.module_path.display(),
+                                        actual_value,
+                                        value_type,
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                )),
+                            );
+                        }
+                        return None;
+                    }
                     let actual_value = resolve_direct_expression_type_from_metadata(
                         node,
                         nodes,
@@ -11151,6 +11186,27 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("passes key `int` where `__setitem__` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_nominal_setitem_subscript_assignment_lambda() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\nclass Cache:\n    def __setitem__(self, key: str, value: Callable[[int], str]) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"fmt\"] = lambda x: str(x)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_contextual_nominal_setitem_subscript_assignment_typed_dict_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\nclass Cache:\n    def __setitem__(self, key: str, value: User) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"user\"] = {}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
     }
 
     #[test]
