@@ -2655,6 +2655,39 @@ fn attribute_assignment_type_diagnostics(
                 Some(WritableAttributeTarget::Value(declaration)) => {
                     let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
+                    let contextual = resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        site.line,
+                        value,
+                        Some(&expected),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual = result.actual_type;
+                        return (!direct_type_matches(&expected, &actual)).then(|| {
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                    target_type,
+                                    node.module_path.display(),
+                                    actual,
+                                    site.field_name,
+                                    expected,
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            ))
+                        });
+                    }
                     let actual = resolve_direct_expression_type_from_metadata(
                         node,
                         nodes,
@@ -2688,6 +2721,39 @@ fn attribute_assignment_type_diagnostics(
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
                     let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
+                    let contextual = resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        site.line,
+                        value,
+                        Some(&expected),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual = result.actual_type;
+                        return (!direct_type_matches(&expected, &actual)).then(|| {
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                    target_type,
+                                    node.module_path.display(),
+                                    actual,
+                                    site.field_name,
+                                    expected,
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            ))
+                        });
+                    }
                     let actual = resolve_direct_expression_type_from_metadata(
                         node,
                         nodes,
@@ -30272,6 +30338,48 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `int` where member `name` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_declared_attribute_assignment_lambda() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\nclass Box:\n    handler: Callable[[int], str]\n\ndef mutate(box: Box) -> None:\n    box.handler = lambda x: str(x)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_contextual_property_setter_assignment_typed_dict() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\nclass Box:\n    @property\n    def user(self) -> User:\n        return {\"name\": \"Ada\"}\n\n    @user.setter\n    def user(self, value: User) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.user = {\"name\": \"Grace\"}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_contextual_property_setter_assignment_typed_dict_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\nclass Box:\n    @property\n    def user(self) -> User:\n        return {\"name\": \"Ada\"}\n\n    @user.setter\n    def user(self, value: User) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.user = {}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_reports_contextual_declared_attribute_assignment_lambda_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\nclass Box:\n    handler: Callable[[int], str]\n\ndef mutate(box: Box) -> None:\n    box.handler = lambda x: x + 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
     }
 
     #[test]
