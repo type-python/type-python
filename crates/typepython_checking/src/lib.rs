@@ -1919,6 +1919,22 @@ fn current_augmented_assignment_target_is_final(
     })
 }
 
+fn final_attribute_reassignment_diagnostic(
+    module_path: &std::path::Path,
+    owner_type_name: &str,
+    member_name: &str,
+) -> Diagnostic {
+    Diagnostic::error(
+        "TPY4006",
+        format!(
+            "type `{}` in module `{}` reassigns Final binding `{}`",
+            owner_type_name,
+            module_path.display(),
+            member_name,
+        ),
+    )
+}
+
 fn is_final_annotation_text(annotation: &str) -> bool {
     let annotation = annotation.trim();
     annotation == "Final"
@@ -3041,6 +3057,13 @@ fn attribute_assignment_type_diagnostics(
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type)?;
             match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
                 Some(WritableAttributeTarget::Value(declaration)) => {
+                    if declaration.is_final {
+                        return Some(final_attribute_reassignment_diagnostic(
+                            &node.module_path,
+                            &target_type,
+                            &site.field_name,
+                        ));
+                    }
                     let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
@@ -13892,6 +13915,28 @@ mod tests {
     fn check_reports_final_augmented_reassignment_in_local_scope() {
         let result = check_temp_typepython_source(
             "from typing import Final\n\ndef build() -> None:\n    limit: Final[int] = 1\n    limit += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("Final binding `limit`"));
+    }
+
+    #[test]
+    fn check_reports_final_attribute_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import Final\n\nclass Box:\n    limit: Final[int] = 1\n\ndef mutate(box: Box) -> None:\n    box.limit = 2\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("Final binding `limit`"));
+    }
+
+    #[test]
+    fn check_reports_final_attribute_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import Final\n\nclass Box:\n    limit: Final[int] = 1\n\ndef mutate(box: Box) -> None:\n    box.limit += 1\n",
         );
 
         let rendered = result.diagnostics.as_text();
