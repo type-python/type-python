@@ -461,6 +461,7 @@ pub enum MethodKind {
     Class,
     Static,
     Property,
+    PropertySetter,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -6641,6 +6642,9 @@ fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> Met
             Expr::Name(name) if name.id.as_str() == "classmethod" => return MethodKind::Class,
             Expr::Name(name) if name.id.as_str() == "staticmethod" => return MethodKind::Static,
             Expr::Name(name) if name.id.as_str() == "property" => return MethodKind::Property,
+            Expr::Attribute(attribute) if attribute.attr.as_str() == "setter" => {
+                return MethodKind::PropertySetter;
+            }
             _ => {}
         }
     }
@@ -11353,7 +11357,7 @@ mod tests {
             kind: SourceKind::Python,
             logical_module: String::new(),
             text: String::from(
-                "class Box:\n    @classmethod\n    def make(cls) -> None:\n        pass\n\n    @staticmethod\n    def build() -> None:\n        pass\n\n    @property\n    def name(self) -> str:\n        return \"x\"\n",
+                "class Box:\n    @classmethod\n    def make(cls) -> None:\n        pass\n\n    @staticmethod\n    def build() -> None:\n        pass\n\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n",
             ),
         });
 
@@ -11440,6 +11444,43 @@ mod tests {
                             is_final: false,
                             is_class_var: false,
                             line: 10,
+                        },
+                        ClassMember {
+                            name: String::from("name"),
+                            kind: ClassMemberKind::Method,
+                            method_kind: Some(MethodKind::PropertySetter),
+                            annotation: None,
+                            value_type: None,
+                            params: vec![
+                                FunctionParam {
+                                    name: String::from("self"),
+                                    annotation: None,
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
+                                FunctionParam {
+                                    name: String::from("value"),
+                                    annotation: Some(String::from("str")),
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false
+                                },
+                            ],
+                            returns: Some(String::from("None")),
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            line: 14,
                         },
                     ],
                     line: 1,

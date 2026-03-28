@@ -2523,6 +2523,7 @@ fn frozen_plain_dataclass_mutation_diagnostics(
 
 enum WritableAttributeTarget<'a> {
     Value(&'a Declaration),
+    PropertySetter(&'a Declaration),
     ReadOnlyProperty,
     NonWritable,
 }
@@ -2533,18 +2534,48 @@ fn find_owned_writable_member_target<'a>(
     class_decl: &'a Declaration,
     member_name: &str,
 ) -> Option<WritableAttributeTarget<'a>> {
-    let declaration = find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
-        declaration.kind == DeclarationKind::Value
-            || matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-    })?;
+    if let Some(declaration) = find_owned_value_declaration(nodes, class_node, class_decl, member_name)
+        && !declaration.is_class_var
+    {
+        return Some(WritableAttributeTarget::Value(declaration));
+    }
+
+    let callables = find_owned_callable_declarations(nodes, class_node, class_decl, member_name);
+    if let Some(setter) = callables.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Function
+            && declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
+    }) {
+        return Some(WritableAttributeTarget::PropertySetter(setter));
+    }
+    if callables.iter().any(|declaration| {
+        declaration.kind == DeclarationKind::Function
+            && declaration.method_kind == Some(typepython_syntax::MethodKind::Property)
+    }) {
+        return Some(WritableAttributeTarget::ReadOnlyProperty);
+    }
+
+    Some(WritableAttributeTarget::NonWritable)
+}
+
+fn resolve_writable_member_type(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    owner_type_name: &str,
+) -> Option<String> {
     match declaration.kind {
-        DeclarationKind::Value if !declaration.is_class_var => Some(WritableAttributeTarget::Value(declaration)),
+        DeclarationKind::Value => resolve_readable_member_type(node, declaration, owner_type_name),
         DeclarationKind::Function
-            if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
+            if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
-            Some(WritableAttributeTarget::ReadOnlyProperty)
+            let signature = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(&declaration.detail, Some(owner_type_name)),
+            );
+            let params = direct_param_types(&signature)?;
+            let params = params.into_iter().skip(1).collect::<Vec<_>>();
+            (params.len() == 1).then(|| normalize_type_text(&params[0]))
         }
-        _ => Some(WritableAttributeTarget::NonWritable),
+        _ => None,
     }
 }
 
@@ -2622,7 +2653,40 @@ fn attribute_assignment_type_diagnostics(
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type)?;
             match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
                 Some(WritableAttributeTarget::Value(declaration)) => {
-                    let expected = resolve_readable_member_type(node, declaration, &target_type)?;
+                    let expected = resolve_writable_member_type(node, declaration, &target_type)?;
+                    let value = site.value.as_ref()?;
+                    let actual = resolve_direct_expression_type_from_metadata(
+                        node,
+                        nodes,
+                        signature,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
+                    (!direct_type_matches(&expected, &actual)).then(|| {
+                        Diagnostic::error(
+                            "TPY4001",
+                            format!(
+                                "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                target_type,
+                                node.module_path.display(),
+                                actual,
+                                site.field_name,
+                                expected,
+                            ),
+                        )
+                        .with_span(Span::new(
+                            node.module_path.display().to_string(),
+                            site.line,
+                            1,
+                            site.line,
+                            1,
+                        ))
+                    })
+                }
+                Some(WritableAttributeTarget::PropertySetter(declaration)) => {
+                    let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     let actual = resolve_direct_expression_type_from_metadata(
                         node,
@@ -2975,7 +3039,9 @@ fn resolve_direct_member_callable_signature(
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,
-        _ => actual_params.into_iter().skip(1).collect(),
+        typepython_syntax::MethodKind::Instance
+        | typepython_syntax::MethodKind::Class
+        | typepython_syntax::MethodKind::PropertySetter => actual_params.into_iter().skip(1).collect(),
     };
     let return_text = rewrite_imported_typing_aliases(
         node,
@@ -4595,7 +4661,10 @@ fn resolve_receiver_name_type(
 
     match (declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance), value_name) {
         (typepython_syntax::MethodKind::Instance, "self")
-        | (typepython_syntax::MethodKind::Property, "self") => Some(String::from(owner_type_name)),
+        | (typepython_syntax::MethodKind::Property, "self")
+        | (typepython_syntax::MethodKind::PropertySetter, "self") => {
+            Some(String::from(owner_type_name))
+        }
         (typepython_syntax::MethodKind::Class, "cls") => Some(format!("type[{owner_type_name}]")),
         _ => None,
     }
@@ -6649,7 +6718,11 @@ fn direct_method_call_diagnostics(
                 typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
                     fallback_signature
                 }
-                _ => fallback_signature.into_iter().skip(1).collect(),
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::PropertySetter => {
+                    fallback_signature.into_iter().skip(1).collect()
+                }
             };
         if let Some(diagnostic) =
             direct_source_function_arity_diagnostic(node, nodes, &direct_call, &fallback_signature)
@@ -6681,7 +6754,9 @@ fn direct_method_signature_sites(
     let params = direct_signature_params(&method_signature).unwrap_or_default();
     let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
-        _ => params.into_iter().skip(1).collect(),
+        typepython_syntax::MethodKind::Instance
+        | typepython_syntax::MethodKind::Class
+        | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
     };
 
     params
@@ -6709,7 +6784,9 @@ fn method_overload_is_applicable(
     let params = direct_signature_params(&method_signature).unwrap_or_default();
     let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
-        _ => params.into_iter().skip(1).collect(),
+        typepython_syntax::MethodKind::Instance
+        | typepython_syntax::MethodKind::Class
+        | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
     };
     call_signature_params_are_applicable(node, nodes, call, &params)
 }
@@ -6731,7 +6808,9 @@ fn load_direct_method_signatures(
                 typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
                     signature.params
                 }
-                typepython_syntax::MethodKind::Instance | typepython_syntax::MethodKind::Class => {
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::PropertySetter => {
                     signature.params.into_iter().skip(1).collect()
                 }
             };
@@ -9863,6 +9942,7 @@ fn duplicate_diagnostics(
     declarations: &[Declaration],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    diagnostics.extend(property_setter_compatibility_diagnostics(module_path, declarations));
 
     for (owner_name, owner_kind, space_declarations) in declaration_spaces(declarations) {
         for declaration in &space_declarations {
@@ -10012,32 +10092,106 @@ fn is_permitted_external_overload_group(
 }
 
 fn invalid_duplicates(declarations: &[Declaration]) -> BTreeSet<&str> {
-    let mut by_name: BTreeMap<&str, Vec<DeclarationKind>> = BTreeMap::new();
+    let mut by_name: BTreeMap<&str, Vec<&Declaration>> = BTreeMap::new();
 
     for declaration in declarations {
-        by_name.entry(&declaration.name).or_default().push(declaration.kind);
+        by_name.entry(&declaration.name).or_default().push(declaration);
     }
 
     by_name
         .into_iter()
-        .filter_map(|(name, kinds)| is_invalid_duplicate_group(&kinds).then_some(name))
+        .filter_map(|(name, declarations)| {
+            is_invalid_duplicate_group(&declarations).then_some(name)
+        })
         .collect()
 }
 
-fn is_invalid_duplicate_group(kinds: &[DeclarationKind]) -> bool {
-    if kinds.len() <= 1 {
+fn is_invalid_duplicate_group(declarations: &[&Declaration]) -> bool {
+    if declarations.len() <= 1 {
         return false;
     }
 
-    let overload_count = kinds.iter().filter(|kind| **kind == DeclarationKind::Overload).count();
-    let function_count = kinds.iter().filter(|kind| **kind == DeclarationKind::Function).count();
+    let overload_count = declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+        .count();
+    let function_count = declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Function)
+        .count();
 
-    if overload_count >= 1 && function_count == 1 && overload_count + function_count == kinds.len()
+    if overload_count >= 1
+        && function_count == 1
+        && overload_count + function_count == declarations.len()
     {
         return false;
     }
 
+    let property_pair = declarations.len() == 2
+        && declarations.iter().all(|declaration| declaration.kind == DeclarationKind::Function)
+        && declarations.iter().any(|declaration| {
+            declaration.method_kind == Some(typepython_syntax::MethodKind::Property)
+        })
+        && declarations.iter().any(|declaration| {
+            declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
+        });
+    if property_pair {
+        return false;
+    }
+
     true
+}
+
+fn property_setter_compatibility_diagnostics(
+    module_path: &std::path::Path,
+    declarations: &[Declaration],
+) -> Vec<Diagnostic> {
+    let mut groups: BTreeMap<(Option<String>, String), Vec<&Declaration>> = BTreeMap::new();
+    for declaration in declarations {
+        groups
+            .entry((declaration.owner.as_ref().map(|owner| owner.name.clone()), declaration.name.clone()))
+            .or_default()
+            .push(declaration);
+    }
+
+    groups
+        .into_iter()
+        .filter_map(|((owner_name, member_name), decls)| {
+            let getter = decls.iter().find(|decl| {
+                decl.kind == DeclarationKind::Function
+                    && decl.method_kind == Some(typepython_syntax::MethodKind::Property)
+            })?;
+            let setter = decls.iter().find(|decl| {
+                decl.kind == DeclarationKind::Function
+                    && decl.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
+            })?;
+            let getter_type = normalize_type_text(getter.detail.split_once("->")?.1.trim());
+            let setter_params = direct_param_types(&setter.detail)?;
+            let setter_type = normalize_type_text(setter_params.get(1)?);
+            (getter_type != setter_type).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    match owner_name {
+                        Some(owner_name) => format!(
+                            "type `{}` in module `{}` declares property `{}` with getter type `{}` but setter expects `{}`",
+                            owner_name,
+                            module_path.display(),
+                            member_name,
+                            getter_type,
+                            setter_type,
+                        ),
+                        None => format!(
+                            "module `{}` declares property `{}` with getter type `{}` but setter expects `{}`",
+                            module_path.display(),
+                            member_name,
+                            getter_type,
+                            setter_type,
+                        ),
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 fn overload_shape_diagnostic(
@@ -30140,6 +30294,48 @@ mod tests {
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("property `name` on `Box`"));
         assert!(rendered.contains("is not writable"));
+    }
+
+    #[test]
+    fn check_accepts_property_setter_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_property_setter_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.name = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `int` where member `name` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_inherited_property_setter_assignment() {
+        let result = check_temp_typepython_source(
+            "class Base:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\nclass Box(Base):\n    pass\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_property_getter_setter_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: int) -> None:\n        pass\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("getter type `str` but setter expects `int`"));
     }
 
     #[test]
