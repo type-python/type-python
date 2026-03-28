@@ -2058,6 +2058,71 @@ fn typed_dict_literal_diagnostic(
     ))
 }
 
+fn direct_expr_metadata_for_known_type(value_type: &str) -> typepython_syntax::DirectExprMetadata {
+    typepython_syntax::DirectExprMetadata {
+        value_type: Some(String::from(value_type)),
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    }
+}
+
+fn resolve_typed_dict_augmented_assignment_result_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    site: &typepython_syntax::TypedDictMutationSite,
+    expected_type: &str,
+    value: &typepython_syntax::DirectExprMetadata,
+) -> Option<String> {
+    let left = direct_expr_metadata_for_known_type(expected_type);
+    resolve_direct_binop_type(
+        node,
+        nodes,
+        signature,
+        site.owner_name.as_deref(),
+        site.owner_type_name.as_deref(),
+        site.line,
+        Some(&left),
+        Some(value),
+        site.operator.as_deref().filter(|operator| !operator.is_empty()),
+    )
+    .or_else(|| {
+        resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            site.owner_name.as_deref(),
+            site.owner_type_name.as_deref(),
+            site.line,
+            value,
+        )
+    })
+}
+
 fn typed_dict_readonly_mutation_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2125,20 +2190,56 @@ fn typed_dict_readonly_mutation_diagnostics(
                 );
             }
 
-            if site.kind == typepython_syntax::TypedDictMutationKind::Assignment {
-                let value = site.value.as_ref()?;
-                let contextual = resolve_contextual_call_arg_type(
-                    node,
-                    nodes,
-                    site.line,
-                    value,
-                    Some(&field.value_type),
-                );
-                if let Some(mut result) = contextual {
-                    if let Some(diagnostic) = result.diagnostics.pop() {
-                        return Some(diagnostic);
+            match site.kind {
+                typepython_syntax::TypedDictMutationKind::Assignment => {
+                    let value = site.value.as_ref()?;
+                    let contextual = resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        site.line,
+                        value,
+                        Some(&field.value_type),
+                    );
+                    if let Some(mut result) = contextual {
+                        if let Some(diagnostic) = result.diagnostics.pop() {
+                            return Some(diagnostic);
+                        }
+                        let actual = result.actual_type;
+                        if !direct_type_matches(&field.value_type, &actual) {
+                            return Some(
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "TypedDict item `{}` on `{}` in module `{}` assigns `{}` where `{}` expects `{}`",
+                                        key,
+                                        target_shape.name,
+                                        node.module_path.display(),
+                                        actual,
+                                        key,
+                                        field.value_type
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                )),
+                            );
+                        }
+                        return None;
                     }
-                    let actual = result.actual_type;
+
+                    let actual = resolve_direct_expression_type_from_metadata(
+                        node,
+                        nodes,
+                        signature,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
                     if !direct_type_matches(&field.value_type, &actual) {
                         return Some(
                             Diagnostic::error(
@@ -2162,41 +2263,42 @@ fn typed_dict_readonly_mutation_diagnostics(
                             )),
                         );
                     }
-                    return None;
                 }
-
-                let actual = resolve_direct_expression_type_from_metadata(
-                    node,
-                    nodes,
-                    signature,
-                    site.owner_name.as_deref(),
-                    site.owner_type_name.as_deref(),
-                    site.line,
-                    value,
-                )?;
-                if !direct_type_matches(&field.value_type, &actual) {
-                    return Some(
-                        Diagnostic::error(
-                            "TPY4001",
-                            format!(
-                                "TypedDict item `{}` on `{}` in module `{}` assigns `{}` where `{}` expects `{}`",
-                                key,
-                                target_shape.name,
-                                node.module_path.display(),
-                                actual,
-                                key,
-                                field.value_type
-                            ),
-                        )
-                        .with_span(Span::new(
-                            node.module_path.display().to_string(),
-                            site.line,
-                            1,
-                            site.line,
-                            1,
-                        )),
-                    );
+                typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
+                    let value = site.value.as_ref()?;
+                    let actual = resolve_typed_dict_augmented_assignment_result_type(
+                        node,
+                        nodes,
+                        signature,
+                        &site,
+                        &field.value_type,
+                        value,
+                    )?;
+                    if !direct_type_matches(&field.value_type, &actual) {
+                        return Some(
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "augmented assignment on TypedDict item `{}` on `{}` in module `{}` produces `{}` where `{}` expects `{}`",
+                                    key,
+                                    target_shape.name,
+                                    node.module_path.display(),
+                                    actual,
+                                    key,
+                                    field.value_type
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            )),
+                        );
+                    }
                 }
+                typepython_syntax::TypedDictMutationKind::Delete => {}
             }
 
             None
@@ -11121,6 +11223,27 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
         assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_accepts_writable_typed_dict_item_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"name\"] += \"!\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_writable_typed_dict_item_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    age: int\n\ndef mutate(user: User) -> None:\n    user[\"age\"] += \"!\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("produces `str` where `age` expects `int`"));
     }
 
     #[test]

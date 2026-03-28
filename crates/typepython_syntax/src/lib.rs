@@ -549,6 +549,18 @@ pub struct TypedDictLiteralEntry {
     pub value: DirectExprMetadata,
 }
 
+fn direct_operator_text(operator: ruff_python_ast::Operator) -> String {
+    match operator {
+        ruff_python_ast::Operator::Add => String::from("+"),
+        ruff_python_ast::Operator::Sub => String::from("-"),
+        ruff_python_ast::Operator::Mult => String::from("*"),
+        ruff_python_ast::Operator::Div => String::from("/"),
+        ruff_python_ast::Operator::FloorDiv => String::from("//"),
+        ruff_python_ast::Operator::Mod => String::from("%"),
+        _ => String::new(),
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictLiteralSite {
     pub annotation: String,
@@ -577,6 +589,7 @@ pub enum TypedDictMutationKind {
 pub struct TypedDictMutationSite {
     pub kind: TypedDictMutationKind,
     pub key: Option<String>,
+    pub operator: Option<String>,
     pub key_value: DirectExprMetadata,
     pub target: DirectExprMetadata,
     pub value: Option<DirectExprMetadata>,
@@ -1861,6 +1874,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                     target,
                     Some(&assign.value),
                     TypedDictMutationKind::Assignment,
+                    None,
                     line,
                     owner_name,
                     owner_type_name,
@@ -1872,6 +1886,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
             &assign.target,
             Some(&assign.value),
             TypedDictMutationKind::AugmentedAssignment,
+            Some(direct_operator_text(assign.op)),
             line,
             owner_name,
             owner_type_name,
@@ -1887,6 +1902,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                     target,
                     None,
                     TypedDictMutationKind::Delete,
+                    None,
                     line,
                     owner_name,
                     owner_type_name,
@@ -1902,6 +1918,7 @@ fn extract_typed_dict_mutation_site(
     expr: &Expr,
     value: Option<&Expr>,
     kind: TypedDictMutationKind,
+    operator: Option<String>,
     line: usize,
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
@@ -1912,6 +1929,7 @@ fn extract_typed_dict_mutation_site(
     Some(TypedDictMutationSite {
         kind,
         key: extract_string_literal_value(source, &subscript.slice),
+        operator,
         key_value: extract_direct_expr_metadata(source, &subscript.slice),
         target: extract_direct_expr_metadata(source, &subscript.value),
         value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
@@ -6186,15 +6204,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_bool_right: None,
             value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
             value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
-            value_binop_operator: Some(match bin_op.op {
-                ruff_python_ast::Operator::Add => String::from("+"),
-                ruff_python_ast::Operator::Sub => String::from("-"),
-                ruff_python_ast::Operator::Mult => String::from("*"),
-                ruff_python_ast::Operator::Div => String::from("/"),
-                ruff_python_ast::Operator::FloorDiv => String::from("//"),
-                ruff_python_ast::Operator::Mod => String::from("%"),
-                _ => String::new(),
-            }),
+            value_binop_operator: Some(direct_operator_text(bin_op.op)),
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
