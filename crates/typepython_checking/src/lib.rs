@@ -1638,25 +1638,43 @@ fn annotated_assignment_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    node.assignments
-        .iter()
-        .filter_map(|assignment| {
-            let expected = normalized_assignment_annotation(assignment.annotation.as_deref()?)
-                .map(normalize_type_text)?;
-            if let Some(callable_result) = callable_assignment_result(node, nodes, assignment, &expected) {
-                return callable_result;
+    let mut diagnostics = Vec::new();
+
+    for assignment in &node.assignments {
+        let Some(annotation) = assignment.annotation.as_deref() else {
+            continue;
+        };
+        let Some(expected) = normalized_assignment_annotation(annotation)
+            .map(normalize_type_text)
+        else {
+            continue;
+        };
+
+        if let Some(callable_result) = callable_assignment_result(node, nodes, assignment, &expected) {
+            if let Some(diagnostic) = callable_result {
+                diagnostics.push(diagnostic);
             }
-            let signature = resolve_assignment_owner_signature(node, assignment);
-            let actual = resolve_assignment_site_type(node, nodes, signature, assignment)?;
-            (!direct_type_matches(&expected, &actual)).then(|| {
-                Diagnostic::error(
+            continue;
+        }
+
+        let assignment_metadata = direct_expr_metadata_from_assignment_site(assignment);
+        if let Some(result) = resolve_contextual_collection_literal_type(
+            node,
+            nodes,
+            assignment.line,
+            &assignment_metadata,
+            Some(&expected),
+        ) {
+            diagnostics.extend(result.diagnostics);
+            if !direct_type_matches(&expected, &result.actual_type) {
+                diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
                         (Some(owner_type_name), Some(owner_name)) => format!(
                             "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
                             owner_type_name,
                             node.module_path.display(),
-                            actual,
+                            result.actual_type,
                             assignment.name,
                             owner_name,
                             expected
@@ -1665,22 +1683,95 @@ fn annotated_assignment_type_diagnostics(
                             "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
                             owner_name,
                             node.module_path.display(),
-                            actual,
+                            result.actual_type,
                             assignment.name,
                             expected
                         ),
                         _ => format!(
                             "module `{}` assigns `{}` where `{}` expects `{}`",
                             node.module_path.display(),
-                            actual,
+                            result.actual_type,
                             assignment.name,
                             expected
                         ),
                     },
-                )
-            })
-        })
-        .collect()
+                ));
+            }
+            continue;
+        }
+
+        let signature = resolve_assignment_owner_signature(node, assignment);
+        let Some(actual) = resolve_assignment_site_type(node, nodes, signature, assignment) else {
+            continue;
+        };
+        if !direct_type_matches(&expected, &actual) {
+            diagnostics.push(Diagnostic::error(
+                "TPY4001",
+                match (&assignment.owner_type_name, &assignment.owner_name) {
+                    (Some(owner_type_name), Some(owner_name)) => format!(
+                        "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
+                        owner_type_name,
+                        node.module_path.display(),
+                        actual,
+                        assignment.name,
+                        owner_name,
+                        expected
+                    ),
+                    (None, Some(owner_name)) => format!(
+                        "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
+                        owner_name,
+                        node.module_path.display(),
+                        actual,
+                        assignment.name,
+                        expected
+                    ),
+                    _ => format!(
+                        "module `{}` assigns `{}` where `{}` expects `{}`",
+                        node.module_path.display(),
+                        actual,
+                        assignment.name,
+                        expected
+                    ),
+                },
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn direct_expr_metadata_from_assignment_site(
+    assignment: &typepython_binding::AssignmentSite,
+) -> typepython_syntax::DirectExprMetadata {
+    typepython_syntax::DirectExprMetadata {
+        value_type: assignment.value_type.clone(),
+        is_awaited: assignment.is_awaited,
+        value_callee: assignment.value_callee.clone(),
+        value_name: assignment.value_name.clone(),
+        value_member_owner_name: assignment.value_member_owner_name.clone(),
+        value_member_name: assignment.value_member_name.clone(),
+        value_member_through_instance: assignment.value_member_through_instance,
+        value_method_owner_name: assignment.value_method_owner_name.clone(),
+        value_method_name: assignment.value_method_name.clone(),
+        value_method_through_instance: assignment.value_method_through_instance,
+        value_subscript_target: assignment.value_subscript_target.clone(),
+        value_subscript_string_key: assignment.value_subscript_string_key.clone(),
+        value_subscript_index: assignment.value_subscript_index.clone(),
+        value_if_true: assignment.value_if_true.clone(),
+        value_if_false: assignment.value_if_false.clone(),
+        value_if_guard: assignment.value_if_guard.as_ref().map(site_to_guard),
+        value_bool_left: assignment.value_bool_left.clone(),
+        value_bool_right: assignment.value_bool_right.clone(),
+        value_binop_left: assignment.value_binop_left.clone(),
+        value_binop_right: assignment.value_binop_right.clone(),
+        value_binop_operator: assignment.value_binop_operator.clone(),
+        value_lambda: assignment.value_lambda.clone(),
+        value_list_comprehension: assignment.value_list_comprehension.clone(),
+        value_generator_comprehension: assignment.value_generator_comprehension.clone(),
+        value_list_elements: assignment.value_list_elements.clone(),
+        value_set_elements: assignment.value_set_elements.clone(),
+        value_dict_entries: assignment.value_dict_entries.clone(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -11028,6 +11119,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -11862,6 +11956,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -12612,6 +12709,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12867,6 +12967,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13103,6 +13206,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13639,6 +13745,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15140,6 +15249,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15220,6 +15332,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15321,6 +15436,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15420,6 +15538,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15521,6 +15642,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15661,6 +15785,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15741,6 +15868,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 1,
@@ -15871,6 +16001,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -15971,6 +16104,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -16004,6 +16140,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -16126,6 +16265,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -16159,6 +16301,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -16279,6 +16424,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -16312,6 +16460,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -16415,6 +16566,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -16448,6 +16602,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -16481,6 +16638,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -16611,6 +16771,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -16644,6 +16807,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -16783,6 +16949,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -16816,6 +16985,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -16849,6 +17021,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -16980,6 +17155,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -17430,6 +17608,40 @@ mod tests {
     fn check_reports_contextual_dict_literal_return_nested_typed_dict_missing_key() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef make() -> dict[str, User]:\n    return {\"owner\": {\"id\": 1}}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_empty_list_assignment() {
+        let result = check_temp_typepython_source("values: list[int] = []\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_contextual_empty_dict_assignment() {
+        let result = check_temp_typepython_source("values: dict[str, int] = {}\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_contextual_list_assignment_with_nested_lambda() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\nhandlers: list[Callable[[int], str]] = [lambda x: str(x)]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_dict_assignment_with_nested_typed_dict_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nowners: dict[str, User] = {\"owner\": {\"id\": 1}}\n",
         );
 
         let rendered = result.diagnostics.as_text();
@@ -17902,6 +18114,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18003,6 +18218,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18102,6 +18320,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18276,6 +18497,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18379,6 +18603,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18478,6 +18705,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18620,6 +18850,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18760,6 +18993,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -18904,6 +19140,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19044,6 +19283,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19128,6 +19370,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19295,6 +19540,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -19328,6 +19576,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -19361,6 +19612,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -19440,6 +19694,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19589,6 +19846,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19701,6 +19961,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19875,6 +20138,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -20591,6 +20857,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -22037,6 +22306,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -22136,6 +22408,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -24889,6 +25164,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -25029,6 +25307,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -25564,6 +25845,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -25658,6 +25942,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -28240,6 +28527,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -28273,6 +28563,9 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 4,
@@ -29188,6 +29481,9 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
