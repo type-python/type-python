@@ -3949,7 +3949,10 @@ fn resolve_subscript_type_from_target_type(
     let normalized_target = normalize_type_text(&target_type);
     let (head, args) = split_generic_type(&normalized_target)?;
     match head {
-        "list" | "Sequence" if !args.is_empty() => Some(args[0].clone()),
+        "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
+            if args.len() == 2 => Some(args[1].clone()),
+        "list" | "Sequence" | "typing.Sequence" | "collections.abc.Sequence"
+            if !args.is_empty() => Some(args[0].clone()),
         "tuple" if !args.is_empty() => {
             if args.len() == 2 && args[1] == "..." {
                 return Some(args[0].clone());
@@ -3959,8 +3962,25 @@ fn resolve_subscript_type_from_target_type(
                 .and_then(|index| args.get(index).cloned())
                 .or_else(|| Some(join_type_candidates(args)))
         }
-        _ => None,
+        _ => resolve_nominal_getitem_return_type(node, nodes, &normalized_target),
     }
+}
+
+fn resolve_nominal_getitem_return_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type_name: &str,
+) -> Option<String> {
+    let nominal_owner_name = split_generic_type(owner_type_name)
+        .map(|(head, _)| head.to_owned())
+        .unwrap_or_else(|| owner_type_name.to_owned());
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
+    let getitem = find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")?;
+    let return_text = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(getitem.detail.split_once("->")?.1.trim(), Some(owner_type_name)),
+    );
+    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
 }
 
 fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
@@ -29411,6 +29431,147 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_dict_subscript_read_type() {
+        let result = check_temp_typepython_source(
+            "def build(values: dict[str, int]) -> int:\n    return values[\"x\"]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_mapping_subscript_read_type() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(values:Mapping[str, int])->int"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: Some(Box::new(typepython_syntax::DirectExprMetadata {
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: Some(String::from("values")),
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                    })),
+                    value_subscript_string_key: Some(String::from("x")),
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_nominal_getitem_subscript_read_type() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __getitem__(self, key: str) -> int:\n        return 1\n\ndef build(cache: Cache) -> int:\n    return cache[\"x\"]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_inherited_getitem_subscript_read_type() {
+        let result = check_temp_typepython_source(
+            "class Base:\n    def __getitem__(self, key: str) -> int:\n        return 1\n\nclass Cache(Base):\n    pass\n\ndef build(cache: Cache) -> int:\n    return cache[\"x\"]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_subscript_read_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "def build(values: dict[str, int]) -> str:\n    return values[\"x\"]\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("returns `int` where `build` expects `str`"));
     }
 
     #[test]
