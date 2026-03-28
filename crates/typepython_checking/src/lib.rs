@@ -2084,38 +2084,78 @@ fn typed_dict_readonly_mutation_diagnostics(
             let key = site.key.as_deref()?;
             let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type)?;
             let field = target_shape.fields.get(key)?;
-            field.readonly.then(|| {
-                Diagnostic::error(
-                    "TPY4016",
-                    match site.kind {
-                        typepython_syntax::TypedDictMutationKind::Assignment => format!(
-                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be assigned",
-                            key,
-                            target_shape.name,
-                            node.module_path.display()
-                        ),
-                        typepython_syntax::TypedDictMutationKind::AugmentedAssignment => format!(
-                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be updated with augmented assignment",
-                            key,
-                            target_shape.name,
-                            node.module_path.display()
-                        ),
-                        typepython_syntax::TypedDictMutationKind::Delete => format!(
-                            "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be deleted",
-                            key,
-                            target_shape.name,
-                            node.module_path.display()
-                        ),
-                    },
-                )
-                .with_span(Span::new(
-                    node.module_path.display().to_string(),
+            if field.readonly {
+                return Some(
+                    Diagnostic::error(
+                        "TPY4016",
+                        match site.kind {
+                            typepython_syntax::TypedDictMutationKind::Assignment => format!(
+                                "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be assigned",
+                                key,
+                                target_shape.name,
+                                node.module_path.display()
+                            ),
+                            typepython_syntax::TypedDictMutationKind::AugmentedAssignment => format!(
+                                "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be updated with augmented assignment",
+                                key,
+                                target_shape.name,
+                                node.module_path.display()
+                            ),
+                            typepython_syntax::TypedDictMutationKind::Delete => format!(
+                                "TypedDict item `{}` on `{}` in module `{}` is read-only and cannot be deleted",
+                                key,
+                                target_shape.name,
+                                node.module_path.display()
+                            ),
+                        },
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        site.line,
+                        1,
+                        site.line,
+                        1,
+                    )),
+                );
+            }
+
+            if site.kind == typepython_syntax::TypedDictMutationKind::Assignment {
+                let value = site.value.as_ref()?;
+                let actual = resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    site.owner_name.as_deref(),
+                    site.owner_type_name.as_deref(),
                     site.line,
-                    1,
-                    site.line,
-                    1,
-                ))
-            })
+                    value,
+                )?;
+                if !direct_type_matches(&field.value_type, &actual) {
+                    return Some(
+                        Diagnostic::error(
+                            "TPY4001",
+                            format!(
+                                "TypedDict item `{}` on `{}` in module `{}` assigns `{}` where `{}` expects `{}`",
+                                key,
+                                target_shape.name,
+                                node.module_path.display(),
+                                actual,
+                                key,
+                                field.value_type
+                            ),
+                        )
+                        .with_span(Span::new(
+                            node.module_path.display().to_string(),
+                            site.line,
+                            1,
+                            site.line,
+                            1,
+                        )),
+                    );
+                }
+            }
+
+            None
         })
         .collect()
 }
@@ -10410,6 +10450,27 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4016"));
         assert!(rendered.contains("cannot be assigned"));
+    }
+
+    #[test]
+    fn check_accepts_writable_typed_dict_item_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_writable_typed_dict_item_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `int` where `name` expects `str`"));
     }
 
     #[test]

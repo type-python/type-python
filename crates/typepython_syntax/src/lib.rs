@@ -577,6 +577,7 @@ pub struct TypedDictMutationSite {
     pub kind: TypedDictMutationKind,
     pub key: Option<String>,
     pub target: DirectExprMetadata,
+    pub value: Option<DirectExprMetadata>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub line: usize,
@@ -1850,6 +1851,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                 extract_typed_dict_mutation_site(
                     source,
                     target,
+                    Some(&assign.value),
                     TypedDictMutationKind::Assignment,
                     line,
                     owner_name,
@@ -1860,6 +1862,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
         Stmt::AugAssign(assign) => extract_typed_dict_mutation_site(
             source,
             &assign.target,
+            Some(&assign.value),
             TypedDictMutationKind::AugmentedAssignment,
             line,
             owner_name,
@@ -1874,6 +1877,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                 extract_typed_dict_mutation_site(
                     source,
                     target,
+                    None,
                     TypedDictMutationKind::Delete,
                     line,
                     owner_name,
@@ -1888,6 +1892,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
 fn extract_typed_dict_mutation_site(
     source: &str,
     expr: &Expr,
+    value: Option<&Expr>,
     kind: TypedDictMutationKind,
     line: usize,
     owner_name: Option<&str>,
@@ -1900,6 +1905,7 @@ fn extract_typed_dict_mutation_site(
         kind,
         key: extract_string_literal_value(source, &subscript.slice),
         target: extract_direct_expr_metadata(source, &subscript.value),
+        value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         line,
