@@ -2124,6 +2124,44 @@ fn typed_dict_readonly_mutation_diagnostics(
 
             if site.kind == typepython_syntax::TypedDictMutationKind::Assignment {
                 let value = site.value.as_ref()?;
+                let contextual = resolve_contextual_call_arg_type(
+                    node,
+                    nodes,
+                    site.line,
+                    value,
+                    Some(&field.value_type),
+                );
+                if let Some(mut result) = contextual {
+                    if let Some(diagnostic) = result.diagnostics.pop() {
+                        return Some(diagnostic);
+                    }
+                    let actual = result.actual_type;
+                    if !direct_type_matches(&field.value_type, &actual) {
+                        return Some(
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "TypedDict item `{}` on `{}` in module `{}` assigns `{}` where `{}` expects `{}`",
+                                    key,
+                                    target_shape.name,
+                                    node.module_path.display(),
+                                    actual,
+                                    key,
+                                    field.value_type
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            )),
+                        );
+                    }
+                    return None;
+                }
+
                 let actual = resolve_direct_expression_type_from_metadata(
                     node,
                     nodes,
@@ -10647,6 +10685,27 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `int` where `name` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_writable_typed_dict_item_assignment_lambda() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable, TypedDict\n\nclass User(TypedDict):\n    formatter: Callable[[int], str]\n\ndef mutate(user: User) -> None:\n    user[\"formatter\"] = lambda x: str(x)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_contextual_writable_typed_dict_item_assignment_nested_typed_dict_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass Child(TypedDict):\n    name: str\n\nclass User(TypedDict):\n    child: Child\n\ndef mutate(user: User) -> None:\n    user[\"child\"] = {}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
     }
 
     #[test]
