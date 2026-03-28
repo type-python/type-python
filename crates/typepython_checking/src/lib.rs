@@ -258,7 +258,7 @@ fn ambiguous_overload_call_diagnostics(
                     overload_is_applicable_with_context(node, nodes, call, declaration)
                 })
                 .collect::<Vec<_>>();
-            if applicable.len() < 2 {
+            if applicable.len() < 2 || select_most_specific_overload(node, nodes, &applicable).is_some() {
                 return None;
             }
 
@@ -314,6 +314,80 @@ fn resolve_direct_overloads<'a>(
                 && declaration.kind == DeclarationKind::Overload
         })
         .collect()
+}
+
+fn overload_is_more_specific(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    candidate: &Declaration,
+    baseline: &Declaration,
+) -> bool {
+    let Some(candidate_params) = direct_signature_params(&candidate.detail) else {
+        return false;
+    };
+    let Some(baseline_params) = direct_signature_params(&baseline.detail) else {
+        return false;
+    };
+    if candidate_params.len() != baseline_params.len() {
+        return false;
+    }
+
+    let mut strictly_more_specific = false;
+    for (candidate_param, baseline_param) in candidate_params.iter().zip(baseline_params.iter()) {
+        if candidate_param.name != baseline_param.name
+            || candidate_param.has_default != baseline_param.has_default
+            || candidate_param.positional_only != baseline_param.positional_only
+            || candidate_param.keyword_only != baseline_param.keyword_only
+            || candidate_param.variadic != baseline_param.variadic
+            || candidate_param.keyword_variadic != baseline_param.keyword_variadic
+        {
+            return false;
+        }
+        if candidate_param.annotation.is_empty() || baseline_param.annotation.is_empty() {
+            if candidate_param.annotation != baseline_param.annotation {
+                return false;
+            }
+            continue;
+        }
+        if !direct_type_is_assignable(
+            node,
+            nodes,
+            &baseline_param.annotation,
+            &candidate_param.annotation,
+        ) {
+            return false;
+        }
+        if normalize_type_text(&candidate_param.annotation)
+            != normalize_type_text(&baseline_param.annotation)
+        {
+            strictly_more_specific = true;
+        }
+    }
+
+    strictly_more_specific
+}
+
+fn select_most_specific_overload<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    applicable: &[&'a Declaration],
+) -> Option<&'a Declaration> {
+    if applicable.len() == 1 {
+        return applicable.first().copied();
+    }
+
+    let best = applicable
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            applicable.iter().copied().all(|other| {
+                std::ptr::eq::<Declaration>(*candidate, other)
+                    || overload_is_more_specific(node, nodes, candidate, other)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if best.len() == 1 { Some(best[0]) } else { None }
 }
 
 #[cfg(test)]
@@ -7419,6 +7493,24 @@ fn resolve_direct_callable_return_type<'a>(
     resolve_builtin_return_type(callee).map(str::to_owned)
 }
 
+fn resolve_instantiated_callable_return_type_from_declaration(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+    call: &typepython_binding::CallSite,
+) -> Option<String> {
+    if declaration.type_params.is_empty() {
+        return Some(declaration.detail.split_once("->")?.1.trim().to_owned());
+    }
+    let signature = direct_signature_sites_from_detail(&declaration.detail);
+    let substitutions =
+        infer_generic_type_param_substitutions(node, nodes, declaration, &signature, call)?;
+    Some(substitute_generic_type_params(
+        declaration.detail.split_once("->")?.1.trim(),
+        &substitutions,
+    ))
+}
+
 fn resolve_direct_callable_return_type_for_line(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -7430,11 +7522,21 @@ fn resolve_direct_callable_return_type_for_line(
         .iter()
         .find(|call| call.callee == callee && call.line == line)
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
+    let overloads = resolve_direct_overloads(node, nodes, callee);
+    if !overloads.is_empty() {
+        let applicable = overloads
+            .into_iter()
+            .filter(|declaration| {
+                overload_is_applicable_with_context(node, nodes, call, declaration)
+            })
+            .collect::<Vec<_>>();
+        let selected = select_most_specific_overload(node, nodes, &applicable)?;
+        return resolve_instantiated_callable_return_type_from_declaration(
+            node, nodes, selected, call,
+        );
+    }
     let function = resolve_direct_function(node, nodes, callee)?;
-    let signature = direct_signature_sites_from_detail(&function.detail);
-    let substitutions =
-        infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
-    Some(substitute_generic_type_params(function.detail.split_once("->")?.1.trim(), &substitutions))
+    resolve_instantiated_callable_return_type_from_declaration(node, nodes, function, call)
 }
 
 fn resolve_direct_function<'a>(
@@ -10386,6 +10488,344 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4012"));
         assert!(rendered.contains("ambiguous across 2 overloads"));
+    }
+
+    #[test]
+    fn check_accepts_direct_overloaded_call_assignment_type_match() {
+        let result = check_temp_typepython_source(
+            "overload def parse(value: int) -> str: ...\noverload def parse(value: str) -> int: ...\ndef parse(value):\n    return value\n\nresult: str = parse(1)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_direct_overloaded_call_return_type_match() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(value:int)->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(value:str)->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(value:int)->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("()->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("parse"),
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
+                    line: 1,
+                }],
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("parse")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
+                    line: 1,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_imported_overloaded_call_assignment_type_match() {
+        let result = check(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("/tmp/pkg/util.pyi"),
+                    module_key: String::from("pkg.util"),
+                    module_kind: SourceKind::Stub,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("parse"),
+                            kind: DeclarationKind::Overload,
+                            detail: String::from("(value:int)->str"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("parse"),
+                            kind: DeclarationKind::Overload,
+                            detail: String::from("(value:str)->int"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        },
+                    ],
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("/tmp/app.tpy"),
+                    module_key: String::from("app"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![
+                        Declaration {
+                            name: String::from("parse"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("pkg.util.parse"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        },
+                        Declaration {
+                            name: String::from("result"),
+                            kind: DeclarationKind::Value,
+                            detail: String::from("str"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        },
+                    ],
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: vec![typepython_binding::AssignmentSite {
+                        name: String::from("result"),
+                        destructuring_target_names: None,
+                        destructuring_index: None,
+                        annotation: Some(String::from("str")),
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: Some(String::from("parse")),
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        owner_name: None,
+                        owner_type_name: None,
+                        line: 1,
+                    }],
+                    summary_fingerprint: 1,
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("parse"),
+                        arg_count: 1,
+                        arg_types: vec![String::from("int")],
+                        arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
+                        keyword_names: Vec::new(),
+                        keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
+                        line: 1,
+                    }],
+                    method_calls: Vec::new(),
+                },
+            ],
+        });
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_non_applicable_overload_as_call_incompatibility() {
+        let result = check_temp_typepython_source(
+            "overload def parse(value: int) -> str: ...\noverload def parse(value: str) -> int: ...\ndef parse(value: int) -> str:\n    return \"x\"\n\nparse(None)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(!rendered.contains("TPY4012"));
     }
 
     #[test]
