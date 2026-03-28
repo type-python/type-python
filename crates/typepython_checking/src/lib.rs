@@ -4220,15 +4220,44 @@ fn resolve_assignment_site_type(
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<String> {
     if let Some(comprehension) = assignment.value_list_comprehension.as_deref() {
-        return resolve_list_comprehension_type(
-            node,
-            nodes,
-            signature,
-            assignment.owner_name.as_deref(),
-            assignment.owner_type_name.as_deref(),
-            assignment.line,
-            comprehension,
-        );
+        return match comprehension.kind {
+            typepython_syntax::ComprehensionKind::List => resolve_list_comprehension_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                comprehension,
+            ),
+            typepython_syntax::ComprehensionKind::Set => resolve_set_comprehension_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                comprehension,
+            ),
+            typepython_syntax::ComprehensionKind::Dict => resolve_dict_comprehension_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                comprehension,
+            ),
+            typepython_syntax::ComprehensionKind::Generator => resolve_generator_comprehension_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                comprehension,
+            ),
+        };
     }
     if let Some(comprehension) = assignment.value_generator_comprehension.as_deref() {
         return resolve_generator_comprehension_type(
@@ -4273,7 +4302,7 @@ fn resolve_assignment_site_type(
     )
 }
 
-fn resolve_list_comprehension_type(
+fn resolve_comprehension_local_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -4281,7 +4310,7 @@ fn resolve_list_comprehension_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<String> {
+) -> Option<BTreeMap<String, String>> {
     let mut local_bindings = BTreeMap::new();
     for clause in &comprehension.clauses {
         let iter_type = resolve_direct_expression_type_from_metadata(
@@ -4311,6 +4340,27 @@ fn resolve_list_comprehension_type(
             }
         }
     }
+    Some(local_bindings)
+}
+
+fn resolve_list_comprehension_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    comprehension: &typepython_syntax::ComprehensionMetadata,
+) -> Option<String> {
+    let local_bindings = resolve_comprehension_local_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension,
+    )?;
 
     let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
         node,
@@ -4325,6 +4375,79 @@ fn resolve_list_comprehension_type(
     Some(format!("list[{element_type}]"))
 }
 
+fn resolve_set_comprehension_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    comprehension: &typepython_syntax::ComprehensionMetadata,
+) -> Option<String> {
+    let local_bindings = resolve_comprehension_local_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension,
+    )?;
+
+    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension.element.as_ref(),
+        &local_bindings,
+    )?;
+    Some(format!("set[{element_type}]"))
+}
+
+fn resolve_dict_comprehension_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    comprehension: &typepython_syntax::ComprehensionMetadata,
+) -> Option<String> {
+    let local_bindings = resolve_comprehension_local_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension,
+    )?;
+    let key_type = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension.key.as_deref()?,
+        &local_bindings,
+    )?;
+    let value_type = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension.element.as_ref(),
+        &local_bindings,
+    )?;
+    Some(format!("dict[{key_type}, {value_type}]"))
+}
+
 fn resolve_generator_comprehension_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -4334,35 +4457,15 @@ fn resolve_generator_comprehension_type(
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
 ) -> Option<String> {
-    let mut local_bindings = BTreeMap::new();
-    for clause in &comprehension.clauses {
-        let iter_type = resolve_direct_expression_type_from_metadata(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            clause.iter.as_ref(),
-        )?;
-        let element_type = unwrap_for_iterable_type(&iter_type)?;
-        bind_list_comprehension_targets(&mut local_bindings, &clause.target_names, &element_type);
-        for guard in &clause.filters {
-            for (name, value_type) in local_bindings.clone() {
-                local_bindings.insert(
-                    name.clone(),
-                    apply_guard_condition(
-                        node,
-                        nodes,
-                        &value_type,
-                        &name,
-                        &guard_to_site(guard),
-                        true,
-                    ),
-                );
-            }
-        }
-    }
+    let local_bindings = resolve_comprehension_local_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension,
+    )?;
 
     let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
         node,
@@ -15030,6 +15133,22 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_set_comprehension_assignment_type_match() {
+        let result = check_temp_typepython_source("values: set[int] = {x + 1 for x in [1, 2]}\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_dict_comprehension_assignment_type_match() {
+        let result = check_temp_typepython_source(
+            "values: dict[int, int] = {x: x + 1 for x in [1, 2]}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_generator_comprehension_assignment_type_mismatch() {
         let result = check_temp_typepython_source(
             "values: Generator[str, None, None] = (x + 1 for x in [1, 2])\n",
@@ -15038,6 +15157,26 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `Generator[int, None, None]` where `values` expects `Generator[str, None, None]`"));
+    }
+
+    #[test]
+    fn check_reports_set_comprehension_assignment_type_mismatch() {
+        let result = check_temp_typepython_source("values: set[str] = {x + 1 for x in [1, 2]}\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `set[int]` where `values` expects `set[str]`"));
+    }
+
+    #[test]
+    fn check_reports_dict_comprehension_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "values: dict[str, int] = {x: x + 1 for x in [1, 2]}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `dict[int, int]` where `values` expects `dict[str, int]`"));
     }
 
     #[test]

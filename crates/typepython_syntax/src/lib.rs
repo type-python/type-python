@@ -480,8 +480,18 @@ pub struct ComprehensionClauseMetadata {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ComprehensionMetadata {
+    pub kind: ComprehensionKind,
     pub clauses: Vec<ComprehensionClauseMetadata>,
+    pub key: Option<Box<DirectExprMetadata>>,
     pub element: Box<DirectExprMetadata>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum ComprehensionKind {
+    List,
+    Set,
+    Dict,
+    Generator,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -5609,8 +5619,76 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_operator: None,
             value_lambda: None,
             value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::List,
                 clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
                 element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
+            value_generator_comprehension: None,
+        };
+    }
+
+    if let Expr::SetComp(comp) = expr {
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Set,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
+                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
+            value_generator_comprehension: None,
+        };
+    }
+
+    if let Expr::DictComp(comp) = expr {
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Dict,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: Some(Box::new(extract_direct_expr_metadata(source, &comp.key))),
+                element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
             })),
             value_generator_comprehension: None,
         };
@@ -5641,7 +5719,9 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Generator,
                 clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
                 element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
             })),
         };
@@ -6754,7 +6834,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
-        ComprehensionClauseMetadata, ComprehensionMetadata, DirectExprMetadata,
+        ComprehensionClauseMetadata, ComprehensionKind, ComprehensionMetadata, DirectExprMetadata,
         ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
         IfStatement, ImportBinding, ImportStatement, InvalidationStatement, LambdaMetadata,
         MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
@@ -8465,6 +8545,7 @@ mod tests {
                 value_binop_operator: None,
                 value_lambda: None,
                 value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                    kind: ComprehensionKind::List,
                     clauses: vec![ComprehensionClauseMetadata {
                         target_name: String::from("x"),
                         target_names: vec![String::from("x")],
@@ -8498,6 +8579,7 @@ mod tests {
                             negated: true,
                         }],
                     }],
+                    key: None,
                     element: Box::new(DirectExprMetadata {
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -8620,6 +8702,7 @@ mod tests {
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
+                    kind: ComprehensionKind::Generator,
                     clauses: vec![ComprehensionClauseMetadata {
                         target_name: String::from("x"),
                         target_names: vec![String::from("x")],
@@ -8653,6 +8736,7 @@ mod tests {
                             negated: true,
                         }],
                     }],
+                    key: None,
                     element: Box::new(DirectExprMetadata {
                         value_type: Some(String::new()),
                         is_awaited: false,
@@ -8734,6 +8818,48 @@ mod tests {
                 line: 1,
             })]
         );
+    }
+
+    #[test]
+    fn parse_retains_set_comprehension_metadata_in_assignment() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("setcomp.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("values = {x + 1 for x in [1, 2]}\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let SyntaxStatement::Value(statement) = &tree.statements[0] else {
+            panic!("expected value statement");
+        };
+        let comprehension =
+            statement.value_list_comprehension.as_deref().expect("set comprehension");
+        assert_eq!(comprehension.kind, ComprehensionKind::Set);
+        assert!(comprehension.key.is_none());
+        assert_eq!(comprehension.clauses.len(), 1);
+        assert_eq!(comprehension.clauses[0].target_names, vec![String::from("x")]);
+    }
+
+    #[test]
+    fn parse_retains_dict_comprehension_metadata_in_assignment() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("dictcomp.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("values = {x: x + 1 for x in [1, 2]}\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let SyntaxStatement::Value(statement) = &tree.statements[0] else {
+            panic!("expected value statement");
+        };
+        let comprehension =
+            statement.value_list_comprehension.as_deref().expect("dict comprehension");
+        assert_eq!(comprehension.kind, ComprehensionKind::Dict);
+        assert!(comprehension.key.is_some());
+        assert_eq!(comprehension.clauses.len(), 1);
+        assert_eq!(comprehension.clauses[0].target_names, vec![String::from("x")]);
     }
 
     #[test]
