@@ -4088,6 +4088,17 @@ fn resolve_assignment_site_type(
             comprehension,
         );
     }
+    if let Some(comprehension) = assignment.value_generator_comprehension.as_deref() {
+        return resolve_generator_comprehension_type(
+            node,
+            nodes,
+            signature,
+            assignment.owner_name.as_deref(),
+            assignment.owner_type_name.as_deref(),
+            assignment.line,
+            comprehension,
+        );
+    }
 
     resolve_direct_expression_type(
         node,
@@ -4170,6 +4181,58 @@ fn resolve_list_comprehension_type(
         &local_bindings,
     )?;
     Some(format!("list[{element_type}]"))
+}
+
+fn resolve_generator_comprehension_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    comprehension: &typepython_syntax::ComprehensionMetadata,
+) -> Option<String> {
+    let mut local_bindings = BTreeMap::new();
+    for clause in &comprehension.clauses {
+        let iter_type = resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            clause.iter.as_ref(),
+        )?;
+        let element_type = unwrap_for_iterable_type(&iter_type)?;
+        bind_list_comprehension_targets(&mut local_bindings, &clause.target_names, &element_type);
+        for guard in &clause.filters {
+            for (name, value_type) in local_bindings.clone() {
+                local_bindings.insert(
+                    name.clone(),
+                    apply_guard_condition(
+                        node,
+                        nodes,
+                        &value_type,
+                        &name,
+                        &guard_to_site(guard),
+                        true,
+                    ),
+                );
+            }
+        }
+    }
+
+    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        comprehension.element.as_ref(),
+        &local_bindings,
+    )?;
+    Some(format!("Generator[{element_type}, None, None]"))
 }
 
 fn resolve_direct_expression_type_from_metadata_with_bindings(
@@ -9692,6 +9755,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -10438,6 +10502,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -10689,6 +10754,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -10921,6 +10987,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -11453,6 +11520,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12885,6 +12953,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12961,6 +13030,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13058,6 +13128,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13153,6 +13224,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13250,6 +13322,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13386,6 +13459,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13462,6 +13536,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 1,
@@ -13583,6 +13658,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -13679,6 +13755,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -13708,6 +13785,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -13826,6 +13904,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -13855,6 +13934,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -13971,6 +14051,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -14000,6 +14081,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -14099,6 +14181,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -14128,6 +14211,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -14157,6 +14241,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -14278,6 +14363,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 1,
@@ -14307,6 +14393,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 2,
@@ -14442,6 +14529,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -14471,6 +14559,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -14500,6 +14589,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -14622,6 +14712,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -14654,6 +14745,26 @@ mod tests {
         let result = check_temp_typepython_source("values: list[int] = [x + 1 for x in [1, 2]]\n");
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_generator_comprehension_assignment_type_match() {
+        let result = check_temp_typepython_source(
+            "values: Generator[int, None, None] = (x + 1 for x in [1, 2])\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_generator_comprehension_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "values: Generator[str, None, None] = (x + 1 for x in [1, 2])\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `Generator[int, None, None]` where `values` expects `Generator[str, None, None]`"));
     }
 
     #[test]
@@ -15103,6 +15214,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15200,6 +15312,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15295,6 +15408,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15460,6 +15574,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15559,6 +15674,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15654,6 +15770,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15792,6 +15909,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -15928,6 +16046,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16068,6 +16187,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16204,6 +16324,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16284,6 +16405,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16442,6 +16564,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -16471,6 +16594,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 2,
@@ -16500,6 +16624,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 3,
@@ -16575,6 +16700,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16715,6 +16841,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16823,6 +16950,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -16993,6 +17121,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: None,
                         owner_type_name: None,
                         line: 1,
@@ -17705,6 +17834,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19147,6 +19277,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -19242,6 +19373,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -21870,6 +22002,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -22006,6 +22139,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -22522,6 +22656,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -22612,6 +22747,7 @@ mod tests {
                     value_binop_operator: None,
                     value_lambda: None,
                     value_list_comprehension: None,
+                    value_generator_comprehension: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -25037,6 +25173,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 3,
@@ -25066,6 +25203,7 @@ mod tests {
                         value_binop_operator: None,
                         value_lambda: None,
                         value_list_comprehension: None,
+                        value_generator_comprehension: None,
                         owner_name: Some(String::from("build")),
                         owner_type_name: None,
                         line: 4,
