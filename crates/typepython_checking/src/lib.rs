@@ -366,7 +366,7 @@ fn call_signature_params_are_applicable(
     let expected_keyword_arg_types =
         expected_keyword_arg_types_from_direct_signature(params, &call.keyword_names);
     if call.arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_typed_dict_literal_type(
+        resolve_contextual_call_arg_type(
             node,
             nodes,
             call.line,
@@ -378,7 +378,7 @@ fn call_signature_params_are_applicable(
         return false;
     }
     if call.keyword_arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_typed_dict_literal_type(
+        resolve_contextual_call_arg_type(
             node,
             nodes,
             call.line,
@@ -1133,6 +1133,8 @@ fn direct_expr_metadata_from_return_site(
         value_lambda: return_site.value_lambda.clone(),
         value_list_comprehension: None,
         value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
         value_dict_entries: return_site.value_dict_entries.clone(),
     }
 }
@@ -2251,6 +2253,11 @@ struct ContextualTypedDictLiteralResult {
     diagnostics: Vec<Diagnostic>,
 }
 
+struct ContextualCallArgResult {
+    actual_type: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
 fn resolve_contextual_lambda_callable_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2294,6 +2301,193 @@ fn resolve_contextual_typed_dict_literal_type(
         None,
     );
     Some(ContextualTypedDictLiteralResult { actual_type, diagnostics })
+}
+
+fn resolve_contextual_collection_literal_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgResult> {
+    let expected = normalize_type_text(expected?);
+    let (head, args) = split_generic_type(&expected)?;
+    match head {
+        "list" if args.len() == 1 => {
+            let elements = metadata.value_list_elements.as_ref()?;
+            let diagnostics = elements
+                .iter()
+                .flat_map(|element| {
+                    resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
+                        .into_iter()
+                        .flat_map(|result| result.diagnostics)
+                })
+                .collect::<Vec<_>>();
+            let actual_element_types = if elements.is_empty() {
+                vec![args[0].clone()]
+            } else {
+                elements
+                    .iter()
+                    .map(|element| {
+                        resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
+                            .map(|result| result.actual_type)
+                            .or_else(|| {
+                                resolve_direct_expression_type_from_metadata(
+                                    node, nodes, None, None, None, current_line, element,
+                                )
+                            })
+                            .unwrap_or_else(|| String::from("Any"))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            Some(ContextualCallArgResult {
+                actual_type: format!("list[{}]", join_type_candidates(actual_element_types)),
+                diagnostics,
+            })
+        }
+        "set" if args.len() == 1 => {
+            let elements = metadata.value_set_elements.as_ref()?;
+            let diagnostics = elements
+                .iter()
+                .flat_map(|element| {
+                    resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
+                        .into_iter()
+                        .flat_map(|result| result.diagnostics)
+                })
+                .collect::<Vec<_>>();
+            let actual_element_types = if elements.is_empty() {
+                vec![args[0].clone()]
+            } else {
+                elements
+                    .iter()
+                    .map(|element| {
+                        resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
+                            .map(|result| result.actual_type)
+                            .or_else(|| {
+                                resolve_direct_expression_type_from_metadata(
+                                    node, nodes, None, None, None, current_line, element,
+                                )
+                            })
+                            .unwrap_or_else(|| String::from("Any"))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            Some(ContextualCallArgResult {
+                actual_type: format!("set[{}]", join_type_candidates(actual_element_types)),
+                diagnostics,
+            })
+        }
+        "dict" if args.len() == 2 => {
+            let entries = metadata.value_dict_entries.as_ref()?;
+            if entries.iter().any(|entry| entry.is_expansion) {
+                return None;
+            }
+            let diagnostics = entries
+                .iter()
+                .flat_map(|entry| {
+                    let key_diagnostics = entry
+                        .key_value
+                        .as_deref()
+                        .and_then(|key| {
+                            resolve_contextual_call_arg_type(node, nodes, current_line, key, Some(&args[0]))
+                        })
+                        .into_iter()
+                        .flat_map(|result| result.diagnostics);
+                    let value_diagnostics = resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        current_line,
+                        &entry.value,
+                        Some(&args[1]),
+                    )
+                    .into_iter()
+                    .flat_map(|result| result.diagnostics);
+                    key_diagnostics.chain(value_diagnostics)
+                })
+                .collect::<Vec<_>>();
+            let actual_key_types = if entries.is_empty() {
+                vec![args[0].clone()]
+            } else {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        entry.key_value
+                            .as_deref()
+                            .and_then(|key| {
+                                resolve_contextual_call_arg_type(node, nodes, current_line, key, Some(&args[0]))
+                            })
+                            .map(|result| result.actual_type)
+                            .or_else(|| {
+                                entry.key_value.as_deref().and_then(|key| {
+                                    resolve_direct_expression_type_from_metadata(
+                                        node, nodes, None, None, None, current_line, key,
+                                    )
+                                })
+                            })
+                            .unwrap_or_else(|| String::from("Any"))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let actual_value_types = if entries.is_empty() {
+                vec![args[1].clone()]
+            } else {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        resolve_contextual_call_arg_type(
+                            node,
+                            nodes,
+                            current_line,
+                            &entry.value,
+                            Some(&args[1]),
+                        )
+                        .map(|result| result.actual_type)
+                        .or_else(|| {
+                            resolve_direct_expression_type_from_metadata(
+                                node, nodes, None, None, None, current_line, &entry.value,
+                            )
+                        })
+                        .unwrap_or_else(|| String::from("Any"))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            Some(ContextualCallArgResult {
+                actual_type: format!(
+                    "dict[{}, {}]",
+                    join_type_candidates(actual_key_types),
+                    join_type_candidates(actual_value_types)
+                ),
+                diagnostics,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn resolve_contextual_call_arg_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgResult> {
+    if let Some(actual_type) =
+        resolve_contextual_lambda_callable_type(node, nodes, current_line, metadata, expected)
+    {
+        return Some(ContextualCallArgResult {
+            actual_type,
+            diagnostics: Vec::new(),
+        });
+    }
+    if let Some(result) =
+        resolve_contextual_typed_dict_literal_type(node, nodes, current_line, metadata, expected)
+    {
+        return Some(ContextualCallArgResult {
+            actual_type: result.actual_type,
+            diagnostics: result.diagnostics,
+        });
+    }
+    resolve_contextual_collection_literal_type(node, nodes, current_line, metadata, expected)
 }
 
 fn expected_positional_arg_types_from_direct_signature(
@@ -6051,7 +6245,7 @@ fn direct_source_function_type_diagnostics(
         .iter()
         .enumerate()
         .flat_map(|(index, metadata)| {
-            resolve_contextual_typed_dict_literal_type(
+            resolve_contextual_call_arg_type(
                 node,
                 nodes,
                 call.line,
@@ -6063,7 +6257,7 @@ fn direct_source_function_type_diagnostics(
         })
         .collect::<Vec<_>>();
     diagnostics.extend(call.keyword_arg_values.iter().enumerate().flat_map(|(index, metadata)| {
-        resolve_contextual_typed_dict_literal_type(
+        resolve_contextual_call_arg_type(
             node,
             nodes,
             call.line,
@@ -6148,23 +6342,14 @@ fn resolved_call_arg_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_lambda_callable_type(
+            resolve_contextual_call_arg_type(
                 node,
                 nodes,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .or_else(|| {
-                resolve_contextual_typed_dict_literal_type(
-                    node,
-                    nodes,
-                    call.line,
-                    metadata,
-                    expected_types.get(index).and_then(|expected| expected.as_deref()),
-                )
-                .map(|result| result.actual_type)
-            })
+            .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
@@ -6188,23 +6373,14 @@ fn resolved_keyword_arg_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_lambda_callable_type(
+            resolve_contextual_call_arg_type(
                 node,
                 nodes,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .or_else(|| {
-                resolve_contextual_typed_dict_literal_type(
-                    node,
-                    nodes,
-                    call.line,
-                    metadata,
-                    expected_types.get(index).and_then(|expected| expected.as_deref()),
-                )
-                .map(|result| result.actual_type)
-            })
+            .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
@@ -9192,6 +9368,8 @@ mod tests {
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
                 value_dict_entries: None,
             }
         }
@@ -9225,14 +9403,18 @@ mod tests {
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
                 value_dict_entries: Some(vec![
                     typepython_syntax::TypedDictLiteralEntry {
                         key: Some(String::from("id")),
+                        key_value: Some(Box::new(direct_expr("str"))),
                         is_expansion: false,
                         value: direct_expr("int"),
                     },
                     typepython_syntax::TypedDictLiteralEntry {
                         key: Some(String::from("name")),
+                        key_value: Some(Box::new(direct_expr("str"))),
                         is_expansion: false,
                         value: direct_expr("str"),
                     },
@@ -10401,6 +10583,8 @@ mod tests {
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
                 value_dict_entries: None,
             }
         }
@@ -10433,6 +10617,8 @@ mod tests {
             })),
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
         let call = typepython_binding::CallSite {
@@ -16318,6 +16504,68 @@ mod tests {
     fn check_reports_contextual_typed_dict_literal_return_missing_key() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef make_user() -> User:\n    return {\"id\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_empty_list_call_argument() {
+        let result = check_temp_typepython_source(
+            "def takes(values: list[int]) -> None:\n    return None\n\ntakes([])\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_contextual_empty_dict_call_argument() {
+        let result = check_temp_typepython_source(
+            "def takes(values: dict[str, int]) -> None:\n    return None\n\ntakes({})\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_list_literal_call_argument_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef takes(values: list[Callable[[int], str]]) -> None:\n    return None\n\ntakes([lambda x: x + 1])\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_set_literal_call_argument_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef takes(values: set[Callable[[int], str]]) -> None:\n    return None\n\ntakes({lambda x: x + 1})\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_dict_literal_call_argument_nested_typed_dict() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef takes(*, owners: dict[str, User]) -> None:\n    return None\n\ntakes(owners={\"owner\": {\"id\": 1, \"name\": \"Ada\"}})\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_dict_literal_call_argument_nested_typed_dict_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef takes(*, owners: dict[str, User]) -> None:\n    return None\n\ntakes(owners={\"owner\": {\"id\": 1}})\n",
         );
 
         let rendered = result.diagnostics.as_text();

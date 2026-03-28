@@ -525,12 +525,15 @@ pub struct DirectExprMetadata {
     pub value_lambda: Option<Box<LambdaMetadata>>,
     pub value_list_comprehension: Option<Box<ComprehensionMetadata>>,
     pub value_generator_comprehension: Option<Box<ComprehensionMetadata>>,
+    pub value_list_elements: Option<Vec<DirectExprMetadata>>,
+    pub value_set_elements: Option<Vec<DirectExprMetadata>>,
     pub value_dict_entries: Option<Vec<TypedDictLiteralEntry>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypedDictLiteralEntry {
     pub key: Option<String>,
+    pub key_value: Option<Box<DirectExprMetadata>>,
     pub is_expansion: bool,
     pub value: DirectExprMetadata,
 }
@@ -2372,6 +2375,10 @@ fn extract_typed_dict_literal_entries(
         .iter()
         .map(|item| TypedDictLiteralEntry {
             key: item.key.as_ref().and_then(|key| extract_string_literal_value(source, key)),
+            key_value: item
+                .key
+                .as_ref()
+                .map(|key| Box::new(extract_direct_expr_metadata(source, key))),
             is_expansion: item.key.is_none(),
             value: extract_direct_expr_metadata(source, &item.value),
         })
@@ -3523,6 +3530,8 @@ fn extract_ast_backed_statement(
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     });
                 Some(SyntaxStatement::Value(ValueStatement {
@@ -5282,6 +5291,8 @@ fn extract_function_body_assignment_statement(
                 value_lambda: None,
                 value_list_comprehension: None,
                 value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
                 value_dict_entries: None,
             },
         );
@@ -5412,6 +5423,8 @@ fn extract_yield_statement(
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                 }),
             false,
@@ -5683,6 +5696,8 @@ fn extract_return_statement(
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         });
 
@@ -5753,7 +5768,77 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: Some(extract_typed_dict_literal_entries(source, dict)),
+        };
+    }
+
+    if let Expr::List(list) = expr {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: Some(
+                list.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+            ),
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
+    }
+
+    if let Expr::Set(set) = expr {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: Some(
+                set.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+            ),
+            value_dict_entries: None,
         };
     }
 
@@ -5792,6 +5877,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             })),
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5827,6 +5914,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
             })),
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5862,6 +5951,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
             })),
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5897,6 +5988,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
             })),
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5932,6 +6025,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 key: None,
                 element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
             })),
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5962,6 +6057,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -5998,6 +6095,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -6036,6 +6135,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -6066,6 +6167,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -6102,6 +6205,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_lambda: None,
             value_list_comprehension: None,
             value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
             value_dict_entries: None,
         };
     }
@@ -6135,6 +6240,8 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_lambda: None,
         value_list_comprehension: None,
         value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
         value_dict_entries: None,
     }
 }
@@ -7055,13 +7162,13 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 mod tests {
     use super::{
         parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
-        ComprehensionClauseMetadata, ComprehensionKind, ComprehensionMetadata, DirectExprMetadata,
-        ExceptionHandlerStatement, ForStatement, FunctionParam, FunctionStatement, GuardCondition,
-        IfStatement, ImportBinding, ImportStatement, InvalidationStatement, LambdaMetadata,
-        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
-        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
-        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective,
-        TypeParam, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
+        ComprehensionKind, DirectExprMetadata, ExceptionHandlerStatement, ForStatement,
+        FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
+        ImportStatement, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
+        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
+        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
+        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
+        ValueStatement, WithStatement, YieldStatement,
     };
     use std::path::PathBuf;
 
@@ -8332,6 +8439,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     },
                     DirectExprMetadata {
@@ -8359,6 +8468,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     },
                 ],
@@ -8461,6 +8572,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     },
                     DirectExprMetadata {
@@ -8488,6 +8601,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     },
                 ],
@@ -8526,11 +8641,19 @@ mod tests {
                 String::from("set[int]"),
             ]
         );
+        let list_elements =
+            statement.arg_values[0].value_list_elements.as_ref().expect("list elements");
+        assert_eq!(list_elements.len(), 2);
+        assert_eq!(list_elements[0].value_type.as_deref(), Some("int"));
         let dict_entries =
             statement.arg_values[2].value_dict_entries.as_ref().expect("dict entries");
         assert_eq!(dict_entries.len(), 1);
         assert_eq!(dict_entries[0].key.as_deref(), Some("x"));
         assert!(!dict_entries[0].is_expansion);
+        let set_elements =
+            statement.arg_values[3].value_set_elements.as_ref().expect("set elements");
+        assert_eq!(set_elements.len(), 2);
+        assert_eq!(set_elements[0].value_type.as_deref(), Some("int"));
     }
 
     #[test]
@@ -8647,11 +8770,15 @@ mod tests {
                             value_lambda: None,
                             value_list_comprehension: None,
                             value_generator_comprehension: None,
+                            value_list_elements: None,
+                            value_set_elements: None,
                             value_dict_entries: None,
                         }),
                     })),
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                 }],
                 starred_arg_types: Vec::new(),
@@ -8676,159 +8803,24 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
+        let [SyntaxStatement::Value(statement)] = tree.statements.as_slice() else {
+            panic!("expected value statement");
+        };
+        assert_eq!(statement.names, vec![String::from("values")]);
+        let comprehension =
+            statement.value_list_comprehension.as_deref().expect("list comprehension");
+        assert_eq!(comprehension.kind, ComprehensionKind::List);
+        assert_eq!(comprehension.clauses.len(), 1);
+        assert_eq!(comprehension.clauses[0].target_names, vec![String::from("x")]);
+        let iter_elements =
+            comprehension.clauses[0].iter.value_list_elements.as_ref().expect("iter list elements");
+        assert_eq!(iter_elements.len(), 2);
+        assert_eq!(iter_elements[0].value_type.as_deref(), Some("int"));
         assert_eq!(
-            tree.statements,
-            vec![SyntaxStatement::Value(ValueStatement {
-                names: vec![String::from("values")],
-                annotation: None,
-                value_type: Some(String::new()),
-                is_awaited: false,
-                value_callee: None,
-                value_name: None,
-                value_member_owner_name: None,
-                value_member_name: None,
-                value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-                value_subscript_target: None,
-                value_subscript_string_key: None,
-                value_subscript_index: None,
-                value_if_true: None,
-                value_if_false: None,
-                value_if_guard: None,
-                value_bool_left: None,
-                value_bool_right: None,
-                value_binop_left: None,
-                value_binop_right: None,
-                value_binop_operator: None,
-                value_lambda: None,
-                value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-                    kind: ComprehensionKind::List,
-                    clauses: vec![ComprehensionClauseMetadata {
-                        target_name: String::from("x"),
-                        target_names: vec![String::from("x")],
-                        iter: Box::new(DirectExprMetadata {
-                            value_type: Some(String::from("list[int]")),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: None,
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        }),
-                        filters: vec![GuardCondition::IsNone {
-                            name: String::from("x"),
-                            negated: true,
-                        }],
-                    }],
-                    key: None,
-                    element: Box::new(DirectExprMetadata {
-                        value_type: Some(String::new()),
-                        is_awaited: false,
-                        value_callee: None,
-                        value_name: None,
-                        value_member_owner_name: None,
-                        value_member_name: None,
-                        value_member_through_instance: false,
-                        value_method_owner_name: None,
-                        value_method_name: None,
-                        value_method_through_instance: false,
-                        value_subscript_target: None,
-                        value_subscript_string_key: None,
-                        value_subscript_index: None,
-                        value_if_true: None,
-                        value_if_false: None,
-                        value_if_guard: None,
-                        value_bool_left: None,
-                        value_bool_right: None,
-                        value_binop_left: Some(Box::new(DirectExprMetadata {
-                            value_type: Some(String::new()),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: Some(String::from("x")),
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        })),
-                        value_binop_right: Some(Box::new(DirectExprMetadata {
-                            value_type: Some(String::from("int")),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: None,
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        })),
-                        value_binop_operator: Some(String::from("+")),
-                        value_lambda: None,
-                        value_list_comprehension: None,
-                        value_generator_comprehension: None,
-                        value_dict_entries: None,
-                    }),
-                })),
-                value_generator_comprehension: None,
-                owner_name: None,
-                owner_type_name: None,
-                is_final: false,
-                is_class_var: false,
-                line: 1,
-            })]
+            comprehension.clauses[0].filters,
+            vec![GuardCondition::IsNone { name: String::from("x"), negated: true }]
         );
+        assert_eq!(comprehension.element.value_binop_operator.as_deref(), Some("+"));
     }
 
     #[test]
@@ -8841,159 +8833,24 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
+        let [SyntaxStatement::Value(statement)] = tree.statements.as_slice() else {
+            panic!("expected value statement");
+        };
+        assert_eq!(statement.names, vec![String::from("values")]);
+        let comprehension =
+            statement.value_generator_comprehension.as_deref().expect("generator comprehension");
+        assert_eq!(comprehension.kind, ComprehensionKind::Generator);
+        assert_eq!(comprehension.clauses.len(), 1);
+        assert_eq!(comprehension.clauses[0].target_names, vec![String::from("x")]);
+        let iter_elements =
+            comprehension.clauses[0].iter.value_list_elements.as_ref().expect("iter list elements");
+        assert_eq!(iter_elements.len(), 2);
+        assert_eq!(iter_elements[0].value_type.as_deref(), Some("int"));
         assert_eq!(
-            tree.statements,
-            vec![SyntaxStatement::Value(ValueStatement {
-                names: vec![String::from("values")],
-                annotation: None,
-                value_type: Some(String::new()),
-                is_awaited: false,
-                value_callee: None,
-                value_name: None,
-                value_member_owner_name: None,
-                value_member_name: None,
-                value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-                value_subscript_target: None,
-                value_subscript_string_key: None,
-                value_subscript_index: None,
-                value_if_true: None,
-                value_if_false: None,
-                value_if_guard: None,
-                value_bool_left: None,
-                value_bool_right: None,
-                value_binop_left: None,
-                value_binop_right: None,
-                value_binop_operator: None,
-                value_lambda: None,
-                value_list_comprehension: None,
-                value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
-                    kind: ComprehensionKind::Generator,
-                    clauses: vec![ComprehensionClauseMetadata {
-                        target_name: String::from("x"),
-                        target_names: vec![String::from("x")],
-                        iter: Box::new(DirectExprMetadata {
-                            value_type: Some(String::from("list[int]")),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: None,
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        }),
-                        filters: vec![GuardCondition::IsNone {
-                            name: String::from("x"),
-                            negated: true,
-                        }],
-                    }],
-                    key: None,
-                    element: Box::new(DirectExprMetadata {
-                        value_type: Some(String::new()),
-                        is_awaited: false,
-                        value_callee: None,
-                        value_name: None,
-                        value_member_owner_name: None,
-                        value_member_name: None,
-                        value_member_through_instance: false,
-                        value_method_owner_name: None,
-                        value_method_name: None,
-                        value_method_through_instance: false,
-                        value_subscript_target: None,
-                        value_subscript_string_key: None,
-                        value_subscript_index: None,
-                        value_if_true: None,
-                        value_if_false: None,
-                        value_if_guard: None,
-                        value_bool_left: None,
-                        value_bool_right: None,
-                        value_binop_left: Some(Box::new(DirectExprMetadata {
-                            value_type: Some(String::new()),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: Some(String::from("x")),
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        })),
-                        value_binop_right: Some(Box::new(DirectExprMetadata {
-                            value_type: Some(String::from("int")),
-                            is_awaited: false,
-                            value_callee: None,
-                            value_name: None,
-                            value_member_owner_name: None,
-                            value_member_name: None,
-                            value_member_through_instance: false,
-                            value_method_owner_name: None,
-                            value_method_name: None,
-                            value_method_through_instance: false,
-                            value_subscript_target: None,
-                            value_subscript_string_key: None,
-                            value_subscript_index: None,
-                            value_if_true: None,
-                            value_if_false: None,
-                            value_if_guard: None,
-                            value_bool_left: None,
-                            value_bool_right: None,
-                            value_binop_left: None,
-                            value_binop_right: None,
-                            value_binop_operator: None,
-                            value_lambda: None,
-                            value_list_comprehension: None,
-                            value_generator_comprehension: None,
-                            value_dict_entries: None,
-                        })),
-                        value_binop_operator: Some(String::from("+")),
-                        value_lambda: None,
-                        value_list_comprehension: None,
-                        value_generator_comprehension: None,
-                        value_dict_entries: None,
-                    }),
-                })),
-                owner_name: None,
-                owner_type_name: None,
-                is_final: false,
-                is_class_var: false,
-                line: 1,
-            })]
+            comprehension.clauses[0].filters,
+            vec![GuardCondition::IsNone { name: String::from("x"), negated: true }]
         );
+        assert_eq!(comprehension.element.value_binop_operator.as_deref(), Some("+"));
     }
 
     #[test]
@@ -9091,6 +8948,8 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                 })),
                 value_if_false: Some(Box::new(DirectExprMetadata {
@@ -9118,6 +8977,8 @@ mod tests {
                     value_lambda: None,
                     value_list_comprehension: None,
                     value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                 })),
                 value_if_guard: None,
@@ -9545,6 +9406,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     }],
                     starred_arg_types: Vec::new(),
@@ -9592,6 +9455,8 @@ mod tests {
                         value_lambda: None,
                         value_list_comprehension: None,
                         value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
                         value_dict_entries: None,
                     }],
                     keyword_expansion_types: Vec::new(),
