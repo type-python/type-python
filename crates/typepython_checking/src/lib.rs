@@ -1216,6 +1216,106 @@ fn direct_expr_metadata_from_return_site(
     }
 }
 
+fn direct_expr_metadata_from_yield_site(
+    yield_site: &typepython_binding::YieldSite,
+) -> typepython_syntax::DirectExprMetadata {
+    typepython_syntax::DirectExprMetadata {
+        value_type: yield_site.value_type.clone(),
+        is_awaited: false,
+        value_callee: yield_site.value_callee.clone(),
+        value_name: yield_site.value_name.clone(),
+        value_member_owner_name: yield_site.value_member_owner_name.clone(),
+        value_member_name: yield_site.value_member_name.clone(),
+        value_member_through_instance: yield_site.value_member_through_instance,
+        value_method_owner_name: yield_site.value_method_owner_name.clone(),
+        value_method_name: yield_site.value_method_name.clone(),
+        value_method_through_instance: yield_site.value_method_through_instance,
+        value_subscript_target: yield_site.value_subscript_target.clone(),
+        value_subscript_string_key: yield_site.value_subscript_string_key.clone(),
+        value_subscript_index: yield_site.value_subscript_index.clone(),
+        value_if_true: yield_site.value_if_true.clone(),
+        value_if_false: yield_site.value_if_false.clone(),
+        value_if_guard: yield_site.value_if_guard.as_ref().map(site_to_guard),
+        value_bool_left: yield_site.value_bool_left.clone(),
+        value_bool_right: yield_site.value_bool_right.clone(),
+        value_binop_left: yield_site.value_binop_left.clone(),
+        value_binop_right: yield_site.value_binop_right.clone(),
+        value_binop_operator: yield_site.value_binop_operator.clone(),
+        value_lambda: yield_site.value_lambda.clone(),
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: yield_site.value_dict_entries.clone(),
+    }
+}
+
+struct ContextualYieldTypeResult {
+    actual_type: Option<String>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+fn resolve_contextual_yield_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    yield_site: &typepython_binding::YieldSite,
+    expected: &str,
+    signature: &str,
+) -> ContextualYieldTypeResult {
+    let metadata = direct_expr_metadata_from_yield_site(yield_site);
+    if !yield_site.is_yield_from {
+        if let Some(actual_type) =
+            resolve_contextual_lambda_callable_type(node, nodes, yield_site.line, &metadata, Some(expected))
+        {
+            return ContextualYieldTypeResult {
+                actual_type: Some(actual_type),
+                diagnostics: Vec::new(),
+            };
+        }
+        if let Some(result) =
+            resolve_contextual_typed_dict_literal_type(node, nodes, yield_site.line, &metadata, Some(expected))
+        {
+            return ContextualYieldTypeResult {
+                actual_type: Some(result.actual_type),
+                diagnostics: result.diagnostics,
+            };
+        }
+    }
+    ContextualYieldTypeResult {
+        actual_type: resolve_direct_expression_type(
+            node,
+            nodes,
+            Some(signature),
+            None,
+            Some(yield_site.owner_name.as_str()),
+            yield_site.owner_type_name.as_deref(),
+            yield_site.line,
+            yield_site.value_type.as_deref(),
+            false,
+            yield_site.value_callee.as_deref(),
+            yield_site.value_name.as_deref(),
+            yield_site.value_member_owner_name.as_deref(),
+            yield_site.value_member_name.as_deref(),
+            yield_site.value_member_through_instance,
+            yield_site.value_method_owner_name.as_deref(),
+            yield_site.value_method_name.as_deref(),
+            yield_site.value_method_through_instance,
+            yield_site.value_subscript_target.as_deref(),
+            yield_site.value_subscript_string_key.as_deref(),
+            yield_site.value_subscript_index.as_deref(),
+            yield_site.value_if_true.as_deref(),
+            yield_site.value_if_false.as_deref(),
+            yield_site.value_if_guard.as_ref(),
+            yield_site.value_bool_left.as_deref(),
+            yield_site.value_bool_right.as_deref(),
+            yield_site.value_binop_left.as_deref(),
+            yield_site.value_binop_right.as_deref(),
+            yield_site.value_binop_operator.as_deref(),
+        ),
+        diagnostics: Vec::new(),
+    }
+}
+
 fn site_to_guard(guard: &typepython_binding::GuardConditionSite) -> typepython_syntax::GuardCondition {
     match guard {
         typepython_binding::GuardConditionSite::IsNone { name, negated } => {
@@ -1246,9 +1346,9 @@ fn direct_yield_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    node.yields
-        .iter()
-        .filter_map(|yield_site| {
+    let mut diagnostics = Vec::new();
+
+    for yield_site in &node.yields {
             let target = node.declarations.iter().find(|declaration| {
                 declaration.name == yield_site.owner_name
                     && declaration.kind == DeclarationKind::Function
@@ -1257,39 +1357,22 @@ fn direct_yield_type_diagnostics(
                         (None, None) => true,
                         _ => false,
                     }
-            })?;
+            });
+            let Some(target) = target else {
+                continue;
+            };
 
-            let expected = unwrap_generator_yield_type(target.detail.split_once("->")?.1.trim())?;
-            let actual = resolve_direct_expression_type(
-                node,
-                nodes,
-                Some(&target.detail),
-                None,
-                Some(yield_site.owner_name.as_str()),
-                yield_site.owner_type_name.as_deref(),
-                yield_site.line,
-                yield_site.value_type.as_deref(),
-                false,
-                yield_site.value_callee.as_deref(),
-                yield_site.value_name.as_deref(),
-                yield_site.value_member_owner_name.as_deref(),
-                yield_site.value_member_name.as_deref(),
-                yield_site.value_member_through_instance,
-                yield_site.value_method_owner_name.as_deref(),
-                yield_site.value_method_name.as_deref(),
-                yield_site.value_method_through_instance,
-                yield_site.value_subscript_target.as_deref(),
-                yield_site.value_subscript_string_key.as_deref(),
-                yield_site.value_subscript_index.as_deref(),
-                yield_site.value_if_true.as_deref(),
-                yield_site.value_if_false.as_deref(),
-                yield_site.value_if_guard.as_ref(),
-                yield_site.value_bool_left.as_deref(),
-                yield_site.value_bool_right.as_deref(),
-                yield_site.value_binop_left.as_deref(),
-                yield_site.value_binop_right.as_deref(),
-                yield_site.value_binop_operator.as_deref(),
-            )?;
+            let Some((_, returns)) = target.detail.split_once("->") else {
+                continue;
+            };
+            let Some(expected) = unwrap_generator_yield_type(returns.trim()) else {
+                continue;
+            };
+            let contextual = resolve_contextual_yield_type(node, nodes, yield_site, &expected, &target.detail);
+            diagnostics.extend(contextual.diagnostics);
+            let Some(actual) = contextual.actual_type else {
+                continue;
+            };
 
             let actual = if yield_site.is_yield_from {
                 unwrap_yield_from_type(&actual).unwrap_or(actual)
@@ -1297,8 +1380,8 @@ fn direct_yield_type_diagnostics(
                 actual
             };
 
-            (!direct_type_matches(&expected, &actual)).then(|| {
-                Diagnostic::error(
+            if !direct_type_matches(&expected, &actual) {
+                diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match &yield_site.owner_type_name {
                         Some(owner_type_name) => format!(
@@ -1326,9 +1409,11 @@ fn direct_yield_type_diagnostics(
                     yield_site.line,
                     1,
                 ))
-            })
-        })
-        .collect()
+                );
+            }
+    }
+
+    diagnostics
 }
 
 fn for_loop_target_diagnostics(
@@ -22187,6 +22272,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     is_yield_from: false,
                     line: 2,
                 }],
@@ -22258,6 +22345,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     is_yield_from: false,
                     line: 2,
                 }],
@@ -22276,6 +22365,46 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("function `produce` in module `src/app/module.py` yields `str` where `Generator[int, ...]` expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_lambda_generator_yield() {
+        let result = check_temp_typepython_source(
+            "def produce() -> Generator[Callable[[int], str], None, None]:\n    yield lambda x: str(x)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_generator_yield_mismatch() {
+        let result = check_temp_typepython_source(
+            "def produce() -> Generator[Callable[[int], str], None, None]:\n    yield lambda x: x + 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_typed_dict_generator_yield() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef produce() -> Generator[User, None, None]:\n    yield {\"id\": 1, \"name\": \"Ada\"}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_generator_yield_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef produce() -> Generator[User, None, None]:\n    yield {\"id\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
     }
 
     #[test]
@@ -22352,6 +22481,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     is_yield_from: true,
                     line: 2,
                 }],
