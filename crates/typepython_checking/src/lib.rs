@@ -129,6 +129,9 @@ pub fn check_with_options(
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
+        for subscript_diagnostic in subscript_assignment_type_diagnostics(node, &graph.nodes) {
+            diagnostics.push(subscript_diagnostic);
+        }
         for dataclass_diagnostic in
             frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes)
         {
@@ -2156,6 +2159,179 @@ fn typed_dict_readonly_mutation_diagnostics(
             }
 
             None
+        })
+        .collect()
+}
+
+enum WritableSubscriptSignature {
+    Writable { key_type: String, value_type: String },
+    ReadOnly,
+}
+
+fn resolve_writable_subscript_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type_name: &str,
+) -> Option<WritableSubscriptSignature> {
+    let normalized = normalize_type_text(owner_type_name);
+    if let Some((head, args)) = split_generic_type(&normalized) {
+        match head {
+            "Mapping" | "typing.Mapping" | "collections.abc.Mapping" if args.len() == 2 => {
+                return Some(WritableSubscriptSignature::ReadOnly);
+            }
+            _ => {}
+        }
+    }
+
+    let nominal_owner_name = split_generic_type(&normalized)
+        .map(|(head, _)| head.to_owned())
+        .unwrap_or_else(|| normalized.clone());
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
+    if let Some(setitem) = find_owned_callable_declaration(nodes, class_node, class_decl, "__setitem__") {
+        let signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&setitem.detail, Some(&normalized)),
+        );
+        let params = direct_param_types(&signature)?;
+        let params = match setitem.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
+            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
+            _ => params.into_iter().skip(1).collect(),
+        };
+        if params.len() == 2 {
+            return Some(WritableSubscriptSignature::Writable {
+                key_type: normalize_type_text(&params[0]),
+                value_type: normalize_type_text(&params[1]),
+            });
+        }
+    }
+
+    find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")
+        .map(|_| WritableSubscriptSignature::ReadOnly)
+}
+
+fn subscript_assignment_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_typed_dict_mutation_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            if site.kind != typepython_syntax::TypedDictMutationKind::Assignment {
+                return None;
+            }
+
+            let signature = resolve_scope_owner_signature(
+                node,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+            );
+            let owner_type = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &site.target,
+            )?;
+
+            if resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type).is_some() {
+                return None;
+            }
+
+            match resolve_writable_subscript_signature(node, nodes, &owner_type)? {
+                WritableSubscriptSignature::ReadOnly => Some(
+                    Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "subscript assignment target `{}` in module `{}` is not writable via `__setitem__`",
+                            owner_type,
+                            node.module_path.display(),
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        site.line,
+                        1,
+                        site.line,
+                        1,
+                    )),
+                ),
+                WritableSubscriptSignature::Writable { key_type, value_type } => {
+                    let actual_key = resolve_direct_expression_type_from_metadata(
+                        node,
+                        nodes,
+                        signature,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        &site.key_value,
+                    )?;
+                    if !direct_type_is_assignable(node, nodes, &key_type, &actual_key) {
+                        return Some(
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "subscript assignment on `{}` in module `{}` passes key `{}` where `__setitem__` expects `{}`",
+                                    owner_type,
+                                    node.module_path.display(),
+                                    actual_key,
+                                    key_type,
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            )),
+                        );
+                    }
+
+                    let value = site.value.as_ref()?;
+                    let actual_value = resolve_direct_expression_type_from_metadata(
+                        node,
+                        nodes,
+                        signature,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
+                    if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                        return Some(
+                            Diagnostic::error(
+                                "TPY4001",
+                                format!(
+                                    "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
+                                    owner_type,
+                                    node.module_path.display(),
+                                    actual_value,
+                                    value_type,
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                site.line,
+                                1,
+                                site.line,
+                                1,
+                            )),
+                        );
+                    }
+
+                    None
+                }
+            }
         })
         .collect()
 }
@@ -10504,6 +10680,59 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4016"));
         assert!(rendered.contains("cannot be deleted"));
+    }
+
+    #[test]
+    fn check_accepts_nominal_setitem_subscript_assignment() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_nominal_setitem_subscript_value_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] = \"bad\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes value `str` where `__setitem__` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_nominal_setitem_subscript_key_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[1] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("passes key `int` where `__setitem__` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_inherited_setitem_subscript_assignment() {
+        let result = check_temp_typepython_source(
+            "class Base:\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\nclass Cache(Base):\n    pass\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_readonly_nominal_subscript_assignment_without_setitem() {
+        let result = check_temp_typepython_source(
+            "class View:\n    def __getitem__(self, key: str) -> int:\n        return 1\n\ndef mutate(view: View) -> None:\n    view[\"x\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("is not writable via `__setitem__`"));
     }
 
     #[test]

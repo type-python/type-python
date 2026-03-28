@@ -576,6 +576,7 @@ pub enum TypedDictMutationKind {
 pub struct TypedDictMutationSite {
     pub kind: TypedDictMutationKind,
     pub key: Option<String>,
+    pub key_value: DirectExprMetadata,
     pub target: DirectExprMetadata,
     pub value: Option<DirectExprMetadata>,
     pub owner_name: Option<String>,
@@ -1904,6 +1905,7 @@ fn extract_typed_dict_mutation_site(
     Some(TypedDictMutationSite {
         kind,
         key: extract_string_literal_value(source, &subscript.slice),
+        key_value: extract_direct_expr_metadata(source, &subscript.slice),
         target: extract_direct_expr_metadata(source, &subscript.value),
         value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         owner_name: owner_name.map(str::to_owned),
