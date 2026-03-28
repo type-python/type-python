@@ -3632,6 +3632,7 @@ fn resolve_direct_expression_type(
                 current_line,
                 value_bool_left,
                 value_bool_right,
+                value_if_guard,
                 value_binop_operator,
             )
         })
@@ -3665,6 +3666,7 @@ fn resolve_direct_boolop_type(
     current_line: usize,
     left: Option<&typepython_syntax::DirectExprMetadata>,
     right: Option<&typepython_syntax::DirectExprMetadata>,
+    guard: Option<&typepython_binding::GuardConditionSite>,
     operator: Option<&str>,
 ) -> Option<String> {
     let operator = operator?;
@@ -3680,15 +3682,45 @@ fn resolve_direct_boolop_type(
         current_line,
         left?,
     )?;
-    let right_type = resolve_direct_expression_type_from_metadata(
-        node,
-        nodes,
-        signature,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        right?,
-    )?;
+    let right_type = if let Some(guard) = guard {
+        let base_bindings = resolve_guard_scope_bindings(
+            node,
+            nodes,
+            signature,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            guard,
+        );
+        let narrowed_bindings = apply_guard_to_local_bindings(
+            node,
+            nodes,
+            &base_bindings,
+            guard,
+            operator == "and",
+        );
+        resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right?,
+            &narrowed_bindings,
+        )?
+    } else {
+        resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right?,
+        )?
+    };
     Some(join_branch_types(vec![left_type, right_type]))
 }
 
@@ -5268,16 +5300,36 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
             left,
             local_bindings,
         )?;
-        let right_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            right,
-            local_bindings,
-        )?;
+        let right_type = if let Some(guard) = metadata.value_if_guard.as_ref() {
+            let narrowed_bindings = apply_guard_to_local_bindings(
+                node,
+                nodes,
+                local_bindings,
+                &guard_to_site(guard),
+                operator == "and",
+            );
+            resolve_direct_expression_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                right,
+                &narrowed_bindings,
+            )?
+        } else {
+            resolve_direct_expression_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                right,
+                local_bindings,
+            )?
+        };
         return Some(join_branch_types(vec![left_type, right_type]));
     }
     if let (Some(left), Some(right), Some(operator)) = (
@@ -27362,6 +27414,44 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_boolop_rhs_narrowing_for_is_not_none_and() {
+        let result = check_temp_typepython_source(
+            "def takes_int(value: int) -> bool:\n    return True\n\ndef build(value: int | None) -> bool:\n    return value is not None and takes_int(value)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_boolop_rhs_narrowing_for_is_none_or() {
+        let result = check_temp_typepython_source(
+            "def takes_int(value: int) -> bool:\n    return True\n\ndef build(value: int | None) -> bool:\n    return value is None or takes_int(value)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_boolop_rhs_narrowing_for_isinstance_call() {
+        let result = check_temp_typepython_source(
+            "def takes_str(value: str) -> bool:\n    return True\n\ndef build(value: str | int) -> bool:\n    return isinstance(value, str) and takes_str(value)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_keeps_non_guard_boolop_rhs_unnarrowed() {
+        let result = check_temp_typepython_source(
+            "def truthy(value: int | None) -> bool:\n    return True\n\ndef build(value: int | None) -> None:\n    result: int = truthy(value) and value\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `Union[bool, int, None]` where local `result` expects `int`"));
     }
 
     #[test]

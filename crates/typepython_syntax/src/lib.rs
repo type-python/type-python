@@ -6081,7 +6081,9 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
 
     if let Expr::BoolOp(bool_op) = expr {
         let mut values = bool_op.values.iter();
-        let left = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
+        let left_expr = values.next();
+        let left_guard = left_expr.and_then(|expr| extract_guard_condition(source, expr));
+        let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
         let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
         return DirectExprMetadata {
             value_type: Some(String::new()),
@@ -6099,7 +6101,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_subscript_index: None,
             value_if_true: None,
             value_if_false: None,
-            value_if_guard: None,
+            value_if_guard: left_guard,
             value_bool_left: left.map(Box::new),
             value_bool_right: right.map(Box::new),
             value_binop_left: None,
