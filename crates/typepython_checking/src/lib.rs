@@ -994,6 +994,7 @@ fn direct_return_type_diagnostics(
                 return_site.value_subscript_index.as_deref(),
                 return_site.value_if_true.as_deref(),
                 return_site.value_if_false.as_deref(),
+                return_site.value_if_guard.as_ref(),
                 return_site.value_bool_left.as_deref(),
                 return_site.value_bool_right.as_deref(),
                 return_site.value_binop_left.as_deref(),
@@ -1076,6 +1077,7 @@ fn direct_yield_type_diagnostics(
                 yield_site.value_subscript_index.as_deref(),
                 yield_site.value_if_true.as_deref(),
                 yield_site.value_if_false.as_deref(),
+                yield_site.value_if_guard.as_ref(),
                 yield_site.value_bool_left.as_deref(),
                 yield_site.value_bool_right.as_deref(),
                 yield_site.value_binop_left.as_deref(),
@@ -1149,6 +1151,7 @@ fn for_loop_target_diagnostics(
                 for_loop.iter_method_owner_name.as_deref(),
                 for_loop.iter_method_name.as_deref(),
                 for_loop.iter_method_through_instance,
+                None,
                 None,
                 None,
                 None,
@@ -1734,6 +1737,7 @@ fn resolve_direct_expression_type_from_metadata(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<String> {
+    let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
     resolve_direct_expression_type(
         node,
         nodes,
@@ -1757,6 +1761,7 @@ fn resolve_direct_expression_type_from_metadata(
         metadata.value_subscript_index.as_deref(),
         metadata.value_if_true.as_deref(),
         metadata.value_if_false.as_deref(),
+        value_if_guard.as_ref(),
         metadata.value_bool_left.as_deref(),
         metadata.value_bool_right.as_deref(),
         metadata.value_binop_left.as_deref(),
@@ -2944,6 +2949,7 @@ fn resolve_direct_expression_type(
     value_subscript_index: Option<&str>,
     value_if_true: Option<&typepython_syntax::DirectExprMetadata>,
     value_if_false: Option<&typepython_syntax::DirectExprMetadata>,
+    value_if_guard: Option<&typepython_binding::GuardConditionSite>,
     value_bool_left: Option<&typepython_syntax::DirectExprMetadata>,
     value_bool_right: Option<&typepython_syntax::DirectExprMetadata>,
     value_binop_left: Option<&typepython_syntax::DirectExprMetadata>,
@@ -3029,6 +3035,46 @@ fn resolve_direct_expression_type(
             })
         })
         .or_else(|| {
+            let true_branch = value_if_true?;
+            let false_branch = value_if_false?;
+            if let Some(guard) = value_if_guard {
+                let base_bindings = resolve_guard_scope_bindings(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    guard,
+                );
+                let true_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, true);
+                let false_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, false);
+                return Some(join_branch_types(vec![
+                    resolve_direct_expression_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        true_branch,
+                        &true_bindings,
+                    )?,
+                    resolve_direct_expression_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        false_branch,
+                        &false_bindings,
+                    )?,
+                ]));
+            }
             Some(join_branch_types(vec![
                 resolve_direct_expression_type_from_metadata(
                     node,
@@ -3037,7 +3083,7 @@ fn resolve_direct_expression_type(
                     current_owner_name,
                     current_owner_type_name,
                     current_line,
-                    value_if_true?,
+                    true_branch,
                 )?,
                 resolve_direct_expression_type_from_metadata(
                     node,
@@ -3046,7 +3092,7 @@ fn resolve_direct_expression_type(
                     current_owner_name,
                     current_owner_type_name,
                     current_line,
-                    value_if_false?,
+                    false_branch,
                 )?,
             ]))
         })
@@ -4039,6 +4085,7 @@ fn resolve_for_loop_target_type(
         None,
         None,
         None,
+        None,
     )?;
 
     let element_type = unwrap_for_iterable_type(&iter_type)?;
@@ -4128,6 +4175,7 @@ fn resolve_with_target_type_for_signature(
         with_site.context_method_owner_name.as_deref(),
         with_site.context_method_name.as_deref(),
         with_site.context_method_through_instance,
+        None,
         None,
         None,
         None,
@@ -4294,6 +4342,7 @@ fn resolve_assignment_site_type(
         assignment.value_subscript_index.as_deref(),
         assignment.value_if_true.as_deref(),
         assignment.value_if_false.as_deref(),
+        assignment.value_if_guard.as_ref(),
         assignment.value_bool_left.as_deref(),
         assignment.value_bool_right.as_deref(),
         assignment.value_binop_left.as_deref(),
@@ -4480,6 +4529,80 @@ fn resolve_generator_comprehension_type(
     Some(format!("Generator[{element_type}, None, None]"))
 }
 
+fn collect_guard_binding_names(
+    guard: &typepython_binding::GuardConditionSite,
+    names: &mut BTreeSet<String>,
+) {
+    match guard {
+        typepython_binding::GuardConditionSite::IsNone { name, .. }
+        | typepython_binding::GuardConditionSite::IsInstance { name, .. }
+        | typepython_binding::GuardConditionSite::PredicateCall { name, .. }
+        | typepython_binding::GuardConditionSite::TruthyName { name } => {
+            names.insert(name.clone());
+        }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            collect_guard_binding_names(inner, names);
+        }
+        typepython_binding::GuardConditionSite::And(parts)
+        | typepython_binding::GuardConditionSite::Or(parts) => {
+            for part in parts {
+                collect_guard_binding_names(part, names);
+            }
+        }
+    }
+}
+
+fn apply_guard_to_local_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    local_bindings: &BTreeMap<String, String>,
+    guard: &typepython_binding::GuardConditionSite,
+    branch_true: bool,
+) -> BTreeMap<String, String> {
+    let mut narrowed = local_bindings.clone();
+    let mut names = BTreeSet::new();
+    collect_guard_binding_names(guard, &mut names);
+    for name in names {
+        if let Some(base_type) = local_bindings.get(&name) {
+            narrowed.insert(
+                name.clone(),
+                apply_guard_condition(node, nodes, base_type, &name, guard, branch_true),
+            );
+        }
+    }
+    narrowed
+}
+
+fn resolve_guard_scope_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    guard: &typepython_binding::GuardConditionSite,
+) -> BTreeMap<String, String> {
+    let mut bindings = BTreeMap::new();
+    let mut names = BTreeSet::new();
+    collect_guard_binding_names(guard, &mut names);
+    for name in names {
+        if let Some(base_type) = resolve_direct_name_reference_type(
+            node,
+            nodes,
+            signature,
+            exclude_name,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            &name,
+        ) {
+            bindings.insert(name, base_type);
+        }
+    }
+    bindings
+}
+
 fn resolve_direct_expression_type_from_metadata_with_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -4517,6 +4640,33 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
     if let (Some(true_branch), Some(false_branch)) =
         (metadata.value_if_true.as_deref(), metadata.value_if_false.as_deref())
     {
+        if let Some(guard) = metadata.value_if_guard.as_ref() {
+            let guard = guard_to_site(guard);
+            let true_bindings = apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, true);
+            let false_bindings =
+                apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, false);
+            let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                true_branch,
+                &true_bindings,
+            )?;
+            let false_type = resolve_direct_expression_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                false_branch,
+                &false_bindings,
+            )?;
+            return Some(join_branch_types(vec![true_type, false_type]));
+        }
         let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
             node,
             nodes,
@@ -7892,6 +8042,7 @@ fn resolve_match_subject_type(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -9652,6 +9803,7 @@ mod tests {
                 value_subscript_index: None,
                 value_if_true: None,
                 value_if_false: None,
+                value_if_guard: None,
                 value_bool_left: None,
                 value_bool_right: None,
                 value_binop_left: None,
@@ -9679,6 +9831,7 @@ mod tests {
             value_subscript_index: None,
             value_if_true: None,
             value_if_false: None,
+            value_if_guard: None,
             value_bool_left: None,
             value_bool_right: None,
             value_binop_left: None,
@@ -10124,6 +10277,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -10871,6 +11025,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -11123,6 +11278,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -11356,6 +11512,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -11889,6 +12046,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12079,6 +12237,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12151,6 +12310,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12223,6 +12383,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12329,6 +12490,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12433,6 +12595,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12539,6 +12702,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12643,6 +12807,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12715,6 +12880,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12785,6 +12951,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -12900,6 +13067,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13013,6 +13181,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13128,6 +13297,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13241,6 +13411,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13322,6 +13493,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13399,6 +13571,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13497,6 +13670,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13593,6 +13767,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13691,6 +13866,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13828,6 +14004,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13905,6 +14082,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -13994,6 +14172,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -14027,6 +14206,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -14124,6 +14304,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14154,6 +14335,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14273,6 +14455,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14303,6 +14486,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14420,6 +14604,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14450,6 +14635,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14550,6 +14736,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14580,6 +14767,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14610,6 +14798,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14698,6 +14887,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -14732,6 +14922,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14762,6 +14953,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14898,6 +15090,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14928,6 +15121,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -14958,6 +15152,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -15048,6 +15243,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -15081,6 +15277,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -15300,6 +15497,45 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `int` where `value` expects `str`"));
+    }
+
+    #[test]
+    fn check_accepts_ifexp_assignment_with_none_narrowing() {
+        let result = check_temp_typepython_source(
+            "def maybe() -> int | None:\n    return None\n\nx: int | None = maybe()\ny: int = x if x is not None else 0\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_ifexp_call_arg_with_none_narrowing() {
+        let result = check_temp_typepython_source(
+            "def takes_int(value: int) -> None:\n    return None\n\ndef maybe() -> int | None:\n    return None\n\nx: int | None = maybe()\ntakes_int(x if x is not None else 0)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_ifexp_return_with_isinstance_narrowing() {
+        let result = check_temp_typepython_source(
+            "def build(value: int | str) -> int:\n    return 0 if isinstance(value, str) else value\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_ifexp_return_without_guard_narrowing_fallback() {
+        let result = check_temp_typepython_source(
+            "def build(value: str | None, flag: bool) -> str:\n    return value if flag else \"\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("function `build`"));
+        assert!(rendered.contains("expects `str`"));
     }
 
     #[test]
@@ -15678,6 +15914,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -15776,6 +16013,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -15872,6 +16110,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -15936,6 +16175,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16038,6 +16278,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16138,6 +16379,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16234,6 +16476,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16373,6 +16616,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16510,6 +16754,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16651,6 +16896,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16788,6 +17034,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16869,6 +17116,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -16994,6 +17242,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -17028,6 +17277,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -17058,6 +17308,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -17088,6 +17339,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -17164,6 +17416,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -17272,6 +17525,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -17305,6 +17559,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -17414,6 +17669,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -17585,6 +17841,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -18298,6 +18555,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -19741,6 +19999,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -19837,6 +20096,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -19927,6 +20187,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -19952,6 +20213,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -20045,6 +20307,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -20070,6 +20333,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -20143,6 +20407,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -20213,6 +20478,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -20306,6 +20572,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22325,6 +22592,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22466,6 +22734,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22603,6 +22872,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22714,6 +22984,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22848,6 +23119,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -22980,6 +23252,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23120,6 +23393,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23211,6 +23485,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23279,6 +23554,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23365,6 +23641,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23451,6 +23728,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23670,6 +23948,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23861,6 +24140,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -23938,6 +24218,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24017,6 +24298,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24094,6 +24376,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24171,6 +24454,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24254,6 +24538,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24331,6 +24616,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24671,6 +24957,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24753,6 +25040,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24831,6 +25119,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -24934,6 +25223,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25037,6 +25327,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25141,6 +25432,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -25166,6 +25458,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -25249,6 +25542,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25339,6 +25633,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25420,6 +25715,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25503,6 +25799,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25592,6 +25889,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -25637,6 +25935,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -25667,6 +25966,7 @@ mod tests {
                         value_subscript_index: None,
                         value_if_true: None,
                         value_if_false: None,
+                        value_if_guard: None,
                         value_bool_left: None,
                         value_bool_right: None,
                         value_binop_left: None,
@@ -26131,6 +26431,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -26329,6 +26630,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -26461,6 +26763,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -26593,6 +26896,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
@@ -27071,6 +27375,7 @@ mod tests {
                     value_subscript_index: None,
                     value_if_true: None,
                     value_if_false: None,
+                    value_if_guard: None,
                     value_bool_left: None,
                     value_bool_right: None,
                     value_binop_left: None,
