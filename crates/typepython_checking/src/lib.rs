@@ -6768,7 +6768,7 @@ fn infer_generic_type_param_substitutions(
         .filter_map(|param| param.annotation.as_deref())
         .zip(call.arg_types.iter())
     {
-        bind_generic_type_params(annotation, actual, &generic_names, &mut substitutions)?;
+        bind_generic_type_params(node, nodes, annotation, actual, &generic_names, &mut substitutions)?;
     }
 
     for (keyword, actual) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
@@ -6778,7 +6778,7 @@ fn infer_generic_type_param_substitutions(
         let Some(annotation) = param.annotation.as_deref() else {
             continue;
         };
-        bind_generic_type_params(annotation, actual, &generic_names, &mut substitutions)?;
+        bind_generic_type_params(node, nodes, annotation, actual, &generic_names, &mut substitutions)?;
     }
 
     for type_param in &function.type_params {
@@ -6797,39 +6797,177 @@ fn infer_generic_type_param_substitutions(
 }
 
 fn bind_generic_type_params(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     annotation: &str,
     actual: &str,
     generic_names: &BTreeSet<String>,
     substitutions: &mut BTreeMap<String, String>,
 ) -> Option<()> {
+    let inferred = infer_generic_type_param_bindings(
+        node,
+        nodes,
+        annotation,
+        actual,
+        generic_names,
+        substitutions,
+    )?;
+    for (name, actual_type) in inferred {
+        match substitutions.get(&name) {
+            Some(existing) if existing != &actual_type => return None,
+            Some(_) => {}
+            None => {
+                substitutions.insert(name, actual_type);
+            }
+        }
+    }
+    Some(())
+}
+
+fn infer_generic_type_param_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &str,
+    actual: &str,
+    generic_names: &BTreeSet<String>,
+    substitutions: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, String>> {
     let annotation = normalize_type_text(annotation);
     let actual = normalize_type_text(actual);
     if actual.is_empty() {
-        return Some(());
+        return Some(BTreeMap::new());
     }
 
     if generic_names.contains(&annotation) {
-        match substitutions.get(&annotation) {
-            Some(existing) if existing != &actual => return None,
-            Some(_) => return Some(()),
+        return match substitutions.get(&annotation) {
+            Some(existing) if existing != &actual => None,
+            Some(_) => Some(BTreeMap::new()),
             None => {
-                substitutions.insert(annotation, actual);
-                return Some(());
+                let mut inferred = BTreeMap::new();
+                inferred.insert(annotation, actual);
+                Some(inferred)
             }
+        };
+    }
+
+    if let Some(branches) = union_branches(&actual)
+        && branches.len() > 1
+    {
+        let mut candidates = Vec::new();
+        for branch in branches {
+            let candidate = infer_generic_type_param_bindings(
+                node,
+                nodes,
+                &annotation,
+                &branch,
+                generic_names,
+                substitutions,
+            )?;
+            let combined = combine_generic_substitutions(substitutions, &candidate);
+            let substituted_annotation = substitute_generic_type_params(&annotation, &combined);
+            if !direct_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
+                return None;
+            }
+            candidates.push(candidate);
         }
+        return merge_union_branch_bindings(candidates);
+    }
+
+    if let Some(branches) = union_branches(&annotation)
+        && branches.len() > 1
+    {
+        let candidates = branches
+            .into_iter()
+            .filter_map(|branch| {
+                let candidate = infer_generic_type_param_bindings(
+                    node,
+                    nodes,
+                    &branch,
+                    &actual,
+                    generic_names,
+                    substitutions,
+                )?;
+                let combined = combine_generic_substitutions(substitutions, &candidate);
+                let substituted_branch = substitute_generic_type_params(&branch, &combined);
+                direct_type_is_assignable(node, nodes, &substituted_branch, &actual).then_some(candidate)
+            })
+            .collect::<Vec<_>>();
+        return select_best_union_branch_binding(candidates);
     }
 
     match (split_generic_type(&annotation), split_generic_type(&actual)) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
             if expected_head == actual_head && expected_args.len() == actual_args.len() =>
         {
+            let mut inferred = BTreeMap::new();
             for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
-                bind_generic_type_params(expected_arg, actual_arg, generic_names, substitutions)?;
+                let nested = infer_generic_type_param_bindings(
+                    node,
+                    nodes,
+                    expected_arg,
+                    actual_arg,
+                    generic_names,
+                    substitutions,
+                )?;
+                for (name, actual_type) in nested {
+                    match inferred.get(&name) {
+                        Some(existing) if existing != &actual_type => return None,
+                        Some(_) => {}
+                        None => {
+                            inferred.insert(name, actual_type);
+                        }
+                    }
+                }
             }
-            Some(())
+            Some(inferred)
         }
-        _ => Some(()),
+        _ => direct_type_is_assignable(node, nodes, &annotation, &actual).then_some(BTreeMap::new()),
     }
+}
+
+fn combine_generic_substitutions(
+    existing: &BTreeMap<String, String>,
+    inferred: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut combined = existing.clone();
+    combined.extend(inferred.clone());
+    combined
+}
+
+fn select_best_union_branch_binding(
+    candidates: Vec<BTreeMap<String, String>>,
+) -> Option<BTreeMap<String, String>> {
+    let min_len = candidates.iter().map(BTreeMap::len).min()?;
+    let mut filtered = candidates.into_iter().filter(|candidate| candidate.len() == min_len);
+    let first = filtered.next()?;
+    if filtered.all(|candidate| candidate == first) {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+fn merge_union_branch_bindings(
+    candidates: Vec<BTreeMap<String, String>>,
+) -> Option<BTreeMap<String, String>> {
+    let mut merged: BTreeMap<String, String> = BTreeMap::new();
+    for candidate in candidates {
+        for (name, actual_type) in candidate {
+            match merged.get(&name) {
+                Some(existing) if existing == &actual_type => {}
+                Some(existing) => {
+                    merged.insert(
+                        name,
+                        join_type_candidates(vec![existing.clone(), actual_type]),
+                    );
+                }
+                None => {
+                    merged.insert(name, actual_type);
+                }
+            }
+        }
+    }
+    Some(merged)
 }
 
 fn substitute_generic_type_params(
@@ -15654,6 +15792,106 @@ mod tests {
         );
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_generic_function_call_inference_through_optional_annotation() {
+        let result = check_temp_typepython_source(
+            "def maybe[T](x: T | None) -> T | None:\n    return x\n\nvalue: int | None = maybe(1)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_infers_generic_function_call_through_union_actual() {
+        let node = ModuleNode {
+            module_path: PathBuf::from("<generic-inference>"),
+            module_key: String::new(),
+            module_kind: SourceKind::TypePython,
+            declarations: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 0,
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+        };
+        let function = Declaration {
+            name: String::from("maybe"),
+            kind: DeclarationKind::Function,
+            detail: String::from("(x:T | None)->T | None"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: vec![typepython_binding::GenericTypeParam {
+                name: String::from("T"),
+                bound: None,
+            }],
+        };
+        let signature = vec![typepython_syntax::DirectFunctionParamSite {
+            name: String::from("x"),
+            annotation: Some(String::from("T | None")),
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        }];
+        let call = typepython_binding::CallSite {
+            callee: String::from("maybe"),
+            arg_count: 1,
+            arg_types: vec![String::from("int | None")],
+            arg_values: Vec::new(),
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
+            line: 1,
+        };
+
+        let substitutions = crate::infer_generic_type_param_substitutions(
+            &node,
+            &[],
+            &function,
+            &signature,
+            &call,
+        )
+        .expect("union actual should infer through Optional-like annotation");
+
+        assert_eq!(substitutions.get("T").map(String::as_str), Some("int"));
+    }
+
+    #[test]
+    fn check_reports_conflicting_union_aware_generic_inference() {
+        let result = check_temp_typepython_source(
+            "value: str | None = \"x\"\n\ndef choose[T](x: T | None, y: T) -> T:\n    return y\n\nout: int = choose(value, 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("returns `T` where `out` expects `int`") || rendered.contains("assigns `T` where `out` expects `int`") || rendered.contains("call to `choose`"));
     }
 
     #[test]
