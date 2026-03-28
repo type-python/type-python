@@ -3641,6 +3641,15 @@ fn extract_ast_backed_statement(
                 None
             }
         }
+        Stmt::AugAssign(stmt) => extract_augmented_assignment_value_statement(
+            source,
+            &stmt.target,
+            &stmt.value,
+            stmt.op,
+            None,
+            None,
+            line,
+        ),
         Stmt::If(stmt) => Some(SyntaxStatement::If(IfStatement {
             owner_name: None,
             owner_type_name: None,
@@ -3657,16 +3666,6 @@ fn extract_ast_backed_statement(
             guard: extract_guard_condition(source, &stmt.test),
             line,
         })),
-        Stmt::AugAssign(stmt) => {
-            let names = extract_assignment_names(&stmt.target);
-            (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
-                kind: InvalidationKind::RebindLike,
-                owner_name: None,
-                owner_type_name: None,
-                names,
-                line,
-            }))
-        }
         Stmt::Delete(stmt) => {
             let names = stmt.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>();
             (!names.is_empty()).then_some(SyntaxStatement::Invalidate(InvalidationStatement {
@@ -5424,51 +5423,115 @@ fn extract_function_body_bare_assignment_statement(
     owner_name: &str,
     owner_type_name: Option<&str>,
 ) -> Option<SyntaxStatement> {
-    let Stmt::Assign(assign) = stmt else {
-        return None;
-    };
-    let destructuring_target_names = (assign.targets.len() == 1)
-        .then(|| extract_simple_destructuring_target_names(&assign.targets[0]))
-        .flatten();
-    let names = destructuring_target_names.clone().unwrap_or_else(|| {
-        assign.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>()
-    });
+    match stmt {
+        Stmt::Assign(assign) => {
+            let destructuring_target_names = (assign.targets.len() == 1)
+                .then(|| extract_simple_destructuring_target_names(&assign.targets[0]))
+                .flatten();
+            let names = destructuring_target_names.clone().unwrap_or_else(|| {
+                assign.targets.iter().flat_map(extract_assignment_names).collect::<Vec<_>>()
+            });
+            if names.is_empty() {
+                return None;
+            }
+            let value = extract_direct_expr_metadata(source, &assign.value);
+            Some(SyntaxStatement::Value(ValueStatement {
+                names,
+                destructuring_target_names,
+                annotation: None,
+                value_type: value.value_type,
+                is_awaited: value.is_awaited,
+                value_callee: value.value_callee,
+                value_name: value.value_name,
+                value_member_owner_name: value.value_member_owner_name,
+                value_member_name: value.value_member_name,
+                value_member_through_instance: value.value_member_through_instance,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: value.value_subscript_target,
+                value_subscript_string_key: value.value_subscript_string_key,
+                value_subscript_index: value.value_subscript_index,
+                value_if_true: value.value_if_true,
+                value_if_false: value.value_if_false,
+                value_if_guard: value.value_if_guard,
+                value_bool_left: value.value_bool_left,
+                value_bool_right: value.value_bool_right,
+                value_binop_left: value.value_binop_left,
+                value_binop_right: value.value_binop_right,
+                value_binop_operator: value.value_binop_operator,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_list_elements: value.value_list_elements,
+                value_set_elements: value.value_set_elements,
+                value_dict_entries: value.value_dict_entries,
+                owner_name: Some(owner_name.to_owned()),
+                owner_type_name: owner_type_name.map(str::to_owned),
+                is_final: false,
+                is_class_var: false,
+                line,
+            }))
+        }
+        Stmt::AugAssign(assign) => extract_augmented_assignment_value_statement(
+            source,
+            &assign.target,
+            &assign.value,
+            assign.op,
+            Some(owner_name),
+            owner_type_name,
+            line,
+        ),
+        _ => None,
+    }
+}
+
+fn extract_augmented_assignment_value_statement(
+    source: &str,
+    target: &Expr,
+    value: &Expr,
+    operator: ruff_python_ast::Operator,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    line: usize,
+) -> Option<SyntaxStatement> {
+    let names = extract_assignment_names(target);
     if names.is_empty() {
         return None;
     }
-    let value = extract_direct_expr_metadata(source, &assign.value);
+    let right = extract_direct_expr_metadata(source, value);
     Some(SyntaxStatement::Value(ValueStatement {
         names,
-        destructuring_target_names,
+        destructuring_target_names: None,
         annotation: None,
-        value_type: value.value_type,
-        is_awaited: value.is_awaited,
-        value_callee: value.value_callee,
-        value_name: value.value_name,
-        value_member_owner_name: value.value_member_owner_name,
-        value_member_name: value.value_member_name,
-        value_member_through_instance: value.value_member_through_instance,
+        value_type: None,
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
-        value_subscript_target: value.value_subscript_target,
-        value_subscript_string_key: value.value_subscript_string_key,
-        value_subscript_index: value.value_subscript_index,
-        value_if_true: value.value_if_true,
-        value_if_false: value.value_if_false,
-        value_if_guard: value.value_if_guard,
-        value_bool_left: value.value_bool_left,
-        value_bool_right: value.value_bool_right,
-        value_binop_left: value.value_binop_left,
-        value_binop_right: value.value_binop_right,
-        value_binop_operator: value.value_binop_operator,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, target))),
+        value_binop_right: Some(Box::new(right)),
+        value_binop_operator: Some(direct_operator_text(operator)),
         value_lambda: None,
         value_list_comprehension: None,
         value_generator_comprehension: None,
-        value_list_elements: value.value_list_elements,
-        value_set_elements: value.value_set_elements,
-        value_dict_entries: value.value_dict_entries,
-        owner_name: Some(owner_name.to_owned()),
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+        owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         is_final: false,
         is_class_var: false,

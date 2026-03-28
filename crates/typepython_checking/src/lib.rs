@@ -126,6 +126,9 @@ pub fn check_with_options(
         for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
             diagnostics.push(assignment_diagnostic);
         }
+        for assignment_diagnostic in simple_name_augmented_assignment_diagnostics(node, &graph.nodes) {
+            diagnostics.push(assignment_diagnostic);
+        }
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
@@ -1783,6 +1786,127 @@ fn annotated_assignment_type_diagnostics(
     }
 
     diagnostics
+}
+
+fn simple_name_augmented_assignment_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.assignments
+        .iter()
+        .filter(|assignment| assignment.annotation.is_none())
+        .filter(|assignment| {
+            assignment
+                .value_binop_left
+                .as_deref()
+                .and_then(|left| left.value_name.as_deref())
+                == Some(assignment.name.as_str())
+                && assignment.value_binop_right.is_some()
+                && assignment.value_binop_operator.is_some()
+        })
+        .filter(|assignment| {
+            node.invalidations.iter().any(|site| {
+                site.kind == typepython_binding::InvalidationKind::RebindLike
+                    && site.line == assignment.line
+                    && site.owner_name == assignment.owner_name
+                    && site.owner_type_name == assignment.owner_type_name
+                    && site.names.iter().any(|name| name == &assignment.name)
+            })
+        })
+        .filter_map(|assignment| {
+            let signature = resolve_assignment_owner_signature(node, assignment);
+            let expected = resolve_current_augmented_assignment_target_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                &assignment.name,
+            )?;
+            let actual = resolve_augmented_assignment_result_type(
+                node,
+                nodes,
+                signature,
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                assignment.value_binop_operator.as_deref(),
+                &expected,
+                assignment.value_binop_right.as_deref()?,
+            )?;
+            (!direct_type_matches(&expected, &actual)).then(|| {
+                Diagnostic::error(
+                    "TPY4001",
+                    match (&assignment.owner_type_name, &assignment.owner_name) {
+                        (Some(owner_type_name), Some(owner_name)) => format!(
+                            "type `{}` in module `{}` augmented-assigns `{}` where local `{}` in `{}` expects `{}`",
+                            owner_type_name,
+                            node.module_path.display(),
+                            actual,
+                            assignment.name,
+                            owner_name,
+                            expected
+                        ),
+                        (None, Some(owner_name)) => format!(
+                            "function `{}` in module `{}` augmented-assigns `{}` where local `{}` expects `{}`",
+                            owner_name,
+                            node.module_path.display(),
+                            actual,
+                            assignment.name,
+                            expected
+                        ),
+                        _ => format!(
+                            "module `{}` augmented-assigns `{}` where `{}` expects `{}`",
+                            node.module_path.display(),
+                            actual,
+                            assignment.name,
+                            expected
+                        ),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn resolve_current_augmented_assignment_target_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    if let Some(signature) = signature {
+        let signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(signature, current_owner_type_name),
+        );
+        if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
+            return Some(param_type);
+        }
+    }
+
+    match current_owner_name {
+        Some(owner_name) => resolve_local_assignment_reference_type(
+            node,
+            nodes,
+            signature,
+            Some(owner_name),
+            current_owner_type_name,
+            current_line,
+            value_name,
+        ),
+        None => resolve_module_level_assignment_reference_type(
+            node,
+            nodes,
+            signature,
+            current_line,
+            value_name,
+        ),
+    }
 }
 
 fn direct_expr_metadata_from_assignment_site(
@@ -17204,6 +17328,24 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_local_name_augmented_assignment() {
+        let result = check_temp_typepython_source("def build() -> None:\n    value: int = 1\n    value += 2\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_local_name_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "def build() -> None:\n    value: int = 1\n    value += \"bad\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("augmented-assigns `str` where local `value` expects `int`"));
+    }
+
+    #[test]
     fn check_does_not_reuse_deleted_local_assignment_type() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -17628,6 +17770,22 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_module_level_name_augmented_assignment() {
+        let result = check_temp_typepython_source("value: int = 1\nvalue += 2\n");
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_module_level_name_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source("value: int = 1\nvalue += \"bad\"\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("augmented-assigns `str` where `value` expects `int`"));
     }
 
     #[test]

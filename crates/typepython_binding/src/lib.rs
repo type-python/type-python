@@ -819,38 +819,37 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 type_params: Vec::new(),
             })
             .collect(),
-        SyntaxStatement::Value(statement) => statement
-            .owner_name
-            .is_none()
-            .then_some(statement)
-            .into_iter()
-            .flat_map(|statement| {
-                statement
-                    .names
-                    .iter()
-                    .cloned()
-                    .map(|name| Declaration {
-                        name,
-                        kind: DeclarationKind::Value,
-                        detail: statement.annotation.clone().unwrap_or_default(),
-                        value_type: statement.value_type.clone(),
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: statement.is_final,
-                        is_class_var: statement.is_class_var,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect(),
+        SyntaxStatement::Value(statement) => (statement.owner_name.is_none()
+            && !value_statement_is_rebind_like_update(statement))
+        .then_some(statement)
+        .into_iter()
+        .flat_map(|statement| {
+            statement
+                .names
+                .iter()
+                .cloned()
+                .map(|name| Declaration {
+                    name,
+                    kind: DeclarationKind::Value,
+                    detail: statement.annotation.clone().unwrap_or_default(),
+                    value_type: statement.value_type.clone(),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: statement.is_final,
+                    is_class_var: statement.is_class_var,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect(),
         SyntaxStatement::Call(_) => Vec::new(),
         SyntaxStatement::MethodCall(_) => Vec::new(),
         SyntaxStatement::MemberAccess(_) => Vec::new(),
@@ -865,6 +864,14 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::ExceptHandler(_) => Vec::new(),
         SyntaxStatement::Unsafe(_) => Vec::new(),
     }
+}
+
+fn value_statement_is_rebind_like_update(statement: &typepython_syntax::ValueStatement) -> bool {
+    statement.annotation.is_none()
+        && statement.names.len() == 1
+        && statement.value_binop_operator.is_some()
+        && statement.value_binop_left.as_deref().and_then(|left| left.value_name.as_deref())
+            == statement.names.first().map(String::as_str)
 }
 
 fn map_guard_condition(condition: &typepython_syntax::GuardCondition) -> GuardConditionSite {
