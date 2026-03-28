@@ -2094,7 +2094,10 @@ fn resolve_augmented_assignment_result_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
-    site: &typepython_syntax::TypedDictMutationSite,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    current_line: usize,
+    operator: Option<&str>,
     left_type: &str,
     value: &typepython_syntax::DirectExprMetadata,
 ) -> Option<String> {
@@ -2103,21 +2106,21 @@ fn resolve_augmented_assignment_result_type(
         node,
         nodes,
         signature,
-        site.owner_name.as_deref(),
-        site.owner_type_name.as_deref(),
-        site.line,
+        owner_name,
+        owner_type_name,
+        current_line,
         Some(&left),
         Some(value),
-        site.operator.as_deref().filter(|operator| !operator.is_empty()),
+        operator.filter(|operator| !operator.is_empty()),
     )
     .or_else(|| {
         resolve_direct_expression_type_from_metadata(
             node,
             nodes,
             signature,
-            site.owner_name.as_deref(),
-            site.owner_type_name.as_deref(),
-            site.line,
+            owner_name,
+            owner_type_name,
+            current_line,
             value,
         )
     })
@@ -2270,7 +2273,10 @@ fn typed_dict_readonly_mutation_diagnostics(
                         node,
                         nodes,
                         signature,
-                        &site,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        site.operator.as_deref(),
                         &field.value_type,
                         value,
                     )?;
@@ -2539,7 +2545,10 @@ fn subscript_assignment_type_diagnostics(
                                 node,
                                 nodes,
                                 signature,
-                                &site,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
+                                site.line,
+                                site.operator.as_deref(),
                                 &readable_type,
                                 value,
                             )?;
@@ -2819,7 +2828,7 @@ fn attribute_assignment_type_diagnostics(
     typepython_syntax::collect_frozen_field_mutation_sites(&source)
         .into_iter()
         .filter_map(|site| {
-            if site.kind != typepython_syntax::FrozenFieldMutationKind::Assignment {
+            if site.kind == typepython_syntax::FrozenFieldMutationKind::Delete {
                 return None;
             }
 
@@ -2853,134 +2862,236 @@ fn attribute_assignment_type_diagnostics(
                 Some(WritableAttributeTarget::Value(declaration)) => {
                     let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
-                    let contextual = resolve_contextual_call_arg_type(
-                        node,
-                        nodes,
-                        site.line,
-                        value,
-                        Some(&expected),
-                    );
-                    if let Some(mut result) = contextual {
-                        if let Some(diagnostic) = result.diagnostics.pop() {
-                            return Some(diagnostic);
+                    match site.kind {
+                        typepython_syntax::FrozenFieldMutationKind::Assignment => {
+                            let contextual = resolve_contextual_call_arg_type(
+                                node,
+                                nodes,
+                                site.line,
+                                value,
+                                Some(&expected),
+                            );
+                            if let Some(mut result) = contextual {
+                                if let Some(diagnostic) = result.diagnostics.pop() {
+                                    return Some(diagnostic);
+                                }
+                                let actual = result.actual_type;
+                                return (!direct_type_matches(&expected, &actual)).then(|| {
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                            target_type,
+                                            node.module_path.display(),
+                                            actual,
+                                            site.field_name,
+                                            expected,
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    ))
+                                });
+                            }
+                            let actual = resolve_direct_expression_type_from_metadata(
+                                node,
+                                nodes,
+                                signature,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
+                                site.line,
+                                value,
+                            )?;
+                            (!direct_type_matches(&expected, &actual)).then(|| {
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                        target_type,
+                                        node.module_path.display(),
+                                        actual,
+                                        site.field_name,
+                                        expected,
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                ))
+                            })
                         }
-                        let actual = result.actual_type;
-                        return (!direct_type_matches(&expected, &actual)).then(|| {
-                            Diagnostic::error(
-                                "TPY4001",
-                                format!(
-                                    "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                    target_type,
-                                    node.module_path.display(),
-                                    actual,
-                                    site.field_name,
-                                    expected,
-                                ),
-                            )
-                            .with_span(Span::new(
-                                node.module_path.display().to_string(),
+                        typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
+                            let actual = resolve_augmented_assignment_result_type(
+                                node,
+                                nodes,
+                                signature,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
                                 site.line,
-                                1,
-                                site.line,
-                                1,
-                            ))
-                        });
+                                site.operator.as_deref(),
+                                &expected,
+                                value,
+                            )?;
+                            (!direct_type_matches(&expected, &actual)).then(|| {
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "augmented attribute assignment on `{}` in module `{}` produces `{}` where member `{}` expects `{}`",
+                                        target_type,
+                                        node.module_path.display(),
+                                        actual,
+                                        site.field_name,
+                                        expected,
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                ))
+                            })
+                        }
+                        typepython_syntax::FrozenFieldMutationKind::Delete => None,
                     }
-                    let actual = resolve_direct_expression_type_from_metadata(
-                        node,
-                        nodes,
-                        signature,
-                        site.owner_name.as_deref(),
-                        site.owner_type_name.as_deref(),
-                        site.line,
-                        value,
-                    )?;
-                    (!direct_type_matches(&expected, &actual)).then(|| {
-                        Diagnostic::error(
-                            "TPY4001",
-                            format!(
-                                "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                target_type,
-                                node.module_path.display(),
-                                actual,
-                                site.field_name,
-                                expected,
-                            ),
-                        )
-                        .with_span(Span::new(
-                            node.module_path.display().to_string(),
-                            site.line,
-                            1,
-                            site.line,
-                            1,
-                        ))
-                    })
                 }
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
                     let expected = resolve_writable_member_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
-                    let contextual = resolve_contextual_call_arg_type(
-                        node,
-                        nodes,
-                        site.line,
-                        value,
-                        Some(&expected),
-                    );
-                    if let Some(mut result) = contextual {
-                        if let Some(diagnostic) = result.diagnostics.pop() {
-                            return Some(diagnostic);
+                    match site.kind {
+                        typepython_syntax::FrozenFieldMutationKind::Assignment => {
+                            let contextual = resolve_contextual_call_arg_type(
+                                node,
+                                nodes,
+                                site.line,
+                                value,
+                                Some(&expected),
+                            );
+                            if let Some(mut result) = contextual {
+                                if let Some(diagnostic) = result.diagnostics.pop() {
+                                    return Some(diagnostic);
+                                }
+                                let actual = result.actual_type;
+                                return (!direct_type_matches(&expected, &actual)).then(|| {
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                            target_type,
+                                            node.module_path.display(),
+                                            actual,
+                                            site.field_name,
+                                            expected,
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    ))
+                                });
+                            }
+                            let actual = resolve_direct_expression_type_from_metadata(
+                                node,
+                                nodes,
+                                signature,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
+                                site.line,
+                                value,
+                            )?;
+                            (!direct_type_matches(&expected, &actual)).then(|| {
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                        target_type,
+                                        node.module_path.display(),
+                                        actual,
+                                        site.field_name,
+                                        expected,
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                ))
+                            })
                         }
-                        let actual = result.actual_type;
-                        return (!direct_type_matches(&expected, &actual)).then(|| {
-                            Diagnostic::error(
-                                "TPY4001",
-                                format!(
-                                    "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                    target_type,
-                                    node.module_path.display(),
-                                    actual,
-                                    site.field_name,
-                                    expected,
-                                ),
-                            )
-                            .with_span(Span::new(
-                                node.module_path.display().to_string(),
+                        typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
+                            let Some(readable) = find_owned_readable_member_declaration(
+                                nodes,
+                                class_node,
+                                class_decl,
+                                &site.field_name,
+                            ) else {
+                                return Some(
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "attribute `{}` on `{}` in module `{}` is not readable for augmented assignment",
+                                            site.field_name,
+                                            target_type,
+                                            node.module_path.display(),
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    )),
+                                );
+                            };
+                            let readable_type = resolve_readable_member_type(node, readable, &target_type)?;
+                            let actual = resolve_augmented_assignment_result_type(
+                                node,
+                                nodes,
+                                signature,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
                                 site.line,
-                                1,
-                                site.line,
-                                1,
-                            ))
-                        });
+                                site.operator.as_deref(),
+                                &readable_type,
+                                value,
+                            )?;
+                            (!direct_type_matches(&expected, &actual)).then(|| {
+                                Diagnostic::error(
+                                    "TPY4001",
+                                    format!(
+                                        "augmented attribute assignment on `{}` in module `{}` produces `{}` where member `{}` expects `{}`",
+                                        target_type,
+                                        node.module_path.display(),
+                                        actual,
+                                        site.field_name,
+                                        expected,
+                                    ),
+                                )
+                                .with_span(Span::new(
+                                    node.module_path.display().to_string(),
+                                    site.line,
+                                    1,
+                                    site.line,
+                                    1,
+                                ))
+                            })
+                        }
+                        typepython_syntax::FrozenFieldMutationKind::Delete => None,
                     }
-                    let actual = resolve_direct_expression_type_from_metadata(
-                        node,
-                        nodes,
-                        signature,
-                        site.owner_name.as_deref(),
-                        site.owner_type_name.as_deref(),
-                        site.line,
-                        value,
-                    )?;
-                    (!direct_type_matches(&expected, &actual)).then(|| {
-                        Diagnostic::error(
-                            "TPY4001",
-                            format!(
-                                "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                target_type,
-                                node.module_path.display(),
-                                actual,
-                                site.field_name,
-                                expected,
-                            ),
-                        )
-                        .with_span(Span::new(
-                            node.module_path.display().to_string(),
-                            site.line,
-                            1,
-                            site.line,
-                            1,
-                        ))
-                    })
                 }
                 Some(WritableAttributeTarget::ReadOnlyProperty) => Some(
                     Diagnostic::error(
@@ -30658,6 +30769,27 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_declared_attribute_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    count: int\n\ndef mutate(box: Box) -> None:\n    box.count += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_declared_attribute_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    count: int\n\ndef mutate(box: Box) -> None:\n    box.count += \"x\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("produces `str` where member `count` expects `int`"));
+    }
+
+    #[test]
     fn check_ignores_undeclared_attribute_assignment_target() {
         let result = check_temp_typepython_source(
             "class Box:\n    name: str\n\ndef mutate(box: Box) -> None:\n    box.age = 1\n",
@@ -30680,6 +30812,18 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_getter_only_property_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def count(self) -> int:\n        return 0\n\ndef mutate(box: Box) -> None:\n    box.count += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("property `count` on `Box`"));
+        assert!(rendered.contains("is not writable"));
+    }
+
+    #[test]
     fn check_accepts_property_setter_assignment() {
         let result = check_temp_typepython_source(
             "class Box:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\n    @name.setter\n    def name(self, value: str) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
@@ -30687,6 +30831,27 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_property_setter_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def count(self) -> int:\n        return 0\n\n    @count.setter\n    def count(self, value: int) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.count += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_property_setter_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def count(self) -> int:\n        return 0\n\n    @count.setter\n    def count(self, value: int) -> None:\n        pass\n\ndef mutate(box: Box) -> None:\n    box.count += \"x\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("produces `str` where member `count` expects `int`"));
     }
 
     #[test]
