@@ -4089,6 +4089,79 @@ fn find_owned_value_declaration<'a>(
     })
 }
 
+fn find_owned_readable_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+            || (declaration.kind == DeclarationKind::Function
+                && declaration.method_kind == Some(typepython_syntax::MethodKind::Property))
+    })
+}
+
+fn resolve_readable_member_type(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    owner_type_name: &str,
+) -> Option<String> {
+    match declaration.kind {
+        DeclarationKind::Value => {
+            let detail = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(&declaration.detail, Some(owner_type_name)),
+            );
+            normalized_direct_return_annotation(&detail).map(normalize_type_text).or_else(|| {
+                declaration.value_type.as_deref().map(|value| {
+                    normalize_type_text(&rewrite_imported_typing_aliases(
+                        node,
+                        &substitute_self_annotation(value, Some(owner_type_name)),
+                    ))
+                })
+            })
+        }
+        DeclarationKind::Function
+            if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
+        {
+            let return_text = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(
+                    declaration.detail.split_once("->")?.1.trim(),
+                    Some(owner_type_name),
+                ),
+            );
+            normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_member_access_owner_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    access: &typepython_binding::MemberAccessSite,
+) -> Option<String> {
+    if access.through_instance {
+        resolve_direct_callable_return_type(node, nodes, &access.owner_name)
+            .map(|return_type| normalize_type_text(&return_type))
+            .or_else(|| Some(access.owner_name.clone()))
+    } else {
+        resolve_direct_name_reference_type(
+            node,
+            nodes,
+            None,
+            None,
+            None,
+            None,
+            usize::MAX,
+            &access.owner_name,
+        )
+        .or_else(|| Some(access.owner_name.clone()))
+    }
+}
+
 fn find_owned_callable_declaration<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     class_node: &'a typepython_graph::ModuleNode,
@@ -5646,22 +5719,11 @@ fn resolve_direct_member_reference_type(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let member = find_owned_value_declaration(nodes, class_node, class_decl, member_name)?;
+    let member = find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(format!("Literal[{}.{}]", class_decl.name, member_name));
     }
-    let detail = rewrite_imported_typing_aliases(
-        node,
-        &substitute_self_annotation(&member.detail, Some(&owner_type_name)),
-    );
-    normalized_direct_return_annotation(&detail).map(normalize_type_text).or_else(|| {
-        member.value_type.as_deref().map(|value| {
-            normalize_type_text(&rewrite_imported_typing_aliases(
-                node,
-                &substitute_self_annotation(value, Some(&owner_type_name)),
-            ))
-        })
-    })
+    resolve_readable_member_type(node, member, &owner_type_name)
 }
 
 fn is_enum_like_class(
@@ -5853,9 +5915,10 @@ fn direct_member_access_diagnostics(
     node.member_accesses
         .iter()
         .filter_map(|access| {
-            let (class_node, class_decl) = resolve_direct_base(nodes, node, &access.owner_name)?;
+            let owner_type_name = resolve_member_access_owner_type(node, nodes, access)?;
+            let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
             let has_member =
-                find_owned_value_declaration(nodes, class_node, class_decl, &access.member)
+                find_owned_readable_member_declaration(nodes, class_node, class_decl, &access.member)
                     .is_some();
 
             (!has_member).then(|| {
@@ -28663,6 +28726,473 @@ mod tests {
                 summary_fingerprint: 1,
                 calls: Vec::new(),
                 method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_property_access_in_return() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->str"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Property),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(box:Box)->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("name")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_property_access_assignment_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->str"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Property),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(box:Box)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: vec![typepython_binding::AssignmentSite {
+                    name: String::from("value"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
+                    annotation: Some(String::from("int")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("name")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    owner_name: Some(String::from("build")),
+                    owner_type_name: None,
+                    line: 2,
+                }],
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `str` where local `value` expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_inherited_property_access() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Base"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->str"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Property),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Base"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Base")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("build"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(box:Box)->str"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("build"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: Some(String::from("box")),
+                    value_member_name: Some(String::from("name")),
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_bare_property_member_access() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Box"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("box"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("Box"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(self)->str"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Property),
+                        class_kind: None,
+                        owner: Some(typepython_binding::DeclarationOwner {
+                            name: String::from("Box"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: vec![typepython_binding::MemberAccessSite {
+                    owner_name: String::from("box"),
+                    member: String::from("name"),
+                    through_instance: false,
+                }],
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
             }],
         });
 
