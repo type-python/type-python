@@ -15981,6 +15981,26 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_namedexpr_binding_for_later_flow() {
+        let result = check_temp_typepython_source(
+            "def build() -> int:\n    if (tmp := 1):\n        return tmp\n    return tmp\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_namedexpr_binding_mismatch_for_later_assignment() {
+        let result = check_temp_typepython_source(
+            "def build() -> None:\n    if (tmp := 1):\n        pass\n    value: str = tmp\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `int` where local `value` expects `str`"));
+    }
+
+    #[test]
     fn check_accepts_starred_tuple_call_expansion() {
         let result = check_temp_typepython_source(
             "def takes(x: int, y: int) -> None:\n    return None\n\nxs: tuple[int, int] = (1, 2)\ntakes(*xs)\n",

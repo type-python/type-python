@@ -2458,6 +2458,13 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 None,
                 &mut statements,
             );
+            collect_function_body_namedexpr_assignments(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             statements.sort_by_key(statement_line);
         }
         Err(error) => {
@@ -2571,6 +2578,13 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                     None,
                     &mut statements,
                 );
+                collect_function_body_namedexpr_assignments(
+                    &normalized,
+                    parsed.suite(),
+                    None,
+                    None,
+                    &mut statements,
+                );
                 statements.sort_by_key(statement_line);
             }
             Err(error) => {
@@ -2592,7 +2606,12 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
 }
 
 fn parse_error_code(message: &str) -> &'static str {
-    if matches!(message, "Invalid assignment target" | "Invalid delete target") {
+    if matches!(
+        message,
+        "Invalid assignment target"
+            | "Invalid delete target"
+            | "Assignment expression target must be an identifier"
+    ) {
         "TPY4011"
     } else {
         "TPY2001"
@@ -5097,6 +5116,126 @@ fn collect_function_body_bare_assignments(
                 });
             }
         }
+    }
+}
+
+fn collect_function_body_namedexpr_assignments(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_function_body_namedexpr_assignments(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_function_body_namedexpr_assignments(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
+            }
+            _ => {
+                let Some(owner_name) = owner_name else {
+                    continue;
+                };
+                let mut collector = NamedExprAssignmentCollector {
+                    source,
+                    owner_name,
+                    owner_type_name,
+                    statements: Vec::new(),
+                };
+                collector.visit_stmt(stmt);
+                statements.extend(collector.statements);
+            }
+        }
+    }
+}
+
+struct NamedExprAssignmentCollector<'a> {
+    source: &'a str,
+    owner_name: &'a str,
+    owner_type_name: Option<&'a str>,
+    statements: Vec<SyntaxStatement>,
+}
+
+impl<'a> NamedExprAssignmentCollector<'a> {
+    fn push_namedexpr_assignment(&mut self, named_expr: &ruff_python_ast::ExprNamed) {
+        let Expr::Name(name) = named_expr.target.as_ref() else {
+            return;
+        };
+        let line = offset_to_line_column(self.source, named_expr.range().start().to_usize()).0;
+        let value = extract_direct_expr_metadata(self.source, &named_expr.value);
+        self.statements.push(SyntaxStatement::Value(ValueStatement {
+            names: vec![name.id.as_str().to_owned()],
+            annotation: None,
+            value_type: value.value_type,
+            is_awaited: value.is_awaited,
+            value_callee: value.value_callee,
+            value_name: value.value_name,
+            value_member_owner_name: value.value_member_owner_name,
+            value_member_name: value.value_member_name,
+            value_member_through_instance: value.value_member_through_instance,
+            value_method_owner_name: value.value_method_owner_name,
+            value_method_name: value.value_method_name,
+            value_method_through_instance: value.value_method_through_instance,
+            value_subscript_target: value.value_subscript_target,
+            value_subscript_string_key: value.value_subscript_string_key,
+            value_subscript_index: value.value_subscript_index,
+            value_if_true: value.value_if_true,
+            value_if_false: value.value_if_false,
+            value_if_guard: value.value_if_guard,
+            value_bool_left: value.value_bool_left,
+            value_bool_right: value.value_bool_right,
+            value_binop_left: value.value_binop_left,
+            value_binop_right: value.value_binop_right,
+            value_binop_operator: value.value_binop_operator,
+            value_lambda: value.value_lambda,
+            value_list_comprehension: value.value_list_comprehension,
+            value_generator_comprehension: value.value_generator_comprehension,
+            owner_name: Some(self.owner_name.to_owned()),
+            owner_type_name: self.owner_type_name.map(str::to_owned),
+            is_final: false,
+            is_class_var: false,
+            line,
+        }));
+    }
+}
+
+impl<'a> visitor::Visitor<'a> for NamedExprAssignmentCollector<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if matches!(stmt, Stmt::FunctionDef(_) | Stmt::ClassDef(_)) {
+            return;
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Lambda(_)
+            | Expr::ListComp(_)
+            | Expr::SetComp(_)
+            | Expr::DictComp(_)
+            | Expr::Generator(_) => return,
+            Expr::Named(named_expr) => {
+                self.push_namedexpr_assignment(named_expr);
+                self.visit_expr(&named_expr.value);
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_expr(self, expr);
     }
 }
 
@@ -7994,6 +8133,48 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn parse_extracts_function_body_namedexpr_assignments() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("namedexpr.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def build() -> int:\n    if (tmp := 1):\n        return tmp\n    return 0\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        let walrus_assignment = tree.statements.iter().find_map(|statement| match statement {
+            SyntaxStatement::Value(statement)
+                if statement.names == vec![String::from("tmp")]
+                    && statement.owner_name.as_deref() == Some("build") =>
+            {
+                Some(statement)
+            }
+            _ => None,
+        });
+        let walrus_assignment = walrus_assignment.expect("named expression assignment statement");
+        assert_eq!(walrus_assignment.annotation, None);
+        assert_eq!(walrus_assignment.value_type.as_deref(), Some("int"));
+        assert_eq!(walrus_assignment.value_name, None);
+        assert_eq!(walrus_assignment.line, 2);
+    }
+
+    #[test]
+    fn parse_reports_namedexpr_non_name_target_as_invalid_assignment() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("namedexpr-invalid.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("value: int = (box.item := 1)\n"),
+        });
+
+        let rendered = tree.diagnostics.as_text();
+        assert!(rendered.contains("TPY4011"));
+        assert!(rendered.contains("Assignment expression target must be an identifier"));
     }
 
     #[test]
