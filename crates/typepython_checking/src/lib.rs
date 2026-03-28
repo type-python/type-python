@@ -126,9 +126,6 @@ pub fn check_with_options(
         for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
             diagnostics.push(assignment_diagnostic);
         }
-        for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
-            diagnostics.push(typed_dict_diagnostic);
-        }
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
@@ -1658,6 +1655,48 @@ fn annotated_assignment_type_diagnostics(
         }
 
         let assignment_metadata = direct_expr_metadata_from_assignment_site(assignment);
+        if let Some(result) = resolve_contextual_typed_dict_literal_type(
+            node,
+            nodes,
+            assignment.line,
+            &assignment_metadata,
+            Some(&expected),
+        ) {
+            diagnostics.extend(result.diagnostics);
+            if !direct_type_matches(&expected, &result.actual_type) {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4001",
+                    match (&assignment.owner_type_name, &assignment.owner_name) {
+                        (Some(owner_type_name), Some(owner_name)) => format!(
+                            "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
+                            owner_type_name,
+                            node.module_path.display(),
+                            result.actual_type,
+                            assignment.name,
+                            owner_name,
+                            expected
+                        ),
+                        (None, Some(owner_name)) => format!(
+                            "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
+                            owner_name,
+                            node.module_path.display(),
+                            result.actual_type,
+                            assignment.name,
+                            expected
+                        ),
+                        _ => format!(
+                            "module `{}` assigns `{}` where `{}` expects `{}`",
+                            node.module_path.display(),
+                            result.actual_type,
+                            assignment.name,
+                            expected
+                        ),
+                    },
+                ));
+            }
+            continue;
+        }
+
         if let Some(result) = resolve_contextual_collection_literal_type(
             node,
             nodes,
@@ -17647,6 +17686,48 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
         assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_typed_dict_literal_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nuser: User = {\"id\": 1, \"name\": \"Ada\"}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_assignment_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nuser: User = {\"id\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_assignment_value_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nuser: User = {\"id\": \"oops\", \"name\": \"Ada\"}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("assigns `str` to key `id`"));
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_assignment_unknown_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\nuser: User = {\"id\": 1, \"name\": \"Ada\", \"extra\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("unknown key `extra`"));
     }
 
     #[test]
