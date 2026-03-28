@@ -1252,8 +1252,8 @@ fn direct_expr_metadata_from_yield_site(
         value_lambda: yield_site.value_lambda.clone(),
         value_list_comprehension: None,
         value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
+        value_list_elements: yield_site.value_list_elements.clone(),
+        value_set_elements: yield_site.value_set_elements.clone(),
         value_dict_entries: yield_site.value_dict_entries.clone(),
     }
 }
@@ -1282,6 +1282,14 @@ fn resolve_contextual_yield_type(
         }
         if let Some(result) =
             resolve_contextual_typed_dict_literal_type(node, nodes, yield_site.line, &metadata, Some(expected))
+        {
+            return ContextualYieldTypeResult {
+                actual_type: Some(result.actual_type),
+                diagnostics: result.diagnostics,
+            };
+        }
+        if let Some(result) =
+            resolve_contextual_collection_literal_type(node, nodes, yield_site.line, &metadata, Some(expected))
         {
             return ContextualYieldTypeResult {
                 actual_type: Some(result.actual_type),
@@ -22433,6 +22441,8 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                     is_yield_from: false,
                     line: 2,
@@ -22506,6 +22516,8 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                     is_yield_from: false,
                     line: 2,
@@ -22525,6 +22537,47 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("function `produce` in module `src/app/module.py` yields `str` where `Generator[int, ...]` expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_list_generator_yield() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable, Generator\n\ndef produce() -> Generator[list[Callable[[int], str]], None, None]:\n    yield [lambda x: str(x)]\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_set_generator_yield_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable, Generator\n\ndef produce() -> Generator[set[Callable[[int], str]], None, None]:\n    yield {lambda x: x + 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_dict_generator_yield_nested_typed_dict() {
+        let result = check_temp_typepython_source(
+            "from typing import Generator, TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef produce() -> Generator[dict[str, User], None, None]:\n    yield {\"owner\": {\"id\": 1, \"name\": \"Ada\"}}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_dict_generator_yield_nested_typed_dict_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import Generator, TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef produce() -> Generator[dict[str, User], None, None]:\n    yield {\"owner\": {\"id\": 1}}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
     }
 
     #[test]
@@ -22642,6 +22695,8 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
                     value_dict_entries: None,
                     is_yield_from: true,
                     line: 2,
