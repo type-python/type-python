@@ -972,61 +972,40 @@ fn direct_return_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    node.returns
-        .iter()
-        .filter_map(|return_site| {
-            let target = node.declarations.iter().find(|declaration| {
-                declaration.name == return_site.owner_name
-                    && declaration.kind == DeclarationKind::Function
-                    && match (&return_site.owner_type_name, &declaration.owner) {
-                        (Some(owner_type), Some(owner)) => owner.name == *owner_type,
-                        (None, None) => true,
-                        _ => false,
-                    }
-            })?;
+    let mut diagnostics = Vec::new();
 
-            let expected_text = rewrite_imported_typing_aliases(
-                node,
-                &substitute_self_annotation(
-                    target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
-                    return_site.owner_type_name.as_deref(),
-                ),
-            );
-            let expected =
-                normalized_direct_return_annotation(&expected_text).map(normalize_type_text)?;
+    for return_site in &node.returns {
+        let Some(target) = node.declarations.iter().find(|declaration| {
+            declaration.name == return_site.owner_name
+                && declaration.kind == DeclarationKind::Function
+                && match (&return_site.owner_type_name, &declaration.owner) {
+                    (Some(owner_type), Some(owner)) => owner.name == *owner_type,
+                    (None, None) => true,
+                    _ => false,
+                }
+        }) else {
+            continue;
+        };
 
-            let actual = resolve_direct_expression_type(
-                node,
-                nodes,
-                Some(&target.detail),
-                None,
-                Some(return_site.owner_name.as_str()),
+        let expected_text = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(
+                target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
                 return_site.owner_type_name.as_deref(),
-                return_site.line,
-                return_site.value_type.as_deref(),
-                return_site.is_awaited,
-                return_site.value_callee.as_deref(),
-                return_site.value_name.as_deref(),
-                return_site.value_member_owner_name.as_deref(),
-                return_site.value_member_name.as_deref(),
-                return_site.value_member_through_instance,
-                return_site.value_method_owner_name.as_deref(),
-                return_site.value_method_name.as_deref(),
-                return_site.value_method_through_instance,
-                return_site.value_subscript_target.as_deref(),
-                return_site.value_subscript_string_key.as_deref(),
-                return_site.value_subscript_index.as_deref(),
-                return_site.value_if_true.as_deref(),
-                return_site.value_if_false.as_deref(),
-                return_site.value_if_guard.as_ref(),
-                return_site.value_bool_left.as_deref(),
-                return_site.value_bool_right.as_deref(),
-                return_site.value_binop_left.as_deref(),
-                return_site.value_binop_right.as_deref(),
-                return_site.value_binop_operator.as_deref(),
-            )?;
+            ),
+        );
+        let Some(expected) = normalized_direct_return_annotation(&expected_text).map(normalize_type_text) else {
+            continue;
+        };
 
-            (!direct_type_matches(&expected, &actual)).then(|| {
+        let contextual = resolve_contextual_return_type(node, nodes, return_site, &expected, &target.detail);
+        diagnostics.extend(contextual.diagnostics);
+        let Some(actual) = contextual.actual_type else {
+            continue;
+        };
+
+        if !direct_type_matches(&expected, &actual) {
+            diagnostics.push(
                 Diagnostic::error(
                     "TPY4001",
                     match &return_site.owner_type_name {
@@ -1054,10 +1033,134 @@ fn direct_return_type_diagnostics(
                     1,
                     return_site.line,
                     1,
-                ))
-            })
-        })
-        .collect()
+                )),
+            );
+        }
+    }
+
+    diagnostics
+}
+
+struct ContextualReturnTypeResult {
+    actual_type: Option<String>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+fn resolve_contextual_return_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+    expected: &str,
+    signature: &str,
+) -> ContextualReturnTypeResult {
+    let metadata = direct_expr_metadata_from_return_site(return_site);
+    if let Some(actual_type) =
+        resolve_contextual_lambda_callable_type(node, nodes, return_site.line, &metadata, Some(expected))
+    {
+        return ContextualReturnTypeResult {
+            actual_type: Some(actual_type),
+            diagnostics: Vec::new(),
+        };
+    }
+    if let Some(result) =
+        resolve_contextual_typed_dict_literal_type(node, nodes, return_site.line, &metadata, Some(expected))
+    {
+        return ContextualReturnTypeResult {
+            actual_type: Some(result.actual_type),
+            diagnostics: result.diagnostics,
+        };
+    }
+    ContextualReturnTypeResult {
+        actual_type: resolve_direct_expression_type(
+            node,
+            nodes,
+            Some(signature),
+            None,
+            Some(return_site.owner_name.as_str()),
+            return_site.owner_type_name.as_deref(),
+            return_site.line,
+            return_site.value_type.as_deref(),
+            return_site.is_awaited,
+            return_site.value_callee.as_deref(),
+            return_site.value_name.as_deref(),
+            return_site.value_member_owner_name.as_deref(),
+            return_site.value_member_name.as_deref(),
+            return_site.value_member_through_instance,
+            return_site.value_method_owner_name.as_deref(),
+            return_site.value_method_name.as_deref(),
+            return_site.value_method_through_instance,
+            return_site.value_subscript_target.as_deref(),
+            return_site.value_subscript_string_key.as_deref(),
+            return_site.value_subscript_index.as_deref(),
+            return_site.value_if_true.as_deref(),
+            return_site.value_if_false.as_deref(),
+            return_site.value_if_guard.as_ref(),
+            return_site.value_bool_left.as_deref(),
+            return_site.value_bool_right.as_deref(),
+            return_site.value_binop_left.as_deref(),
+            return_site.value_binop_right.as_deref(),
+            return_site.value_binop_operator.as_deref(),
+        ),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn direct_expr_metadata_from_return_site(
+    return_site: &typepython_binding::ReturnSite,
+) -> typepython_syntax::DirectExprMetadata {
+    typepython_syntax::DirectExprMetadata {
+        value_type: return_site.value_type.clone(),
+        is_awaited: return_site.is_awaited,
+        value_callee: return_site.value_callee.clone(),
+        value_name: return_site.value_name.clone(),
+        value_member_owner_name: return_site.value_member_owner_name.clone(),
+        value_member_name: return_site.value_member_name.clone(),
+        value_member_through_instance: return_site.value_member_through_instance,
+        value_method_owner_name: return_site.value_method_owner_name.clone(),
+        value_method_name: return_site.value_method_name.clone(),
+        value_method_through_instance: return_site.value_method_through_instance,
+        value_subscript_target: return_site.value_subscript_target.clone(),
+        value_subscript_string_key: return_site.value_subscript_string_key.clone(),
+        value_subscript_index: return_site.value_subscript_index.clone(),
+        value_if_true: return_site.value_if_true.clone(),
+        value_if_false: return_site.value_if_false.clone(),
+        value_if_guard: return_site.value_if_guard.as_ref().map(site_to_guard),
+        value_bool_left: return_site.value_bool_left.clone(),
+        value_bool_right: return_site.value_bool_right.clone(),
+        value_binop_left: return_site.value_binop_left.clone(),
+        value_binop_right: return_site.value_binop_right.clone(),
+        value_binop_operator: return_site.value_binop_operator.clone(),
+        value_lambda: return_site.value_lambda.clone(),
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_dict_entries: return_site.value_dict_entries.clone(),
+    }
+}
+
+fn site_to_guard(guard: &typepython_binding::GuardConditionSite) -> typepython_syntax::GuardCondition {
+    match guard {
+        typepython_binding::GuardConditionSite::IsNone { name, negated } => {
+            typepython_syntax::GuardCondition::IsNone { name: name.clone(), negated: *negated }
+        }
+        typepython_binding::GuardConditionSite::IsInstance { name, types } => {
+            typepython_syntax::GuardCondition::IsInstance { name: name.clone(), types: types.clone() }
+        }
+        typepython_binding::GuardConditionSite::PredicateCall { name, callee } => {
+            typepython_syntax::GuardCondition::PredicateCall { name: name.clone(), callee: callee.clone() }
+        }
+        typepython_binding::GuardConditionSite::TruthyName { name } => {
+            typepython_syntax::GuardCondition::TruthyName { name: name.clone() }
+        }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            typepython_syntax::GuardCondition::Not(Box::new(site_to_guard(inner)))
+        }
+        typepython_binding::GuardConditionSite::And(parts) => {
+            typepython_syntax::GuardCondition::And(parts.iter().map(site_to_guard).collect())
+        }
+        typepython_binding::GuardConditionSite::Or(parts) => {
+            typepython_syntax::GuardCondition::Or(parts.iter().map(site_to_guard).collect())
+        }
+    }
 }
 
 fn direct_yield_type_diagnostics(
@@ -12731,6 +12834,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -12804,6 +12909,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -12877,6 +12984,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -12984,6 +13093,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13089,6 +13200,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13196,6 +13309,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13301,6 +13416,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13374,6 +13491,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13445,6 +13564,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13561,6 +13682,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13675,6 +13798,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13791,6 +13916,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -13905,6 +14032,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 1,
                 }],
                 yields: Vec::new(),
@@ -14666,6 +14795,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -15381,6 +15512,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -15737,6 +15870,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -16148,6 +16283,46 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_lambda_callable_return() {
+        let result = check_temp_typepython_source(
+            "def make() -> Callable[[int], str]:\n    return lambda x: str(x)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_callable_return_mismatch() {
+        let result = check_temp_typepython_source(
+            "def make() -> Callable[[int], str]:\n    return lambda x: x + 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_accepts_contextual_typed_dict_literal_return() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef make_user() -> User:\n    return {\"id\": 1, \"name\": \"Ada\"}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_contextual_typed_dict_literal_return_missing_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n    name: str\n\ndef make_user() -> User:\n    return {\"id\": 1}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("missing required key `name`"));
     }
 
     #[test]
@@ -16789,6 +16964,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -17856,6 +18033,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -18139,6 +18318,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -20801,6 +20982,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 2,
                     },
                     typepython_binding::ReturnSite {
@@ -20827,6 +21010,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 5,
                     },
                 ],
@@ -20921,6 +21106,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 2,
                     },
                     typepython_binding::ReturnSite {
@@ -20947,6 +21134,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 5,
                     },
                 ],
@@ -23206,6 +23395,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -23598,6 +23789,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -23733,6 +23926,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -23866,6 +24061,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -24168,6 +24365,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -24255,6 +24454,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -24342,6 +24543,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -24562,6 +24765,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -24754,6 +24959,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -24832,6 +25039,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -24912,6 +25121,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 6,
                 }],
                 yields: Vec::new(),
@@ -24990,6 +25201,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -25068,6 +25281,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -25152,6 +25367,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -25230,6 +25447,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -25571,6 +25790,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -25654,6 +25875,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -25733,6 +25956,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -25837,6 +26062,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -25941,6 +26168,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -26046,6 +26275,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 3,
                     },
                     typepython_binding::ReturnSite {
@@ -26072,6 +26303,8 @@ mod tests {
                         value_binop_left: None,
                         value_binop_right: None,
                         value_binop_operator: None,
+                        value_lambda: None,
+                        value_dict_entries: None,
                         line: 4,
                     },
                 ],
@@ -26156,6 +26389,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -26247,6 +26482,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -26329,6 +26566,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -26413,6 +26652,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),
@@ -26503,6 +26744,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }],
                 yields: Vec::new(),
@@ -27045,6 +27288,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -27244,6 +27489,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }],
                 yields: Vec::new(),
@@ -27377,6 +27624,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -27510,6 +27759,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }],
                 yields: Vec::new(),
@@ -27989,6 +28240,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }],
                 yields: Vec::new(),

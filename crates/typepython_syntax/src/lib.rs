@@ -266,6 +266,8 @@ pub struct ReturnStatement {
     pub value_binop_left: Option<Box<DirectExprMetadata>>,
     pub value_binop_right: Option<Box<DirectExprMetadata>>,
     pub value_binop_operator: Option<String>,
+    pub value_lambda: Option<Box<LambdaMetadata>>,
+    pub value_dict_entries: Option<Vec<TypedDictLiteralEntry>>,
     pub line: usize,
 }
 
@@ -5708,6 +5710,8 @@ fn extract_return_statement(
         value_binop_left: value.value_binop_left,
         value_binop_right: value.value_binop_right,
         value_binop_operator: value.value_binop_operator,
+        value_lambda: value.value_lambda,
+        value_dict_entries: value.value_dict_entries,
         line,
     }))
 }
@@ -7458,6 +7462,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 })
             ]
@@ -7651,6 +7657,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }),
             ]
@@ -9239,6 +9247,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
             ]
@@ -9295,6 +9305,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -9332,6 +9344,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }),
             ]
@@ -9386,6 +9400,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
             ]
@@ -9448,6 +9464,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
             ]
@@ -9810,6 +9828,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 8,
                 }),
             ]
@@ -10177,6 +10197,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
             ]
@@ -10233,6 +10255,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
@@ -10270,6 +10294,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }),
             ]
@@ -10460,6 +10486,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 3,
                 }),
             ]
@@ -10514,6 +10542,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 2,
                 }),
             ]
@@ -10595,6 +10625,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }),
             ]
@@ -10676,6 +10708,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }),
             ]
@@ -10756,6 +10790,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }),
             ]
@@ -10917,6 +10953,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 4,
                 }),
             ]
@@ -10995,6 +11033,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 5,
                 }),
             ]
@@ -11086,6 +11126,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 7,
                 }),
             ]
@@ -11351,6 +11393,8 @@ mod tests {
                     value_binop_left: None,
                     value_binop_right: None,
                     value_binop_operator: None,
+                    value_lambda: None,
+                    value_dict_entries: None,
                     line: 12,
                 })
             ]
