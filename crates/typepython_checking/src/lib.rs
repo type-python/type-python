@@ -361,7 +361,13 @@ fn call_signature_params_are_applicable(
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
     let starred_positional = resolved_starred_positional_expansions(node, nodes, call);
-    let mut positional_types = call.arg_types.clone();
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_direct_signature(params, call.arg_count);
+    let expected_keyword_arg_types =
+        expected_keyword_arg_types_from_direct_signature(params, &call.keyword_names);
+    let resolved_keyword_arg_types =
+        resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
+    let mut positional_types = resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types);
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
         match expansion {
@@ -467,7 +473,7 @@ fn call_signature_params_are_applicable(
             arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
         });
     let keyword_ok =
-        call.keyword_names.iter().zip(&call.keyword_arg_types).all(|(keyword, arg_ty)| {
+        call.keyword_names.iter().zip(&resolved_keyword_arg_types).all(|(keyword, arg_ty)| {
             let Some(index) = params.iter().position(|param| param.name == *keyword) else {
                 let Some(param_ty) = keyword_variadic_type else {
                     return false;
@@ -1936,28 +1942,15 @@ fn resolve_callable_assignment_signature(
 ) -> Option<(Vec<String>, String)> {
     if let Some(lambda) = assignment.value_lambda.as_deref() {
         let expected = normalized_assignment_annotation(assignment.annotation.as_deref()?)?;
-        let (expected_params, _expected_return) = parse_callable_annotation(expected)?;
-        let expected_params = expected_params?;
-        if expected_params.len() != lambda.param_names.len() {
-            return None;
-        }
-        let local_bindings = lambda
-            .param_names
-            .iter()
-            .cloned()
-            .zip(expected_params.iter().cloned())
-            .collect::<BTreeMap<_, _>>();
-        let actual_return = resolve_direct_expression_type_from_metadata_with_bindings(
+        return resolve_contextual_lambda_callable_signature(
             node,
             nodes,
-            None,
             assignment.owner_name.as_deref(),
             assignment.owner_type_name.as_deref(),
             assignment.line,
-            &lambda.body,
-            &local_bindings,
-        )?;
-        return Some((expected_params, actual_return));
+            lambda,
+            expected,
+        );
     }
 
     if let Some(value_name) = assignment.value_name.as_deref() {
@@ -2059,6 +2052,155 @@ fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)
         split_top_level_type_args(params).into_iter().map(normalize_type_text).collect()
     };
     Some((Some(param_types), normalize_type_text(parts[1])))
+}
+
+fn resolve_contextual_lambda_callable_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: &str,
+) -> Option<(Vec<String>, String)> {
+    let (expected_params, _expected_return) = parse_callable_annotation(expected)?;
+    let expected_params = expected_params?;
+    if expected_params.len() != lambda.param_names.len() {
+        return Some((
+            vec![String::from("dynamic"); lambda.param_names.len()],
+            String::from("dynamic"),
+        ));
+    }
+    let local_bindings = lambda
+        .param_names
+        .iter()
+        .cloned()
+        .zip(expected_params.iter().cloned())
+        .collect::<BTreeMap<_, _>>();
+    let actual_return = resolve_direct_expression_type_from_metadata_with_bindings(
+        node,
+        nodes,
+        None,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        &lambda.body,
+        &local_bindings,
+    )?;
+    Some((expected_params, actual_return))
+}
+
+fn format_callable_annotation(param_types: &[String], return_type: &str) -> String {
+    normalize_type_text(&format!("Callable[[{}], {}]", param_types.join(", "), return_type))
+}
+
+fn resolve_contextual_lambda_callable_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<String> {
+    let lambda = metadata.value_lambda.as_deref()?;
+    let expected = expected?;
+    let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+        node,
+        nodes,
+        None,
+        None,
+        current_line,
+        lambda,
+        expected,
+    )?;
+    Some(format_callable_annotation(&param_types, &return_type))
+}
+
+fn expected_positional_arg_types_from_direct_signature(
+    params: &[DirectSignatureParam],
+    arg_count: usize,
+) -> Vec<Option<String>> {
+    let positional_params = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let variadic_type = params
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()));
+
+    (0..arg_count)
+        .map(|index| {
+            positional_params
+                .get(index)
+                .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()))
+                .or_else(|| variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_keyword_arg_types_from_direct_signature(
+    params: &[DirectSignatureParam],
+    keyword_names: &[String],
+) -> Vec<Option<String>> {
+    let keyword_variadic_type = params
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()));
+
+    keyword_names
+        .iter()
+        .map(|keyword| {
+            params
+                .iter()
+                .find(|param| param.name == *keyword && !param.positional_only)
+                .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()))
+                .or_else(|| keyword_variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_positional_arg_types_from_signature_sites(
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    arg_count: usize,
+) -> Vec<Option<String>> {
+    let positional_params = signature
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let variadic_type = signature
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| param.annotation.clone());
+
+    (0..arg_count)
+        .map(|index| {
+            positional_params
+                .get(index)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_keyword_arg_types_from_signature_sites(
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    keyword_names: &[String],
+) -> Vec<Option<String>> {
+    let keyword_variadic_type = signature
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.clone());
+
+    keyword_names
+        .iter()
+        .map(|keyword| {
+            signature
+                .iter()
+                .find(|param| param.name == *keyword && !param.positional_only)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| keyword_variadic_type.clone())
+        })
+        .collect()
 }
 
 fn resolve_assignment_owner_signature<'a>(
@@ -5228,8 +5370,10 @@ fn direct_source_function_arity_diagnostic(
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let has_variadic = signature.iter().any(|param| param.variadic);
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call);
+        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
     if !has_variadic
         && (positional_types.len() > positional_params.len() || !variadic_starred_types.is_empty())
     {
@@ -5309,7 +5453,10 @@ fn direct_source_function_keyword_diagnostics(
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
     let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
-    let (positional_types, _) = expanded_positional_arg_types(node, nodes, call);
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
+    let (positional_types, _) =
+        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
     let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     let mut diagnostics = call.keyword_names
@@ -5466,9 +5613,14 @@ fn direct_source_function_type_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let resolved_keyword_arg_types = resolved_keyword_arg_types(node, nodes, call);
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
+    let expected_keyword_arg_types =
+        expected_keyword_arg_types_from_signature_sites(signature, &call.keyword_names);
+    let resolved_keyword_arg_types =
+        resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
     let (expanded_arg_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call);
+        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
     let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     let param_types = signature
         .iter()
@@ -5507,8 +5659,9 @@ fn expanded_positional_arg_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
 ) -> (Vec<String>, Vec<String>) {
-    let mut positional_types = resolved_call_arg_types(node, nodes, call);
+    let mut positional_types = resolved_call_arg_types(node, nodes, call, expected_types);
     if positional_types.len() < call.arg_count {
         positional_types
             .extend(std::iter::repeat(String::new()).take(call.arg_count - positional_types.len()));
@@ -5529,6 +5682,7 @@ fn resolved_call_arg_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
 ) -> Vec<String> {
     if call.arg_values.is_empty() {
         return call.arg_types.clone();
@@ -5537,9 +5691,18 @@ fn resolved_call_arg_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_direct_expression_type_from_metadata(
-                node, nodes, None, None, None, call.line, metadata,
+            resolve_contextual_lambda_callable_type(
+                node,
+                nodes,
+                call.line,
+                metadata,
+                expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
+            .or_else(|| {
+                resolve_direct_expression_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
             .unwrap_or_else(|| call.arg_types.get(index).cloned().unwrap_or_default())
         })
         .collect()
@@ -5549,6 +5712,7 @@ fn resolved_keyword_arg_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
 ) -> Vec<String> {
     if call.keyword_arg_values.is_empty() {
         return call.keyword_arg_types.clone();
@@ -5557,9 +5721,18 @@ fn resolved_keyword_arg_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_direct_expression_type_from_metadata(
-                node, nodes, None, None, None, call.line, metadata,
+            resolve_contextual_lambda_callable_type(
+                node,
+                nodes,
+                call.line,
+                metadata,
+                expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
+            .or_else(|| {
+                resolve_direct_expression_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
             .unwrap_or_else(|| call.keyword_arg_types.get(index).cloned().unwrap_or_default())
         })
         .collect()
@@ -9355,6 +9528,106 @@ mod tests {
             &call,
             &declaration
         ));
+    }
+
+    #[test]
+    fn overload_applicability_uses_contextual_lambda_callable_types() {
+        fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
+            typepython_syntax::DirectExprMetadata {
+                value_type: Some(String::from(value_type)),
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+            }
+        }
+
+        let lambda_arg = typepython_syntax::DirectExprMetadata {
+            value_type: Some(String::new()),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: Some(Box::new(typepython_syntax::LambdaMetadata {
+                param_names: vec![String::from("x")],
+                body: Box::new(direct_expr("str")),
+            })),
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+        };
+        let call = typepython_binding::CallSite {
+            callee: String::from("choose"),
+            arg_count: 1,
+            arg_types: vec![String::new()],
+            arg_values: vec![lambda_arg],
+            starred_arg_types: Vec::new(),
+            starred_arg_values: Vec::new(),
+            keyword_names: Vec::new(),
+            keyword_arg_types: Vec::new(),
+            keyword_arg_values: Vec::new(),
+            keyword_expansion_types: Vec::new(),
+            keyword_expansion_values: Vec::new(),
+            line: 1,
+        };
+        let str_declaration = Declaration {
+            name: String::from("choose"),
+            kind: DeclarationKind::Overload,
+            detail: String::from("(fn:Callable[[int],str])->str"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        };
+        let int_declaration = Declaration {
+            detail: String::from("(fn:Callable[[int],int])->int"),
+            ..str_declaration.clone()
+        };
+
+        assert!(crate::overload_is_applicable(&call, &str_declaration));
+        assert!(!crate::overload_is_applicable(&call, &int_declaration));
     }
 
     #[test]
@@ -14911,6 +15184,65 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_callable_argument_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef apply(fn: Callable[[int], str]) -> None:\n    return None\n\napply(lambda x: x + 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_callable_argument_arity_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef apply(fn: Callable[[int], str]) -> None:\n    return None\n\napply(lambda x, y: \"ok\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_callable_keyword_argument_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef apply(*, fn: Callable[[int], str]) -> None:\n    return None\n\napply(fn=lambda x: x + 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_method_argument_mismatch() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\nclass Runner:\n    def use(self, fn: Callable[[int], str]) -> None:\n        return None\n\nrunner = Runner()\nrunner.use(lambda x: x + 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_contextual_lambda_argument_mismatch_after_generic_instantiation() {
+        let result = check_temp_typepython_source(
+            "from typing import Callable\n\ndef use[T](value: T, fn: Callable[[T], str]) -> None:\n    return None\n\nuse(1, lambda x: x + 1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], int]"));
         assert!(rendered.contains("Callable[[int], str]"));
     }
 
