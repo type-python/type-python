@@ -1814,6 +1814,31 @@ fn simple_name_augmented_assignment_diagnostics(
             })
         })
         .filter_map(|assignment| {
+            if current_augmented_assignment_target_is_final(node, assignment) {
+                return Some(Diagnostic::error(
+                    "TPY4006",
+                    match (&assignment.owner_type_name, &assignment.owner_name) {
+                        (Some(owner_type_name), Some(owner_name)) => format!(
+                            "type `{}` in module `{}` reassigns Final binding `{}` in `{}`",
+                            owner_type_name,
+                            node.module_path.display(),
+                            assignment.name,
+                            owner_name,
+                        ),
+                        (None, Some(owner_name)) => format!(
+                            "function `{}` in module `{}` reassigns Final binding `{}`",
+                            owner_name,
+                            node.module_path.display(),
+                            assignment.name,
+                        ),
+                        _ => format!(
+                            "module `{}` reassigns Final binding `{}`",
+                            node.module_path.display(),
+                            assignment.name,
+                        ),
+                    },
+                ));
+            }
             let signature = resolve_assignment_owner_signature(node, assignment);
             let expected = resolve_current_augmented_assignment_target_type(
                 node,
@@ -1868,6 +1893,38 @@ fn simple_name_augmented_assignment_diagnostics(
             })
         })
         .collect()
+}
+
+fn current_augmented_assignment_target_is_final(
+    node: &typepython_graph::ModuleNode,
+    assignment: &typepython_binding::AssignmentSite,
+) -> bool {
+    if assignment.owner_name.is_none()
+        && node.declarations.iter().any(|declaration| {
+            declaration.kind == DeclarationKind::Value
+                && declaration.owner.is_none()
+                && declaration.name == assignment.name
+                && declaration.is_final
+        })
+    {
+        return true;
+    }
+
+    node.assignments.iter().rev().any(|previous| {
+        previous.name == assignment.name
+            && previous.owner_name == assignment.owner_name
+            && previous.owner_type_name == assignment.owner_type_name
+            && previous.line < assignment.line
+            && previous.annotation.as_deref().is_some_and(is_final_annotation_text)
+    })
+}
+
+fn is_final_annotation_text(annotation: &str) -> bool {
+    let annotation = annotation.trim();
+    annotation == "Final"
+        || annotation.starts_with("Final[")
+        || annotation == "typing.Final"
+        || annotation.starts_with("typing.Final[")
 }
 
 fn resolve_current_augmented_assignment_target_type(
@@ -13726,6 +13783,17 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_final_augmented_reassignment_in_module_scope() {
+        let result = check_temp_typepython_source(
+            "from typing import Final\n\nMAX_SIZE: Final[int] = 1\nMAX_SIZE += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
+        assert!(rendered.contains("Final binding `MAX_SIZE`"));
+    }
+
+    #[test]
     fn check_reports_final_reassignment_in_class_scope() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -13817,6 +13885,17 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4006"));
         assert!(rendered.contains("type `Box`"));
+        assert!(rendered.contains("Final binding `limit`"));
+    }
+
+    #[test]
+    fn check_reports_final_augmented_reassignment_in_local_scope() {
+        let result = check_temp_typepython_source(
+            "from typing import Final\n\ndef build() -> None:\n    limit: Final[int] = 1\n    limit += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4006"));
         assert!(rendered.contains("Final binding `limit`"));
     }
 
