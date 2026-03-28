@@ -2090,15 +2090,15 @@ fn direct_expr_metadata_for_known_type(value_type: &str) -> typepython_syntax::D
     }
 }
 
-fn resolve_typed_dict_augmented_assignment_result_type(
+fn resolve_augmented_assignment_result_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
     site: &typepython_syntax::TypedDictMutationSite,
-    expected_type: &str,
+    left_type: &str,
     value: &typepython_syntax::DirectExprMetadata,
 ) -> Option<String> {
-    let left = direct_expr_metadata_for_known_type(expected_type);
+    let left = direct_expr_metadata_for_known_type(left_type);
     resolve_direct_binop_type(
         node,
         nodes,
@@ -2266,7 +2266,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                 }
                 typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
                     let value = site.value.as_ref()?;
-                    let actual = resolve_typed_dict_augmented_assignment_result_type(
+                    let actual = resolve_augmented_assignment_result_type(
                         node,
                         nodes,
                         signature,
@@ -2367,7 +2367,7 @@ fn subscript_assignment_type_diagnostics(
     typepython_syntax::collect_typed_dict_mutation_sites(&source)
         .into_iter()
         .filter_map(|site| {
-            if site.kind != typepython_syntax::TypedDictMutationKind::Assignment {
+            if site.kind == typepython_syntax::TypedDictMutationKind::Delete {
                 return None;
             }
 
@@ -2441,70 +2441,131 @@ fn subscript_assignment_type_diagnostics(
                     }
 
                     let value = site.value.as_ref()?;
-                    let contextual = resolve_contextual_call_arg_type(
-                        node,
-                        nodes,
-                        site.line,
-                        value,
-                        Some(&value_type),
-                    );
-                    if let Some(mut result) = contextual {
-                        if let Some(diagnostic) = result.diagnostics.pop() {
-                            return Some(diagnostic);
-                        }
-                        let actual_value = result.actual_type;
-                        if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
-                            return Some(
-                                Diagnostic::error(
-                                    "TPY4001",
-                                    format!(
-                                        "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
-                                        owner_type,
-                                        node.module_path.display(),
-                                        actual_value,
-                                        value_type,
-                                    ),
-                                )
-                                .with_span(Span::new(
-                                    node.module_path.display().to_string(),
-                                    site.line,
-                                    1,
-                                    site.line,
-                                    1,
-                                )),
+                    match site.kind {
+                        typepython_syntax::TypedDictMutationKind::Assignment => {
+                            let contextual = resolve_contextual_call_arg_type(
+                                node,
+                                nodes,
+                                site.line,
+                                value,
+                                Some(&value_type),
                             );
+                            if let Some(mut result) = contextual {
+                                if let Some(diagnostic) = result.diagnostics.pop() {
+                                    return Some(diagnostic);
+                                }
+                                let actual_value = result.actual_type;
+                                if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                                    return Some(
+                                        Diagnostic::error(
+                                            "TPY4001",
+                                            format!(
+                                                "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
+                                                owner_type,
+                                                node.module_path.display(),
+                                                actual_value,
+                                                value_type,
+                                            ),
+                                        )
+                                        .with_span(Span::new(
+                                            node.module_path.display().to_string(),
+                                            site.line,
+                                            1,
+                                            site.line,
+                                            1,
+                                        )),
+                                    );
+                                }
+                                return None;
+                            }
+                            let actual_value = resolve_direct_expression_type_from_metadata(
+                                node,
+                                nodes,
+                                signature,
+                                site.owner_name.as_deref(),
+                                site.owner_type_name.as_deref(),
+                                site.line,
+                                value,
+                            )?;
+                            if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                                return Some(
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
+                                            owner_type,
+                                            node.module_path.display(),
+                                            actual_value,
+                                            value_type,
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    )),
+                                );
+                            }
                         }
-                        return None;
-                    }
-                    let actual_value = resolve_direct_expression_type_from_metadata(
-                        node,
-                        nodes,
-                        signature,
-                        site.owner_name.as_deref(),
-                        site.owner_type_name.as_deref(),
-                        site.line,
-                        value,
-                    )?;
-                    if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
-                        return Some(
-                            Diagnostic::error(
-                                "TPY4001",
-                                format!(
-                                    "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
-                                    owner_type,
-                                    node.module_path.display(),
-                                    actual_value,
-                                    value_type,
-                                ),
-                            )
-                            .with_span(Span::new(
-                                node.module_path.display().to_string(),
-                                site.line,
-                                1,
-                                site.line,
-                                1,
-                            )),
-                        );
+                        typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
+                            let Some(readable_type) = resolve_subscript_type_from_target_type(
+                                node,
+                                nodes,
+                                &owner_type,
+                                site.key.as_deref(),
+                                None,
+                            ) else {
+                                return Some(
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "augmented subscript assignment target `{}` in module `{}` is not readable via `__getitem__`",
+                                            owner_type,
+                                            node.module_path.display(),
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    )),
+                                );
+                            };
+                            let actual_value = resolve_augmented_assignment_result_type(
+                                node,
+                                nodes,
+                                signature,
+                                &site,
+                                &readable_type,
+                                value,
+                            )?;
+                            if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                                return Some(
+                                    Diagnostic::error(
+                                        "TPY4001",
+                                        format!(
+                                            "augmented subscript assignment on `{}` in module `{}` produces `{}` where `__setitem__` expects `{}`",
+                                            owner_type,
+                                            node.module_path.display(),
+                                            actual_value,
+                                            value_type,
+                                        ),
+                                    )
+                                    .with_span(Span::new(
+                                        node.module_path.display().to_string(),
+                                        site.line,
+                                        1,
+                                        site.line,
+                                        1,
+                                    )),
+                                );
+                            }
+                        }
+                        typepython_syntax::TypedDictMutationKind::Delete => {}
                     }
 
                     None
@@ -4760,23 +4821,26 @@ fn resolve_subscript_type_from_target_type(
     }
 
     let normalized_target = normalize_type_text(&target_type);
-    let (head, args) = split_generic_type(&normalized_target)?;
-    match head {
-        "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
-            if args.len() == 2 => Some(args[1].clone()),
-        "list" | "Sequence" | "typing.Sequence" | "collections.abc.Sequence"
-            if !args.is_empty() => Some(args[0].clone()),
-        "tuple" if !args.is_empty() => {
-            if args.len() == 2 && args[1] == "..." {
-                return Some(args[0].clone());
+    if let Some((head, args)) = split_generic_type(&normalized_target) {
+        return match head {
+            "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
+                if args.len() == 2 => Some(args[1].clone()),
+            "list" | "Sequence" | "typing.Sequence" | "collections.abc.Sequence"
+                if !args.is_empty() => Some(args[0].clone()),
+            "tuple" if !args.is_empty() => {
+                if args.len() == 2 && args[1] == "..." {
+                    return Some(args[0].clone());
+                }
+                index_text
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| args.get(index).cloned())
+                    .or_else(|| Some(join_type_candidates(args)))
             }
-            index_text
-                .and_then(|index| index.parse::<usize>().ok())
-                .and_then(|index| args.get(index).cloned())
-                .or_else(|| Some(join_type_candidates(args)))
-        }
-        _ => resolve_nominal_getitem_return_type(node, nodes, &normalized_target),
+            _ => resolve_nominal_getitem_return_type(node, nodes, &normalized_target),
+        };
     }
+
+    resolve_nominal_getitem_return_type(node, nodes, &normalized_target)
 }
 
 fn resolve_nominal_getitem_return_type(
@@ -11330,6 +11394,38 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
         assert!(rendered.contains("missing required key `name`"));
+    }
+
+    #[test]
+    fn check_accepts_nominal_setitem_subscript_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __getitem__(self, key: str) -> int:\n        return 0\n\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_nominal_setitem_subscript_augmented_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __getitem__(self, key: str) -> int:\n        return 0\n\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] += \"bad\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("produces `str` where `__setitem__` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_unreadable_nominal_setitem_subscript_augmented_assignment() {
+        let result = check_temp_typepython_source(
+            "class Cache:\n    def __setitem__(self, key: str, value: int) -> None:\n        return None\n\ndef mutate(cache: Cache) -> None:\n    cache[\"x\"] += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("not readable via `__getitem__`"));
     }
 
     #[test]
