@@ -141,6 +141,9 @@ pub fn check_with_options(
         {
             diagnostics.push(dataclass_diagnostic);
         }
+        for attribute_diagnostic in attribute_assignment_type_diagnostics(node, &graph.nodes) {
+            diagnostics.push(attribute_diagnostic);
+        }
         for duplicate in
             duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
         {
@@ -2514,6 +2517,163 @@ fn frozen_plain_dataclass_mutation_diagnostics(
                 site.line,
                 1,
             )))
+        })
+        .collect()
+}
+
+enum WritableAttributeTarget<'a> {
+    Value(&'a Declaration),
+    ReadOnlyProperty,
+    NonWritable,
+}
+
+fn find_owned_writable_member_target<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<WritableAttributeTarget<'a>> {
+    let declaration = find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+            || matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+    })?;
+    match declaration.kind {
+        DeclarationKind::Value if !declaration.is_class_var => Some(WritableAttributeTarget::Value(declaration)),
+        DeclarationKind::Function
+            if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
+        {
+            Some(WritableAttributeTarget::ReadOnlyProperty)
+        }
+        _ => Some(WritableAttributeTarget::NonWritable),
+    }
+}
+
+fn should_defer_attribute_assignment_to_frozen_checks(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    site: &typepython_syntax::FrozenFieldMutationSite,
+    target_type: &str,
+) -> bool {
+    if let Some(shape) = resolve_known_dataclass_transform_shape_from_type(node, nodes, target_type)
+        && shape.frozen
+        && shape.fields.iter().any(|field| field.name == site.field_name)
+    {
+        let in_initializer = site.owner_name.as_deref() == Some("__init__")
+            && site.owner_type_name.as_deref() == Some(target_type)
+            && site.target.value_name.as_deref() == Some("self");
+        return !in_initializer;
+    }
+    if let Some(shape) = resolve_known_plain_dataclass_shape_from_type(node, nodes, target_type)
+        && shape.frozen
+        && shape.fields.iter().any(|field| field.name == site.field_name)
+    {
+        let in_initializer = site.owner_name.as_deref() == Some("__init__")
+            && site.owner_type_name.as_deref() == Some(target_type)
+            && site.target.value_name.as_deref() == Some("self");
+        return !in_initializer;
+    }
+    false
+}
+
+fn attribute_assignment_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return Vec::new();
+    }
+
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return Vec::new();
+    };
+
+    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+        .into_iter()
+        .filter_map(|site| {
+            if site.kind != typepython_syntax::FrozenFieldMutationKind::Assignment {
+                return None;
+            }
+
+            if site.owner_name.as_deref() == Some("__init__")
+                && site.target.value_name.as_deref() == Some("self")
+            {
+                return None;
+            }
+
+            let signature = resolve_scope_owner_signature(
+                node,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+            );
+            let target_type = resolve_direct_expression_type_from_metadata(
+                node,
+                nodes,
+                signature,
+                site.owner_name.as_deref(),
+                site.owner_type_name.as_deref(),
+                site.line,
+                &site.target,
+            )?;
+
+            if should_defer_attribute_assignment_to_frozen_checks(node, nodes, &site, &target_type) {
+                return None;
+            }
+
+            let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type)?;
+            match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
+                Some(WritableAttributeTarget::Value(declaration)) => {
+                    let expected = resolve_readable_member_type(node, declaration, &target_type)?;
+                    let value = site.value.as_ref()?;
+                    let actual = resolve_direct_expression_type_from_metadata(
+                        node,
+                        nodes,
+                        signature,
+                        site.owner_name.as_deref(),
+                        site.owner_type_name.as_deref(),
+                        site.line,
+                        value,
+                    )?;
+                    (!direct_type_matches(&expected, &actual)).then(|| {
+                        Diagnostic::error(
+                            "TPY4001",
+                            format!(
+                                "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
+                                target_type,
+                                node.module_path.display(),
+                                actual,
+                                site.field_name,
+                                expected,
+                            ),
+                        )
+                        .with_span(Span::new(
+                            node.module_path.display().to_string(),
+                            site.line,
+                            1,
+                            site.line,
+                            1,
+                        ))
+                    })
+                }
+                Some(WritableAttributeTarget::ReadOnlyProperty) => Some(
+                    Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "property `{}` on `{}` in module `{}` is not writable",
+                            site.field_name,
+                            target_type,
+                            node.module_path.display(),
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        site.line,
+                        1,
+                        site.line,
+                        1,
+                    )),
+                ),
+                Some(WritableAttributeTarget::NonWritable) | None => None,
+            }
         })
         .collect()
 }
@@ -29927,6 +30087,59 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `str` where local `value` expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_declared_attribute_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    name: str\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_accepts_inherited_attribute_assignment() {
+        let result = check_temp_typepython_source(
+            "class Base:\n    name: str\n\nclass Box(Base):\n    pass\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_attribute_assignment_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    name: str\n\ndef mutate(box: Box) -> None:\n    box.name = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `int` where member `name` expects `str`"));
+    }
+
+    #[test]
+    fn check_ignores_undeclared_attribute_assignment_target() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    name: str\n\ndef mutate(box: Box) -> None:\n    box.age = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
+    fn check_reports_getter_only_property_assignment() {
+        let result = check_temp_typepython_source(
+            "class Box:\n    @property\n    def name(self) -> str:\n        return \"x\"\n\ndef mutate(box: Box) -> None:\n    box.name = \"Grace\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("property `name` on `Box`"));
+        assert!(rendered.contains("is not writable"));
     }
 
     #[test]

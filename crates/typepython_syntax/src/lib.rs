@@ -685,6 +685,7 @@ pub struct FrozenFieldMutationSite {
     pub kind: FrozenFieldMutationKind,
     pub field_name: String,
     pub target: DirectExprMetadata,
+    pub value: Option<DirectExprMetadata>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
     pub line: usize,
@@ -1139,6 +1140,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
                 extract_frozen_field_mutation_site(
                     source,
                     target,
+                    Some(&assign.value),
                     FrozenFieldMutationKind::Assignment,
                     line,
                     owner_name,
@@ -1149,6 +1151,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
         Stmt::AugAssign(assign) => extract_frozen_field_mutation_site(
             source,
             &assign.target,
+            Some(&assign.value),
             FrozenFieldMutationKind::AugmentedAssignment,
             line,
             owner_name,
@@ -1163,6 +1166,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
                 extract_frozen_field_mutation_site(
                     source,
                     target,
+                    None,
                     FrozenFieldMutationKind::Delete,
                     line,
                     owner_name,
@@ -1177,6 +1181,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
 fn extract_frozen_field_mutation_site(
     source: &str,
     expr: &Expr,
+    value: Option<&Expr>,
     kind: FrozenFieldMutationKind,
     line: usize,
     owner_name: Option<&str>,
@@ -1189,6 +1194,7 @@ fn extract_frozen_field_mutation_site(
         kind,
         field_name: attribute.attr.as_str().to_owned(),
         target: extract_direct_expr_metadata(source, &attribute.value),
+        value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
         line,
