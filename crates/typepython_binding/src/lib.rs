@@ -116,6 +116,8 @@ pub struct ReturnSite {
     pub value_binop_right: Option<Box<typepython_syntax::DirectExprMetadata>>,
     pub value_binop_operator: Option<String>,
     pub value_lambda: Option<Box<typepython_syntax::LambdaMetadata>>,
+    pub value_list_elements: Option<Vec<typepython_syntax::DirectExprMetadata>>,
+    pub value_set_elements: Option<Vec<typepython_syntax::DirectExprMetadata>>,
     pub value_dict_entries: Option<Vec<typepython_syntax::TypedDictLiteralEntry>>,
     pub line: usize,
 }
@@ -447,6 +449,8 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     value_binop_right: statement.value_binop_right.clone(),
                     value_binop_operator: statement.value_binop_operator.clone(),
                     value_lambda: statement.value_lambda.clone(),
+                    value_list_elements: statement.value_list_elements.clone(),
+                    value_set_elements: statement.value_set_elements.clone(),
                     value_dict_entries: statement.value_dict_entries.clone(),
                     line: statement.line,
                 }),
