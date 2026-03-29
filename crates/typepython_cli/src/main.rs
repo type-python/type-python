@@ -23,7 +23,10 @@ use typepython_binding::bind;
 use typepython_checking::check_with_options;
 use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-use typepython_emit::{EmitArtifact, plan_emits, write_runtime_outputs};
+use typepython_emit::{
+    EmitArtifact, InferredStubMode, generate_inferred_stub_source, plan_emits,
+    write_runtime_outputs,
+};
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot, snapshot};
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
@@ -1061,6 +1064,12 @@ fn source_kind_label(kind: SourceKind) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ShadowStub {
+    logical_module: String,
+    stub_path: PathBuf,
+}
+
 fn load_syntax_trees(
     sources: &[DiscoveredSource],
     enable_conditional_returns: bool,
@@ -1077,6 +1086,105 @@ fn load_syntax_trees(
             ))
         })
         .collect::<Result<Vec<_>>>()
+}
+
+fn write_shadow_stubs(
+    config: &ConfigHandle,
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> Result<Vec<ShadowStub>> {
+    let cache_root =
+        config.resolve_relative_path(&config.config.project.cache_dir).join("shadow-stubs");
+    fs::create_dir_all(&cache_root)
+        .with_context(|| format!("unable to create {}", cache_root.display()))?;
+
+    let local_stub_modules: BTreeSet<_> = syntax_trees
+        .iter()
+        .filter(|tree| tree.source.kind == SourceKind::Stub)
+        .map(|tree| tree.source.logical_module.clone())
+        .collect();
+
+    let mut written = Vec::new();
+    for tree in syntax_trees {
+        if tree.source.kind != SourceKind::Python
+            || local_stub_modules.contains(&tree.source.logical_module)
+        {
+            continue;
+        }
+
+        let relative_path = shadow_stub_relative_path(&tree.source);
+        let stub_path = cache_root.join(relative_path);
+        if let Some(parent) = stub_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("unable to create {}", parent.display()))?;
+        }
+        let stub_source =
+            generate_inferred_stub_source(&tree.source.text, InferredStubMode::Shadow)
+                .with_context(|| {
+                    format!(
+                        "unable to generate inferred shadow stub for {}",
+                        tree.source.path.display()
+                    )
+                })?;
+        fs::write(&stub_path, stub_source)
+            .with_context(|| format!("unable to write {}", stub_path.display()))?;
+        written.push(ShadowStub { logical_module: tree.source.logical_module.clone(), stub_path });
+    }
+
+    Ok(written)
+}
+
+fn shadow_stub_relative_path(source: &SourceFile) -> PathBuf {
+    let mut path = PathBuf::new();
+    let mut parts = source.logical_module.split('.').collect::<Vec<_>>();
+    if source.path.file_name().is_some_and(|name| name == "__init__.py") {
+        for part in parts {
+            path.push(part);
+        }
+        path.push("__init__.pyi");
+    } else {
+        let module_name = parts.pop().unwrap_or("module");
+        for part in parts {
+            path.push(part);
+        }
+        path.push(format!("{module_name}.pyi"));
+    }
+    path
+}
+
+fn load_shadow_stub_syntax_trees(
+    shadow_stubs: &[ShadowStub],
+    enable_conditional_returns: bool,
+) -> Result<Vec<typepython_syntax::SyntaxTree>> {
+    shadow_stubs
+        .iter()
+        .map(|shadow_stub| {
+            let mut source_file = SourceFile::from_path(&shadow_stub.stub_path)
+                .with_context(|| format!("unable to read {}", shadow_stub.stub_path.display()))?;
+            source_file.logical_module = shadow_stub.logical_module.clone();
+            Ok(typepython_syntax::parse_with_options(
+                source_file,
+                typepython_syntax::ParseOptions { enable_conditional_returns },
+            ))
+        })
+        .collect()
+}
+
+fn replace_local_python_surfaces_with_shadow_stubs(
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+    shadow_stub_syntax: Vec<typepython_syntax::SyntaxTree>,
+) -> Vec<typepython_syntax::SyntaxTree> {
+    let shadow_modules: BTreeSet<_> =
+        shadow_stub_syntax.iter().map(|tree| tree.source.logical_module.clone()).collect();
+    let mut surfaces = syntax_trees
+        .iter()
+        .filter(|tree| {
+            !(tree.source.kind == SourceKind::Python
+                && shadow_modules.contains(&tree.source.logical_module))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    surfaces.extend(shadow_stub_syntax);
+    surfaces
 }
 
 fn run_with_pipeline(
@@ -1132,7 +1240,20 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     checking_sources.extend(external_resolution_sources(config)?);
     let checking_support_syntax =
         load_syntax_trees(&checking_sources, config.config.typing.conditional_returns)?;
-    let mut all_syntax_trees = syntax_trees.clone();
+    let shadow_stubs = if config.config.typing.infer_passthrough {
+        write_shadow_stubs(config, &syntax_trees)?
+    } else {
+        Vec::new()
+    };
+    let mut all_syntax_trees = if config.config.typing.infer_passthrough && !shadow_stubs.is_empty()
+    {
+        replace_local_python_surfaces_with_shadow_stubs(
+            &syntax_trees,
+            load_shadow_stub_syntax_trees(&shadow_stubs, config.config.typing.conditional_returns)?,
+        )
+    } else {
+        syntax_trees.clone()
+    };
     all_syntax_trees.extend(checking_support_syntax);
     let mut parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
@@ -4024,6 +4145,47 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
+    }
+
+    #[test]
+    fn run_pipeline_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled() {
+        let project_dir = temp_project_dir(
+            "run_pipeline_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled",
+        );
+        let (with_inference, shadow_stub) = {
+            fs::write(
+                project_dir.join("typepython.toml"),
+                "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n",
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/helpers.py"),
+                "class User:\n    def __init__(self):\n        self.age = 3\n\ndef build():\n    return User()\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "from app.helpers import build\n\nuser = build()\nage: int = user.age\n",
+            )
+            .expect("test setup should succeed");
+
+            let with = {
+                let config = load(&project_dir).expect("test setup should succeed");
+                run_pipeline(&config).expect("test setup should succeed").diagnostics
+            };
+            let shadow = fs::read_to_string(
+                project_dir.join(".typepython/cache/shadow-stubs/app/helpers.pyi"),
+            )
+            .expect("shadow stub should be written");
+
+            (with, shadow)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!with_inference.has_errors(), "{}", with_inference.as_text());
+        assert!(shadow_stub.contains("def build() -> User: ..."));
+        assert!(shadow_stub.contains("age: int"));
     }
 
     #[test]
