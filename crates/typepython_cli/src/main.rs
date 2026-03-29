@@ -26,9 +26,10 @@ use typepython_checking::{
 use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
-    EmitArtifact, InferredStubMode, StubCallableOverride, StubSyntheticMethod, StubValueOverride,
-    TypePythonStubContext, generate_inferred_stub_source, generate_typepython_stub_source,
-    plan_emits, write_runtime_outputs,
+    EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride,
+    StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
+    generate_inferred_stub_source, generate_typepython_stub_source, plan_emits,
+    plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot, snapshot};
@@ -1438,8 +1439,14 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     incremental.stdlib_snapshot =
         Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
     let tracked_modules = incremental.fingerprints.len();
-    let planned_modules = placeholder_lowered_modules(&syntax_trees);
-    let emit_plan = plan_emits(config, &planned_modules);
+    let planned_sources: Vec<_> = syntax_trees
+        .iter()
+        .map(|tree| PlannedModuleSource {
+            source_path: tree.source.path.clone(),
+            source_kind: tree.source.kind,
+        })
+        .collect();
+    let emit_plan = plan_emits_for_sources(config, &planned_sources);
     if let Some(previous) = load_previous_incremental_state(config)? {
         let snapshot_diff = diff(&previous, &incremental);
         if snapshot_diff.added.is_empty()
@@ -1512,23 +1519,6 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         discovered_sources: source_paths.len(),
         diagnostics,
     })
-}
-
-fn placeholder_lowered_modules(
-    syntax_trees: &[typepython_syntax::SyntaxTree],
-) -> Vec<LoweredModule> {
-    syntax_trees
-        .iter()
-        .map(|tree| LoweredModule {
-            source_path: tree.source.path.clone(),
-            source_kind: tree.source.kind,
-            python_source: String::new(),
-            source_map: Vec::new(),
-            span_map: Vec::new(),
-            required_imports: Vec::new(),
-            metadata: typepython_lowering::LoweringMetadata::default(),
-        })
-        .collect()
 }
 
 fn build_typepython_stub_contexts(

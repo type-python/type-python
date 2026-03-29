@@ -24,6 +24,12 @@ pub struct EmitArtifact {
     pub stub_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PlannedModuleSource {
+    pub source_path: PathBuf,
+    pub source_kind: SourceKind,
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct RuntimeWriteSummary {
     pub runtime_files_written: usize,
@@ -74,15 +80,31 @@ pub enum InferredStubMode {
 /// Plans output paths for the provided modules.
 #[must_use]
 pub fn plan_emits(config: &ConfigHandle, modules: &[LoweredModule]) -> Vec<EmitArtifact> {
-    modules
+    let sources: Vec<_> = modules
         .iter()
-        .map(|module| {
-            let relative = relative_module_path(config, &module.source_path);
+        .map(|module| PlannedModuleSource {
+            source_path: module.source_path.clone(),
+            source_kind: module.source_kind,
+        })
+        .collect();
+    plan_emits_for_sources(config, &sources)
+}
+
+/// Plans output paths for the provided source descriptors.
+#[must_use]
+pub fn plan_emits_for_sources(
+    config: &ConfigHandle,
+    sources: &[PlannedModuleSource],
+) -> Vec<EmitArtifact> {
+    sources
+        .iter()
+        .map(|source| {
+            let relative = relative_module_path(config, &source.source_path);
             let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
-            match module.source_kind {
+            match source.source_kind {
                 SourceKind::TypePython => EmitArtifact {
-                    source_path: module.source_path.clone(),
+                    source_path: source.source_path.clone(),
                     runtime_path: Some(out_root.join(&relative).with_extension("py")),
                     stub_path: config
                         .config
@@ -91,12 +113,12 @@ pub fn plan_emits(config: &ConfigHandle, modules: &[LoweredModule]) -> Vec<EmitA
                         .then(|| out_root.join(relative).with_extension("pyi")),
                 },
                 SourceKind::Python => EmitArtifact {
-                    source_path: module.source_path.clone(),
+                    source_path: source.source_path.clone(),
                     runtime_path: Some(out_root.join(relative)),
                     stub_path: None,
                 },
                 SourceKind::Stub => EmitArtifact {
-                    source_path: module.source_path.clone(),
+                    source_path: source.source_path.clone(),
                     runtime_path: None,
                     stub_path: Some(out_root.join(relative)),
                 },
@@ -2154,9 +2176,10 @@ fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmitArtifact, InferredStubMode, RuntimeWriteSummary, StubCallableOverride,
-        StubSyntheticMethod, TypePythonStubContext, generate_inferred_stub_source,
-        generate_typepython_stub_source, write_runtime_outputs,
+        EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary,
+        StubCallableOverride, StubSyntheticMethod, TypePythonStubContext,
+        generate_inferred_stub_source, generate_typepython_stub_source, plan_emits_for_sources,
+        write_runtime_outputs,
     };
     use std::{
         env, fs,
@@ -2166,6 +2189,56 @@ mod tests {
     use typepython_config::load;
     use typepython_lowering::{LoweredModule, SourceMapEntry};
     use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
+
+    #[test]
+    fn plan_emits_for_sources_matches_source_kinds_without_lowered_modules() {
+        let temp_dir = temp_dir("plan_emits_for_sources_matches_source_kinds_without_lowered_modules");
+        fs::create_dir_all(temp_dir.join("src/pkg")).expect("test setup should succeed");
+        fs::write(
+            temp_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\nout_dir = \"build\"\n[emit]\nemit_pyi = true\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&temp_dir).expect("config should load");
+        let artifacts = plan_emits_for_sources(
+            &config,
+            &[
+                PlannedModuleSource {
+                    source_path: temp_dir.join("src/pkg/__init__.tpy"),
+                    source_kind: SourceKind::TypePython,
+                },
+                PlannedModuleSource {
+                    source_path: temp_dir.join("src/pkg/helpers.py"),
+                    source_kind: SourceKind::Python,
+                },
+                PlannedModuleSource {
+                    source_path: temp_dir.join("src/pkg/helpers.pyi"),
+                    source_kind: SourceKind::Stub,
+                },
+            ],
+        );
+
+        assert_eq!(artifacts.len(), 3);
+        assert_eq!(
+            artifacts[0].runtime_path,
+            Some(temp_dir.join("build/pkg/__init__.py"))
+        );
+        assert_eq!(
+            artifacts[0].stub_path,
+            Some(temp_dir.join("build/pkg/__init__.pyi"))
+        );
+        assert_eq!(
+            artifacts[1].runtime_path,
+            Some(temp_dir.join("build/pkg/helpers.py"))
+        );
+        assert_eq!(artifacts[1].stub_path, None);
+        assert_eq!(artifacts[2].runtime_path, None);
+        assert_eq!(
+            artifacts[2].stub_path,
+            Some(temp_dir.join("build/pkg/helpers.pyi"))
+        );
+        fs::remove_dir_all(&temp_dir).expect("temp dir cleanup should succeed");
+    }
 
     #[test]
     fn write_runtime_outputs_emits_lowered_typepython_and_python_modules() {
