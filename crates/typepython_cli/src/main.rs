@@ -161,6 +161,12 @@ struct MigrateArgs {
     /// Emit the migration coverage report.
     #[arg(long)]
     report: bool,
+    /// Generate inferred `.pyi` stubs for the selected `.py` files or directories.
+    #[arg(long = "emit-stubs", value_name = "PATH")]
+    emit_stubs: Vec<PathBuf>,
+    /// Output directory for generated stubs. Defaults to writing alongside the source `.py` files.
+    #[arg(long = "stub-out-dir", value_name = "PATH")]
+    stub_out_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -593,12 +599,34 @@ fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     diagnostics.diagnostics.extend(parse_diagnostics.diagnostics);
 
     let report = build_migration_report(&config, &syntax_trees);
-    let mut notes = vec![String::from(
-        "pass-through inference and stub generation remain experimental and disabled",
-    )];
+    let emitted_stubs = emit_migration_stubs(
+        &config,
+        &discovery.sources,
+        &args.emit_stubs,
+        args.stub_out_dir.as_deref(),
+    )?;
+    let mut notes = Vec::new();
     if args.report {
         notes.push(String::from(
             "migration report includes file coverage, directory coverage, and high-impact untyped files",
+        ));
+    }
+    if !emitted_stubs.is_empty() {
+        let destination = args
+            .stub_out_dir
+            .as_ref()
+            .map(|path| {
+                if path.is_absolute() {
+                    path.display().to_string()
+                } else {
+                    config.config_dir.join(path).display().to_string()
+                }
+            })
+            .unwrap_or_else(|| String::from("source-adjacent `.pyi` files"));
+        notes.push(format!(
+            "generated {} inferred migration stub(s) under {}",
+            emitted_stubs.len(),
+            destination
         ));
     }
 
@@ -1185,6 +1213,112 @@ fn replace_local_python_surfaces_with_shadow_stubs(
         .collect::<Vec<_>>();
     surfaces.extend(shadow_stub_syntax);
     surfaces
+}
+
+fn emit_migration_stubs(
+    config: &ConfigHandle,
+    discovered_sources: &[DiscoveredSource],
+    requested_paths: &[PathBuf],
+    stub_out_dir: Option<&Path>,
+) -> Result<Vec<PathBuf>> {
+    let targets = select_migration_stub_sources(config, discovered_sources, requested_paths)?;
+    let output_root = stub_out_dir.map(|path| {
+        if path.is_absolute() { path.to_path_buf() } else { config.config_dir.join(path) }
+    });
+
+    let mut written = Vec::new();
+    for source in targets {
+        let source_file = SourceFile::from_path(&source.path)
+            .with_context(|| format!("unable to read {}", source.path.display()))?;
+        let stub_source =
+            generate_inferred_stub_source(&source_file.text, InferredStubMode::Migration)
+                .with_context(|| {
+                    format!("unable to generate migration stub for {}", source.path.display())
+                })?;
+        let stub_path = migration_stub_output_path(source, output_root.as_deref())?;
+        if let Some(parent) = stub_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("unable to create {}", parent.display()))?;
+        }
+        fs::write(&stub_path, stub_source)
+            .with_context(|| format!("unable to write {}", stub_path.display()))?;
+        written.push(stub_path);
+    }
+
+    Ok(written)
+}
+
+fn select_migration_stub_sources<'a>(
+    config: &ConfigHandle,
+    discovered_sources: &'a [DiscoveredSource],
+    requested_paths: &[PathBuf],
+) -> Result<Vec<&'a DiscoveredSource>> {
+    if requested_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let python_sources = discovered_sources
+        .iter()
+        .filter(|source| source.kind == SourceKind::Python)
+        .collect::<Vec<_>>();
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for requested in requested_paths {
+        let resolved = if requested.is_absolute() {
+            requested.clone()
+        } else {
+            config.config_dir.join(requested)
+        };
+        let matches = if resolved.is_dir() {
+            python_sources
+                .iter()
+                .copied()
+                .filter(|source| source.path.starts_with(&resolved))
+                .collect::<Vec<_>>()
+        } else {
+            python_sources
+                .iter()
+                .copied()
+                .filter(|source| source.path == resolved)
+                .collect::<Vec<_>>()
+        };
+
+        if matches.is_empty() {
+            anyhow::bail!(
+                "unable to find project `.py` source matching `{}` for `typepython migrate --emit-stubs`",
+                resolved.display()
+            );
+        }
+
+        for source in matches {
+            if seen.insert(source.path.clone()) {
+                selected.push(source);
+            }
+        }
+    }
+
+    selected.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(selected)
+}
+
+fn migration_stub_output_path(
+    source: &DiscoveredSource,
+    output_root: Option<&Path>,
+) -> Result<PathBuf> {
+    match output_root {
+        Some(root) => {
+            let relative = source.path.strip_prefix(&source.root).with_context(|| {
+                format!(
+                    "unable to compute relative stub path for {} from source root {}",
+                    source.path.display(),
+                    source.root.display()
+                )
+            })?;
+            Ok(root.join(relative).with_extension("pyi"))
+        }
+        None => Ok(source.path.with_extension("pyi")),
+    }
 }
 
 fn run_with_pipeline(
@@ -2858,9 +2992,9 @@ mod tests {
     use super::{
         Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
-        embedded_config_template, exit_code_for_error, external_resolution_sources,
-        format_watch_rebuild_note, init_project, load_syntax_trees, run_pipeline,
-        should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
+        embedded_config_template, emit_migration_stubs, exit_code_for_error,
+        external_resolution_sources, format_watch_rebuild_note, init_project, load_syntax_trees,
+        run_pipeline, should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
         verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
         write_incremental_snapshot,
     };
@@ -4494,6 +4628,76 @@ mod tests {
         assert!(!report.high_impact_untyped_files.is_empty());
         assert!(report.high_impact_untyped_files[0].path.ends_with("src/app/a.tpy"));
         assert_eq!(report.high_impact_untyped_files[0].downstream_references, 1);
+    }
+
+    #[test]
+    fn migrate_command_parses_emit_stubs_flags() {
+        let cli = Cli::parse_from([
+            "typepython",
+            "migrate",
+            "--project",
+            "examples/hello-world",
+            "--report",
+            "--emit-stubs",
+            "src/app",
+            "--emit-stubs",
+            "src/lib.py",
+            "--stub-out-dir",
+            ".generated-stubs",
+        ]);
+
+        let super::Command::Migrate(args) = cli.command else {
+            panic!("expected migrate command");
+        };
+
+        assert!(args.report);
+        assert_eq!(args.emit_stubs, vec![PathBuf::from("src/app"), PathBuf::from("src/lib.py")]);
+        assert_eq!(args.stub_out_dir, Some(PathBuf::from(".generated-stubs")));
+    }
+
+    #[test]
+    fn emit_migration_stubs_writes_generated_pyi_to_configured_output_dir() {
+        let project_dir =
+            temp_project_dir("emit_migration_stubs_writes_generated_pyi_to_configured_output_dir");
+        let (written, stub) = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app/__init__.py"), "")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/helpers.py"),
+                "VALUE = 1\n\ndef parse(text):\n    return VALUE\n",
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let discovery = collect_source_paths(&config).expect("test setup should succeed");
+            let written = emit_migration_stubs(
+                &config,
+                &discovery.sources,
+                &[PathBuf::from("src/app")],
+                Some(Path::new(".generated-stubs")),
+            )
+            .expect("migration stub emission should succeed");
+            let stub_path = project_dir.join(".generated-stubs/app/helpers.pyi");
+            let stub = fs::read_to_string(&stub_path)
+                .expect("generated migration stub should be readable");
+
+            (written, stub)
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(
+            written,
+            vec![
+                project_dir.join(".generated-stubs/app/__init__.pyi"),
+                project_dir.join(".generated-stubs/app/helpers.pyi"),
+            ]
+        );
+        assert!(stub.starts_with("# auto-generated by typepython migrate"));
+        assert!(stub.contains("VALUE: int"));
+        assert!(stub.contains("# TODO: add type annotation"));
+        assert!(stub.contains("def parse(text: ...) -> ...: ..."));
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {
