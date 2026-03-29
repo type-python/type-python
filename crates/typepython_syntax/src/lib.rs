@@ -609,6 +609,20 @@ pub struct TypedDictMutationSite {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypedDictExtraItemsMetadata {
+    pub annotation: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TypedDictClassMetadata {
+    pub name: String,
+    pub total: Option<bool>,
+    pub closed: Option<bool>,
+    pub extra_items: Option<TypedDictExtraItemsMetadata>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConditionalReturnSite {
     pub function_name: String,
     pub target_name: String,
@@ -784,6 +798,29 @@ pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationS
     let mut sites = Vec::new();
     collect_typed_dict_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
     sites
+}
+
+#[must_use]
+pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMetadata> {
+    let Ok(parsed) = parse_module(source) else {
+        return Vec::new();
+    };
+
+    parsed
+        .suite()
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::ClassDef(class_def) => Some(TypedDictClassMetadata {
+                name: class_def.name.as_str().to_owned(),
+                total: class_keyword_static_bool(class_def, "total"),
+                closed: class_keyword_static_bool(class_def, "closed"),
+                extra_items: class_keyword_source(source, class_def, "extra_items")
+                    .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
+                line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 #[must_use]
@@ -1494,6 +1531,29 @@ fn expr_static_bool(expr: &Expr) -> Option<bool> {
         Expr::Name(name) if name.id.as_str() == "False" => Some(false),
         _ => None,
     }
+}
+
+fn class_keyword_static_bool(
+    class_def: &ruff_python_ast::StmtClassDef,
+    keyword_name: &str,
+) -> Option<bool> {
+    class_def.arguments.as_ref()?.keywords.iter().find_map(|keyword| {
+        (keyword.arg.as_ref().map(|name| name.as_str()) == Some(keyword_name))
+            .then(|| expr_static_bool(&keyword.value))
+            .flatten()
+    })
+}
+
+fn class_keyword_source(
+    source: &str,
+    class_def: &ruff_python_ast::StmtClassDef,
+    keyword_name: &str,
+) -> Option<String> {
+    class_def.arguments.as_ref()?.keywords.iter().find_map(|keyword| {
+        (keyword.arg.as_ref().map(|name| name.as_str()) == Some(keyword_name))
+            .then(|| slice_range(source, keyword.value.range()).map(str::to_owned))
+            .flatten()
+    })
 }
 
 fn expr_name_list(
@@ -3265,14 +3325,7 @@ fn render_type_params(type_params: &[TypeParam]) -> String {
         return String::new();
     }
 
-    format!(
-        "[{}]",
-        type_params
-            .iter()
-            .map(render_type_param)
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
+    format!("[{}]", type_params.iter().map(render_type_param).collect::<Vec<_>>().join(", "))
 }
 
 fn render_type_param(type_param: &TypeParam) -> String {
@@ -6413,8 +6466,10 @@ fn extract_ast_type_params(
     for type_param in type_params.into_iter().flat_map(|type_params| type_params.iter()) {
         match type_param {
             AstTypeParam::TypeVar(type_var) => {
-                let (bound, constraints) =
-                    extract_ast_type_param_bound_and_constraints(source, type_var.bound.as_deref())?;
+                let (bound, constraints) = extract_ast_type_param_bound_and_constraints(
+                    source,
+                    type_var.bound.as_deref(),
+                )?;
                 parsed.push(TypeParam {
                     name: type_var.name.as_str().to_owned(),
                     bound,
@@ -7069,7 +7124,13 @@ fn validate_type_param_names(
                     "TPY4004",
                     format!("{label} declares type parameter `{}` more than once", type_param.name),
                 )
-                .with_span(Span::new(path.display().to_string(), line_number, 1, line_number, 1)),
+                .with_span(Span::new(
+                    path.display().to_string(),
+                    line_number,
+                    1,
+                    line_number,
+                    1,
+                )),
             );
             return false;
         }
@@ -7201,13 +7262,9 @@ fn parse_type_param(
                 format!("{label} type parameter bound must not be empty"),
             )));
         }
-        Some(bound) if bound.starts_with('(') => (None, parse_type_param_constraints(
-            path,
-            line_number,
-            line,
-            bound,
-            label,
-        )?),
+        Some(bound) if bound.starts_with('(') => {
+            (None, parse_type_param_constraints(path, line_number, line, bound, label)?)
+        }
         Some(bound) => (Some(bound.to_owned()), Vec::new()),
         None => (None, Vec::new()),
     };
@@ -7234,7 +7291,8 @@ fn parse_type_param_constraints(
     constraints: &str,
     label: &str,
 ) -> Result<Vec<String>, Box<Diagnostic>> {
-    let Some(inner) = constraints.strip_prefix('(').and_then(|inner| inner.strip_suffix(')')) else {
+    let Some(inner) = constraints.strip_prefix('(').and_then(|inner| inner.strip_suffix(')'))
+    else {
         return Err(Box::new(parse_error(
             path,
             line_number,

@@ -2064,9 +2064,18 @@ struct TypedDictFieldShape {
 }
 
 #[derive(Debug, Clone)]
+struct TypedDictExtraItemsShape {
+    value_type: String,
+    readonly: bool,
+}
+
+#[derive(Debug, Clone)]
 struct TypedDictShape {
     name: String,
     fields: BTreeMap<String, TypedDictFieldShape>,
+    #[expect(dead_code, reason = "closed/open TypedDict state is preserved for future shape ops")]
+    closed: bool,
+    extra_items: Option<TypedDictExtraItemsShape>,
 }
 
 #[derive(Debug, Clone)]
@@ -2089,6 +2098,41 @@ fn is_typed_dict_base_name(base: &str) -> bool {
     matches!(base.trim(), "TypedDict" | "typing.TypedDict" | "typing_extensions.TypedDict")
 }
 
+fn typed_dict_known_or_extra_field<'a>(
+    shape: &'a TypedDictShape,
+    key: &str,
+) -> Option<TypedDictFieldShapeRef<'a>> {
+    if let Some(field) = shape.fields.get(key) {
+        return Some(TypedDictFieldShapeRef::Known(field));
+    }
+    shape.extra_items.as_ref().map(TypedDictFieldShapeRef::Extra)
+}
+
+enum TypedDictFieldShapeRef<'a> {
+    Known(&'a TypedDictFieldShape),
+    Extra(&'a TypedDictExtraItemsShape),
+}
+
+impl<'a> TypedDictFieldShapeRef<'a> {
+    fn value_type(&self) -> &str {
+        match self {
+            Self::Known(field) => &field.value_type,
+            Self::Extra(field) => &field.value_type,
+        }
+    }
+
+    fn readonly(&self) -> bool {
+        match self {
+            Self::Known(field) => field.readonly,
+            Self::Extra(field) => field.readonly,
+        }
+    }
+}
+
+#[expect(
+    dead_code,
+    reason = "standalone TypedDict literal diagnostics are preserved for future call sites"
+)]
 fn typed_dict_literal_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2182,7 +2226,7 @@ fn typed_dict_literal_entry_diagnostics(
             };
 
             for (key, field) in &expansion_shape.fields {
-                let Some(target_field) = target_shape.fields.get(key) else {
+                let Some(target_field) = typed_dict_known_or_extra_field(target_shape, key) else {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
                         line,
@@ -2194,7 +2238,7 @@ fn typed_dict_literal_entry_diagnostics(
                     continue;
                 };
 
-                if !direct_type_matches(&target_field.value_type, &field.value_type) {
+                if !direct_type_matches(target_field.value_type(), &field.value_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
                         line,
@@ -2204,7 +2248,7 @@ fn typed_dict_literal_entry_diagnostics(
                             key,
                             field.value_type,
                             key,
-                            target_field.value_type
+                            target_field.value_type()
                         ),
                     ));
                 }
@@ -2212,6 +2256,23 @@ fn typed_dict_literal_entry_diagnostics(
                 if field.required {
                     guaranteed_keys.insert(key.clone());
                 }
+            }
+
+            if let Some(extra_items) = &expansion_shape.extra_items
+                && target_shape.extra_items.as_ref().is_none_or(|target_extra| {
+                    !direct_type_matches(&target_extra.value_type, &extra_items.value_type)
+                })
+            {
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    line,
+                    format!(
+                        "TypedDict literal for `{}` expands `{}` with additional keys of type `{}` that are not accepted by the target",
+                        target_shape.name,
+                        expansion_shape.name,
+                        extra_items.value_type
+                    ),
+                ));
             }
 
             continue;
@@ -2226,7 +2287,7 @@ fn typed_dict_literal_entry_diagnostics(
             continue;
         };
 
-        let Some(target_field) = target_shape.fields.get(key) else {
+        let Some(target_field) = typed_dict_known_or_extra_field(target_shape, key) else {
             diagnostics.push(typed_dict_literal_diagnostic(
                 node,
                 line,
@@ -2244,7 +2305,7 @@ fn typed_dict_literal_entry_diagnostics(
             line,
             &entry.value,
         ) {
-            if !direct_type_matches(&target_field.value_type, &actual_type) {
+            if !direct_type_matches(target_field.value_type(), &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
@@ -2254,7 +2315,7 @@ fn typed_dict_literal_entry_diagnostics(
                         actual_type,
                         key,
                         key,
-                        target_field.value_type
+                        target_field.value_type()
                     ),
                 ));
             }
@@ -2392,8 +2453,27 @@ fn typed_dict_readonly_mutation_diagnostics(
             )?;
             let key = site.key.as_deref()?;
             let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type)?;
-            let field = target_shape.fields.get(key)?;
-            if field.readonly {
+            let Some(field) = typed_dict_known_or_extra_field(&target_shape, key) else {
+                return Some(
+                    Diagnostic::error(
+                        "TPY4001",
+                        format!(
+                            "TypedDict item `{}` on `{}` in module `{}` is not a declared key",
+                            key,
+                            target_shape.name,
+                            node.module_path.display()
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        site.line,
+                        1,
+                        site.line,
+                        1,
+                    )),
+                );
+            };
+            if field.readonly() {
                 return Some(
                     Diagnostic::error(
                         "TPY4016",
@@ -2436,14 +2516,14 @@ fn typed_dict_readonly_mutation_diagnostics(
                         nodes,
                         site.line,
                         value,
-                        Some(&field.value_type),
+                        Some(field.value_type()),
                     );
                     if let Some(mut result) = contextual {
                         if let Some(diagnostic) = result.diagnostics.pop() {
                             return Some(diagnostic);
                         }
                         let actual = result.actual_type;
-                        if !direct_type_matches(&field.value_type, &actual) {
+                        if !direct_type_matches(field.value_type(), &actual) {
                             return Some(
                                 Diagnostic::error(
                                     "TPY4001",
@@ -2454,7 +2534,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                                         node.module_path.display(),
                                         actual,
                                         key,
-                                        field.value_type
+                                        field.value_type()
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -2478,7 +2558,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    if !direct_type_matches(&field.value_type, &actual) {
+                    if !direct_type_matches(field.value_type(), &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -2489,7 +2569,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                                     node.module_path.display(),
                                     actual,
                                     key,
-                                    field.value_type
+                                    field.value_type()
                                 ),
                             )
                             .with_span(Span::new(
@@ -2512,10 +2592,10 @@ fn typed_dict_readonly_mutation_diagnostics(
                         site.owner_type_name.as_deref(),
                         site.line,
                         site.operator.as_deref(),
-                        &field.value_type,
+                        field.value_type(),
                         value,
                     )?;
-                    if !direct_type_matches(&field.value_type, &actual) {
+                    if !direct_type_matches(field.value_type(), &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -2526,7 +2606,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                                     node.module_path.display(),
                                     actual,
                                     key,
-                                    field.value_type
+                                    field.value_type()
                                 ),
                             )
                             .with_span(Span::new(
@@ -3425,9 +3505,19 @@ fn resolve_known_typed_dict_shape(
         return None;
     }
 
+    let typed_dict_metadata = load_typed_dict_class_metadata(class_node);
     let mut fields = BTreeMap::new();
-    collect_typed_dict_fields(nodes, class_node, class_decl, &mut BTreeSet::new(), &mut fields);
-    Some(TypedDictShape { name: class_decl.name.clone(), fields })
+    collect_typed_dict_fields(
+        nodes,
+        class_node,
+        class_decl,
+        &typed_dict_metadata,
+        &mut BTreeSet::new(),
+        &mut fields,
+    );
+    let (closed, extra_items) =
+        collect_typed_dict_openness(node, nodes, class_node, class_decl, &mut BTreeSet::new())?;
+    Some(TypedDictShape { name: class_decl.name.clone(), fields, closed, extra_items })
 }
 
 fn is_typed_dict_class(
@@ -3456,6 +3546,7 @@ fn collect_typed_dict_fields(
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,
     class_decl: &Declaration,
+    typed_dict_metadata: &BTreeMap<String, typepython_syntax::TypedDictClassMetadata>,
     visited: &mut BTreeSet<(String, String)>,
     fields: &mut BTreeMap<String, TypedDictFieldShape>,
 ) {
@@ -3467,11 +3558,22 @@ fn collect_typed_dict_fields(
     for base in &class_decl.bases {
         if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
             if is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
-                collect_typed_dict_fields(nodes, base_node, base_decl, visited, fields);
+                collect_typed_dict_fields(
+                    nodes,
+                    base_node,
+                    base_decl,
+                    &load_typed_dict_class_metadata(base_node),
+                    visited,
+                    fields,
+                );
             }
         }
     }
 
+    let total_default = typed_dict_metadata
+        .get(&class_decl.name)
+        .and_then(|metadata| metadata.total)
+        .unwrap_or(true);
     for declaration in class_node.declarations.iter().filter(|declaration| {
         declaration.kind == DeclarationKind::Value
             && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
@@ -3479,17 +3581,108 @@ fn collect_typed_dict_fields(
     }) {
         fields.insert(
             declaration.name.clone(),
-            parse_typed_dict_field_shape(&rewrite_imported_typing_aliases(
-                class_node,
-                &declaration.detail,
-            )),
+            parse_typed_dict_field_shape(
+                &rewrite_imported_typing_aliases(class_node, &declaration.detail),
+                total_default,
+            ),
         );
     }
 }
 
-fn parse_typed_dict_field_shape(annotation: &str) -> TypedDictFieldShape {
+fn collect_typed_dict_openness(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    class_node: &typepython_graph::ModuleNode,
+    class_decl: &Declaration,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<(bool, Option<TypedDictExtraItemsShape>)> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return Some((false, None));
+    }
+
+    let mut inherited_closed = false;
+    let mut inherited_extra_items = None;
+    for base in &class_decl.bases {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+            continue;
+        };
+        if !is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
+            continue;
+        }
+        let (base_closed, base_extra_items) =
+            collect_typed_dict_openness(node, nodes, base_node, base_decl, visited)?;
+        inherited_closed |= base_closed;
+        if inherited_extra_items.is_none() {
+            inherited_extra_items = base_extra_items;
+        }
+    }
+
+    let metadata = load_typed_dict_class_metadata(class_node);
+    let metadata = metadata.get(&class_decl.name);
+    let mut closed = inherited_closed;
+    let mut extra_items = inherited_extra_items;
+
+    if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref()) {
+        if let Some(parsed) = parse_typed_dict_extra_items(node, &annotation.annotation) {
+            if parsed.value_type == "Never" {
+                closed = true;
+                extra_items = None;
+            } else {
+                closed = false;
+                extra_items = Some(parsed);
+            }
+        }
+    }
+
+    if let Some(explicit_closed) = metadata.and_then(|metadata| metadata.closed) {
+        if explicit_closed {
+            closed = true;
+            extra_items = None;
+        } else if extra_items.is_none() {
+            closed = false;
+        }
+    }
+
+    Some((closed, extra_items))
+}
+
+fn load_typed_dict_class_metadata(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, typepython_syntax::TypedDictClassMetadata> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return BTreeMap::new();
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_typed_dict_class_metadata(&source)
+        .into_iter()
+        .map(|metadata| (metadata.name.clone(), metadata))
+        .collect()
+}
+
+fn parse_typed_dict_extra_items(
+    node: &typepython_graph::ModuleNode,
+    annotation: &str,
+) -> Option<TypedDictExtraItemsShape> {
+    let mut value_type = normalize_type_text(&rewrite_imported_typing_aliases(node, annotation));
+    let mut readonly = false;
+
+    if let Some(inner) =
+        value_type.strip_prefix("ReadOnly[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        value_type = normalize_type_text(inner);
+        readonly = true;
+    }
+
+    Some(TypedDictExtraItemsShape { value_type, readonly })
+}
+
+fn parse_typed_dict_field_shape(annotation: &str, total_default: bool) -> TypedDictFieldShape {
     let mut value_type = normalize_type_text(annotation);
-    let mut required = true;
+    let mut required = total_default;
     let mut readonly = false;
 
     loop {
@@ -5228,7 +5421,8 @@ fn resolve_subscript_type_from_target_type(
     if let Some(key) = string_key
         && let Some(shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &target_type)
     {
-        return shape.fields.get(key).map(|field| field.value_type.clone());
+        return typed_dict_known_or_extra_field(&shape, key)
+            .map(|field| field.value_type().to_owned());
     }
 
     let normalized_target = normalize_type_text(&target_type);
@@ -7852,17 +8046,25 @@ fn direct_source_function_keyword_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
+    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+    let keyword_variadic_annotation = signature
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.as_deref())
+        .map(normalize_type_text);
     let param_names = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
-    let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic);
+    let accepts_extra_keywords = keyword_variadic_annotation
+        .as_deref()
+        .is_some_and(|annotation| !annotation.starts_with("Unpack["))
+        || unpack_shape.as_ref().is_some_and(|shape| shape.extra_items.is_some());
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, _) =
         expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
-    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
     let mut diagnostics = call.keyword_names
         .iter()
@@ -7878,22 +8080,30 @@ fn direct_source_function_keyword_diagnostics(
                         keyword
                     ),
                 ),
-                None if !accepts_extra_keywords && !param_names.contains(keyword.as_str()) => {
+                None if unpack_shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.fields.contains_key(keyword.as_str())) =>
+                {
+                    return None;
+                }
+                None if unpack_shape.as_ref().is_some_and(|shape| {
+                    !shape.fields.contains_key(keyword.as_str()) && shape.extra_items.is_none()
+                }) => {
                     Diagnostic::error(
                     "TPY4001",
                     format!(
-                        "call to `{}` in module `{}` uses unknown keyword `{}`",
+                        "call to `{}` in module `{}` uses unknown unpacked keyword `{}`",
                         call.callee,
                         node.module_path.display(),
                         keyword
                     ),
                 )
                 }
-                None if unpack_shape.as_ref().is_some_and(|shape| !shape.fields.contains_key(keyword.as_str())) => {
+                None if !accepts_extra_keywords && !param_names.contains(keyword.as_str()) => {
                     Diagnostic::error(
                     "TPY4001",
                     format!(
-                        "call to `{}` in module `{}` uses unknown unpacked keyword `{}`",
+                        "call to `{}` in module `{}` uses unknown keyword `{}`",
                         call.callee,
                         node.module_path.display(),
                         keyword
@@ -7981,6 +8191,20 @@ fn direct_source_function_keyword_diagnostics(
                     _ => None,
                 }
             })
+            .chain(shape.extra_items.as_ref().into_iter().filter_map(|extra| {
+                (!accepts_extra_keywords).then(|| {
+                    Diagnostic::error(
+                        "TPY4013",
+                        format!(
+                            "call to `{}` in module `{}` cannot expand additional `**{}` keys of type `{}` without `**kwargs`",
+                            call.callee,
+                            node.module_path.display(),
+                            shape.name,
+                            extra.value_type
+                        ),
+                    )
+                })
+            }))
             .collect::<Vec<_>>(),
         KeywordExpansion::Mapping(value_ty) => (!accepts_extra_keywords).then(|| {
             Diagnostic::error(
@@ -8066,11 +8290,12 @@ fn direct_source_function_type_diagnostics(
         .collect::<Vec<_>>();
     let variadic_type =
         signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.as_deref());
+    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
-        .and_then(|param| param.annotation.as_deref());
-    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+        .and_then(|param| param.annotation.as_deref())
+        .filter(|annotation| !normalize_type_text(annotation).starts_with("Unpack["));
     diagnostics.extend(positional_and_keyword_type_diagnostics(
         node,
         nodes,
@@ -8187,6 +8412,9 @@ fn positional_and_keyword_type_diagnostics(
     variadic_starred_types: &[String],
     keyword_expansions: &[KeywordExpansion],
 ) -> Vec<Diagnostic> {
+    let unpack_extra_items_type = unpack_shape
+        .and_then(|shape| shape.extra_items.as_ref())
+        .map(|extra| extra.value_type.as_str());
     let mut diagnostics = arg_types
         .iter()
         .take(param_types.len())
@@ -8275,7 +8503,7 @@ fn positional_and_keyword_type_diagnostics(
                 }
                 continue;
             }
-            let Some(param_ty) = keyword_variadic_type else {
+            let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type) else {
                 continue;
             };
             if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty)
@@ -8335,7 +8563,8 @@ fn positional_and_keyword_type_diagnostics(
                                 ),
                             ));
                         }
-                    } else if let Some(param_ty) = keyword_variadic_type {
+                    } else if let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type)
+                    {
                         if !field.value_type.is_empty()
                             && !param_ty.is_empty()
                             && !direct_type_is_assignable(node, nodes, param_ty, &field.value_type)
@@ -8349,6 +8578,31 @@ fn positional_and_keyword_type_diagnostics(
                                     shape.name,
                                     key,
                                     field.value_type,
+                                    param_ty
+                                ),
+                            ));
+                        }
+                    }
+                }
+                if let Some(extra_items) = &shape.extra_items {
+                    if let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type) {
+                        if !extra_items.value_type.is_empty()
+                            && !param_ty.is_empty()
+                            && !direct_type_is_assignable(
+                                node,
+                                nodes,
+                                param_ty,
+                                &extra_items.value_type,
+                            )
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                "TPY4013",
+                                format!(
+                                    "call to `{}` in module `{}` expands additional `**{}` keys of type `{}` where extra keywords expect `{}`",
+                                    call.callee,
+                                    node.module_path.display(),
+                                    shape.name,
+                                    extra_items.value_type,
                                     param_ty
                                 ),
                             ));
@@ -11200,6 +11454,15 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_total_false_typed_dict_missing_keys() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict, total=False):\n    id: int\n    name: str\n\npayload: User = {}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_unknown_typed_dict_key() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\npayload: User = {\"id\": 1, \"name\": \"Ada\"}\n",
@@ -11211,6 +11474,15 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_typed_dict_extra_items_literal_key() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict, extra_items=int):\n    id: int\n\npayload: User = {\"id\": 1, \"age\": 2}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_incompatible_typed_dict_value() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\npayload: User = {\"id\": \"oops\"}\n",
@@ -11219,6 +11491,17 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
         assert!(rendered.contains("assigns `str` to key `id`"));
+    }
+
+    #[test]
+    fn check_reports_incompatible_typed_dict_extra_items_value() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict, extra_items=int):\n    id: int\n\npayload: User = {\"id\": 1, \"age\": \"old\"}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("assigns `str` to key `age`"));
     }
 
     #[test]
@@ -11766,6 +12049,16 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_writable_typed_dict_extra_item_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict, extra_items=int):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"age\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(!result.diagnostics.has_errors(), "{rendered}");
+    }
+
+    #[test]
     fn check_reports_writable_typed_dict_item_assignment_type_mismatch() {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = 1\n",
@@ -11774,6 +12067,17 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
         assert!(rendered.contains("assigns `int` where `name` expects `str`"));
+    }
+
+    #[test]
+    fn check_reports_readonly_typed_dict_extra_item_assignment() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict, extra_items=ReadOnly[int]):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"age\"] = 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4016"));
+        assert!(rendered.contains("cannot be assigned"));
     }
 
     #[test]
@@ -19933,6 +20237,26 @@ mod tests {
         });
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_accepts_typed_dict_unpack_extra_items_callsite() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict, extra_items=int):\n    name: str\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(name=\"Ada\", age=1)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_typed_dict_unpack_extra_items_callsite_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class UserKw(TypedDict, extra_items=int):\n    name: str\n\ndef build(**kwargs: Unpack[UserKw]) -> None:\n    return None\n\nbuild(name=\"Ada\", age=\"old\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("variadic keyword parameter expects `int`"));
     }
 
     #[test]
