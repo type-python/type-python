@@ -809,64 +809,148 @@ pub fn normalize_annotated_lambda_source_for_emission(source: &str) -> String {
     normalize_annotated_lambda_source_lossy(source)
 }
 
+#[derive(Debug)]
+struct ActiveSourceLineIndex {
+    ptr: usize,
+    len: usize,
+    line_starts: Vec<usize>,
+}
+
+thread_local! {
+    static ACTIVE_SOURCE_LINE_INDICES: RefCell<Vec<ActiveSourceLineIndex>> = const { RefCell::new(Vec::new()) };
+}
+
+fn build_source_line_starts(source: &str) -> Vec<usize> {
+    let mut line_starts = vec![0];
+    line_starts.extend(
+        source
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, byte)| (*byte == b'\n').then_some(index + 1)),
+    );
+    line_starts
+}
+
+fn offset_to_line_column_from_line_starts(
+    source: &str,
+    offset: usize,
+    line_starts: &[usize],
+) -> (usize, usize) {
+    let clamped = offset.min(source.len());
+    let line_index = line_starts.partition_point(|start| *start <= clamped).saturating_sub(1);
+    let line_start = line_starts.get(line_index).copied().unwrap_or(0);
+    let column =
+        source.get(line_start..clamped).map(|segment| segment.chars().count() + 1).unwrap_or(1);
+    (line_index + 1, column)
+}
+
+fn with_source_line_index<T>(source: &str, action: impl FnOnce() -> T) -> T {
+    struct LineIndexGuard;
+
+    impl Drop for LineIndexGuard {
+        fn drop(&mut self) {
+            ACTIVE_SOURCE_LINE_INDICES.with(|active| {
+                active.borrow_mut().pop();
+            });
+        }
+    }
+
+    ACTIVE_SOURCE_LINE_INDICES.with(|active| {
+        active.borrow_mut().push(ActiveSourceLineIndex {
+            ptr: source.as_ptr() as usize,
+            len: source.len(),
+            line_starts: build_source_line_starts(source),
+        });
+    });
+    let _guard = LineIndexGuard;
+    action()
+}
+
 #[must_use]
 pub fn collect_typed_dict_literal_sites(source: &str) -> Vec<TypedDictLiteralSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    let mut sites = Vec::new();
-    collect_typed_dict_literal_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
-    sites
+        let mut sites = Vec::new();
+        collect_typed_dict_literal_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            None,
+            &mut sites,
+        );
+        sites
+    })
 }
 
 #[must_use]
 pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    let mut sites = Vec::new();
-    collect_direct_call_context_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
-    sites
+        let mut sites = Vec::new();
+        collect_direct_call_context_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            None,
+            &mut sites,
+        );
+        sites
+    })
 }
 
 #[must_use]
 pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    let mut sites = Vec::new();
-    collect_typed_dict_mutation_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
-    sites
+        let mut sites = Vec::new();
+        collect_typed_dict_mutation_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            None,
+            &mut sites,
+        );
+        sites
+    })
 }
 
 #[must_use]
 pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMetadata> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    parsed
-        .suite()
-        .iter()
-        .filter_map(|stmt| match stmt {
-            Stmt::ClassDef(class_def) => Some(TypedDictClassMetadata {
-                name: class_def.name.as_str().to_owned(),
-                total: class_keyword_static_bool(class_def, "total"),
-                closed: class_keyword_static_bool(class_def, "closed"),
-                extra_items: class_keyword_source(&normalized, class_def, "extra_items")
-                    .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
-                line: offset_to_line_column(&normalized, class_def.range.start().to_usize()).0,
-            }),
-            _ => None,
-        })
-        .collect()
+        parsed
+            .suite()
+            .iter()
+            .filter_map(|stmt| match stmt {
+                Stmt::ClassDef(class_def) => Some(TypedDictClassMetadata {
+                    name: class_def.name.as_str().to_owned(),
+                    total: class_keyword_static_bool(class_def, "total"),
+                    closed: class_keyword_static_bool(class_def, "closed"),
+                    extra_items: class_keyword_source(&normalized, class_def, "extra_items")
+                        .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
+                    line: offset_to_line_column(&normalized, class_def.range.start().to_usize()).0,
+                }),
+                _ => None,
+            })
+            .collect()
+    })
 }
 
 #[must_use]
@@ -881,17 +965,19 @@ pub fn collect_unsafe_operation_sites(source: &str) -> Vec<UnsafeOperationSite> 
         source,
         &tree.statements,
     ));
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    let unsafe_ranges = collect_unsafe_block_ranges(source, &tree.statements);
-    let mut collector =
-        UnsafeOperationCollector { source: &normalized, unsafe_ranges, sites: Vec::new() };
-    for stmt in parsed.suite() {
-        visitor::Visitor::visit_stmt(&mut collector, stmt);
-    }
-    collector.sites
+        let unsafe_ranges = collect_unsafe_block_ranges(source, &tree.statements);
+        let mut collector =
+            UnsafeOperationCollector { source: &normalized, unsafe_ranges, sites: Vec::new() };
+        for stmt in parsed.suite() {
+            visitor::Visitor::visit_stmt(&mut collector, stmt);
+        }
+        collector.sites
+    })
 }
 
 #[must_use]
@@ -915,130 +1001,144 @@ pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSi
 #[must_use]
 pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransformModuleInfo {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return DataclassTransformModuleInfo::default();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return DataclassTransformModuleInfo::default();
+        };
 
-    let import_bindings = collect_import_bindings(parsed.suite());
-    let mut providers = Vec::new();
-    let mut classes = Vec::new();
-    for stmt in parsed.suite() {
-        match stmt {
-            Stmt::FunctionDef(function) => {
-                if let Some(metadata) = dataclass_transform_metadata(
-                    &normalized,
-                    &function.decorator_list,
-                    &import_bindings,
-                ) {
-                    providers.push(DataclassTransformProviderSite {
-                        name: function.name.as_str().to_owned(),
-                        metadata,
-                        line: offset_to_line_column(&normalized, function.range.start().to_usize())
+        let import_bindings = collect_import_bindings(parsed.suite());
+        let mut providers = Vec::new();
+        let mut classes = Vec::new();
+        for stmt in parsed.suite() {
+            match stmt {
+                Stmt::FunctionDef(function) => {
+                    if let Some(metadata) = dataclass_transform_metadata(
+                        &normalized,
+                        &function.decorator_list,
+                        &import_bindings,
+                    ) {
+                        providers.push(DataclassTransformProviderSite {
+                            name: function.name.as_str().to_owned(),
+                            metadata,
+                            line: offset_to_line_column(
+                                &normalized,
+                                function.range.start().to_usize(),
+                            )
                             .0,
-                    });
+                        });
+                    }
                 }
-            }
-            Stmt::ClassDef(class_def) => {
-                if let Some(metadata) = dataclass_transform_metadata(
-                    &normalized,
-                    &class_def.decorator_list,
-                    &import_bindings,
-                ) {
-                    providers.push(DataclassTransformProviderSite {
-                        name: class_def.name.as_str().to_owned(),
-                        metadata,
-                        line: offset_to_line_column(
-                            &normalized,
-                            class_def.range.start().to_usize(),
-                        )
-                        .0,
-                    });
+                Stmt::ClassDef(class_def) => {
+                    if let Some(metadata) = dataclass_transform_metadata(
+                        &normalized,
+                        &class_def.decorator_list,
+                        &import_bindings,
+                    ) {
+                        providers.push(DataclassTransformProviderSite {
+                            name: class_def.name.as_str().to_owned(),
+                            metadata,
+                            line: offset_to_line_column(
+                                &normalized,
+                                class_def.range.start().to_usize(),
+                            )
+                            .0,
+                        });
+                    }
+                    classes.push(collect_dataclass_transform_class_site(
+                        &normalized,
+                        class_def,
+                        &import_bindings,
+                    ));
                 }
-                classes.push(collect_dataclass_transform_class_site(
-                    &normalized,
-                    class_def,
-                    &import_bindings,
-                ));
+                _ => {}
             }
-            _ => {}
         }
-    }
 
-    DataclassTransformModuleInfo { providers, classes }
+        DataclassTransformModuleInfo { providers, classes }
+    })
 }
 
 #[must_use]
 pub fn collect_decorator_transform_module_info(source: &str) -> DecoratorTransformModuleInfo {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return DecoratorTransformModuleInfo::default();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return DecoratorTransformModuleInfo::default();
+        };
 
-    let import_bindings = collect_import_bindings(parsed.suite());
-    let mut callables = Vec::new();
-    collect_decorated_callable_sites(
-        &normalized,
-        parsed.suite(),
-        None,
-        &import_bindings,
-        &mut callables,
-    );
-    DecoratorTransformModuleInfo { callables }
+        let import_bindings = collect_import_bindings(parsed.suite());
+        let mut callables = Vec::new();
+        collect_decorated_callable_sites(
+            &normalized,
+            parsed.suite(),
+            None,
+            &import_bindings,
+            &mut callables,
+        );
+        DecoratorTransformModuleInfo { callables }
+    })
 }
 
 #[must_use]
 pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFunctionSignatureSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    parsed
-        .suite()
-        .iter()
-        .filter_map(|stmt| match stmt {
-            Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
-                name: function.name.as_str().to_owned(),
-                params: collect_direct_function_param_sites(&normalized, &function.parameters),
-                line: offset_to_line_column(&normalized, function.range.start().to_usize()).0,
-            }),
-            _ => None,
-        })
-        .collect()
+        parsed
+            .suite()
+            .iter()
+            .filter_map(|stmt| match stmt {
+                Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
+                    name: function.name.as_str().to_owned(),
+                    params: collect_direct_function_param_sites(&normalized, &function.parameters),
+                    line: offset_to_line_column(&normalized, function.range.start().to_usize()).0,
+                }),
+                _ => None,
+            })
+            .collect()
+    })
 }
 
 #[must_use]
 pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSignatureSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    parsed
-        .suite()
-        .iter()
-        .flat_map(|stmt| match stmt {
-            Stmt::ClassDef(class_def) => class_def
-                .body
-                .iter()
-                .filter_map(|member| match member {
-                    Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
-                        owner_type_name: class_def.name.as_str().to_owned(),
-                        name: function.name.as_str().to_owned(),
-                        method_kind: method_kind_from_decorators(&function.decorator_list),
-                        params: collect_direct_function_param_sites(
-                            &normalized,
-                            &function.parameters,
-                        ),
-                        line: offset_to_line_column(&normalized, function.range.start().to_usize())
+        parsed
+            .suite()
+            .iter()
+            .flat_map(|stmt| match stmt {
+                Stmt::ClassDef(class_def) => class_def
+                    .body
+                    .iter()
+                    .filter_map(|member| match member {
+                        Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
+                            owner_type_name: class_def.name.as_str().to_owned(),
+                            name: function.name.as_str().to_owned(),
+                            method_kind: method_kind_from_decorators(&function.decorator_list),
+                            params: collect_direct_function_param_sites(
+                                &normalized,
+                                &function.parameters,
+                            ),
+                            line: offset_to_line_column(
+                                &normalized,
+                                function.range.start().to_usize(),
+                            )
                             .0,
-                    }),
-                    _ => None,
-                })
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        })
-        .collect()
+                        }),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect()
+    })
 }
 
 fn collect_direct_function_param_sites(
@@ -1117,19 +1217,21 @@ fn collect_direct_function_param_sites(
 #[must_use]
 pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutationSite> {
     let normalized = normalize_annotated_lambda_source_lossy(source);
-    let Ok(parsed) = parse_module(&normalized) else {
-        return Vec::new();
-    };
+    with_source_line_index(&normalized, || {
+        let Ok(parsed) = parse_module(&normalized) else {
+            return Vec::new();
+        };
 
-    let mut sites = Vec::new();
-    collect_frozen_field_mutation_sites_in_suite(
-        &normalized,
-        parsed.suite(),
-        None,
-        None,
-        &mut sites,
-    );
-    sites
+        let mut sites = Vec::new();
+        collect_frozen_field_mutation_sites_in_suite(
+            &normalized,
+            parsed.suite(),
+            None,
+            None,
+            &mut sites,
+        );
+        sites
+    })
 }
 
 fn collect_frozen_field_mutation_sites_in_suite(
@@ -2686,7 +2788,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
     let mut diagnostics = DiagnosticReport::default();
     let type_ignore_directives = parse_type_ignore_directives(&source.text);
 
-    match parse_module(&source.text) {
+    with_source_line_index(&source.text, || match parse_module(&source.text) {
         Ok(parsed) => {
             collect_invalid_annotation_placement_diagnostics(
                 &source.path,
@@ -2762,7 +2864,7 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 ),
             );
         }
-    }
+    });
 
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
 }
@@ -2795,7 +2897,7 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
         };
         let (normalized, annotated_lambda_sites) = normalize_annotated_lambda_source(&normalized);
         with_active_annotated_lambda_sites(annotated_lambda_sites, || {
-            match parse_module(&normalized) {
+            with_source_line_index(&normalized, || match parse_module(&normalized) {
                 Ok(parsed) => {
                     collect_invalid_annotation_placement_diagnostics(
                         &source.path,
@@ -2910,7 +3012,7 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                         )),
                     );
                 }
-            }
+            });
         });
     }
 
@@ -7640,6 +7742,18 @@ fn parse_error_span(path: &Path, source: &str, start: usize, end: usize) -> Span
 }
 
 fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
+    let active_lookup = ACTIVE_SOURCE_LINE_INDICES.with(|active| {
+        active
+            .borrow()
+            .iter()
+            .rev()
+            .find(|index| index.ptr == source.as_ptr() as usize && index.len == source.len())
+            .map(|index| offset_to_line_column_from_line_starts(source, offset, &index.line_starts))
+    });
+    if let Some(line_and_column) = active_lookup {
+        return line_and_column;
+    }
+
     let mut line = 1usize;
     let mut column = 1usize;
 

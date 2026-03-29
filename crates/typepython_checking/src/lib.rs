@@ -1,6 +1,7 @@
 //! Type-checking boundary for TypePython.
 
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fs,
 };
@@ -73,6 +74,71 @@ pub struct SyntheticMethodStub {
     pub returns: Option<String>,
 }
 
+thread_local! {
+    static ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE:
+        RefCell<Vec<BTreeMap<String, BTreeMap<String, typepython_syntax::TypedDictClassMetadata>>>> =
+            const { RefCell::new(Vec::new()) };
+    static ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE: RefCell<
+        Vec<BTreeMap<String, BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>>>,
+    > = const { RefCell::new(Vec::new()) };
+    static ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE: RefCell<
+        Vec<
+            BTreeMap<
+                String,
+                BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>,
+            >,
+        >,
+    > = const { RefCell::new(Vec::new()) };
+    static ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE: RefCell<
+        Vec<BTreeMap<String, typepython_syntax::DecoratorTransformModuleInfo>>,
+    > = const { RefCell::new(Vec::new()) };
+    static ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE: RefCell<
+        Vec<BTreeMap<String, typepython_syntax::DataclassTransformModuleInfo>>,
+    > = const { RefCell::new(Vec::new()) };
+}
+
+fn with_checker_source_caches<T>(action: impl FnOnce() -> T) -> T {
+    struct CheckerSourceCacheGuard;
+
+    impl Drop for CheckerSourceCacheGuard {
+        fn drop(&mut self) {
+            ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+            ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+            ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+            ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+            ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+        }
+    }
+
+    ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
+        cache.borrow_mut().push(BTreeMap::new());
+    });
+    ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
+        cache.borrow_mut().push(BTreeMap::new());
+    });
+    ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
+        cache.borrow_mut().push(BTreeMap::new());
+    });
+    ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+        cache.borrow_mut().push(BTreeMap::new());
+    });
+    ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+        cache.borrow_mut().push(BTreeMap::new());
+    });
+    let _guard = CheckerSourceCacheGuard;
+    action()
+}
+
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
@@ -88,137 +154,145 @@ pub fn check_with_options(
     strict: bool,
     warn_unsafe: bool,
 ) -> CheckResult {
-    let mut diagnostics = DiagnosticReport::default();
+    with_checker_source_caches(|| {
+        let mut diagnostics = DiagnosticReport::default();
 
-    for node in &graph.nodes {
-        for overload_diagnostic in ambiguous_overload_call_diagnostics(node, &graph.nodes) {
-            diagnostics.push(overload_diagnostic);
-        }
-        for unknown_diagnostic in direct_unknown_operation_diagnostics(node, &graph.nodes) {
-            diagnostics.push(unknown_diagnostic);
-        }
-        for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
-            diagnostics.push(resolution_diagnostic);
-        }
-        for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
-            diagnostics.push(access_diagnostic);
-        }
-        for unsafe_diagnostic in unsafe_boundary_diagnostics(node, strict, warn_unsafe) {
-            diagnostics.push(unsafe_diagnostic);
-        }
-        for deprecated_diagnostic in
-            deprecated_use_diagnostics(node, &graph.nodes, report_deprecated)
-        {
-            diagnostics.push(deprecated_diagnostic);
-        }
-        for call_diagnostic in direct_method_call_diagnostics(node, &graph.nodes) {
-            diagnostics.push(call_diagnostic);
-        }
-        for return_diagnostic in direct_return_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(return_diagnostic);
-        }
-        for yield_diagnostic in direct_yield_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(yield_diagnostic);
-        }
-        for for_diagnostic in for_loop_target_diagnostics(node, &graph.nodes) {
-            diagnostics.push(for_diagnostic);
-        }
-        for destructuring_diagnostic in destructuring_assignment_diagnostics(node, &graph.nodes) {
-            diagnostics.push(destructuring_diagnostic);
-        }
-        for with_diagnostic in with_statement_diagnostics(node, &graph.nodes) {
-            diagnostics.push(with_diagnostic);
-        }
-        for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
-            diagnostics.push(call_diagnostic);
-        }
-        for call_diagnostic in direct_call_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(call_diagnostic);
-        }
-        for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
-            diagnostics.push(call_diagnostic);
-        }
-        for call_diagnostic in direct_unresolved_paramspec_call_diagnostics(node, &graph.nodes) {
-            diagnostics.push(call_diagnostic);
-        }
-        for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(assignment_diagnostic);
-        }
-        for assignment_diagnostic in
-            simple_name_augmented_assignment_diagnostics(node, &graph.nodes)
-        {
-            diagnostics.push(assignment_diagnostic);
-        }
-        for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
-            if !diagnostics.diagnostics.contains(&typed_dict_diagnostic) {
+        for node in &graph.nodes {
+            for overload_diagnostic in ambiguous_overload_call_diagnostics(node, &graph.nodes) {
+                diagnostics.push(overload_diagnostic);
+            }
+            for unknown_diagnostic in direct_unknown_operation_diagnostics(node, &graph.nodes) {
+                diagnostics.push(unknown_diagnostic);
+            }
+            for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
+                diagnostics.push(resolution_diagnostic);
+            }
+            for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
+                diagnostics.push(access_diagnostic);
+            }
+            for unsafe_diagnostic in unsafe_boundary_diagnostics(node, strict, warn_unsafe) {
+                diagnostics.push(unsafe_diagnostic);
+            }
+            for deprecated_diagnostic in
+                deprecated_use_diagnostics(node, &graph.nodes, report_deprecated)
+            {
+                diagnostics.push(deprecated_diagnostic);
+            }
+            for call_diagnostic in direct_method_call_diagnostics(node, &graph.nodes) {
+                diagnostics.push(call_diagnostic);
+            }
+            for return_diagnostic in direct_return_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(return_diagnostic);
+            }
+            for yield_diagnostic in direct_yield_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(yield_diagnostic);
+            }
+            for for_diagnostic in for_loop_target_diagnostics(node, &graph.nodes) {
+                diagnostics.push(for_diagnostic);
+            }
+            for destructuring_diagnostic in destructuring_assignment_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(destructuring_diagnostic);
+            }
+            for with_diagnostic in with_statement_diagnostics(node, &graph.nodes) {
+                diagnostics.push(with_diagnostic);
+            }
+            for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
+                diagnostics.push(call_diagnostic);
+            }
+            for call_diagnostic in direct_call_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(call_diagnostic);
+            }
+            for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
+                diagnostics.push(call_diagnostic);
+            }
+            for call_diagnostic in direct_unresolved_paramspec_call_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(call_diagnostic);
+            }
+            for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(assignment_diagnostic);
+            }
+            for assignment_diagnostic in
+                simple_name_augmented_assignment_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(assignment_diagnostic);
+            }
+            for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
+                if !diagnostics.diagnostics.contains(&typed_dict_diagnostic) {
+                    diagnostics.push(typed_dict_diagnostic);
+                }
+            }
+            for typed_dict_diagnostic in
+                typed_dict_readonly_mutation_diagnostics(node, &graph.nodes)
+            {
                 diagnostics.push(typed_dict_diagnostic);
             }
-        }
-        for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
-            diagnostics.push(typed_dict_diagnostic);
-        }
-        for subscript_diagnostic in subscript_assignment_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(subscript_diagnostic);
-        }
-        for dataclass_diagnostic in
-            frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes)
-        {
-            diagnostics.push(dataclass_diagnostic);
-        }
-        for dataclass_diagnostic in frozen_plain_dataclass_mutation_diagnostics(node, &graph.nodes)
-        {
-            diagnostics.push(dataclass_diagnostic);
-        }
-        for attribute_diagnostic in attribute_assignment_type_diagnostics(node, &graph.nodes) {
-            diagnostics.push(attribute_diagnostic);
-        }
-        for duplicate in
-            duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
-        {
-            diagnostics.push(duplicate);
-        }
-        for override_violation in override_diagnostics(node, &graph.nodes) {
-            diagnostics.push(override_violation);
-        }
-        for override_violation in override_compatibility_diagnostics(node, &graph.nodes) {
-            diagnostics.push(override_violation);
-        }
-        if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
-            for override_violation in missing_override_diagnostics(node, &graph.nodes) {
+            for subscript_diagnostic in subscript_assignment_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(subscript_diagnostic);
+            }
+            for dataclass_diagnostic in
+                frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(dataclass_diagnostic);
+            }
+            for dataclass_diagnostic in
+                frozen_plain_dataclass_mutation_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(dataclass_diagnostic);
+            }
+            for attribute_diagnostic in attribute_assignment_type_diagnostics(node, &graph.nodes) {
+                diagnostics.push(attribute_diagnostic);
+            }
+            for duplicate in
+                duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
+            {
+                diagnostics.push(duplicate);
+            }
+            for override_violation in override_diagnostics(node, &graph.nodes) {
                 diagnostics.push(override_violation);
             }
-        }
-        for final_violation in final_decorator_diagnostics(node, &graph.nodes) {
-            diagnostics.push(final_violation);
-        }
-        for override_violation in final_override_diagnostics(node, &graph.nodes) {
-            diagnostics.push(override_violation);
-        }
-        for abstract_violation in abstract_member_diagnostics(node, &graph.nodes) {
-            diagnostics.push(abstract_violation);
-        }
-        for instantiation_violation in abstract_instantiation_diagnostics(node, &graph.nodes) {
-            diagnostics.push(instantiation_violation);
-        }
-        for implementation_violation in interface_implementation_diagnostics(node, &graph.nodes) {
-            diagnostics.push(implementation_violation);
-        }
-        if enable_sealed_exhaustiveness {
-            for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-                diagnostics.push(match_violation);
+            for override_violation in override_compatibility_diagnostics(node, &graph.nodes) {
+                diagnostics.push(override_violation);
             }
-            for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-                diagnostics.push(match_violation);
+            if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
+                for override_violation in missing_override_diagnostics(node, &graph.nodes) {
+                    diagnostics.push(override_violation);
+                }
+            }
+            for final_violation in final_decorator_diagnostics(node, &graph.nodes) {
+                diagnostics.push(final_violation);
+            }
+            for override_violation in final_override_diagnostics(node, &graph.nodes) {
+                diagnostics.push(override_violation);
+            }
+            for abstract_violation in abstract_member_diagnostics(node, &graph.nodes) {
+                diagnostics.push(abstract_violation);
+            }
+            for instantiation_violation in abstract_instantiation_diagnostics(node, &graph.nodes) {
+                diagnostics.push(instantiation_violation);
+            }
+            for implementation_violation in interface_implementation_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(implementation_violation);
+            }
+            if enable_sealed_exhaustiveness {
+                for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+                    diagnostics.push(match_violation);
+                }
+                for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
+                    diagnostics.push(match_violation);
+                }
+            }
+            for conditional_return_diagnostic in
+                conditional_return_coverage_diagnostics(node, &graph.nodes)
+            {
+                diagnostics.push(conditional_return_diagnostic);
             }
         }
-        for conditional_return_diagnostic in
-            conditional_return_coverage_diagnostics(node, &graph.nodes)
-        {
-            diagnostics.push(conditional_return_diagnostic);
-        }
-    }
 
-    CheckResult { diagnostics }
+        CheckResult { diagnostics }
+    })
 }
 
 #[must_use]
@@ -3777,6 +3851,24 @@ fn load_typed_dict_class_metadata(
     if node.module_path.to_string_lossy().starts_with('<') {
         return BTreeMap::new();
     }
+    let cache_key = node.module_path.display().to_string();
+    ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(active) = cache.last_mut() else {
+            return load_typed_dict_class_metadata_uncached(node);
+        };
+        if let Some(metadata) = active.get(&cache_key) {
+            return metadata.clone();
+        }
+        let metadata = load_typed_dict_class_metadata_uncached(node);
+        active.insert(cache_key, metadata.clone());
+        metadata
+    })
+}
+
+fn load_typed_dict_class_metadata_uncached(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, typepython_syntax::TypedDictClassMetadata> {
     let Ok(source) = fs::read_to_string(&node.module_path) else {
         return BTreeMap::new();
     };
@@ -3785,6 +3877,58 @@ fn load_typed_dict_class_metadata(
         .into_iter()
         .map(|metadata| (metadata.name.clone(), metadata))
         .collect()
+}
+
+fn load_direct_method_signatures_uncached(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_direct_method_signature_sites(&source)
+        .into_iter()
+        .map(|signature| {
+            let params = match signature.method_kind {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    signature.params
+                }
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::PropertySetter => {
+                    signature.params.into_iter().skip(1).collect()
+                }
+            };
+            ((signature.owner_type_name, signature.name), params)
+        })
+        .collect()
+}
+
+fn load_direct_function_signatures_uncached(
+    node: &typepython_graph::ModuleNode,
+) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return BTreeMap::new();
+    };
+
+    typepython_syntax::collect_direct_function_signature_sites(&source)
+        .into_iter()
+        .map(|signature| (signature.name, signature.params))
+        .collect()
+}
+
+fn load_decorator_transform_module_info_uncached(
+    node: &typepython_graph::ModuleNode,
+) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
+    let source = fs::read_to_string(&node.module_path).ok()?;
+    Some(typepython_syntax::collect_decorator_transform_module_info(&source))
+}
+
+fn load_dataclass_transform_module_info_uncached(
+    node: &typepython_graph::ModuleNode,
+) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
+    let source = fs::read_to_string(&node.module_path).ok()?;
+    Some(typepython_syntax::collect_dataclass_transform_module_info(&source))
 }
 
 fn parse_typed_dict_extra_items(
@@ -8105,26 +8249,19 @@ fn load_direct_method_signatures(
     if node.module_path.to_string_lossy().starts_with('<') {
         return BTreeMap::new();
     }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_direct_method_signature_sites(&source)
-        .into_iter()
-        .map(|signature| {
-            let params = match signature.method_kind {
-                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                    signature.params
-                }
-                typepython_syntax::MethodKind::Instance
-                | typepython_syntax::MethodKind::Class
-                | typepython_syntax::MethodKind::PropertySetter => {
-                    signature.params.into_iter().skip(1).collect()
-                }
-            };
-            ((signature.owner_type_name, signature.name), params)
-        })
-        .collect()
+    let cache_key = node.module_path.display().to_string();
+    ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(active) = cache.last_mut() else {
+            return load_direct_method_signatures_uncached(node);
+        };
+        if let Some(signatures) = active.get(&cache_key) {
+            return signatures.clone();
+        }
+        let signatures = load_direct_method_signatures_uncached(node);
+        active.insert(cache_key, signatures.clone());
+        signatures
+    })
 }
 
 fn resolve_method_call_owner_type(
@@ -9098,33 +9235,28 @@ fn load_direct_function_signatures(
     if node.module_path.to_string_lossy().starts_with('<') {
         return BTreeMap::new();
     }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_direct_function_signature_sites(&source)
-        .into_iter()
-        .map(|signature| (signature.name, signature.params))
-        .collect()
+    let cache_key = node.module_path.display().to_string();
+    ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(active) = cache.last_mut() else {
+            return load_direct_function_signatures_uncached(node);
+        };
+        if let Some(signatures) = active.get(&cache_key) {
+            return signatures.clone();
+        }
+        let signatures = load_direct_function_signatures_uncached(node);
+        active.insert(cache_key, signatures.clone());
+        signatures
+    })
 }
 
 fn load_direct_init_signatures(
     node: &typepython_graph::ModuleNode,
 ) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return BTreeMap::new();
-    }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_direct_method_signature_sites(&source)
+    load_direct_method_signatures(node)
         .into_iter()
-        .filter(|signature| signature.name == "__init__")
-        .map(|signature| {
-            let params = signature.params.into_iter().skip(1).collect::<Vec<_>>();
-            (signature.owner_type_name, params)
-        })
+        .filter(|((_, method_name), _)| method_name == "__init__")
+        .map(|((owner_type_name, _), params)| (owner_type_name, params))
         .collect()
 }
 
@@ -10230,8 +10362,19 @@ fn load_decorator_transform_module_info(
     if node.module_path.to_string_lossy().starts_with('<') {
         return None;
     }
-    let source = fs::read_to_string(&node.module_path).ok()?;
-    Some(typepython_syntax::collect_decorator_transform_module_info(&source))
+    let cache_key = node.module_path.display().to_string();
+    ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(active) = cache.last_mut() else {
+            return load_decorator_transform_module_info_uncached(node);
+        };
+        if let Some(info) = active.get(&cache_key) {
+            return Some(info.clone());
+        }
+        let info = load_decorator_transform_module_info_uncached(node)?;
+        active.insert(cache_key, info.clone());
+        Some(info)
+    })
 }
 
 fn resolve_direct_function_with_node<'a>(
@@ -11026,8 +11169,19 @@ fn load_dataclass_transform_module_info(
     if node.module_path.to_string_lossy().starts_with('<') {
         return None;
     }
-    let source = fs::read_to_string(&node.module_path).ok()?;
-    Some(typepython_syntax::collect_dataclass_transform_module_info(&source))
+    let cache_key = node.module_path.display().to_string();
+    ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let Some(active) = cache.last_mut() else {
+            return load_dataclass_transform_module_info_uncached(node);
+        };
+        if let Some(info) = active.get(&cache_key) {
+            return Some(info.clone());
+        }
+        let info = load_dataclass_transform_module_info_uncached(node)?;
+        active.insert(cache_key, info.clone());
+        Some(info)
+    })
 }
 
 fn resolve_dataclass_transform_provider<'a>(

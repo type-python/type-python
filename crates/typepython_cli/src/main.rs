@@ -1,7 +1,7 @@
 //! `typepython` command-line entrypoint.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     env, fs,
     io::Read,
     num::Wrapping,
@@ -1121,6 +1121,130 @@ fn load_syntax_trees(
         .collect::<Result<Vec<_>>>()
 }
 
+fn load_support_syntax_trees(
+    config: &ConfigHandle,
+    surface_syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> Result<Vec<typepython_syntax::SyntaxTree>> {
+    let project_modules = surface_syntax_trees
+        .iter()
+        .map(|tree| tree.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
+    let import_paths = collect_import_source_paths(surface_syntax_trees);
+    let external_import_paths = import_paths
+        .into_iter()
+        .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
+        .collect::<Vec<_>>();
+    if external_import_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
+    support_sources.extend(external_resolution_sources(config)?);
+    let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
+    for source in support_sources {
+        sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
+    }
+
+    let mut queued_modules = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    for import_path in external_import_paths {
+        for module_key in matching_support_module_keys(&import_path, &sources_by_module) {
+            if queued_modules.insert(module_key.clone()) {
+                queue.push_back(module_key);
+            }
+        }
+    }
+
+    let mut loaded_modules = BTreeSet::new();
+    let mut loaded_paths = BTreeSet::new();
+    let mut support_syntax_trees = Vec::new();
+
+    while let Some(module_key) = queue.pop_front() {
+        if !loaded_modules.insert(module_key.clone()) {
+            continue;
+        }
+        let Some(module_sources) = sources_by_module.get(&module_key) else {
+            continue;
+        };
+
+        for source in module_sources {
+            if !loaded_paths.insert(source.path.clone()) {
+                continue;
+            }
+
+            let mut source_file = SourceFile::from_path(&source.path)
+                .with_context(|| format!("unable to read {}", source.path.display()))?;
+            source_file.logical_module = source.logical_module.clone();
+            let tree = typepython_syntax::parse_with_options(
+                source_file,
+                typepython_syntax::ParseOptions {
+                    enable_conditional_returns: config.config.typing.conditional_returns,
+                },
+            );
+            for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
+                for nested_module_key in
+                    matching_support_module_keys(&import_path, &sources_by_module)
+                {
+                    if queued_modules.insert(nested_module_key.clone()) {
+                        queue.push_back(nested_module_key);
+                    }
+                }
+            }
+            support_syntax_trees.push(tree);
+        }
+    }
+
+    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
+    Ok(support_syntax_trees)
+}
+
+fn collect_import_source_paths(syntax_trees: &[typepython_syntax::SyntaxTree]) -> Vec<String> {
+    syntax_trees
+        .iter()
+        .flat_map(|tree| tree.statements.iter())
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::Import(statement) => Some(
+                statement
+                    .bindings
+                    .iter()
+                    .map(|binding| binding.source_path.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn import_resolves_within_modules(import_path: &str, module_keys: &BTreeSet<String>) -> bool {
+    module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
+}
+
+fn matching_support_module_keys(
+    import_path: &str,
+    sources_by_module: &BTreeMap<String, Vec<DiscoveredSource>>,
+) -> Vec<String> {
+    module_path_prefixes(import_path)
+        .filter(|module_key| sources_by_module.contains_key(*module_key))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
+    let mut candidates = Vec::new();
+    let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);
+    loop {
+        if !current.is_empty() {
+            candidates.push(current);
+        }
+        let Some((parent, _)) = current.rsplit_once('.') else {
+            break;
+        };
+        current = parent;
+    }
+    candidates.into_iter()
+}
+
 fn write_shadow_stubs(
     config: &ConfigHandle,
     syntax_trees: &[typepython_syntax::SyntaxTree],
@@ -1376,10 +1500,6 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
     let syntax_trees =
         load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
-    let mut checking_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
-    checking_sources.extend(external_resolution_sources(config)?);
-    let checking_support_syntax =
-        load_syntax_trees(&checking_sources, config.config.typing.conditional_returns)?;
     let shadow_stubs = if config.config.typing.infer_passthrough {
         write_shadow_stubs(config, &syntax_trees)?
     } else {
@@ -1387,13 +1507,13 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     };
     let mut all_syntax_trees = if config.config.typing.infer_passthrough && !shadow_stubs.is_empty()
     {
-        replace_local_python_surfaces_with_shadow_stubs(
-            &syntax_trees,
-            load_shadow_stub_syntax_trees(&shadow_stubs, config.config.typing.conditional_returns)?,
-        )
+        let shadow_stub_syntax =
+            load_shadow_stub_syntax_trees(&shadow_stubs, config.config.typing.conditional_returns)?;
+        replace_local_python_surfaces_with_shadow_stubs(&syntax_trees, shadow_stub_syntax)
     } else {
         syntax_trees.clone()
     };
+    let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
     all_syntax_trees.extend(checking_support_syntax);
     let mut parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);

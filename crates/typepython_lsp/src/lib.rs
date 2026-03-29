@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
@@ -125,13 +125,20 @@ struct LspTextEdit {
 struct Server {
     config: ConfigHandle,
     overlays: BTreeMap<PathBuf, OverlayDocument>,
+    cached_workspace: Option<WorkspaceState>,
     shutdown_requested: bool,
     exited: bool,
 }
 
 impl Server {
     fn new(config: ConfigHandle) -> Self {
-        Self { config, overlays: BTreeMap::new(), shutdown_requested: false, exited: false }
+        Self {
+            config,
+            overlays: BTreeMap::new(),
+            cached_workspace: None,
+            shutdown_requested: false,
+            exited: false,
+        }
     }
 
     fn serve<R: BufRead, W: Write>(
@@ -259,6 +266,7 @@ impl Server {
             uri_to_path(uri)?,
             OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
         );
+        self.cached_workspace = None;
         Ok(())
     }
 
@@ -307,6 +315,7 @@ impl Server {
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
         self.overlays
             .insert(path, OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version });
+        self.cached_workspace = None;
         Ok(())
     }
 
@@ -323,15 +332,16 @@ impl Server {
                 uri
             )));
         }
+        self.cached_workspace = None;
         Ok(vec![publish_diagnostics_notification(uri, Vec::new())])
     }
 
-    fn publish_diagnostics(&self) -> Result<Vec<Value>, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn publish_diagnostics(&mut self) -> Result<Vec<Value>, LspError> {
+        let workspace = self.workspace()?;
         let mut notifications = workspace
             .diagnostics_by_uri
-            .into_iter()
-            .map(|(uri, diagnostics)| publish_diagnostics_notification(&uri, diagnostics))
+            .iter()
+            .map(|(uri, diagnostics)| publish_diagnostics_notification(uri, diagnostics.clone()))
             .collect::<Vec<_>>();
 
         for overlay in self.overlays.values() {
@@ -349,8 +359,8 @@ impl Server {
         Ok(notifications)
     }
 
-    fn handle_hover(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_hover(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
         let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
             return Ok(Value::Null);
@@ -369,8 +379,8 @@ impl Server {
         }))
     }
 
-    fn handle_definition(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_definition(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
         let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
             return Ok(Value::Null);
@@ -381,8 +391,8 @@ impl Server {
         Ok(json!([LspLocation { uri: declaration.uri.clone(), range: declaration.range }]))
     }
 
-    fn handle_references(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_references(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
         let include_declaration = params
             .get("context")
@@ -402,8 +412,8 @@ impl Server {
         Ok(json!(references))
     }
 
-    fn handle_rename(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_rename(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
         let new_name = params
             .get("newName")
@@ -426,8 +436,8 @@ impl Server {
         Ok(json!({"changes": changes}))
     }
 
-    fn handle_code_action(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_code_action(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, range) = text_document_range(&params)?;
         let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
             return Ok(json!([]));
@@ -441,8 +451,8 @@ impl Server {
         Ok(json!(actions))
     }
 
-    fn handle_completion(&self, params: Value) -> Result<Value, LspError> {
-        let workspace = self.rebuild_workspace()?;
+    fn handle_completion(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
         let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
             return Ok(json!([]));
@@ -470,13 +480,22 @@ impl Server {
         Ok(json!({"isIncomplete": false, "items": items}))
     }
 
+    fn workspace(&mut self) -> Result<&WorkspaceState, LspError> {
+        if self.cached_workspace.is_none() {
+            self.cached_workspace = Some(self.rebuild_workspace()?);
+        }
+        Ok(self.cached_workspace.as_ref().expect("workspace cache should be populated"))
+    }
+
     fn rebuild_workspace(&self) -> Result<WorkspaceState, LspError> {
-        let sources = collect_source_paths(&self.config, &self.overlays)?;
-        let syntax_trees = load_syntax_trees(
-            &sources,
+        let project_sources = collect_project_source_paths(&self.config, &self.overlays)?;
+        let mut syntax_trees = load_syntax_trees(
+            &project_sources,
             &self.overlays,
             self.config.config.typing.conditional_returns,
         )?;
+        let support_syntax_trees = load_support_syntax_trees(&self.config, &syntax_trees)?;
+        syntax_trees.extend(support_syntax_trees);
 
         let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
         apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
@@ -2196,7 +2215,7 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
     )
 }
 
-fn collect_source_paths(
+fn collect_project_source_paths(
     config: &ConfigHandle,
     overlays: &BTreeMap<PathBuf, OverlayDocument>,
 ) -> Result<Vec<DiscoveredSource>> {
@@ -2229,29 +2248,145 @@ fn collect_source_paths(
     }
 
     sort_sources_by_type_authority(&mut local_sources);
+    local_sources.dedup_by(|left, right| left.path == right.path);
+    Ok(local_sources)
+}
 
-    let mut sources = local_sources;
-    let stdlib_root = bundled_stdlib_root();
-    if stdlib_root.exists() {
-        walk_bundled_stdlib_directory(
-            &stdlib_root,
-            &stdlib_root,
-            &config.config.project.target_python,
-            &mut sources,
-        )?;
+fn load_support_syntax_trees(
+    config: &ConfigHandle,
+    surface_syntax_trees: &[SyntaxTree],
+) -> Result<Vec<SyntaxTree>> {
+    let project_modules = surface_syntax_trees
+        .iter()
+        .map(|tree| tree.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
+    let import_paths = collect_import_source_paths(surface_syntax_trees);
+    let external_import_paths = import_paths
+        .into_iter()
+        .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
+        .collect::<Vec<_>>();
+    if external_import_paths.is_empty() {
+        return Ok(Vec::new());
     }
 
-    let mut external_sources = Vec::new();
-    for root in configured_external_type_roots(config) {
-        walk_external_type_root(&root, &mut external_sources)?;
+    let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
+    support_sources.extend(external_resolution_sources(config)?);
+    let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
+    for source in support_sources {
+        sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
     }
-    sort_sources_by_type_authority(&mut external_sources);
-    sources.extend(external_sources);
-    Ok(sources)
+
+    let mut queued_modules = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    for import_path in external_import_paths {
+        for module_key in matching_support_module_keys(&import_path, &sources_by_module) {
+            if queued_modules.insert(module_key.clone()) {
+                queue.push_back(module_key);
+            }
+        }
+    }
+
+    let mut loaded_modules = BTreeSet::new();
+    let mut loaded_paths = BTreeSet::new();
+    let mut support_syntax_trees = Vec::new();
+
+    while let Some(module_key) = queue.pop_front() {
+        if !loaded_modules.insert(module_key.clone()) {
+            continue;
+        }
+        let Some(module_sources) = sources_by_module.get(&module_key) else {
+            continue;
+        };
+
+        for source in module_sources {
+            if !loaded_paths.insert(source.path.clone()) {
+                continue;
+            }
+
+            let mut source_file = SourceFile::from_path(&source.path)
+                .with_context(|| format!("unable to read {}", source.path.display()))?;
+            source_file.logical_module = source.logical_module.clone();
+            let tree = parse_with_options(
+                source_file,
+                ParseOptions {
+                    enable_conditional_returns: config.config.typing.conditional_returns,
+                },
+            );
+            for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
+                for nested_module_key in
+                    matching_support_module_keys(&import_path, &sources_by_module)
+                {
+                    if queued_modules.insert(nested_module_key.clone()) {
+                        queue.push_back(nested_module_key);
+                    }
+                }
+            }
+            support_syntax_trees.push(tree);
+        }
+    }
+
+    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
+    Ok(support_syntax_trees)
+}
+
+fn collect_import_source_paths(syntax_trees: &[SyntaxTree]) -> Vec<String> {
+    syntax_trees
+        .iter()
+        .flat_map(|tree| tree.statements.iter())
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Import(statement) => Some(
+                statement
+                    .bindings
+                    .iter()
+                    .map(|binding| binding.source_path.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+fn import_resolves_within_modules(import_path: &str, module_keys: &BTreeSet<String>) -> bool {
+    module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
+}
+
+fn matching_support_module_keys(
+    import_path: &str,
+    sources_by_module: &BTreeMap<String, Vec<DiscoveredSource>>,
+) -> Vec<String> {
+    module_path_prefixes(import_path)
+        .filter(|module_key| sources_by_module.contains_key(*module_key))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
+    let mut candidates = Vec::new();
+    let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);
+    loop {
+        if !current.is_empty() {
+            candidates.push(current);
+        }
+        let Some((parent, _)) = current.rsplit_once('.') else {
+            break;
+        };
+        current = parent;
+    }
+    candidates.into_iter()
 }
 
 fn bundled_stdlib_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib")
+}
+
+fn bundled_stdlib_sources(target_python: &str) -> Result<Vec<DiscoveredSource>> {
+    let root = bundled_stdlib_root();
+    let mut sources = Vec::new();
+    if root.exists() {
+        walk_bundled_stdlib_directory(&root, &root, target_python, &mut sources)?;
+    }
+    Ok(sources)
 }
 
 fn walk_bundled_stdlib_directory(
@@ -2293,7 +2428,17 @@ fn walk_bundled_stdlib_directory(
     Ok(())
 }
 
-fn configured_external_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
+fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
+    let mut sources = Vec::new();
+    for root in configured_external_type_roots(config)? {
+        walk_external_type_root(&root, &mut sources)?;
+    }
+    sort_sources_by_type_authority(&mut sources);
+    sources.dedup_by(|left, right| left.path == right.path);
+    Ok(sources)
+}
+
+fn configured_external_type_roots(config: &ConfigHandle) -> Result<Vec<PathBuf>> {
     let mut roots = config
         .config
         .resolution
@@ -2305,7 +2450,7 @@ fn configured_external_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
     roots.retain(|root| root.exists());
     roots.sort();
     roots.dedup();
-    roots
+    Ok(roots)
 }
 
 fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
@@ -2775,7 +2920,7 @@ mod tests {
                 ),
             ],
         );
-        let server = Server::new(config.clone());
+        let mut server = Server::new(config.clone());
         let uri = path_to_uri(&config.config_dir.join("src/app/b.tpy"));
 
         let hover = server
@@ -3043,7 +3188,7 @@ foo.ping()
                 "class Box:\n    pass\n\ndef build() -> Box:\n    return Box()\n\nbox = build()\n",
             )],
         );
-        let server = Server::new(config.clone());
+        let mut server = Server::new(config.clone());
         let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
 
         let actions = server
@@ -3072,7 +3217,7 @@ foo.ping()
             "code_actions_offer_unsafe_wrapper_fix",
             &[("src/app/__init__.tpy", "def run() -> None:\n    eval(\"1\")\n")],
         );
-        let server = Server::new(config.clone());
+        let mut server = Server::new(config.clone());
         let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
 
         let actions = server
@@ -3114,7 +3259,7 @@ foo.ping()
                 ("src/app/types.tpy", "class Foo:\n    pass\n"),
             ],
         );
-        let server = Server::new(config.clone());
+        let mut server = Server::new(config.clone());
         let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
 
         let actions = server
