@@ -655,7 +655,7 @@ pub fn generate_inferred_stub_source(
         )
     })?;
 
-    let context = StubInferenceContext::from_suite(parsed.suite());
+    let context = StubInferenceContext::from_suite(python, parsed.suite());
     let mut edits = Vec::new();
     collect_inferred_stub_edits(python, parsed.suite(), &context, mode, &mut edits);
     edits.sort_by_key(|edit| edit.start_line);
@@ -695,13 +695,16 @@ pub fn generate_inferred_stub_source(
     Ok(rewritten)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct StubInferenceContext {
     class_names: std::collections::BTreeSet<String>,
+    value_bindings: BTreeMap<String, String>,
+    instance_attributes: BTreeMap<String, String>,
+    receiver_name: Option<String>,
 }
 
 impl StubInferenceContext {
-    fn from_suite(suite: &[Stmt]) -> Self {
+    fn from_suite(source: &str, suite: &[Stmt]) -> Self {
         let class_names = suite
             .iter()
             .filter_map(|statement| match statement {
@@ -709,7 +712,74 @@ impl StubInferenceContext {
                 _ => None,
             })
             .collect();
-        Self { class_names }
+        let mut context = Self {
+            class_names,
+            value_bindings: BTreeMap::new(),
+            instance_attributes: BTreeMap::new(),
+            receiver_name: None,
+        };
+        collect_name_bindings_from_suite(source, suite, &mut context);
+        context
+    }
+
+    fn with_instance_attributes(&self, instance_attributes: BTreeMap<String, String>) -> Self {
+        let mut derived = self.clone();
+        derived.instance_attributes = instance_attributes;
+        derived
+    }
+
+    fn with_receiver_name(&self, receiver_name: Option<&str>) -> Self {
+        let mut derived = self.clone();
+        derived.receiver_name = receiver_name.map(str::to_owned);
+        derived
+    }
+}
+
+fn collect_name_bindings_from_suite(
+    source: &str,
+    suite: &[Stmt],
+    context: &mut StubInferenceContext,
+) {
+    for statement in suite {
+        collect_name_bindings_from_statement(source, statement, context);
+    }
+}
+
+fn collect_name_bindings_from_statement(
+    source: &str,
+    statement: &Stmt,
+    context: &mut StubInferenceContext,
+) {
+    match statement {
+        Stmt::Assign(assign) => {
+            let Some(inferred) = infer_expr_type(&assign.value, context) else {
+                return;
+            };
+            for target in &assign.targets {
+                if let Expr::Name(name) = target {
+                    context.value_bindings.insert(name.id.as_str().to_owned(), inferred.clone());
+                } else if let Some(receiver_name) = context.receiver_name.as_deref()
+                    && let Some(attribute) = self_attribute_name(target, receiver_name)
+                {
+                    context.instance_attributes.insert(attribute.to_owned(), inferred.clone());
+                }
+            }
+        }
+        Stmt::AnnAssign(assign) => {
+            let Some(annotation) =
+                slice_range(source, assign.annotation.range()).map(str::to_owned)
+            else {
+                return;
+            };
+            if let Expr::Name(name) = assign.target.as_ref() {
+                context.value_bindings.insert(name.id.as_str().to_owned(), annotation);
+            } else if let Some(receiver_name) = context.receiver_name.as_deref()
+                && let Some(attribute) = self_attribute_name(assign.target.as_ref(), receiver_name)
+            {
+                context.instance_attributes.insert(attribute.to_owned(), annotation);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -739,7 +809,7 @@ fn collect_inferred_stub_edits(
                 let end_line =
                     offset_to_line(source, end_offset.max(assign.range.start().to_usize()));
                 if let Some(replacement) =
-                    render_assignment_stub(source, &assign.targets, &assign.value, mode)
+                    render_assignment_stub(source, &assign.targets, &assign.value, context, mode)
                 {
                     edits.push(StubEdit { start_line, end_line, replacement: Some(replacement) });
                 }
@@ -814,8 +884,22 @@ fn render_function_stub_parts(
     {
         Some(annotation) => (annotation, false),
         None => {
-            let inferred = if is_async { None } else { infer_function_return_type(body, context) };
+            let inferred = if is_async {
+                None
+            } else {
+                infer_function_return_type(
+                    source,
+                    parameters,
+                    body,
+                    in_class,
+                    is_static_method,
+                    context,
+                )
+            };
             match inferred {
+                Some(annotation) if annotation == missing_type_annotation(mode) => {
+                    (annotation, true)
+                }
                 Some(annotation) => (annotation, false),
                 None => (missing_type_annotation(mode).to_owned(), true),
             }
@@ -1000,13 +1084,15 @@ fn render_assignment_stub(
     _source: &str,
     targets: &[Expr],
     value: &Expr,
+    context: &StubInferenceContext,
     mode: InferredStubMode,
 ) -> Option<String> {
     let mut lines = Vec::new();
-    let inferred = infer_expr_type(value, &StubInferenceContext::default());
+    let inferred = infer_expr_type(value, context);
     for target in targets {
         if let Expr::Name(name) = target {
-            let missing = inferred.is_none();
+            let missing =
+                inferred.is_none() || inferred.as_deref() == Some(missing_type_annotation(mode));
             if mode == InferredStubMode::Migration && missing {
                 lines.push(String::from("# TODO: add type annotation"));
             }
@@ -1041,7 +1127,10 @@ fn render_class_stub(
         source_header_text(source, class_def.name.range.start().to_usize(), &class_def.body)
             .trim_end()
             .to_owned();
+    let inferred_instance_attributes = infer_instance_attributes(source, class_def, context, mode);
     let mut body_lines = Vec::new();
+    let mut known_instance_attributes =
+        inferred_instance_attributes.iter().cloned().collect::<BTreeMap<_, _>>();
     let mut declared_names = std::collections::BTreeSet::new();
 
     for statement in &class_def.body {
@@ -1054,6 +1143,8 @@ fn render_class_stub(
                     continue;
                 };
                 declared_names.insert(name.id.as_str().to_owned());
+                known_instance_attributes
+                    .insert(name.id.as_str().to_owned(), annotation.to_owned());
                 body_lines.push(format!("    {}: {}", name.id.as_str(), annotation));
             }
             Stmt::Assign(assign) => {
@@ -1063,7 +1154,14 @@ fn render_class_stub(
                         continue;
                     };
                     declared_names.insert(name.id.as_str().to_owned());
-                    if mode == InferredStubMode::Migration && inferred.is_none() {
+                    if let Some(inferred) = &inferred {
+                        known_instance_attributes
+                            .insert(name.id.as_str().to_owned(), inferred.clone());
+                    }
+                    if mode == InferredStubMode::Migration
+                        && (inferred.is_none()
+                            || inferred.as_deref() == Some(missing_type_annotation(mode)))
+                    {
                         body_lines.push(String::from("    # TODO: add type annotation"));
                     }
                     body_lines.push(format!(
@@ -1076,7 +1174,14 @@ fn render_class_stub(
                 }
             }
             Stmt::FunctionDef(function) => {
-                body_lines.push(render_method_with_decorators(source, function, context, mode))
+                let method_context =
+                    context.with_instance_attributes(known_instance_attributes.clone());
+                body_lines.push(render_method_with_decorators(
+                    source,
+                    function,
+                    &method_context,
+                    mode,
+                ))
             }
             Stmt::ClassDef(nested) => {
                 body_lines.push(render_class_stub(source, nested, context, mode))
@@ -1085,7 +1190,7 @@ fn render_class_stub(
         }
     }
 
-    for (name, annotation) in infer_instance_attributes(source, class_def, context, mode) {
+    for (name, annotation) in inferred_instance_attributes {
         if declared_names.contains(&name) {
             continue;
         }
@@ -1164,63 +1269,253 @@ fn missing_type_annotation(mode: InferredStubMode) -> &'static str {
     }
 }
 
-fn infer_function_return_type(body: &[Stmt], context: &StubInferenceContext) -> Option<String> {
+fn infer_function_return_type(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    body: &[Stmt],
+    in_class: bool,
+    is_static_method: bool,
+    context: &StubInferenceContext,
+) -> Option<String> {
     let mut inferred = Vec::new();
     let mut unresolved = false;
-    collect_return_annotations(body, context, &mut inferred, &mut unresolved);
+    let function_context =
+        build_function_inference_context(source, parameters, in_class, is_static_method, context);
+    collect_return_annotations(source, body, &function_context, &mut inferred, &mut unresolved);
     if unresolved {
         return None;
     }
     if inferred.is_empty() { Some(String::from("None")) } else { normalize_union_types(inferred) }
 }
 
+fn build_function_inference_context(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    in_class: bool,
+    is_static_method: bool,
+    context: &StubInferenceContext,
+) -> StubInferenceContext {
+    let receiver_name = (in_class && !is_static_method).then(|| first_receiver_name(parameters));
+    let mut function_context = context.with_receiver_name(receiver_name);
+    let mut parameter_index = 0usize;
+    for parameter in &parameters.posonlyargs {
+        bind_parameter_inference(
+            source,
+            parameter.name().as_str(),
+            parameter.annotation(),
+            parameter.default(),
+            if parameter_index == 0 && in_class && !is_static_method {
+                ReceiverKind::Implicit
+            } else {
+                ReceiverKind::None
+            },
+            ParameterPrefix::None,
+            &mut function_context,
+        );
+        parameter_index += 1;
+    }
+    for parameter in &parameters.args {
+        bind_parameter_inference(
+            source,
+            parameter.name().as_str(),
+            parameter.annotation(),
+            parameter.default(),
+            if parameter_index == 0 && in_class && !is_static_method {
+                ReceiverKind::Implicit
+            } else {
+                ReceiverKind::None
+            },
+            ParameterPrefix::None,
+            &mut function_context,
+        );
+        parameter_index += 1;
+    }
+    if let Some(parameter) = parameters.vararg.as_ref() {
+        bind_parameter_inference(
+            source,
+            parameter.name().as_str(),
+            parameter.annotation(),
+            None,
+            ReceiverKind::None,
+            ParameterPrefix::Variadic,
+            &mut function_context,
+        );
+    }
+    for parameter in &parameters.kwonlyargs {
+        bind_parameter_inference(
+            source,
+            parameter.name().as_str(),
+            parameter.annotation(),
+            parameter.default(),
+            ReceiverKind::None,
+            ParameterPrefix::None,
+            &mut function_context,
+        );
+    }
+    if let Some(parameter) = parameters.kwarg.as_ref() {
+        bind_parameter_inference(
+            source,
+            parameter.name().as_str(),
+            parameter.annotation(),
+            None,
+            ReceiverKind::None,
+            ParameterPrefix::KeywordVariadic,
+            &mut function_context,
+        );
+    }
+    function_context
+}
+
+fn bind_parameter_inference(
+    source: &str,
+    name: &str,
+    annotation: Option<&Expr>,
+    default: Option<&Expr>,
+    receiver: ReceiverKind,
+    prefix: ParameterPrefix,
+    context: &mut StubInferenceContext,
+) {
+    let inferred = match annotation
+        .and_then(|annotation| slice_range(source, annotation.range()))
+        .map(str::to_owned)
+    {
+        Some(annotation) => Some(annotation),
+        None if receiver == ReceiverKind::Implicit => None,
+        None => default.and_then(|value| infer_expr_type(value, context)),
+    };
+    let Some(inferred) = inferred else {
+        return;
+    };
+    let binding = match prefix {
+        ParameterPrefix::None => inferred,
+        ParameterPrefix::Variadic => format!("tuple[{inferred}, ...]"),
+        ParameterPrefix::KeywordVariadic => format!("dict[str, {inferred}]"),
+    };
+    context.value_bindings.insert(name.to_owned(), binding);
+}
+
 fn collect_return_annotations(
+    source: &str,
     suite: &[Stmt],
     context: &StubInferenceContext,
     inferred: &mut Vec<String>,
     unresolved: &mut bool,
 ) {
+    let mut local_context = context.clone();
     for statement in suite {
         match statement {
             Stmt::Return(return_stmt) => match return_stmt.value.as_deref() {
-                Some(value) => match infer_expr_type(value, context) {
+                Some(value) => match infer_expr_type(value, &local_context) {
                     Some(annotation) => inferred.push(annotation),
                     None => *unresolved = true,
                 },
                 None => inferred.push(String::from("None")),
             },
+            Stmt::Assign(_) | Stmt::AnnAssign(_) => {
+                collect_name_bindings_from_statement(source, statement, &mut local_context)
+            }
             Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
             Stmt::If(if_stmt) => {
-                collect_return_annotations(&if_stmt.body, context, inferred, unresolved);
+                collect_return_annotations(
+                    source,
+                    &if_stmt.body,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
                 for clause in &if_stmt.elif_else_clauses {
-                    collect_return_annotations(&clause.body, context, inferred, unresolved);
+                    collect_return_annotations(
+                        source,
+                        &clause.body,
+                        &local_context,
+                        inferred,
+                        unresolved,
+                    );
                 }
             }
             Stmt::Try(try_stmt) => {
-                collect_return_annotations(&try_stmt.body, context, inferred, unresolved);
+                collect_return_annotations(
+                    source,
+                    &try_stmt.body,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_return_annotations(&handler.body, context, inferred, unresolved);
+                    collect_return_annotations(
+                        source,
+                        &handler.body,
+                        &local_context,
+                        inferred,
+                        unresolved,
+                    );
                 }
-                collect_return_annotations(&try_stmt.orelse, context, inferred, unresolved);
-                collect_return_annotations(&try_stmt.finalbody, context, inferred, unresolved);
+                collect_return_annotations(
+                    source,
+                    &try_stmt.orelse,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
+                collect_return_annotations(
+                    source,
+                    &try_stmt.finalbody,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
             }
             Stmt::Match(match_stmt) => {
                 for case in &match_stmt.cases {
-                    collect_return_annotations(&case.body, context, inferred, unresolved);
+                    collect_return_annotations(
+                        source,
+                        &case.body,
+                        &local_context,
+                        inferred,
+                        unresolved,
+                    );
                 }
             }
             Stmt::For(for_stmt) => {
-                collect_return_annotations(&for_stmt.body, context, inferred, unresolved);
-                collect_return_annotations(&for_stmt.orelse, context, inferred, unresolved);
+                collect_return_annotations(
+                    source,
+                    &for_stmt.body,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
+                collect_return_annotations(
+                    source,
+                    &for_stmt.orelse,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
             }
             Stmt::While(while_stmt) => {
-                collect_return_annotations(&while_stmt.body, context, inferred, unresolved);
-                collect_return_annotations(&while_stmt.orelse, context, inferred, unresolved);
+                collect_return_annotations(
+                    source,
+                    &while_stmt.body,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
+                collect_return_annotations(
+                    source,
+                    &while_stmt.orelse,
+                    &local_context,
+                    inferred,
+                    unresolved,
+                );
             }
-            Stmt::With(with_stmt) => {
-                collect_return_annotations(&with_stmt.body, context, inferred, unresolved)
-            }
+            Stmt::With(with_stmt) => collect_return_annotations(
+                source,
+                &with_stmt.body,
+                &local_context,
+                inferred,
+                unresolved,
+            ),
             _ => {}
         }
     }
@@ -1234,17 +1529,24 @@ fn infer_instance_attributes(
 ) -> Vec<(String, String)> {
     let mut attributes = BTreeMap::new();
     for statement in &class_def.body {
-        let (receiver_name, body) = match statement {
-            Stmt::FunctionDef(function) if function.name.as_str() == "__init__" => {
-                (first_receiver_name(&function.parameters), function.body.as_slice())
-            }
-            _ => continue,
+        let Stmt::FunctionDef(function) = statement else {
+            continue;
         };
+        if function.name.as_str() != "__init__" {
+            continue;
+        }
+        let init_context = build_function_inference_context(
+            source,
+            &function.parameters,
+            true,
+            is_static_method(&function.decorator_list),
+            context,
+        );
         collect_instance_attribute_annotations(
             source,
-            body,
-            receiver_name,
-            context,
+            function.body.as_slice(),
+            first_receiver_name(&function.parameters),
+            &init_context,
             mode,
             &mut attributes,
         );
@@ -1431,6 +1733,16 @@ fn merge_inferred_annotation(
 
 fn infer_expr_type(expr: &Expr, context: &StubInferenceContext) -> Option<String> {
     match expr {
+        Expr::Name(name) => context.value_bindings.get(name.id.as_str()).cloned(),
+        Expr::Attribute(attribute) => {
+            let Expr::Name(name) = attribute.value.as_ref() else {
+                return None;
+            };
+            if context.receiver_name.as_deref() == Some(name.id.as_str()) {
+                return context.instance_attributes.get(attribute.attr.as_str()).cloned();
+            }
+            None
+        }
         Expr::NumberLiteral(_) => Some(String::from("int")),
         Expr::StringLiteral(_) => Some(String::from("str")),
         Expr::BooleanLiteral(_) => Some(String::from("bool")),
@@ -1889,7 +2201,13 @@ fn render_authoritative_assignment_stub(
             return Some(lines.join("\n"));
         }
     }
-    render_assignment_stub(source, &assign.targets, &assign.value, InferredStubMode::Shadow)
+    render_assignment_stub(
+        source,
+        &assign.targets,
+        &assign.value,
+        &StubInferenceContext::default(),
+        InferredStubMode::Shadow,
+    )
 }
 
 fn render_synthetic_method_stub(method: &StubSyntheticMethod, indentation: &str) -> String {
@@ -2192,7 +2510,8 @@ mod tests {
 
     #[test]
     fn plan_emits_for_sources_matches_source_kinds_without_lowered_modules() {
-        let temp_dir = temp_dir("plan_emits_for_sources_matches_source_kinds_without_lowered_modules");
+        let temp_dir =
+            temp_dir("plan_emits_for_sources_matches_source_kinds_without_lowered_modules");
         fs::create_dir_all(temp_dir.join("src/pkg")).expect("test setup should succeed");
         fs::write(
             temp_dir.join("typepython.toml"),
@@ -2219,24 +2538,12 @@ mod tests {
         );
 
         assert_eq!(artifacts.len(), 3);
-        assert_eq!(
-            artifacts[0].runtime_path,
-            Some(temp_dir.join("build/pkg/__init__.py"))
-        );
-        assert_eq!(
-            artifacts[0].stub_path,
-            Some(temp_dir.join("build/pkg/__init__.pyi"))
-        );
-        assert_eq!(
-            artifacts[1].runtime_path,
-            Some(temp_dir.join("build/pkg/helpers.py"))
-        );
+        assert_eq!(artifacts[0].runtime_path, Some(temp_dir.join("build/pkg/__init__.py")));
+        assert_eq!(artifacts[0].stub_path, Some(temp_dir.join("build/pkg/__init__.pyi")));
+        assert_eq!(artifacts[1].runtime_path, Some(temp_dir.join("build/pkg/helpers.py")));
         assert_eq!(artifacts[1].stub_path, None);
         assert_eq!(artifacts[2].runtime_path, None);
-        assert_eq!(
-            artifacts[2].stub_path,
-            Some(temp_dir.join("build/pkg/helpers.pyi"))
-        );
+        assert_eq!(artifacts[2].stub_path, Some(temp_dir.join("build/pkg/helpers.pyi")));
         fs::remove_dir_all(&temp_dir).expect("temp dir cleanup should succeed");
     }
 
@@ -2584,6 +2891,21 @@ mod tests {
         assert!(stub.contains("    age: int"));
         assert!(stub.contains("    @property"));
         assert!(stub.contains("    # TODO: add type annotation\n    def title(self) -> ...: ..."));
+    }
+
+    #[test]
+    fn generate_inferred_migration_stub_infers_local_and_attribute_returns() {
+        let stub = generate_inferred_stub_source(
+            "DEFAULT_RETRIES = 3\n\nclass User:\n    def __init__(self, age: int):\n        self.age = age\n\n    @property\n    def years(self):\n        return self.age\n\ndef parse(text: str):\n    retries = DEFAULT_RETRIES\n    return retries\n",
+            InferredStubMode::Migration,
+        )
+        .expect("migration stub generation should succeed");
+
+        assert!(stub.contains("DEFAULT_RETRIES: int"));
+        assert!(stub.contains("def parse(text: str) -> int: ..."));
+        assert!(stub.contains("    def years(self) -> int: ..."));
+        assert!(!stub.contains("# TODO: add type annotation\ndef parse"));
+        assert!(!stub.contains("# TODO: add type annotation\n    def years"));
     }
 
     #[test]
