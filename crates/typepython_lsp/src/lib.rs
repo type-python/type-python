@@ -2147,7 +2147,12 @@ fn collect_source_paths(
     let mut sources = local_sources;
     let stdlib_root = bundled_stdlib_root();
     if stdlib_root.exists() {
-        walk_bundled_stdlib_directory(&stdlib_root, &mut sources)?;
+        walk_bundled_stdlib_directory(
+            &stdlib_root,
+            &stdlib_root,
+            &config.config.project.target_python,
+            &mut sources,
+        )?;
     }
 
     let mut external_sources = Vec::new();
@@ -2164,7 +2169,9 @@ fn bundled_stdlib_root() -> PathBuf {
 }
 
 fn walk_bundled_stdlib_directory(
+    root: &Path,
     directory: &Path,
+    target_python: &str,
     sources: &mut Vec<DiscoveredSource>,
 ) -> Result<()> {
     if !directory.exists() {
@@ -2176,7 +2183,7 @@ fn walk_bundled_stdlib_directory(
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            walk_bundled_stdlib_directory(&path, sources)?;
+            walk_bundled_stdlib_directory(root, &path, target_python, sources)?;
             continue;
         }
 
@@ -2186,8 +2193,10 @@ fn walk_bundled_stdlib_directory(
         if kind != SourceKind::Stub {
             continue;
         }
+        if !bundled_stdlib_file_matches_target(&path, target_python)? {
+            continue;
+        }
 
-        let root = bundled_stdlib_root();
         let Some(logical_module) = logical_module_path(&root, &path) else {
             continue;
         };
@@ -2235,6 +2244,67 @@ fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
         return Vec::new();
     };
     roots.into_iter().map(PathBuf::from).collect()
+}
+
+fn bundled_stdlib_file_matches_target(path: &Path, target_python: &str) -> Result<bool> {
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("unable to read bundled stdlib file {}", path.display()))?;
+    Ok(parse_bundled_stdlib_version_filter(&contents).allows(target_python))
+}
+
+#[derive(Debug, Default, Clone)]
+struct BundledStdlibVersionFilter {
+    min_python: Option<String>,
+    max_python: Option<String>,
+}
+
+impl BundledStdlibVersionFilter {
+    fn allows(&self, target_python: &str) -> bool {
+        let target = parse_supported_python_version(target_python);
+        let min_ok = self
+            .min_python
+            .as_deref()
+            .and_then(parse_supported_python_version)
+            .is_none_or(|minimum| target >= Some(minimum));
+        let max_ok = self
+            .max_python
+            .as_deref()
+            .and_then(parse_supported_python_version)
+            .is_none_or(|maximum| target <= Some(maximum));
+        min_ok && max_ok
+    }
+}
+
+fn parse_bundled_stdlib_version_filter(source: &str) -> BundledStdlibVersionFilter {
+    let mut filter = BundledStdlibVersionFilter::default();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !trimmed.starts_with('#') {
+            break;
+        }
+        let metadata = trimmed.trim_start_matches('#').trim();
+        let Some(metadata) = metadata.strip_prefix("typepython:") else {
+            continue;
+        };
+        for field in metadata.trim().split_whitespace() {
+            if let Some(value) = field.strip_prefix("min-python=") {
+                filter.min_python = Some(value.to_owned());
+            } else if let Some(value) = field.strip_prefix("max-python=") {
+                filter.max_python = Some(value.to_owned());
+            }
+        }
+    }
+
+    filter
+}
+
+fn parse_supported_python_version(version: &str) -> Option<(u8, u8)> {
+    let (major, minor) = version.trim().split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {

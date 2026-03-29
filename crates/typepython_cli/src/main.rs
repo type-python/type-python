@@ -590,7 +590,7 @@ fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let discovery = collect_source_paths(&config)?;
     let mut syntax_trees =
         load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
-    let bundled_sources = bundled_stdlib_sources()?;
+    let bundled_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
     syntax_trees
         .extend(load_syntax_trees(&bundled_sources, config.config.typing.conditional_returns)?);
     let mut diagnostics = discovery.diagnostics.clone();
@@ -1370,7 +1370,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
     let syntax_trees =
         load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
-    let mut checking_sources = bundled_stdlib_sources()?;
+    let mut checking_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
     checking_sources.extend(external_resolution_sources(config)?);
     let checking_support_syntax =
         load_syntax_trees(&checking_sources, config.config.typing.conditional_returns)?;
@@ -1430,7 +1430,8 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let mut incremental = snapshot(&graph);
-    incremental.stdlib_snapshot = Some(bundled_stdlib_snapshot_identity()?);
+    incremental.stdlib_snapshot =
+        Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
     let tracked_modules = incremental.fingerprints.len();
     let planned_modules = placeholder_lowered_modules(&syntax_trees);
     let emit_plan = plan_emits(config, &planned_modules);
@@ -2410,7 +2411,9 @@ fn bundled_stdlib_root() -> PathBuf {
 }
 
 fn walk_bundled_stdlib_directory(
+    root: &Path,
     directory: &Path,
+    target_python: &str,
     sources: &mut Vec<DiscoveredSource>,
 ) -> Result<()> {
     if !directory.exists() {
@@ -2424,7 +2427,7 @@ fn walk_bundled_stdlib_directory(
         let path = entry.path();
 
         if path.is_dir() {
-            walk_bundled_stdlib_directory(&path, sources)?;
+            walk_bundled_stdlib_directory(root, &path, target_python, sources)?;
             continue;
         }
 
@@ -2434,37 +2437,52 @@ fn walk_bundled_stdlib_directory(
         if kind != SourceKind::Stub {
             continue;
         }
+        if !bundled_stdlib_file_matches_target(&path, target_python)? {
+            continue;
+        }
 
-        let root = bundled_stdlib_root();
         let Some(logical_module) = logical_module_path(&root, &path) else {
             continue;
         };
-        sources.push(DiscoveredSource { path, root, kind, logical_module });
+        sources.push(DiscoveredSource { path, root: root.to_path_buf(), kind, logical_module });
     }
 
     Ok(())
 }
 
-fn bundled_stdlib_sources() -> Result<Vec<DiscoveredSource>> {
-    let root = bundled_stdlib_root();
+fn bundled_stdlib_sources(target_python: &str) -> Result<Vec<DiscoveredSource>> {
+    bundled_stdlib_sources_for_root(&bundled_stdlib_root(), target_python)
+}
+
+fn bundled_stdlib_sources_for_root(
+    root: &Path,
+    target_python: &str,
+) -> Result<Vec<DiscoveredSource>> {
     let mut sources = Vec::new();
     if root.exists() {
-        walk_bundled_stdlib_directory(&root, &mut sources)?;
+        walk_bundled_stdlib_directory(root, root, target_python, &mut sources)?;
     }
     sources.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(sources)
 }
 
-fn bundled_stdlib_snapshot_identity() -> Result<String> {
-    let root = bundled_stdlib_root();
+fn bundled_stdlib_snapshot_identity(target_python: &str) -> Result<String> {
+    bundled_stdlib_snapshot_identity_for_root(&bundled_stdlib_root(), target_python)
+}
+
+fn bundled_stdlib_snapshot_identity_for_root(root: &Path, target_python: &str) -> Result<String> {
     let mut files = Vec::new();
     if root.exists() {
-        collect_stdlib_files(&root, &root, &mut files)?;
+        collect_stdlib_files(root, root, target_python, &mut files)?;
     }
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut hash = Wrapping(0xcbf29ce484222325_u64);
     let prime = Wrapping(0x100000001b3_u64);
+    for byte in target_python.as_bytes().iter().chain([0_u8].iter()) {
+        hash ^= Wrapping(u64::from(*byte));
+        hash *= prime;
+    }
     for (relative, bytes) in files {
         for byte in relative.as_bytes().iter().chain([0_u8].iter()).chain(bytes.iter()) {
             hash ^= Wrapping(u64::from(*byte));
@@ -2478,6 +2496,7 @@ fn bundled_stdlib_snapshot_identity() -> Result<String> {
 fn collect_stdlib_files(
     root: &Path,
     directory: &Path,
+    target_python: &str,
     files: &mut Vec<(String, Vec<u8>)>,
 ) -> Result<()> {
     for entry in fs::read_dir(directory).with_context(|| {
@@ -2486,7 +2505,10 @@ fn collect_stdlib_files(
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_stdlib_files(root, &path, files)?;
+            collect_stdlib_files(root, &path, target_python, files)?;
+            continue;
+        }
+        if !bundled_stdlib_file_matches_target(&path, target_python)? {
             continue;
         }
 
@@ -2497,6 +2519,67 @@ fn collect_stdlib_files(
     }
 
     Ok(())
+}
+
+fn bundled_stdlib_file_matches_target(path: &Path, target_python: &str) -> Result<bool> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("unable to read bundled stdlib file {}", path.display()))?;
+    Ok(parse_bundled_stdlib_version_filter(&contents).allows(target_python))
+}
+
+#[derive(Debug, Default, Clone)]
+struct BundledStdlibVersionFilter {
+    min_python: Option<String>,
+    max_python: Option<String>,
+}
+
+impl BundledStdlibVersionFilter {
+    fn allows(&self, target_python: &str) -> bool {
+        let target = parse_supported_python_version(target_python);
+        let min_ok = self
+            .min_python
+            .as_deref()
+            .and_then(parse_supported_python_version)
+            .is_none_or(|minimum| target >= Some(minimum));
+        let max_ok = self
+            .max_python
+            .as_deref()
+            .and_then(parse_supported_python_version)
+            .is_none_or(|maximum| target <= Some(maximum));
+        min_ok && max_ok
+    }
+}
+
+fn parse_bundled_stdlib_version_filter(source: &str) -> BundledStdlibVersionFilter {
+    let mut filter = BundledStdlibVersionFilter::default();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !trimmed.starts_with('#') {
+            break;
+        }
+        let metadata = trimmed.trim_start_matches('#').trim();
+        let Some(metadata) = metadata.strip_prefix("typepython:") else {
+            continue;
+        };
+        for field in metadata.trim().split_whitespace() {
+            if let Some(value) = field.strip_prefix("min-python=") {
+                filter.min_python = Some(value.to_owned());
+            } else if let Some(value) = field.strip_prefix("max-python=") {
+                filter.max_python = Some(value.to_owned());
+            }
+        }
+    }
+
+    filter
+}
+
+fn parse_supported_python_version(version: &str) -> Option<(u8, u8)> {
+    let (major, minor) = version.trim().split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
@@ -3026,7 +3109,8 @@ fn exit_code(diagnostics: &DiagnosticReport) -> ExitCode {
 mod tests {
     use super::{
         Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
-        build_migration_report, collect_source_paths, compile_runtime_bytecode,
+        build_migration_report, bundled_stdlib_snapshot_identity_for_root,
+        bundled_stdlib_sources_for_root, collect_source_paths, compile_runtime_bytecode,
         embedded_config_template, emit_migration_stubs, exit_code_for_error,
         external_resolution_sources, format_watch_rebuild_note, init_project, load_syntax_trees,
         python_type_roots_from_interpreter, run_pipeline, should_emit_build_outputs,
@@ -3430,6 +3514,70 @@ mod tests {
             roots,
             vec![PathBuf::from("/tmp/site-packages"), PathBuf::from("/tmp/user-site")]
         );
+    }
+
+    #[test]
+    fn bundled_stdlib_sources_filter_version_marked_files_by_target_python() {
+        let project_dir =
+            temp_project_dir("bundled_stdlib_sources_filter_version_marked_files_by_target_python");
+        let root = project_dir.join("stdlib");
+        fs::create_dir_all(&root).expect("test setup should succeed");
+        fs::write(root.join("shared.pyi"), "def shared() -> int: ...\n")
+            .expect("test setup should succeed");
+        fs::write(
+            root.join("modern_only.pyi"),
+            "# typepython: min-python=3.11\n\ndef modern_only() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            root.join("legacy_only.pyi"),
+            "# typepython: max-python=3.10\n\ndef legacy_only() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+
+        let modules_310 = bundled_stdlib_sources_for_root(&root, "3.10")
+            .expect("3.10 stdlib selection should succeed")
+            .into_iter()
+            .map(|source| source.logical_module)
+            .collect::<BTreeSet<_>>();
+        let modules_311 = bundled_stdlib_sources_for_root(&root, "3.11")
+            .expect("3.11 stdlib selection should succeed")
+            .into_iter()
+            .map(|source| source.logical_module)
+            .collect::<BTreeSet<_>>();
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(
+            modules_310,
+            BTreeSet::from([String::from("legacy_only"), String::from("shared"),])
+        );
+        assert_eq!(
+            modules_311,
+            BTreeSet::from([String::from("modern_only"), String::from("shared"),])
+        );
+    }
+
+    #[test]
+    fn bundled_stdlib_snapshot_identity_tracks_target_filtered_surface() {
+        let project_dir =
+            temp_project_dir("bundled_stdlib_snapshot_identity_tracks_target_filtered_surface");
+        let root = project_dir.join("stdlib");
+        fs::create_dir_all(&root).expect("test setup should succeed");
+        fs::write(root.join("shared.pyi"), "def shared() -> int: ...\n")
+            .expect("test setup should succeed");
+        fs::write(
+            root.join("modern_only.pyi"),
+            "# typepython: min-python=3.11\n\ndef modern_only() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+
+        let snapshot_310 = bundled_stdlib_snapshot_identity_for_root(&root, "3.10")
+            .expect("3.10 snapshot should succeed");
+        let snapshot_311 = bundled_stdlib_snapshot_identity_for_root(&root, "3.11")
+            .expect("3.11 snapshot should succeed");
+        remove_temp_project_dir(&project_dir);
+
+        assert_ne!(snapshot_310, snapshot_311);
     }
 
     #[test]
