@@ -7,7 +7,7 @@ use std::{
 
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::DiagnosticLevel;
-use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
 use typepython_syntax::SourceKind;
 
@@ -1166,36 +1166,55 @@ fn direct_return_type_diagnostics(
         };
 
         if !direct_type_is_assignable(node, nodes, &expected, &actual) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "TPY4001",
-                    match &return_site.owner_type_name {
-                        Some(owner_type) => format!(
-                            "type `{}` in module `{}` returns `{}` where member `{}` expects `{}`",
-                            owner_type,
-                            node.module_path.display(),
-                            actual,
-                            return_site.owner_name,
-                            expected
-                        ),
-                        None => format!(
-                            "function `{}` in module `{}` returns `{}` where `{}` expects `{}`",
-                            return_site.owner_name,
-                            node.module_path.display(),
-                            actual,
-                            return_site.owner_name,
-                            expected
-                        ),
-                    },
-                )
-                .with_span(Span::new(
-                    node.module_path.display().to_string(),
-                    return_site.line,
-                    1,
-                    return_site.line,
-                    1,
-                )),
+            let diagnostic = Diagnostic::error(
+                "TPY4001",
+                match &return_site.owner_type_name {
+                    Some(owner_type) => format!(
+                        "type `{}` in module `{}` returns `{}` where member `{}` expects `{}`",
+                        owner_type,
+                        node.module_path.display(),
+                        actual,
+                        return_site.owner_name,
+                        expected
+                    ),
+                    None => format!(
+                        "function `{}` in module `{}` returns `{}` where `{}` expects `{}`",
+                        return_site.owner_name,
+                        node.module_path.display(),
+                        actual,
+                        return_site.owner_name,
+                        expected
+                    ),
+                },
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                return_site.line,
+                1,
+                return_site.line,
+                1,
+            ));
+            let diagnostic =
+                attach_type_mismatch_notes(diagnostic, node, nodes, &expected, &actual);
+            let diagnostic = attach_return_inference_trace(
+                diagnostic,
+                node,
+                nodes,
+                return_site,
+                &expected,
+                &actual,
+                &target.detail,
             );
+            diagnostics.push(attach_missing_none_return_suggestion(
+                diagnostic,
+                node,
+                nodes,
+                return_site,
+                &expected_text,
+                &expected,
+                &actual,
+                &target.detail,
+            ));
         }
     }
 
@@ -8832,7 +8851,7 @@ fn positional_and_keyword_type_diagnostics(
                 && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
-            Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where parameter expects `{}`",
@@ -8841,7 +8860,8 @@ fn positional_and_keyword_type_diagnostics(
                     arg_ty,
                     param_ty
                 ),
-            )
+            );
+            attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty)
         })
         .collect::<Vec<_>>();
 
@@ -8853,7 +8873,7 @@ fn positional_and_keyword_type_diagnostics(
             && !param_ty.is_empty()
             && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
-            diagnostics.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where variadic parameter expects `{}`",
@@ -8862,7 +8882,8 @@ fn positional_and_keyword_type_diagnostics(
                     arg_ty,
                     param_ty
                 ),
-            ));
+            );
+            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
         }
     }
 
@@ -8874,7 +8895,7 @@ fn positional_and_keyword_type_diagnostics(
             && !param_ty.is_empty()
             && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
-            diagnostics.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` expands `*args` element type `{}` where variadic parameter expects `{}`",
@@ -8883,7 +8904,8 @@ fn positional_and_keyword_type_diagnostics(
                     arg_ty,
                     param_ty
                 ),
-            ));
+            );
+            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
         }
     }
 
@@ -8896,7 +8918,7 @@ fn positional_and_keyword_type_diagnostics(
                     && !field.value_type.is_empty()
                     && !direct_type_matches(node, nodes, &field.value_type, arg_ty)
                 {
-                    diagnostics.push(Diagnostic::error(
+                    let diagnostic = Diagnostic::error(
                         "TPY4001",
                         format!(
                             "call to `{}` in module `{}` passes `{}` for unpacked keyword `{}` where TypedDict key expects `{}`",
@@ -8906,6 +8928,13 @@ fn positional_and_keyword_type_diagnostics(
                             keyword,
                             field.value_type
                         ),
+                    );
+                    diagnostics.push(attach_type_mismatch_notes(
+                        diagnostic,
+                        node,
+                        nodes,
+                        &field.value_type,
+                        arg_ty,
                     ));
                 }
                 continue;
@@ -8917,7 +8946,7 @@ fn positional_and_keyword_type_diagnostics(
                 && !param_ty.is_empty()
                 && !direct_type_matches(node, nodes, param_ty, arg_ty)
             {
-                diagnostics.push(Diagnostic::error(
+                let diagnostic = Diagnostic::error(
                     "TPY4001",
                     format!(
                         "call to `{}` in module `{}` passes `{}` for keyword `{}` where variadic keyword parameter expects `{}`",
@@ -8927,7 +8956,9 @@ fn positional_and_keyword_type_diagnostics(
                         keyword,
                         param_ty
                     ),
-                ));
+                );
+                diagnostics
+                    .push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
             }
             continue;
         };
@@ -8938,7 +8969,7 @@ fn positional_and_keyword_type_diagnostics(
             && !param_ty.is_empty()
             && !direct_type_matches(node, nodes, param_ty, arg_ty)
         {
-            diagnostics.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` for keyword `{}` where parameter expects `{}`",
@@ -8948,7 +8979,8 @@ fn positional_and_keyword_type_diagnostics(
                     keyword,
                     param_ty
                 ),
-            ));
+            );
+            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
         }
     }
 
@@ -11210,6 +11242,422 @@ fn deprecated_diagnostic(
     })
 }
 
+fn type_supports_mismatch_path(text: &str) -> bool {
+    union_branches(text).is_some() || split_generic_type(text).is_some()
+}
+
+fn attach_type_mismatch_notes(
+    diagnostic: Diagnostic,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> Diagnostic {
+    let expected = normalize_type_text(expected);
+    let actual = normalize_type_text(actual);
+    if !type_supports_mismatch_path(&expected) && !type_supports_mismatch_path(&actual) {
+        return diagnostic;
+    }
+
+    let mut diagnostic = diagnostic
+        .with_note(format!("source: `{actual}`"))
+        .with_note(format!("target: `{expected}`"));
+    let mut path = Vec::new();
+    if let Some(detail) = first_type_mismatch_detail(node, nodes, &expected, &actual, &mut path, 8)
+    {
+        if !path.is_empty() {
+            diagnostic = diagnostic.with_note(format!(
+                "mismatch at: {}",
+                path.iter().map(|segment| format!("-> {segment}")).collect::<Vec<_>>().join(" ")
+            ));
+        }
+        diagnostic = diagnostic.with_note(detail);
+    }
+    diagnostic
+}
+
+fn first_type_mismatch_detail(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+    path: &mut Vec<String>,
+    depth: usize,
+) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
+
+    let expected = normalize_type_text(expected);
+    let actual = normalize_type_text(actual);
+    if path.last().is_none_or(|segment| segment != &actual) {
+        path.push(actual.clone());
+    }
+
+    if let (Some(expected_branches), Some(actual_branches)) =
+        (union_branches(&expected), union_branches(&actual))
+    {
+        if let Some(unmatched) = actual_branches.iter().find(|branch| {
+            !expected_branches
+                .iter()
+                .any(|target_branch| direct_type_is_assignable(node, nodes, target_branch, branch))
+        }) {
+            if path.last().is_none_or(|segment| segment != unmatched) {
+                path.push(unmatched.clone());
+            }
+            return Some(format!(
+                "union branch `{}` is not assignable to any target branch in `{}`",
+                unmatched, expected
+            ));
+        }
+    }
+
+    if let (Some((expected_head, expected_args)), Some((actual_head, actual_args))) =
+        (split_generic_type(&expected), split_generic_type(&actual))
+    {
+        if expected_head == "tuple"
+            && actual_head == "tuple"
+            && actual_args.len() == 2
+            && actual_args[1] == "..."
+            && !(expected_args.len() == 2 && expected_args[1] == "...")
+        {
+            return Some(format!(
+                "`{actual}` is a variable-length tuple and is not assignable to fixed tuple `{expected}`"
+            ));
+        }
+
+        if expected_head == actual_head && expected_args.len() == actual_args.len() {
+            for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
+                if !direct_type_is_assignable(node, nodes, expected_arg, actual_arg) {
+                    return first_type_mismatch_detail(
+                        node,
+                        nodes,
+                        expected_arg,
+                        actual_arg,
+                        path,
+                        depth - 1,
+                    )
+                    .or_else(|| {
+                        Some(format!("`{}` is not assignable to `{}`", actual_arg, expected_arg))
+                    });
+                }
+            }
+            if expected_head == "tuple" && expected_args != actual_args {
+                return Some(format!("tuple shape `{actual}` is not assignable to `{expected}`"));
+            }
+        }
+
+        match (expected_head, actual_head) {
+            ("Sequence", "list") | ("Sequence", "tuple") if !expected_args.is_empty() => {
+                let actual_element = if actual_head == "tuple" {
+                    if actual_args.len() == 2 && actual_args[1] == "..." {
+                        actual_args[0].clone()
+                    } else {
+                        join_branch_types(actual_args.clone())
+                    }
+                } else {
+                    actual_args.first().cloned().unwrap_or_default()
+                };
+                if !direct_type_is_assignable(node, nodes, &expected_args[0], &actual_element) {
+                    return first_type_mismatch_detail(
+                        node,
+                        nodes,
+                        &expected_args[0],
+                        &actual_element,
+                        path,
+                        depth - 1,
+                    )
+                    .or_else(|| {
+                        Some(format!(
+                            "element type `{}` is not assignable to `{}`",
+                            actual_element, expected_args[0]
+                        ))
+                    });
+                }
+            }
+            ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
+                if !direct_type_is_assignable(node, nodes, &expected_args[0], &actual_args[0]) {
+                    return first_type_mismatch_detail(
+                        node,
+                        nodes,
+                        &expected_args[0],
+                        &actual_args[0],
+                        path,
+                        depth - 1,
+                    )
+                    .or_else(|| {
+                        Some(format!(
+                            "mapping key type `{}` is not assignable to `{}`",
+                            actual_args[0], expected_args[0]
+                        ))
+                    });
+                }
+                if !direct_type_is_assignable(node, nodes, &expected_args[1], &actual_args[1]) {
+                    return first_type_mismatch_detail(
+                        node,
+                        nodes,
+                        &expected_args[1],
+                        &actual_args[1],
+                        path,
+                        depth - 1,
+                    )
+                    .or_else(|| {
+                        Some(format!(
+                            "mapping value type `{}` is not assignable to `{}`",
+                            actual_args[1], expected_args[1]
+                        ))
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn same_return_owner(
+    left: &typepython_binding::ReturnSite,
+    right: &typepython_binding::ReturnSite,
+) -> bool {
+    left.owner_name == right.owner_name && left.owner_type_name == right.owner_type_name
+}
+
+fn describe_return_trace_expression(return_site: &typepython_binding::ReturnSite) -> String {
+    if return_site.value_name.is_none()
+        && return_site.value_member_name.is_none()
+        && return_site.value_method_name.is_none()
+        && return_site.value_callee.is_none()
+        && return_site.value_lambda.is_none()
+        && return_site.value_list_elements.is_none()
+        && return_site.value_set_elements.is_none()
+        && return_site.value_dict_entries.is_none()
+        && return_site.value_subscript_target.is_none()
+    {
+        return String::from("bare return");
+    }
+    if let Some(name) = &return_site.value_name {
+        return format!("return {name}");
+    }
+    if let (Some(owner), Some(member)) =
+        (&return_site.value_member_owner_name, &return_site.value_member_name)
+    {
+        return format!("return {}.{}", owner, member);
+    }
+    if let (Some(owner), Some(method)) =
+        (&return_site.value_method_owner_name, &return_site.value_method_name)
+    {
+        return format!("return {}.{}(...)", owner, method);
+    }
+    if let Some(callee) = &return_site.value_callee {
+        return format!("return {}(...)", callee);
+    }
+    if let Some(key) = &return_site.value_subscript_string_key {
+        return format!("return [...][\"{key}\"]");
+    }
+    if return_site.value_lambda.is_some() {
+        return String::from("return lambda");
+    }
+    if return_site.value_dict_entries.is_some() {
+        return String::from("return dict literal");
+    }
+    if return_site.value_list_elements.is_some() {
+        return String::from("return list literal");
+    }
+    if return_site.value_set_elements.is_some() {
+        return String::from("return set literal");
+    }
+    String::from("return expression")
+}
+
+fn inferred_return_type_for_owner(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+    expected: &str,
+    signature: &str,
+) -> Option<String> {
+    let related_returns = node
+        .returns
+        .iter()
+        .filter(|candidate| same_return_owner(candidate, return_site))
+        .collect::<Vec<_>>();
+    if related_returns.is_empty() {
+        return None;
+    }
+
+    let mut trace_types = Vec::new();
+    for candidate in related_returns {
+        let contextual =
+            resolve_contextual_return_type(node, nodes, candidate, expected, signature);
+        let candidate_type = contextual
+            .actual_type
+            .or_else(|| candidate.value_type.clone())
+            .unwrap_or_else(|| String::from("unknown"));
+        trace_types.push(candidate_type);
+    }
+
+    Some(if trace_types.len() > 1 {
+        join_branch_types(trace_types)
+    } else {
+        normalize_type_text(trace_types.first().expect("single return type should exist"))
+    })
+}
+
+fn attach_return_inference_trace(
+    mut diagnostic: Diagnostic,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+    expected: &str,
+    actual: &str,
+    signature: &str,
+) -> Diagnostic {
+    let related_returns = node
+        .returns
+        .iter()
+        .filter(|candidate| same_return_owner(candidate, return_site))
+        .collect::<Vec<_>>();
+    if related_returns.is_empty() {
+        return diagnostic;
+    }
+
+    let mut trace_types = Vec::new();
+    let mut trace_lines = Vec::new();
+
+    for candidate in related_returns {
+        let contextual =
+            resolve_contextual_return_type(node, nodes, candidate, expected, signature);
+        let candidate_type = contextual
+            .actual_type
+            .or_else(|| candidate.value_type.clone())
+            .unwrap_or_else(|| String::from("unknown"));
+        trace_types.push(candidate_type.clone());
+        trace_lines.push(format!(
+            "line {}: {} -> {}",
+            candidate.line,
+            describe_return_trace_expression(candidate),
+            normalize_type_text(&candidate_type)
+        ));
+    }
+
+    let inferred_return_type =
+        inferred_return_type_for_owner(node, nodes, return_site, expected, signature)
+            .unwrap_or_else(|| normalize_type_text(actual));
+    diagnostic = diagnostic
+        .with_note(format!(
+            "inferred return type: `{}`",
+            normalize_type_text(&inferred_return_type)
+        ))
+        .with_note(format!("declared return type: `{}`", normalize_type_text(expected)))
+        .with_note(String::from("inference trace:"));
+
+    for line in trace_lines {
+        diagnostic = diagnostic.with_note(line);
+    }
+
+    if node.returns.iter().filter(|candidate| same_return_owner(candidate, return_site)).count() > 1
+    {
+        diagnostic =
+            diagnostic.with_note(format!("join: `{}`", normalize_type_text(&inferred_return_type)));
+    }
+
+    diagnostic
+}
+
+fn find_method_line(source: &str, owner_type_name: &str, method_name: &str) -> Option<usize> {
+    typepython_syntax::collect_direct_method_signature_sites(source)
+        .into_iter()
+        .find(|site| site.owner_type_name == owner_type_name && site.name == method_name)
+        .map(|site| site.line)
+}
+
+fn find_function_line(source: &str, function_name: &str) -> Option<usize> {
+    typepython_syntax::collect_direct_function_signature_sites(source)
+        .into_iter()
+        .find(|site| site.name == function_name)
+        .map(|site| site.line)
+}
+
+fn single_line_return_annotation_span(
+    source: &str,
+    owner_type_name: Option<&str>,
+    function_name: &str,
+) -> Option<Span> {
+    let line = match owner_type_name {
+        Some(owner_type_name) => find_method_line(source, owner_type_name, function_name)?,
+        None => find_function_line(source, function_name)?,
+    };
+    let line_text = source.lines().nth(line.saturating_sub(1))?;
+    let arrow = line_text.find("->")?;
+    let colon = line_text[arrow + 2..].find(':')? + arrow + 2;
+    let start_column = arrow
+        + 3
+        + line_text[arrow + 2..].chars().take_while(|character| character.is_whitespace()).count();
+    let end_trimmed = line_text[..colon].trim_end();
+    Some(Span::new(String::new(), line, start_column, line, end_trimmed.chars().count() + 1))
+}
+
+fn override_insertion_span(
+    source: &str,
+    owner_type_name: &str,
+    method_name: &str,
+    path: &std::path::Path,
+) -> Option<Span> {
+    let line = find_method_line(source, owner_type_name, method_name)?;
+    let line_text = source.lines().nth(line.saturating_sub(1))?;
+    let indent = line_text.chars().take_while(|character| character.is_whitespace()).count() + 1;
+    Some(Span::new(path.display().to_string(), line, indent, line, indent))
+}
+
+fn attach_missing_none_return_suggestion(
+    diagnostic: Diagnostic,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+    expected_text: &str,
+    expected: &str,
+    actual: &str,
+    signature: &str,
+) -> Diagnostic {
+    let inferred_actual =
+        inferred_return_type_for_owner(node, nodes, return_site, expected, signature)
+            .unwrap_or_else(|| normalize_type_text(actual));
+    if union_branches(expected)
+        .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
+        || !union_branches(&inferred_actual)
+            .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
+    {
+        return diagnostic;
+    }
+    let Some(without_none) = remove_none_branch(&inferred_actual) else {
+        return diagnostic;
+    };
+    if !direct_type_is_assignable(node, nodes, expected, &without_none) {
+        return diagnostic;
+    }
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return diagnostic;
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return diagnostic;
+    };
+    let Some(mut span) = single_line_return_annotation_span(
+        &source,
+        return_site.owner_type_name.as_deref(),
+        &return_site.owner_name,
+    ) else {
+        return diagnostic;
+    };
+    span.path = node.module_path.display().to_string();
+    diagnostic.with_suggestion(
+        "Add `| None` to the declared return type",
+        span,
+        format!("{} | None", expected_text.trim()),
+        SuggestionApplicability::MachineApplicable,
+    )
+}
+
 fn resolve_import_target<'a>(
     _node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
@@ -11538,6 +11986,11 @@ fn missing_override_diagnostics<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let declarations = &node.declarations;
+    let source = if node.module_path.to_string_lossy().starts_with('<') {
+        None
+    } else {
+        fs::read_to_string(&node.module_path).ok()
+    };
     let mut diagnostics = Vec::new();
 
     for declaration in declarations.iter().filter(|declaration| {
@@ -11567,7 +12020,7 @@ fn missing_override_diagnostics<'a>(
         });
 
         if overrides_any {
-            diagnostics.push(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4005",
                 format!(
                     "member `{}` in type `{}` in module `{}` overrides a direct base member but is missing @override",
@@ -11575,7 +12028,27 @@ fn missing_override_diagnostics<'a>(
                     owner.name,
                     node.module_path.display()
                 ),
-            ));
+            );
+            let diagnostic = source
+                .as_deref()
+                .and_then(|source| {
+                    override_insertion_span(
+                        source,
+                        &owner.name,
+                        &declaration.name,
+                        &node.module_path,
+                    )
+                })
+                .map(|span| {
+                    diagnostic.clone().with_suggestion(
+                        "Insert `@override` above the overriding method",
+                        span,
+                        String::from("@override\n"),
+                        SuggestionApplicability::MachineApplicable,
+                    )
+                })
+                .unwrap_or(diagnostic);
+            diagnostics.push(diagnostic);
         }
     }
 
@@ -34774,5 +35247,42 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_return_inference_trace_and_none_suggestion() {
+        let result = check_temp_typepython_source(
+            "def build(flag: bool) -> int:\n    if flag:\n        return 1\n    return None\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(
+            rendered.contains("inferred return type: `Optional[int]`")
+                || rendered.contains("inferred return type: `Union[int, None]`")
+                || rendered.contains("inferred return type: `int | None`")
+        );
+        assert!(rendered.contains("declared return type: `int`"));
+        assert!(rendered.contains("inference trace:"));
+        assert!(
+            rendered.contains("join: `Optional[int]`")
+                || rendered.contains("join: `Union[int, None]`")
+                || rendered.contains("join: `int | None`")
+        );
+        assert!(rendered.contains("Add `| None` to the declared return type"));
+    }
+
+    #[test]
+    fn check_reports_nested_call_type_mismatch_path() {
+        let result = check_temp_typepython_source(
+            "from typing import Sequence\n\ndef takes(values: Sequence[tuple[int, int]]) -> None:\n    return None\n\npayload: list[tuple[int]] = [(1,)]\ntakes(payload)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("source: `list[tuple[int]]`"));
+        assert!(rendered.contains("target: `Sequence[tuple[int, int]]`"));
+        assert!(rendered.contains("mismatch at:"));
+        assert!(rendered.contains("tuple[int]"));
     }
 }

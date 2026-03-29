@@ -55,6 +55,22 @@ impl Span {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SuggestionApplicability {
+    MachineApplicable,
+    MaybeIncorrect,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticSuggestion {
+    pub message: String,
+    pub span: Span,
+    pub replacement: String,
+    pub applicability: SuggestionApplicability,
+}
+
 /// TypePython diagnostic payload.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
@@ -66,6 +82,8 @@ pub struct Diagnostic {
     pub message: String,
     /// Optional supporting notes.
     pub notes: Vec<String>,
+    /// Optional machine-readable fix suggestions.
+    pub suggestions: Vec<DiagnosticSuggestion>,
     /// Optional source span.
     pub span: Option<Span>,
 }
@@ -79,6 +97,7 @@ impl Diagnostic {
             severity: Severity::Error,
             message: message.into(),
             notes: Vec::new(),
+            suggestions: Vec::new(),
             span: None,
         }
     }
@@ -91,6 +110,7 @@ impl Diagnostic {
             severity: Severity::Warning,
             message: message.into(),
             notes: Vec::new(),
+            suggestions: Vec::new(),
             span: None,
         }
     }
@@ -106,6 +126,24 @@ impl Diagnostic {
     #[must_use]
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
+        self
+    }
+
+    /// Appends a machine-readable suggestion to the diagnostic.
+    #[must_use]
+    pub fn with_suggestion(
+        mut self,
+        message: impl Into<String>,
+        span: Span,
+        replacement: impl Into<String>,
+        applicability: SuggestionApplicability,
+    ) -> Self {
+        self.suggestions.push(DiagnosticSuggestion {
+            message: message.into(),
+            span,
+            replacement: replacement.into(),
+            applicability,
+        });
         self
     }
 }
@@ -157,6 +195,20 @@ impl DiagnosticReport {
 
             for note in &diagnostic.notes {
                 let _ = writeln!(&mut buffer, "  = note: {note}");
+            }
+            for suggestion in &diagnostic.suggestions {
+                let _ = writeln!(
+                    &mut buffer,
+                    "  = help: {} (replace {}:{}:{}-{}:{} with `{}`; applicability: {:?})",
+                    suggestion.message,
+                    suggestion.span.path,
+                    suggestion.span.line,
+                    suggestion.span.column,
+                    suggestion.span.end_line,
+                    suggestion.span.end_column,
+                    suggestion.replacement,
+                    suggestion.applicability,
+                );
             }
         }
 

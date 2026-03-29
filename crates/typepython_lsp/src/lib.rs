@@ -111,6 +111,8 @@ struct LspDiagnostic {
     severity: u8,
     code: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +434,7 @@ impl Server {
         };
 
         let mut actions = Vec::new();
+        actions.extend(collect_diagnostic_suggestion_code_actions(document, range, &params));
         actions.extend(collect_missing_annotation_code_actions(&workspace, document, range));
         actions.extend(collect_unsafe_code_actions(document, range, &params));
         actions.extend(collect_missing_import_code_actions(&workspace, document, range));
@@ -650,6 +653,13 @@ fn range_contains(range: LspRange, position: LspPosition) -> bool {
             || (position.line == range.end.line && position.character <= range.end.character))
 }
 
+fn range_intersects(left: LspRange, right: LspRange) -> bool {
+    !(left.end.line < right.start.line
+        || right.end.line < left.start.line
+        || (left.end.line == right.start.line && left.end.character < right.start.character)
+        || (right.end.line == left.start.line && right.end.character < left.start.character))
+}
+
 fn diagnostics_by_uri(
     documents: &[DocumentState],
     diagnostics: &DiagnosticReport,
@@ -693,6 +703,11 @@ fn diagnostics_by_uri(
             } else {
                 format!("{} ({})", diagnostic.message, diagnostic.notes.join("; "))
             },
+            data: (!diagnostic.suggestions.is_empty()).then(|| {
+                json!({
+                    "suggestions": diagnostic.suggestions,
+                })
+            }),
         });
     }
 
@@ -1818,6 +1833,77 @@ fn collect_missing_annotation_code_actions(
             ))
         })
         .collect()
+}
+
+fn collect_diagnostic_suggestion_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+    params: &Value,
+) -> Vec<Value> {
+    let diagnostics = params
+        .get("context")
+        .and_then(|context| context.get("diagnostics"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut actions = Vec::new();
+    for diagnostic in diagnostics {
+        let Some(data) = diagnostic.get("data") else {
+            continue;
+        };
+        let Some(suggestions) = data.get("suggestions").and_then(Value::as_array) else {
+            continue;
+        };
+        for suggestion in suggestions {
+            let applicability =
+                suggestion.get("applicability").and_then(Value::as_str).unwrap_or_default();
+            if applicability != "machineApplicable" {
+                continue;
+            }
+            let Some(span) = suggestion.get("span") else {
+                continue;
+            };
+            let suggestion_range = LspRange {
+                start: LspPosition {
+                    line: span.get("line").and_then(Value::as_u64).unwrap_or(1).saturating_sub(1)
+                        as u32,
+                    character: span
+                        .get("column")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        .saturating_sub(1) as u32,
+                },
+                end: LspPosition {
+                    line: span
+                        .get("end_line")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        .saturating_sub(1) as u32,
+                    character: span
+                        .get("end_column")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        .saturating_sub(1) as u32,
+                },
+            };
+            if !range_intersects(range, suggestion_range) {
+                continue;
+            }
+            let replacement =
+                suggestion.get("replacement").and_then(Value::as_str).unwrap_or_default();
+            let title = suggestion
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("Apply suggested fix")
+                .to_owned();
+            actions.push(code_action(
+                title,
+                &document.uri,
+                vec![LspTextEdit { range: suggestion_range, new_text: replacement.to_owned() }],
+            ));
+        }
+    }
+    actions
 }
 
 fn collect_unsafe_code_actions(
@@ -3050,6 +3136,84 @@ foo.ping()
             action["edit"]["changes"][uri.as_str()][0]["newText"],
             json!("from app.types import Foo\n")
         );
+    }
+
+    #[test]
+    fn code_actions_offer_machine_applicable_return_suggestion() {
+        let config = temp_workspace(
+            "code_actions_offer_machine_applicable_return_suggestion",
+            &[(
+                "src/app/__init__.tpy",
+                "def build(flag: bool) -> int:\n    if flag:\n        return 1\n    return None\n",
+            )],
+        );
+        let path = config.config_dir.join("src/app/__init__.tpy");
+        let uri = path_to_uri(&path);
+        let text = fs::read_to_string(&path).expect("source file should be readable");
+        let syntax = parse_with_options(
+            SourceFile {
+                path: path.clone(),
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: text.clone(),
+            },
+            ParseOptions::default(),
+        );
+        let document = DocumentState {
+            uri: uri.clone(),
+            path: path.clone(),
+            text,
+            syntax,
+            local_symbols: BTreeMap::new(),
+            local_value_types: BTreeMap::new(),
+        };
+        let diagnostics = DiagnosticReport {
+            diagnostics: vec![
+                typepython_diagnostics::Diagnostic::error(
+                    "TPY4001",
+                    "function `build` returns `None` where `build` expects `int`",
+                )
+                .with_span(typepython_diagnostics::Span::new(
+                    path.display().to_string(),
+                    4,
+                    1,
+                    4,
+                    12,
+                ))
+                .with_suggestion(
+                    "Add `| None` to the declared return type",
+                    typepython_diagnostics::Span::new(path.display().to_string(), 1, 26, 1, 29),
+                    String::from("int | None"),
+                    typepython_diagnostics::SuggestionApplicability::MachineApplicable,
+                ),
+            ],
+        };
+        let diagnostics = diagnostics_by_uri(std::slice::from_ref(&document), &diagnostics);
+        let diagnostics = serde_json::to_value(
+            diagnostics.get(&uri).expect("diagnostics should be mapped to the document URI"),
+        )
+        .expect("diagnostics should serialize");
+
+        let actions = collect_diagnostic_suggestion_code_actions(
+            &document,
+            LspRange {
+                start: LspPosition { line: 0, character: 0 },
+                end: LspPosition { line: 0, character: 30 },
+            },
+            &json!({
+                "textDocument": {"uri": uri},
+                "context": {"diagnostics": diagnostics}
+            }),
+        );
+        let action = actions
+            .iter()
+            .find(|action| {
+                action["title"]
+                    .as_str()
+                    .is_some_and(|title| title.contains("Add `| None` to the declared return type"))
+            })
+            .expect("return suggestion action should be present");
+        assert_eq!(action["edit"]["changes"][uri.as_str()][0]["newText"], json!("int | None"));
     }
 
     #[test]
