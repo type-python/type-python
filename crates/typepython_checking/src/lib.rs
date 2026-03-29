@@ -24527,6 +24527,15 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_tpy_direct_await_of_async_function() {
+        let result = check_temp_typepython_source(
+            "async def fetch() -> int:\n    return 1\n\nasync def build() -> int:\n    return await fetch()\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_direct_await_mismatch() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -24729,6 +24738,15 @@ mod tests {
         });
 
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_tpy_yield_and_yield_from() {
+        let result = check_temp_typepython_source(
+            "from typing import Generator\n\ndef produce() -> Generator[int, None, None]:\n    yield 1\n\ndef relay(values: list[int]) -> Generator[int, None, None]:\n    yield from values\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
 
     #[test]

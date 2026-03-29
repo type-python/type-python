@@ -2584,12 +2584,6 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                     false,
                     &mut diagnostics,
                 );
-                collect_deferred_async_construct_diagnostics(
-                    &source.path,
-                    &normalized,
-                    parsed.suite(),
-                    &mut diagnostics,
-                );
                 refresh_custom_statements_from_ast(
                     &source.path,
                     &normalized,
@@ -2788,65 +2782,6 @@ fn collect_invalid_annotation_placement_diagnostics(
             ),
             _ => {}
         }
-    }
-}
-
-fn collect_deferred_async_construct_diagnostics(
-    path: &Path,
-    source: &str,
-    suite: &[Stmt],
-    diagnostics: &mut DiagnosticReport,
-) {
-    let mut visitor = DeferredAsyncConstructVisitor { path, source, diagnostics };
-    visitor.visit_body(suite);
-}
-
-struct DeferredAsyncConstructVisitor<'a> {
-    path: &'a Path,
-    source: &'a str,
-    diagnostics: &'a mut DiagnosticReport,
-}
-
-impl<'a> DeferredAsyncConstructVisitor<'a> {
-    fn push_deferred(&mut self, range: ruff_text_size::TextRange, construct: &str) {
-        let line = offset_to_line_column(self.source, range.start().to_usize()).0;
-        self.diagnostics.push(
-            Diagnostic::error(
-                "TPY4010",
-                format!("{construct} in .tpy source is deferred beyond v1"),
-            )
-            .with_span(Span::new(self.path.display().to_string(), line, 1, line, 1)),
-        );
-    }
-}
-
-impl<'a> visitor::Visitor<'a> for DeferredAsyncConstructVisitor<'a> {
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match stmt {
-            Stmt::FunctionDef(function) if function.is_async => {
-                self.push_deferred(function.range(), "`async def`");
-            }
-            Stmt::For(for_stmt) if for_stmt.is_async => {
-                self.push_deferred(for_stmt.range(), "`async for`");
-            }
-            Stmt::With(with_stmt) if with_stmt.is_async => {
-                self.push_deferred(with_stmt.range(), "`async with`");
-            }
-            _ => {}
-        }
-        visitor::walk_stmt(self, stmt);
-    }
-
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        match expr {
-            Expr::Await(await_expr) => self.push_deferred(await_expr.range(), "`await`"),
-            Expr::Yield(yield_expr) => self.push_deferred(yield_expr.range(), "`yield`"),
-            Expr::YieldFrom(yield_from_expr) => {
-                self.push_deferred(yield_from_expr.range(), "`yield from`");
-            }
-            _ => {}
-        }
-        visitor::walk_expr(self, expr);
     }
 }
 
@@ -10562,7 +10497,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_deferred_async_constructs_in_typepython_source() {
+    fn parse_accepts_async_constructs_in_typepython_source() {
         let tree = parse(SourceFile {
             path: PathBuf::from("async-deferred.tpy"),
             kind: SourceKind::TypePython,
@@ -10572,15 +10507,8 @@ mod tests {
             ),
         });
 
-        let rendered = tree.diagnostics.as_text();
-        assert!(tree.diagnostics.has_errors());
-        assert!(rendered.contains("TPY4010"));
-        assert!(rendered.contains("`async def` in .tpy source is deferred beyond v1"));
-        assert!(rendered.contains("`await` in .tpy source is deferred beyond v1"));
-        assert!(rendered.contains("`async for` in .tpy source is deferred beyond v1"));
-        assert!(rendered.contains("`async with` in .tpy source is deferred beyond v1"));
-        assert!(rendered.contains("`yield` in .tpy source is deferred beyond v1"));
-        assert!(rendered.contains("`yield from` in .tpy source is deferred beyond v1"));
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        assert!(!tree.statements.is_empty());
     }
 
     #[test]
