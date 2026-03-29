@@ -2870,7 +2870,7 @@ fn source_root_for_path(config: &ConfigHandle, path: &Path) -> Option<PathBuf> {
 fn logical_module_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let parent = relative.parent().unwrap_or_else(|| Path::new(""));
-    let package_components = explicit_package_components(root, parent)?;
+    let package_components = package_components(parent)?;
     let stem = path.file_stem()?.to_str()?;
 
     if stem == "__init__" {
@@ -2882,26 +2882,14 @@ fn logical_module_path(root: &Path, path: &Path) -> Option<String> {
     Some(components.join("."))
 }
 
-fn explicit_package_components(root: &Path, relative_parent: &Path) -> Option<Vec<String>> {
+fn package_components(relative_parent: &Path) -> Option<Vec<String>> {
     let mut components = Vec::new();
-    let mut current = PathBuf::new();
-
     for component in relative_parent.components() {
         let name = component.as_os_str().to_str()?.to_owned();
-        current.push(&name);
-        if !is_explicit_package_dir(&root.join(&current)) {
-            return None;
-        }
         components.push(name);
     }
 
     Some(components)
-}
-
-fn is_explicit_package_dir(directory: &Path) -> bool {
-    ["__init__.py", "__init__.tpy", "__init__.pyi"]
-        .iter()
-        .any(|entry| directory.join(entry).is_file())
 }
 
 fn normalize_glob_path(path: &Path) -> String {
@@ -3140,8 +3128,8 @@ mod tests {
     use zip::{ZipWriter, write::FileOptions};
 
     #[test]
-    fn collect_source_paths_skips_implicit_namespace_packages() {
-        let project_dir = temp_project_dir("skips_implicit_namespace_packages");
+    fn collect_source_paths_includes_implicit_namespace_packages() {
+        let project_dir = temp_project_dir("includes_implicit_namespace_packages");
         let result = {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
                 .expect("test setup should succeed");
@@ -3159,8 +3147,9 @@ mod tests {
 
         let discovery = result.expect("test setup should succeed");
         assert!(discovery.diagnostics.is_empty());
-        assert_eq!(discovery.sources.len(), 1);
-        assert_eq!(discovery.sources[0].logical_module, "pkg");
+        let logical_modules: Vec<_> =
+            discovery.sources.iter().map(|source| source.logical_module.as_str()).collect();
+        assert_eq!(logical_modules, vec!["pkg", "pkg.subpkg.mod"]);
     }
 
     #[test]

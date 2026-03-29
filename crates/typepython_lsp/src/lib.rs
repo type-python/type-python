@@ -2546,7 +2546,7 @@ fn source_root_for_path(config: &ConfigHandle, path: &Path) -> Option<PathBuf> {
 fn logical_module_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let parent = relative.parent().unwrap_or_else(|| Path::new(""));
-    let package_components = explicit_package_components(root, parent)?;
+    let package_components = package_components(parent)?;
     let stem = path.file_stem()?.to_str()?;
     if stem == "__init__" {
         return (!package_components.is_empty()).then(|| package_components.join("."));
@@ -2556,24 +2556,13 @@ fn logical_module_path(root: &Path, path: &Path) -> Option<String> {
     Some(components.join("."))
 }
 
-fn explicit_package_components(root: &Path, relative_parent: &Path) -> Option<Vec<String>> {
+fn package_components(relative_parent: &Path) -> Option<Vec<String>> {
     let mut components = Vec::new();
-    let mut current = PathBuf::new();
     for component in relative_parent.components() {
         let name = component.as_os_str().to_str()?.to_owned();
-        current.push(&name);
-        if !is_explicit_package_dir(&root.join(&current)) {
-            return None;
-        }
         components.push(name);
     }
     Some(components)
-}
-
-fn is_explicit_package_dir(directory: &Path) -> bool {
-    ["__init__.py", "__init__.tpy", "__init__.pyi"]
-        .iter()
-        .any(|entry| directory.join(entry).is_file())
 }
 
 fn load_syntax_trees(

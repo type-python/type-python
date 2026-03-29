@@ -1,9 +1,9 @@
 //! Module graph and summary construction boundary for TypePython.
 
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{BTreeMap, BTreeSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use typepython_binding::{
@@ -71,6 +71,8 @@ pub fn build(bindings: &[BindingTable]) -> ModuleGraph {
         })
         .collect::<Vec<_>>();
 
+    inject_package_module_nodes(&mut nodes);
+
     if !nodes.iter().any(|node| node.module_key == "typing") {
         nodes.push(typing_prelude_node());
     }
@@ -97,6 +99,20 @@ fn hash_summary(binding: &BindingTable) -> u64 {
     hasher.finish()
 }
 
+fn hash_node_summary(node: &ModuleNode, child_summaries: &[(String, u64)]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    node.module_path.hash(&mut hasher);
+    node.module_key.hash(&mut hasher);
+    node.declarations.hash(&mut hasher);
+    node.assignments.hash(&mut hasher);
+    node.if_guards.hash(&mut hasher);
+    node.asserts.hash(&mut hasher);
+    node.invalidations.hash(&mut hasher);
+    node.matches.hash(&mut hasher);
+    child_summaries.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn hash_module_summary(
     module_path: &std::path::Path,
     module_key: &str,
@@ -107,6 +123,149 @@ fn hash_module_summary(
     module_key.hash(&mut hasher);
     declarations.hash(&mut hasher);
     hasher.finish()
+}
+
+fn inject_package_module_nodes(nodes: &mut Vec<ModuleNode>) {
+    let actual_module_keys = nodes
+        .iter()
+        .filter(|node| !is_synthetic_module_path(&node.module_path))
+        .map(|node| node.module_key.clone())
+        .collect::<BTreeSet<_>>();
+    let all_module_keys = all_package_module_keys(&actual_module_keys);
+    let direct_children = direct_child_module_index(&all_module_keys);
+    let existing = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.module_key.clone(), index))
+        .collect::<BTreeMap<_, _>>();
+
+    for (package_key, child_keys) in &direct_children {
+        if let Some(index) = existing.get(package_key).copied() {
+            add_missing_child_module_imports(&mut nodes[index].declarations, child_keys);
+            continue;
+        }
+        nodes.push(namespace_module_node(package_key, child_keys));
+    }
+
+    recompute_package_summary_fingerprints(nodes, &direct_children);
+}
+
+fn is_synthetic_module_path(path: &Path) -> bool {
+    path.to_string_lossy().starts_with('<')
+}
+
+fn all_package_module_keys(actual_module_keys: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut all = actual_module_keys.clone();
+    for module_key in actual_module_keys {
+        let mut current = module_key.as_str();
+        while let Some((parent, _)) = current.rsplit_once('.') {
+            all.insert(parent.to_owned());
+            current = parent;
+        }
+    }
+    all
+}
+
+fn direct_child_module_index(all_module_keys: &BTreeSet<String>) -> BTreeMap<String, Vec<String>> {
+    let mut index: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for module_key in all_module_keys {
+        let Some((parent, _)) = module_key.rsplit_once('.') else {
+            continue;
+        };
+        index.entry(parent.to_owned()).or_default().push(module_key.clone());
+    }
+    index
+}
+
+fn add_missing_child_module_imports(declarations: &mut Vec<Declaration>, child_keys: &[String]) {
+    for child_key in child_keys {
+        let Some(name) = child_key.rsplit('.').next() else {
+            continue;
+        };
+        if declarations
+            .iter()
+            .any(|declaration| declaration.owner.is_none() && declaration.name == name)
+        {
+            continue;
+        }
+        declarations.push(package_child_import_declaration(name, child_key));
+    }
+}
+
+fn namespace_module_node(module_key: &str, child_keys: &[String]) -> ModuleNode {
+    let mut declarations = Vec::new();
+    add_missing_child_module_imports(&mut declarations, child_keys);
+    ModuleNode {
+        module_path: PathBuf::from(format!("<namespace-package:{module_key}>")),
+        module_key: module_key.to_owned(),
+        module_kind: SourceKind::Python,
+        declarations,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+    }
+}
+
+fn package_child_import_declaration(name: &str, module_key: &str) -> Declaration {
+    Declaration {
+        name: name.to_owned(),
+        kind: DeclarationKind::Import,
+        detail: module_key.to_owned(),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    }
+}
+
+fn recompute_package_summary_fingerprints(
+    nodes: &mut [ModuleNode],
+    direct_children: &BTreeMap<String, Vec<String>>,
+) {
+    let mut order = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.module_key.split('.').count(), node.module_key.clone(), index))
+        .collect::<Vec<_>>();
+    order.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+
+    let mut summary_by_key = BTreeMap::new();
+    for (_, module_key, index) in order {
+        let child_summaries = direct_children
+            .get(&module_key)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter_map(|child| {
+                        summary_by_key.get(child).map(|summary| (child.clone(), *summary))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        nodes[index].summary_fingerprint = hash_node_summary(&nodes[index], &child_summaries);
+        summary_by_key.insert(module_key, nodes[index].summary_fingerprint);
+    }
 }
 
 fn typing_prelude_node() -> ModuleNode {
@@ -752,5 +911,181 @@ mod tests {
         assert!(
             collections_abc.declarations.iter().any(|declaration| declaration.name == "Mapping")
         );
+    }
+
+    #[test]
+    fn build_synthesizes_namespace_package_nodes_for_parent_modules() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/pkg/sub/module.py"),
+            module_key: String::from("pkg.sub.module"),
+            module_kind: SourceKind::Python,
+            declarations: vec![Declaration {
+                name: String::from("greet"),
+                kind: DeclarationKind::Function,
+                detail: String::from("(name:str)->str"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let pkg = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "pkg")
+            .expect("expected synthetic pkg namespace node");
+        let sub = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "pkg.sub")
+            .expect("expected synthetic pkg.sub namespace node");
+
+        assert!(pkg.module_path.to_string_lossy().contains("<namespace-package:pkg>"));
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "sub"
+                && declaration.detail == "pkg.sub")
+        );
+        assert!(
+            sub.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "module"
+                && declaration.detail == "pkg.sub.module")
+        );
+    }
+
+    #[test]
+    fn build_namespace_package_fingerprint_tracks_child_summary_changes() {
+        let first = build(&[BindingTable {
+            module_path: PathBuf::from("src/pkg/sub/module.py"),
+            module_key: String::from("pkg.sub.module"),
+            module_kind: SourceKind::Python,
+            declarations: vec![Declaration {
+                name: String::from("greet"),
+                kind: DeclarationKind::Function,
+                detail: String::from("(name:str)->str"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+        let second = build(&[BindingTable {
+            module_path: PathBuf::from("src/pkg/sub/module.py"),
+            module_key: String::from("pkg.sub.module"),
+            module_kind: SourceKind::Python,
+            declarations: vec![
+                Declaration {
+                    name: String::from("greet"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(name:str)->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("version"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let first_pkg = first
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "pkg")
+            .expect("expected synthetic pkg namespace node");
+        let second_pkg = second
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "pkg")
+            .expect("expected synthetic pkg namespace node");
+
+        assert_ne!(first_pkg.summary_fingerprint, second_pkg.summary_fingerprint);
     }
 }
