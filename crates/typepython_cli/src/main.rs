@@ -2525,10 +2525,11 @@ fn configured_external_type_roots(config: &ConfigHandle) -> Result<Vec<PathBuf>>
 }
 
 fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
-    if config.config.resolution.python_executable.is_none() {
-        return Vec::new();
-    }
     let interpreter = resolve_python_executable(config);
+    python_type_roots_from_interpreter(&interpreter)
+}
+
+fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
     let output = ProcessCommand::new(&interpreter)
         .args([
             "-c",
@@ -2994,9 +2995,9 @@ mod tests {
         build_migration_report, collect_source_paths, compile_runtime_bytecode,
         embedded_config_template, emit_migration_stubs, exit_code_for_error,
         external_resolution_sources, format_watch_rebuild_note, init_project, load_syntax_trees,
-        run_pipeline, should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
-        verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
-        write_incremental_snapshot,
+        python_type_roots_from_interpreter, run_pipeline, should_emit_build_outputs,
+        supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
+        verify_runtime_public_name_parity, watch_targets, write_incremental_snapshot,
     };
     use clap::Parser;
     use flate2::{Compression, write::GzEncoder};
@@ -3195,17 +3196,24 @@ mod tests {
         assert!(message.contains("invalid glob pattern"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn external_resolution_merges_partial_stub_packages_with_runtime_fallback() {
         let project_dir = temp_project_dir(
             "external_resolution_merges_partial_stub_packages_with_runtime_fallback",
         );
         let modules = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
             fs::write(
                 project_dir.join("typepython.toml"),
                 format!(
-                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\n",
-                    project_dir.join("site-packages").display()
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
                 ),
             )
             .expect("test setup should succeed");
@@ -3236,16 +3244,23 @@ mod tests {
         assert_eq!(modules, vec!["demo", "demo.runtime_only", "demo.typed_only"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn external_resolution_does_not_fallback_for_non_partial_stub_packages() {
         let project_dir =
             temp_project_dir("external_resolution_does_not_fallback_for_non_partial_stub_packages");
         let modules = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
             fs::write(
                 project_dir.join("typepython.toml"),
                 format!(
-                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\n",
-                    project_dir.join("site-packages").display()
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
                 ),
             )
             .expect("test setup should succeed");
@@ -3272,6 +3287,26 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert_eq!(modules, vec!["demo"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn python_type_roots_from_interpreter_reads_json_from_probe_script() {
+        let project_dir =
+            temp_project_dir("python_type_roots_from_interpreter_reads_json_from_probe_script");
+        let interpreter_path = project_dir.join("python3");
+        write_executable_script(
+            &interpreter_path,
+            "#!/bin/sh\nprintf '[\"/tmp/site-packages\",\"/tmp/user-site\"]\\n'\n",
+        );
+
+        let roots = python_type_roots_from_interpreter(&interpreter_path);
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(
+            roots,
+            vec![PathBuf::from("/tmp/site-packages"), PathBuf::from("/tmp/user-site")]
+        );
     }
 
     #[test]
@@ -4714,6 +4749,15 @@ mod tests {
         if path.exists() {
             fs::remove_dir_all(path).expect("temp project directory should be removed");
         }
+    }
+
+    #[cfg(unix)]
+    fn write_executable_script(path: &Path, body: &str) {
+        fs::write(path, body).expect("script should be written");
+        let mut permissions =
+            fs::metadata(path).expect("script metadata should be readable").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("script should be executable");
     }
 
     fn write_zip_archive(path: &Path, files: &[(&str, &str)]) {

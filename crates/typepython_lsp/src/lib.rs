@@ -2210,10 +2210,11 @@ fn configured_external_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
 }
 
 fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
-    if config.config.resolution.python_executable.is_none() {
-        return Vec::new();
-    }
     let interpreter = resolve_python_executable(config);
+    python_type_roots_from_interpreter(&interpreter)
+}
+
+fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
     let output = ProcessCommand::new(&interpreter)
         .args([
             "-c",
