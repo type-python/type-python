@@ -2118,19 +2118,10 @@ fn collect_source_paths(
     let exclude_patterns = compile_patterns(config, &config.config.project.exclude)?;
     let source_roots: Vec<_> =
         config.config.project.src.iter().map(|root| config.resolve_relative_path(root)).collect();
-    let mut sources = Vec::new();
+    let mut local_sources = Vec::new();
 
     for root in &source_roots {
-        walk_directory(config, root, &include_patterns, &exclude_patterns, &mut sources)?;
-    }
-
-    let stdlib_root = bundled_stdlib_root();
-    if stdlib_root.exists() {
-        walk_bundled_stdlib_directory(&stdlib_root, &mut sources)?;
-    }
-
-    for root in configured_external_type_roots(config) {
-        walk_external_type_root(&root, &mut sources)?;
+        walk_directory(config, root, &include_patterns, &exclude_patterns, &mut local_sources)?;
     }
 
     for path in overlays.keys() {
@@ -2146,12 +2137,25 @@ fn collect_source_paths(
         let Some(logical_module) = logical_module_path(&root, path) else {
             continue;
         };
-        if !sources.iter().any(|source| source.path == *path) {
-            sources.push(DiscoveredSource { path: path.clone(), kind, logical_module });
+        if !local_sources.iter().any(|source| source.path == *path) {
+            local_sources.push(DiscoveredSource { path: path.clone(), kind, logical_module });
         }
     }
 
-    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    sort_sources_by_type_authority(&mut local_sources);
+
+    let mut sources = local_sources;
+    let stdlib_root = bundled_stdlib_root();
+    if stdlib_root.exists() {
+        walk_bundled_stdlib_directory(&stdlib_root, &mut sources)?;
+    }
+
+    let mut external_sources = Vec::new();
+    for root in configured_external_type_roots(config) {
+        walk_external_type_root(&root, &mut external_sources)?;
+    }
+    sort_sources_by_type_authority(&mut external_sources);
+    sources.extend(external_sources);
     Ok(sources)
 }
 
@@ -2288,12 +2292,18 @@ fn walk_external_type_root_directory(
 fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Stub => true,
-        SourceKind::Python => {
-            external_runtime_is_typed(root, path)
-                || external_runtime_allowed_by_partial_stub(root, path)
-        }
+        SourceKind::Python => external_runtime_allowed(root, path),
         SourceKind::TypePython => false,
     }
+}
+
+fn external_runtime_allowed(root: &Path, path: &Path) -> bool {
+    let Some(stub_root) = sibling_stub_distribution_root(root, path) else {
+        return external_runtime_is_typed(root, path);
+    };
+
+    partial_stub_package_marker(&stub_root)
+        && runtime_module_missing_from_stub_package(root, path, &stub_root)
 }
 
 fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
@@ -2331,30 +2341,58 @@ fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
     false
 }
 
-fn external_runtime_allowed_by_partial_stub(root: &Path, path: &Path) -> bool {
+fn sibling_stub_distribution_root(root: &Path, path: &Path) -> Option<PathBuf> {
     let Ok(relative) = path.strip_prefix(root) else {
-        return false;
+        return None;
     };
     let mut components = relative.components();
     let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
-        return false;
+        return None;
     };
     if first.ends_with("-stubs") {
-        return false;
+        return None;
     }
 
     let stub_root = root.join(format!("{first}-stubs"));
-    if !partial_stub_package_marker(&stub_root) {
-        return false;
-    }
+    stub_root.exists().then_some(stub_root)
+}
 
+fn runtime_module_missing_from_stub_package(root: &Path, path: &Path, stub_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let Some(first) =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())
+    else {
+        return false;
+    };
     let Ok(relative_inside_package) = relative.strip_prefix(first) else {
         return false;
     };
     let nested_stub_root = stub_root.join(first);
-    let stub_package_root = if nested_stub_root.exists() { nested_stub_root } else { stub_root };
+    let stub_package_root =
+        if nested_stub_root.exists() { nested_stub_root } else { stub_root.to_path_buf() };
     let stub_candidate = stub_package_root.join(relative_inside_package).with_extension("pyi");
     !stub_candidate.is_file()
+}
+
+fn sort_sources_by_type_authority(sources: &mut [DiscoveredSource]) {
+    sources.sort_by(|left, right| {
+        left.logical_module
+            .cmp(&right.logical_module)
+            .then_with(|| {
+                source_kind_authority_rank(left.kind).cmp(&source_kind_authority_rank(right.kind))
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn source_kind_authority_rank(kind: SourceKind) -> u8 {
+    match kind {
+        SourceKind::TypePython => 0,
+        SourceKind::Stub => 1,
+        SourceKind::Python => 2,
+    }
 }
 
 fn partial_stub_package_marker(stub_root: &Path) -> bool {

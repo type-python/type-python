@@ -2399,7 +2399,7 @@ fn collect_source_paths(config: &ConfigHandle) -> Result<SourceDiscovery> {
         walk_directory(config, root, &include_patterns, &exclude_patterns, &mut sources)?;
     }
 
-    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    sort_sources_by_type_authority(&mut sources);
     let diagnostics = detect_module_collisions(&sources, &source_roots);
 
     Ok(SourceDiscovery { sources, diagnostics })
@@ -2504,7 +2504,7 @@ fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSo
     for root in configured_external_type_roots(config)? {
         walk_external_type_root(&root, &mut sources)?;
     }
-    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    sort_sources_by_type_authority(&mut sources);
     sources.dedup_by(|left, right| left.path == right.path);
     Ok(sources)
 }
@@ -2587,12 +2587,18 @@ fn walk_external_type_root_directory(
 fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Stub => true,
-        SourceKind::Python => {
-            external_runtime_is_typed(root, path)
-                || external_runtime_allowed_by_partial_stub(root, path)
-        }
+        SourceKind::Python => external_runtime_allowed(root, path),
         SourceKind::TypePython => false,
     }
+}
+
+fn external_runtime_allowed(root: &Path, path: &Path) -> bool {
+    let Some(stub_root) = sibling_stub_distribution_root(root, path) else {
+        return external_runtime_is_typed(root, path);
+    };
+
+    partial_stub_package_marker(&stub_root)
+        && runtime_module_missing_from_stub_package(root, path, &stub_root)
 }
 
 fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
@@ -2630,30 +2636,58 @@ fn external_runtime_is_typed(root: &Path, path: &Path) -> bool {
     false
 }
 
-fn external_runtime_allowed_by_partial_stub(root: &Path, path: &Path) -> bool {
+fn sibling_stub_distribution_root(root: &Path, path: &Path) -> Option<PathBuf> {
     let Ok(relative) = path.strip_prefix(root) else {
-        return false;
+        return None;
     };
     let mut components = relative.components();
     let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
-        return false;
+        return None;
     };
     if first.ends_with("-stubs") {
-        return false;
+        return None;
     }
 
     let stub_root = root.join(format!("{first}-stubs"));
-    if !partial_stub_package_marker(&stub_root) {
-        return false;
-    }
+    stub_root.exists().then_some(stub_root)
+}
 
+fn runtime_module_missing_from_stub_package(root: &Path, path: &Path, stub_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let Some(first) =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())
+    else {
+        return false;
+    };
     let Ok(relative_inside_package) = relative.strip_prefix(first) else {
         return false;
     };
     let nested_stub_root = stub_root.join(first);
-    let stub_package_root = if nested_stub_root.exists() { nested_stub_root } else { stub_root };
+    let stub_package_root =
+        if nested_stub_root.exists() { nested_stub_root } else { stub_root.to_path_buf() };
     let stub_candidate = stub_package_root.join(relative_inside_package).with_extension("pyi");
     !stub_candidate.is_file()
+}
+
+fn sort_sources_by_type_authority(sources: &mut [DiscoveredSource]) {
+    sources.sort_by(|left, right| {
+        left.logical_module
+            .cmp(&right.logical_module)
+            .then_with(|| {
+                source_kind_authority_rank(left.kind).cmp(&source_kind_authority_rank(right.kind))
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn source_kind_authority_rank(kind: SourceKind) -> u8 {
+    match kind {
+        SourceKind::TypePython => 0,
+        SourceKind::Stub => 1,
+        SourceKind::Python => 2,
+    }
 }
 
 fn partial_stub_package_marker(stub_root: &Path) -> bool {
@@ -3012,9 +3046,12 @@ mod tests {
         process::ExitCode,
         time::{SystemTime, UNIX_EPOCH},
     };
+    use typepython_binding::bind;
+    use typepython_checking::check as check_graph;
     use typepython_config::load;
     use typepython_diagnostics::{Diagnostic, DiagnosticReport};
     use typepython_emit::{EmitArtifact, write_runtime_outputs};
+    use typepython_graph::build as build_graph;
     use typepython_incremental::IncrementalState;
     use zip::{ZipWriter, write::FileOptions};
 
@@ -3287,6 +3324,92 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert_eq!(modules, vec!["demo"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_pipeline_prefers_local_companion_stub_surfaces() {
+        let project_dir = temp_project_dir("run_pipeline_prefers_local_companion_stub_surfaces");
+        let diagnostics = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src/lib")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/lib/__init__.py"),
+                "def make() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join("src/lib/__init__.pyi"), "def make() -> str: ...\n")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app.tpy"),
+                "from lib import make\n\nname: str = make()\n",
+            )
+            .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            let discovery = collect_source_paths(&config).expect("test setup should succeed");
+            let syntax =
+                load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
+            let bindings = syntax.iter().map(bind).collect::<Vec<_>>();
+            check_graph(&build_graph(&bindings)).diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_pipeline_prefers_stub_packages_over_typed_runtime_packages() {
+        let project_dir =
+            temp_project_dir("run_pipeline_prefers_stub_packages_over_typed_runtime_packages");
+        let diagnostics = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join("site-packages/demo-stubs/demo"))
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("site-packages/demo/__init__.py"),
+                "def make() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo/py.typed"), "")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("site-packages/demo-stubs/demo/__init__.pyi"),
+                "def make() -> str: ...\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join("site-packages/demo-stubs/py.typed"), "")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app.tpy"),
+                "from demo import make\n\nname: str = make()\n",
+            )
+            .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            run_pipeline(&config).expect("test setup should succeed").diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
     }
 
     #[cfg(unix)]
