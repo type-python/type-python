@@ -129,6 +129,8 @@ fn lower_passthrough(source: &str) -> LoweredText {
 }
 
 fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText {
+    let normalized_source =
+        typepython_syntax::normalize_annotated_lambda_source_for_emission(&tree.source.text);
     let unsafe_lines: BTreeSet<_> = tree
         .statements
         .iter()
@@ -341,7 +343,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_line_number += 1;
     }
 
-    for (index, line) in tree.source.text.lines().enumerate() {
+    for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
         let replacement_lines = if let Some(statement) = type_aliases.get(&line_number) {
             if let Some(expanded) =
@@ -383,7 +385,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     }
 
     let mut lowered = lowered_lines.join("\n");
-    if tree.source.text.ends_with('\n') {
+    if normalized_source.ends_with('\n') {
         lowered.push('\n');
     }
 
@@ -717,15 +719,112 @@ fn split_bracketed(input: &str) -> Option<(&str, &str)> {
 }
 
 fn append_optional_generic_base(statement: &typepython_syntax::NamedBlockStatement) -> String {
+    let header_suffix = runtime_header_suffix(statement);
     if statement.type_params.is_empty() {
-        if statement.header_suffix.is_empty() {
-            String::new()
-        } else {
-            statement.header_suffix.clone()
-        }
+        if header_suffix.is_empty() { String::new() } else { header_suffix }
     } else {
-        append_bases(&statement.header_suffix, &[generic_base(statement)])
+        append_bases(&header_suffix, &[generic_base(statement)])
     }
+}
+
+fn runtime_header_suffix(statement: &typepython_syntax::NamedBlockStatement) -> String {
+    if !statement.bases.iter().any(|base| is_typed_dict_base(base)) {
+        return statement.header_suffix.clone();
+    }
+    strip_typeddict_runtime_keywords(&statement.header_suffix)
+}
+
+fn strip_typeddict_runtime_keywords(header_suffix: &str) -> String {
+    let trimmed = header_suffix.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let inner = trimmed.trim_start_matches('(').trim_end_matches(')').trim();
+    if inner.is_empty() {
+        return String::new();
+    }
+
+    let parts = split_header_suffix_args(inner)
+        .into_iter()
+        .filter(|part| {
+            let keyword = part.split_once('=').map(|(name, _)| name.trim());
+            !matches!(keyword, Some("closed" | "extra_items"))
+        })
+        .collect::<Vec<_>>();
+
+    if parts.is_empty() { String::new() } else { format!("({})", parts.join(", ")) }
+}
+
+fn split_header_suffix_args(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut string_quote = None::<char>;
+    let mut escaped = false;
+
+    for character in text.chars() {
+        if let Some(quote) = string_quote {
+            current.push(character);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if character == '\\' {
+                escaped = true;
+            } else if character == quote {
+                string_quote = None;
+            }
+            continue;
+        }
+
+        match character {
+            '\'' | '"' => {
+                string_quote = Some(character);
+                current.push(character);
+            }
+            '(' => {
+                paren_depth += 1;
+                current.push(character);
+            }
+            ')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                current.push(character);
+            }
+            '[' => {
+                bracket_depth += 1;
+                current.push(character);
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                current.push(character);
+            }
+            '{' => {
+                brace_depth += 1;
+                current.push(character);
+            }
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                current.push(character);
+            }
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                let part = current.trim();
+                if !part.is_empty() {
+                    parts.push(part.to_owned());
+                }
+                current.clear();
+            }
+            _ => current.push(character),
+        }
+    }
+
+    let tail = current.trim();
+    if !tail.is_empty() {
+        parts.push(tail.to_owned());
+    }
+    parts
 }
 
 fn append_bases(header_suffix: &str, extras: &[String]) -> String {
@@ -1265,7 +1364,7 @@ mod tests {
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
         ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
-        SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, UnsafeStatement,
+        SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, UnsafeStatement, parse,
     };
 
     #[test]
@@ -1314,6 +1413,42 @@ mod tests {
         eprintln!("OUTPUT:\n{}", lowered.module.python_source);
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(lowered.module.python_source, "def update():\n    if True:\n        x = 1\n");
+    }
+
+    #[test]
+    fn lower_normalizes_annotated_lambda_runtime_syntax() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("lambda-annotation.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("handler = lambda (value: int): value + 1\n"),
+        });
+
+        let lowered = lower(&tree);
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(!lowered.module.python_source.contains("(value: int)"));
+        assert!(lowered.module.python_source.contains("lambda"));
+        assert_eq!(lowered.module.python_source, "handler = lambda  value      : value + 1\n");
+    }
+
+    #[test]
+    fn lower_strips_runtime_only_typeddict_keywords() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("typed-dict-runtime.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing import TypedDict\n\nclass User(TypedDict, total=False, closed=True, extra_items=int):\n    name: str\n",
+            ),
+        });
+
+        let lowered = lower(&tree);
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("class User(TypedDict, total=False):"));
+        assert!(!lowered.module.python_source.contains("closed=True"));
+        assert!(!lowered.module.python_source.contains("extra_items=int"));
     }
 
     #[test]

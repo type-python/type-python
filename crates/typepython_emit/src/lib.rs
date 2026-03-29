@@ -11,7 +11,7 @@ use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_config::ConfigHandle;
 use typepython_lowering::LoweredModule;
-use typepython_syntax::SourceKind;
+use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 /// Planned runtime and stub artifacts for one source module.
 #[derive(Debug, Clone)]
@@ -29,6 +29,37 @@ pub struct RuntimeWriteSummary {
     pub runtime_files_written: usize,
     pub stub_files_written: usize,
     pub py_typed_written: usize,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct TypePythonStubContext {
+    pub value_overrides: Vec<StubValueOverride>,
+    pub callable_overrides: Vec<StubCallableOverride>,
+    pub synthetic_methods: Vec<StubSyntheticMethod>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StubValueOverride {
+    pub line: usize,
+    pub annotation: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StubCallableOverride {
+    pub line: usize,
+    pub params: Vec<FunctionParam>,
+    pub returns: Option<String>,
+    pub use_async_syntax: bool,
+    pub drop_non_builtin_decorators: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StubSyntheticMethod {
+    pub class_line: usize,
+    pub name: String,
+    pub method_kind: MethodKind,
+    pub params: Vec<FunctionParam>,
+    pub returns: Option<String>,
 }
 
 /// Generated stub flavor for inferred pass-through Python surfaces.
@@ -78,6 +109,7 @@ pub fn write_runtime_outputs(
     artifacts: &[EmitArtifact],
     modules: &[LoweredModule],
     runtime_validators: bool,
+    stub_contexts: Option<&BTreeMap<PathBuf, TypePythonStubContext>>,
 ) -> Result<RuntimeWriteSummary, io::Error> {
     let modules_by_source: BTreeMap<_, _> =
         modules.iter().map(|module| (module.source_path.as_path(), module)).collect();
@@ -114,7 +146,11 @@ pub fn write_runtime_outputs(
                 fs::create_dir_all(parent)?;
             }
             let stub_source = if module.source_kind == SourceKind::TypePython {
-                rewrite_to_stub_source(&module.python_source).map_err(|error| {
+                let context = stub_contexts
+                    .and_then(|contexts| contexts.get(&module.source_path))
+                    .cloned()
+                    .unwrap_or_default();
+                generate_typepython_stub_source(module, &context).map_err(|error| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
@@ -526,7 +562,25 @@ fn collect_typed_dict_fields(python: &str) -> BTreeMap<String, Vec<ValidatorFiel
     typed_dicts
 }
 
+#[allow(dead_code)]
 fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
+    let module = LoweredModule {
+        source_path: PathBuf::new(),
+        source_kind: SourceKind::TypePython,
+        python_source: python.to_owned(),
+        source_map: Vec::new(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+    generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+}
+
+pub fn generate_typepython_stub_source(
+    module: &LoweredModule,
+    context: &TypePythonStubContext,
+) -> Result<String, io::Error> {
+    let python = &module.python_source;
     let parsed = parse_module(python).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -534,8 +588,9 @@ fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
         )
     })?;
 
+    let lowered_context = LoweredStubContext::from_module(module, context);
     let mut edits = Vec::new();
-    collect_stub_edits(python, parsed.suite(), &mut edits);
+    collect_authoritative_stub_edits(python, parsed.suite(), &lowered_context, &mut edits);
     edits.sort_by_key(|edit| edit.start_line);
 
     let lines: Vec<&str> = python.lines().collect();
@@ -1513,6 +1568,61 @@ fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
     source.get(range.start().to_usize()..range.end().to_usize())
 }
 
+#[derive(Debug, Clone, Default)]
+struct LoweredStubContext {
+    value_overrides: BTreeMap<usize, String>,
+    callable_overrides: BTreeMap<usize, LoweredCallableOverride>,
+    synthetic_methods: BTreeMap<usize, Vec<StubSyntheticMethod>>,
+}
+
+#[derive(Debug, Clone)]
+struct LoweredCallableOverride {
+    params: Vec<FunctionParam>,
+    returns: Option<String>,
+    use_async_syntax: bool,
+    drop_non_builtin_decorators: bool,
+}
+
+impl LoweredStubContext {
+    fn from_module(module: &LoweredModule, context: &TypePythonStubContext) -> Self {
+        let mut lowered = Self::default();
+        for override_line in &context.value_overrides {
+            lowered.value_overrides.insert(
+                original_to_lowered_line(module, override_line.line),
+                override_line.annotation.clone(),
+            );
+        }
+        for override_line in &context.callable_overrides {
+            lowered.callable_overrides.insert(
+                original_to_lowered_line(module, override_line.line),
+                LoweredCallableOverride {
+                    params: override_line.params.clone(),
+                    returns: override_line.returns.clone(),
+                    use_async_syntax: override_line.use_async_syntax,
+                    drop_non_builtin_decorators: override_line.drop_non_builtin_decorators,
+                },
+            );
+        }
+        for method in &context.synthetic_methods {
+            lowered
+                .synthetic_methods
+                .entry(original_to_lowered_line(module, method.class_line))
+                .or_default()
+                .push(method.clone());
+        }
+        lowered
+    }
+}
+
+fn original_to_lowered_line(module: &LoweredModule, original_line: usize) -> usize {
+    module
+        .source_map
+        .iter()
+        .find(|entry| entry.original_line == original_line)
+        .map(|entry| entry.lowered_line)
+        .unwrap_or(original_line)
+}
+
 #[derive(Debug)]
 struct StubEdit {
     start_line: usize,
@@ -1520,6 +1630,361 @@ struct StubEdit {
     replacement: Option<String>,
 }
 
+fn collect_authoritative_stub_edits(
+    source: &str,
+    suite: &[Stmt],
+    context: &LoweredStubContext,
+    edits: &mut Vec<StubEdit>,
+) {
+    let overloaded_names: std::collections::BTreeSet<_> = suite
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::FunctionDef(function)
+                if function.decorator_list.iter().any(is_overload_decorator) =>
+            {
+                Some(function.name.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+
+    for statement in suite {
+        match statement {
+            Stmt::Import(_) | Stmt::ImportFrom(_) => {}
+            Stmt::FunctionDef(function) => {
+                let function_line = offset_to_line(source, function.name.range.start().to_usize());
+                let start_line = function
+                    .decorator_list
+                    .first()
+                    .map(|decorator| offset_to_line(source, decorator.range().start().to_usize()))
+                    .unwrap_or(function_line);
+                let end_offset = function.range.end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(function.range.start().to_usize()));
+                let replacement = if function.decorator_list.iter().any(is_overload_decorator) {
+                    Some(render_authoritative_function_stub(source, function, context))
+                } else if overloaded_names.contains(function.name.as_str()) {
+                    None
+                } else {
+                    Some(render_authoritative_function_stub(source, function, context))
+                };
+                edits.push(StubEdit { start_line, end_line, replacement });
+            }
+            Stmt::AnnAssign(assign) => {
+                let start_line = offset_to_line(source, assign.range.start().to_usize());
+                let replacement = render_authoritative_annotated_assignment_stub(source, assign);
+                edits.push(StubEdit { start_line, end_line: start_line, replacement });
+            }
+            Stmt::Assign(assign) => {
+                let start_line = offset_to_line(source, assign.range.start().to_usize());
+                let end_offset = assign.range.end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(assign.range.start().to_usize()));
+                let replacement = render_authoritative_assignment_stub(source, assign, context);
+                edits.push(StubEdit { start_line, end_line, replacement });
+            }
+            Stmt::ClassDef(class_def) => {
+                let class_line = offset_to_line(source, class_def.name.range.start().to_usize());
+                let start_line = class_def
+                    .decorator_list
+                    .first()
+                    .map(|decorator| offset_to_line(source, decorator.range().start().to_usize()))
+                    .unwrap_or(class_line);
+                let end_offset = class_def.range.end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(class_def.range.start().to_usize()));
+                edits.push(StubEdit {
+                    start_line,
+                    end_line,
+                    replacement: Some(render_authoritative_class_stub(source, class_def, context)),
+                });
+            }
+            Stmt::Expr(_) | Stmt::Pass(_) => {
+                let start_line = offset_to_line(source, statement.range().start().to_usize());
+                let end_offset = statement.range().end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(statement.range().start().to_usize()));
+                edits.push(StubEdit { start_line, end_line, replacement: None });
+            }
+            _ => {
+                let start_line = offset_to_line(source, statement.range().start().to_usize());
+                let end_offset = statement.range().end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(statement.range().start().to_usize()));
+                edits.push(StubEdit { start_line, end_line, replacement: None });
+            }
+        }
+    }
+}
+
+fn render_authoritative_function_stub(
+    source: &str,
+    function: &ruff_python_ast::StmtFunctionDef,
+    context: &LoweredStubContext,
+) -> String {
+    let function_line = offset_to_line(source, function.name.range.start().to_usize());
+    if let Some(override_signature) = context.callable_overrides.get(&function_line) {
+        let indentation =
+            leading_indent(source.lines().nth(function_line.saturating_sub(1)).unwrap_or_default());
+        let mut parts = if override_signature.drop_non_builtin_decorators {
+            builtin_decorator_lines(source, &function.decorator_list, &indentation)
+        } else {
+            decorator_lines(
+                source,
+                &function.decorator_list,
+                function.name.range.start().to_usize(),
+            )
+        };
+        parts.push(format_function_stub_signature(
+            &indentation,
+            function.name.as_str(),
+            &override_signature.params,
+            override_signature.returns.as_deref(),
+            override_signature.use_async_syntax,
+        ));
+        return parts.join("\n");
+    }
+    let mut parts =
+        decorator_lines(source, &function.decorator_list, function.name.range.start().to_usize());
+    parts.push(rewrite_stub_function_signature(source, function));
+    parts.join("\n")
+}
+
+fn render_authoritative_class_stub(
+    source: &str,
+    class_def: &ruff_python_ast::StmtClassDef,
+    context: &LoweredStubContext,
+) -> String {
+    let header =
+        source_header_text(source, class_def.name.range.start().to_usize(), &class_def.body)
+            .trim_end()
+            .to_owned();
+    let indent = format!("{}    ", leading_indent(&header.lines().next().unwrap_or_default()));
+    let class_line = offset_to_line(source, class_def.name.range.start().to_usize());
+    let mut body_lines = render_authoritative_class_body(source, class_def, context, &indent);
+
+    if let Some(extra_methods) = context.synthetic_methods.get(&class_line) {
+        for method in extra_methods {
+            body_lines.push(render_synthetic_method_stub(method, &indent));
+        }
+    }
+
+    if body_lines.is_empty() {
+        rewrite_stub_header_text(&header)
+    } else {
+        format!("{header}\n{}", body_lines.join("\n"))
+    }
+}
+
+fn render_authoritative_class_body(
+    source: &str,
+    class_def: &ruff_python_ast::StmtClassDef,
+    context: &LoweredStubContext,
+    _indent: &str,
+) -> Vec<String> {
+    let overloaded_names: std::collections::BTreeSet<_> = class_def
+        .body
+        .iter()
+        .filter_map(|statement| match statement {
+            Stmt::FunctionDef(function)
+                if function.decorator_list.iter().any(is_overload_decorator) =>
+            {
+                Some(function.name.as_str().to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    let mut body_lines = Vec::new();
+
+    for statement in &class_def.body {
+        match statement {
+            Stmt::AnnAssign(assign) => {
+                if let Some(replacement) =
+                    render_authoritative_annotated_assignment_stub(source, assign)
+                {
+                    body_lines.push(replacement);
+                }
+            }
+            Stmt::Assign(assign) => {
+                if let Some(replacement) =
+                    render_authoritative_assignment_stub(source, assign, context)
+                {
+                    body_lines.push(replacement);
+                }
+            }
+            Stmt::FunctionDef(function) => {
+                if !function.decorator_list.iter().any(is_overload_decorator)
+                    && overloaded_names.contains(function.name.as_str())
+                {
+                    continue;
+                }
+                body_lines.push(render_authoritative_function_stub(source, function, context));
+            }
+            Stmt::ClassDef(nested) => {
+                body_lines.push(render_authoritative_class_stub(source, nested, context));
+            }
+            _ => {}
+        }
+    }
+
+    body_lines
+}
+
+fn render_authoritative_annotated_assignment_stub(
+    source: &str,
+    assign: &ruff_python_ast::StmtAnnAssign,
+) -> Option<String> {
+    if source
+        .lines()
+        .nth(offset_to_line(source, assign.range.start().to_usize()).saturating_sub(1))
+        .is_some_and(|line| line.contains("TypeAlias ="))
+    {
+        return source_stmt_text(source, assign.range());
+    }
+    render_annotated_assignment_stub(source, assign)
+}
+
+fn render_authoritative_assignment_stub(
+    source: &str,
+    assign: &ruff_python_ast::StmtAssign,
+    context: &LoweredStubContext,
+) -> Option<String> {
+    let start_line = offset_to_line(source, assign.range.start().to_usize());
+    if let Some(statement_text) = source_stmt_text(source, assign.range())
+        && statement_text.contains("TypeAlias =")
+    {
+        return Some(statement_text);
+    }
+    if let Some(annotation) = context.value_overrides.get(&start_line) {
+        let mut lines = Vec::new();
+        for target in &assign.targets {
+            let Expr::Name(name) = target else {
+                continue;
+            };
+            lines.push(format!("{}: {}", name.id.as_str(), annotation));
+        }
+        if !lines.is_empty() {
+            return Some(lines.join("\n"));
+        }
+    }
+    render_assignment_stub(source, &assign.targets, &assign.value, InferredStubMode::Shadow)
+}
+
+fn render_synthetic_method_stub(method: &StubSyntheticMethod, indentation: &str) -> String {
+    let mut lines = Vec::new();
+    lines.extend(method_decorator_lines(method.method_kind, indentation));
+    lines.push(format_function_stub_signature(
+        indentation,
+        &method.name,
+        &method.params,
+        method.returns.as_deref(),
+        false,
+    ));
+    lines.join("\n")
+}
+
+fn method_decorator_lines(method_kind: MethodKind, indentation: &str) -> Vec<String> {
+    match method_kind {
+        MethodKind::Class => vec![format!("{indentation}@classmethod")],
+        MethodKind::Static => vec![format!("{indentation}@staticmethod")],
+        MethodKind::Property => vec![format!("{indentation}@property")],
+        MethodKind::PropertySetter => vec![format!("{indentation}@property.setter")],
+        MethodKind::Instance => Vec::new(),
+    }
+}
+
+fn format_function_stub_signature(
+    indentation: &str,
+    name: &str,
+    params: &[FunctionParam],
+    returns: Option<&str>,
+    use_async_syntax: bool,
+) -> String {
+    let prefix = if use_async_syntax { "async def" } else { "def" };
+    format!(
+        "{indentation}{prefix} {name}({}) -> {}: ...",
+        format_stub_params(params),
+        returns.unwrap_or("None")
+    )
+}
+
+fn format_stub_params(params: &[FunctionParam]) -> String {
+    let mut rendered = Vec::new();
+    let positional_only_count = params.iter().filter(|param| param.positional_only).count();
+    let has_variadic = params.iter().any(|param| param.variadic);
+    let keyword_only_index = params.iter().position(|param| param.keyword_only);
+
+    for (index, param) in params.iter().enumerate() {
+        if keyword_only_index == Some(index) && !has_variadic {
+            rendered.push(String::from("*"));
+        }
+        let mut part = match &param.annotation {
+            Some(annotation) => format!("{}: {}", param.name, annotation),
+            None => param.name.clone(),
+        };
+        if param.has_default {
+            part.push_str(" = ...");
+        }
+        if param.keyword_variadic {
+            part = format!("**{part}");
+        } else if param.variadic {
+            part = format!("*{part}");
+        }
+        rendered.push(part);
+        if positional_only_count > 0 && index + 1 == positional_only_count {
+            rendered.push(String::from("/"));
+        }
+    }
+
+    rendered.join(", ")
+}
+
+fn builtin_decorator_lines(
+    source: &str,
+    decorators: &[ruff_python_ast::Decorator],
+    indentation: &str,
+) -> Vec<String> {
+    decorators
+        .iter()
+        .filter(|decorator| is_stub_surface_decorator(&decorator.expression))
+        .filter_map(|decorator| {
+            slice_range(source, decorator.expression.range())
+                .map(|expression| format!("{indentation}@{expression}"))
+        })
+        .collect()
+}
+
+fn is_stub_surface_decorator(expression: &Expr) -> bool {
+    match expression {
+        Expr::Name(name) => matches!(
+            name.id.as_str(),
+            "overload" | "staticmethod" | "classmethod" | "property" | "final" | "override"
+        ),
+        Expr::Attribute(attribute) => {
+            matches!(
+                attribute.attr.as_str(),
+                "overload" | "staticmethod" | "classmethod" | "setter"
+            ) || matches!(attribute.attr.as_str(), "property")
+        }
+        Expr::Call(call) => is_stub_surface_decorator(call.func.as_ref()),
+        _ => false,
+    }
+}
+
+fn source_stmt_text(source: &str, range: ruff_text_size::TextRange) -> Option<String> {
+    let start_line = offset_to_line(source, range.start().to_usize());
+    let end_offset = range.end().to_usize().saturating_sub(1);
+    let end_line = offset_to_line(source, end_offset.max(range.start().to_usize()));
+    let text = source
+        .lines()
+        .skip(start_line.saturating_sub(1))
+        .take(end_line.saturating_sub(start_line) + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+#[allow(dead_code)]
 fn collect_stub_edits(source: &str, suite: &[Stmt], edits: &mut Vec<StubEdit>) {
     let overloaded_names: std::collections::BTreeSet<_> = suite
         .iter()
@@ -1607,6 +2072,7 @@ fn rewrite_stub_header_text(header: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn rewrite_stub_annotated_assignment_line(line: &str) -> Option<String> {
     if line.contains("TypeAlias =") {
         return None;
@@ -1615,6 +2081,7 @@ fn rewrite_stub_annotated_assignment_line(line: &str) -> Option<String> {
     Some(head.trim_end().to_owned())
 }
 
+#[allow(dead_code)]
 fn rewrite_stub_class_line(source: &str, class_def: &ruff_python_ast::StmtClassDef) -> String {
     let header =
         source_header_text(source, class_def.name.range.start().to_usize(), &class_def.body);
@@ -1637,6 +2104,7 @@ fn source_header_text(source: &str, start_offset: usize, body: &[Stmt]) -> Strin
         .join("\n")
 }
 
+#[allow(dead_code)]
 fn is_empty_stub_class_body(body: &[Stmt]) -> bool {
     body.iter().all(|statement| match statement {
         Stmt::Pass(_) => true,
@@ -1686,8 +2154,9 @@ fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmitArtifact, InferredStubMode, RuntimeWriteSummary, generate_inferred_stub_source,
-        write_runtime_outputs,
+        EmitArtifact, InferredStubMode, RuntimeWriteSummary, StubCallableOverride,
+        StubSyntheticMethod, TypePythonStubContext, generate_inferred_stub_source,
+        generate_typepython_stub_source, write_runtime_outputs,
     };
     use std::{
         env, fs,
@@ -1696,7 +2165,7 @@ mod tests {
     };
     use typepython_config::load;
     use typepython_lowering::{LoweredModule, SourceMapEntry};
-    use typepython_syntax::SourceKind;
+    use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
     #[test]
     fn write_runtime_outputs_emits_lowered_typepython_and_python_modules() {
@@ -1781,7 +2250,7 @@ mod tests {
             },
         ];
 
-        let summary = write_runtime_outputs(&artifacts, &modules, false)
+        let summary = write_runtime_outputs(&artifacts, &modules, false, None)
             .expect("runtime outputs should be written");
         let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime __init__.py should be readable");
@@ -1886,7 +2355,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        write_runtime_outputs(&artifacts, &modules, true)
+        write_runtime_outputs(&artifacts, &modules, true, None)
             .expect("runtime validator outputs should be written");
         let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime validator file should be readable");
@@ -1920,7 +2389,7 @@ mod tests {
             runtime_path: Some(temp_dir.join("build/app/__init__.py")),
             stub_path: None,
         }];
-        write_runtime_outputs(&artifacts, &modules, false)
+        write_runtime_outputs(&artifacts, &modules, false, None)
             .expect("runtime outputs should be written without validators");
         let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime file should be readable");
@@ -1947,7 +2416,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        let result = write_runtime_outputs(&artifacts, &modules, false);
+        let result = write_runtime_outputs(&artifacts, &modules, false, None);
         remove_temp_dir(&temp_dir);
 
         let error = result.expect_err("invalid lowered python should fail stub generation");
@@ -1973,7 +2442,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        let summary = write_runtime_outputs(&artifacts, &modules, false)
+        let summary = write_runtime_outputs(&artifacts, &modules, false, None)
             .expect("stub-only package outputs should be written");
         let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
             .expect("stub-only __init__.pyi should be readable");
@@ -2007,7 +2476,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        write_runtime_outputs(&artifacts, &modules, false)
+        write_runtime_outputs(&artifacts, &modules, false, None)
             .expect("multiline runtime outputs should be written");
         let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
             .expect("multiline stub should be readable");
@@ -2042,6 +2511,109 @@ mod tests {
         assert!(stub.contains("    age: int"));
         assert!(stub.contains("    @property"));
         assert!(stub.contains("    # TODO: add type annotation\n    def title(self) -> ...: ..."));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_materializes_semantic_callable_and_synthetic_init() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "@decorate\ndef build(name: str) -> int:\n    return 1\n\n@model\nclass User:\n    name: str\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+                SourceMapEntry { original_line: 6, lowered_line: 6 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let context = TypePythonStubContext {
+            value_overrides: Vec::new(),
+            callable_overrides: vec![StubCallableOverride {
+                line: 2,
+                params: vec![FunctionParam {
+                    name: String::from("name"),
+                    annotation: Some(String::from("str")),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }],
+                returns: Some(String::from("str")),
+                use_async_syntax: false,
+                drop_non_builtin_decorators: true,
+            }],
+            synthetic_methods: vec![StubSyntheticMethod {
+                class_line: 6,
+                name: String::from("__init__"),
+                method_kind: MethodKind::Instance,
+                params: vec![
+                    FunctionParam {
+                        name: String::from("self"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                    FunctionParam {
+                        name: String::from("name"),
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                ],
+                returns: Some(String::from("None")),
+            }],
+        };
+
+        let stub = generate_typepython_stub_source(&module, &context)
+            .expect("semantic stub should generate");
+
+        assert!(!stub.contains("@decorate"));
+        assert!(stub.contains("def build(name: str) -> str: ..."));
+        assert!(!stub.contains("@model"));
+        assert!(stub.contains("def __init__(self, name: str) -> None: ..."));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_drops_runtime_control_flow_and_rewrites_assignments() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "VALUE = 1\nif True:\n    VALUE = 2\n\ndef build() -> int:\n    return VALUE\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("stub should generate");
+
+        assert!(stub.contains("VALUE: int"));
+        assert!(!stub.contains("if True"));
+        assert!(!stub.contains("return VALUE"));
+        assert!(stub.contains("def build() -> int: ..."));
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {

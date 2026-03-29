@@ -52,6 +52,27 @@ pub struct CheckResult {
     pub diagnostics: DiagnosticReport,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EffectiveCallableStubOverride {
+    pub module_key: String,
+    pub owner_type_name: Option<String>,
+    pub name: String,
+    pub line: usize,
+    pub params: Vec<typepython_syntax::FunctionParam>,
+    pub returns: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SyntheticMethodStub {
+    pub module_key: String,
+    pub owner_type_name: String,
+    pub class_line: usize,
+    pub name: String,
+    pub method_kind: typepython_syntax::MethodKind,
+    pub params: Vec<typepython_syntax::FunctionParam>,
+    pub returns: Option<String>,
+}
+
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
@@ -70,9 +91,6 @@ pub fn check_with_options(
     let mut diagnostics = DiagnosticReport::default();
 
     for node in &graph.nodes {
-        for alias_diagnostic in recursive_type_alias_diagnostics(node, &graph.nodes) {
-            diagnostics.push(alias_diagnostic);
-        }
         for overload_diagnostic in ambiguous_overload_call_diagnostics(node, &graph.nodes) {
             diagnostics.push(overload_diagnostic);
         }
@@ -188,12 +206,155 @@ pub fn check_with_options(
                 diagnostics.push(match_violation);
             }
         }
-        for conditional_return_diagnostic in conditional_return_coverage_diagnostics(node) {
+        for conditional_return_diagnostic in
+            conditional_return_coverage_diagnostics(node, &graph.nodes)
+        {
             diagnostics.push(conditional_return_diagnostic);
         }
     }
 
     CheckResult { diagnostics }
+}
+
+#[must_use]
+pub fn collect_effective_callable_stub_overrides(
+    graph: &ModuleGraph,
+) -> Vec<EffectiveCallableStubOverride> {
+    let mut overrides = graph
+        .nodes
+        .iter()
+        .filter(|node| node.module_kind == SourceKind::TypePython)
+        .flat_map(|node| {
+            node.declarations
+                .iter()
+                .filter(|declaration| declaration.kind == DeclarationKind::Function)
+                .filter_map(|declaration| {
+                    let site = resolve_decorated_callable_site(node, declaration)?;
+                    let callable = resolve_decorated_callable_annotation_for_declaration(
+                        node,
+                        &graph.nodes,
+                        declaration,
+                    )?;
+                    let params =
+                        direct_function_signature_sites_from_callable_annotation(&callable)?;
+                    let returns =
+                        decorated_function_return_type_from_callable_annotation(&callable)?;
+                    Some(EffectiveCallableStubOverride {
+                        module_key: node.module_key.clone(),
+                        owner_type_name: site.owner_type_name,
+                        name: site.name,
+                        line: site.line,
+                        params: function_params_from_direct_sites(&params),
+                        returns,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    overrides.sort_by(|left, right| {
+        left.module_key
+            .cmp(&right.module_key)
+            .then(left.owner_type_name.cmp(&right.owner_type_name))
+            .then(left.line.cmp(&right.line))
+            .then(left.name.cmp(&right.name))
+    });
+    overrides
+}
+
+#[must_use]
+pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMethodStub> {
+    let mut methods = graph
+        .nodes
+        .iter()
+        .filter(|node| node.module_kind == SourceKind::TypePython)
+        .flat_map(|node| {
+            let module_info = load_dataclass_transform_module_info(node).unwrap_or_default();
+            node.declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.owner.is_none() && declaration.kind == DeclarationKind::Class
+                })
+                .filter_map(|declaration| {
+                    let class_line = module_info
+                        .classes
+                        .iter()
+                        .find(|class_site| class_site.name == declaration.name)
+                        .map(|class_site| class_site.line)?;
+                    let shape = resolve_dataclass_transform_class_shape_from_decl(
+                        &graph.nodes,
+                        node,
+                        declaration,
+                        &mut BTreeSet::new(),
+                    )
+                    .or_else(|| {
+                        resolve_plain_dataclass_class_shape_from_decl(
+                            &graph.nodes,
+                            node,
+                            declaration,
+                            &mut BTreeSet::new(),
+                        )
+                    })?;
+                    if shape.has_explicit_init {
+                        return None;
+                    }
+                    let mut params = vec![typepython_syntax::FunctionParam {
+                        name: String::from("self"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    }];
+                    params.extend(shape.fields.iter().map(|field| {
+                        typepython_syntax::FunctionParam {
+                            name: field.keyword_name.clone(),
+                            annotation: Some(field.annotation.clone()),
+                            has_default: !field.required,
+                            positional_only: false,
+                            keyword_only: field.kw_only,
+                            variadic: false,
+                            keyword_variadic: false,
+                        }
+                    }));
+                    Some(SyntheticMethodStub {
+                        module_key: node.module_key.clone(),
+                        owner_type_name: declaration.name.clone(),
+                        class_line,
+                        name: String::from("__init__"),
+                        method_kind: typepython_syntax::MethodKind::Instance,
+                        params,
+                        returns: Some(String::from("None")),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    methods.sort_by(|left, right| {
+        left.module_key
+            .cmp(&right.module_key)
+            .then(left.owner_type_name.cmp(&right.owner_type_name))
+            .then(left.class_line.cmp(&right.class_line))
+            .then(left.name.cmp(&right.name))
+    });
+    methods
+}
+
+fn function_params_from_direct_sites(
+    params: &[typepython_syntax::DirectFunctionParamSite],
+) -> Vec<typepython_syntax::FunctionParam> {
+    params
+        .iter()
+        .map(|param| typepython_syntax::FunctionParam {
+            name: param.name.clone(),
+            annotation: param.annotation.clone(),
+            has_default: param.has_default,
+            positional_only: param.positional_only,
+            keyword_only: param.keyword_only,
+            variadic: param.variadic,
+            keyword_variadic: param.keyword_variadic,
+        })
+        .collect()
 }
 
 fn unsafe_boundary_diagnostics(
@@ -580,7 +741,9 @@ fn call_signature_params_are_applicable(
             let Some(param_ty) = variadic_type else {
                 return false;
             };
-            arg_ty.is_empty() || param_ty.is_empty() || direct_type_matches(param_ty, arg_ty)
+            arg_ty.is_empty()
+                || param_ty.is_empty()
+                || direct_type_matches(node, nodes, param_ty, arg_ty)
         });
     let keyword_ok =
         call.keyword_names.iter().zip(&resolved_keyword_arg_types).all(|(keyword, arg_ty)| {
@@ -609,14 +772,14 @@ fn call_signature_params_are_applicable(
                     let param_ty = &param_types[index];
                     return field.value_type.is_empty()
                         || param_ty.is_empty()
-                        || direct_type_matches(param_ty, &field.value_type);
+                        || direct_type_matches(node, nodes, param_ty, &field.value_type);
                 }
                 let Some(param_ty) = keyword_variadic_type else {
                     return false;
                 };
                 field.value_type.is_empty()
                     || param_ty.is_empty()
-                    || direct_type_matches(param_ty, &field.value_type)
+                    || direct_type_matches(node, nodes, param_ty, &field.value_type)
             }),
             KeywordExpansion::Mapping(value_ty) => {
                 let Some(param_ty) = keyword_variadic_type else {
@@ -624,7 +787,7 @@ fn call_signature_params_are_applicable(
                 };
                 value_ty.is_empty()
                     || param_ty.is_empty()
-                    || direct_type_matches(param_ty, value_ty)
+                    || direct_type_matches(node, nodes, param_ty, value_ty)
             }
         });
 
@@ -822,7 +985,10 @@ fn plain_dataclass_field_specifier_call(
     })
 }
 
-fn conditional_return_coverage_diagnostics(node: &typepython_graph::ModuleNode) -> Vec<Diagnostic> {
+fn conditional_return_coverage_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
     if node.module_path.to_string_lossy().starts_with('<') {
         return Vec::new();
     }
@@ -846,7 +1012,7 @@ fn conditional_return_coverage_diagnostics(node: &typepython_graph::ModuleNode) 
                 .filter(|branch| {
                     !covered
                         .iter()
-                        .any(|covered_branch| direct_type_matches(branch, covered_branch))
+                        .any(|covered_branch| direct_type_matches(node, nodes, branch, covered_branch))
                 })
                 .collect::<Vec<_>>();
             (!missing.is_empty()).then(|| {
@@ -901,138 +1067,7 @@ fn name_is_unknown_boundary(
         .is_some_and(|import| resolve_import_target(node, nodes, import).is_none())
 }
 
-fn recursive_type_alias_diagnostics(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let mut diagnostics = Vec::new();
-    let mut seen_cycles = BTreeSet::new();
-
-    for declaration in node.declarations.iter().filter(|declaration| {
-        declaration.kind == DeclarationKind::TypeAlias && declaration.owner.is_none()
-    }) {
-        let alias_id = format!("{}::{}", node.module_key, declaration.name);
-        let mut stack = Vec::new();
-        let mut visiting = BTreeSet::new();
-        collect_recursive_type_alias_diagnostics(
-            nodes,
-            node,
-            declaration,
-            &alias_id,
-            &mut stack,
-            &mut visiting,
-            &mut seen_cycles,
-            &mut diagnostics,
-        );
-    }
-
-    diagnostics
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "recursive alias traversal threads shared state through helper recursion"
-)]
-fn collect_recursive_type_alias_diagnostics(
-    nodes: &[typepython_graph::ModuleNode],
-    node: &typepython_graph::ModuleNode,
-    declaration: &Declaration,
-    alias_id: &str,
-    stack: &mut Vec<String>,
-    visiting: &mut BTreeSet<String>,
-    seen_cycles: &mut BTreeSet<String>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if let Some(index) = stack.iter().position(|entry| entry == alias_id) {
-        let cycle = stack[index..]
-            .iter()
-            .cloned()
-            .chain(std::iter::once(alias_id.to_owned()))
-            .collect::<Vec<_>>();
-        let mut cycle_key_parts = cycle.clone();
-        cycle_key_parts.sort();
-        cycle_key_parts.dedup();
-        let cycle_key = cycle_key_parts.join("|");
-        if seen_cycles.insert(cycle_key) {
-            diagnostics.push(Diagnostic::error(
-                "TPY4001",
-                format!(
-                    "type alias `{}` in module `{}` is recursively defined: {}",
-                    declaration.name,
-                    node.module_path.display(),
-                    cycle
-                        .iter()
-                        .map(|entry| entry
-                            .rsplit_once("::")
-                            .map(|(_, name)| name)
-                            .unwrap_or(entry.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(" -> ")
-                ),
-            ));
-        }
-        return;
-    }
-
-    if !visiting.insert(alias_id.to_owned()) {
-        return;
-    }
-    stack.push(alias_id.to_owned());
-
-    for reference in referenced_type_aliases(nodes, node, declaration) {
-        let next_id = format!("{}::{}", reference.0.module_key, reference.1.name);
-        collect_recursive_type_alias_diagnostics(
-            nodes,
-            reference.0,
-            reference.1,
-            &next_id,
-            stack,
-            visiting,
-            seen_cycles,
-            diagnostics,
-        );
-    }
-
-    stack.pop();
-    visiting.remove(alias_id);
-}
-
-fn referenced_type_aliases<'a>(
-    nodes: &'a [typepython_graph::ModuleNode],
-    node: &'a typepython_graph::ModuleNode,
-    declaration: &'a Declaration,
-) -> Vec<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
-    referenced_type_identifiers(&declaration.detail)
-        .into_iter()
-        .filter_map(|name| resolve_type_alias_reference(nodes, node, &name))
-        .collect()
-}
-
-fn referenced_type_identifiers(text: &str) -> Vec<String> {
-    let mut identifiers = Vec::new();
-    let mut token = String::new();
-
-    for character in text.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            token.push(character);
-            continue;
-        }
-        if !token.is_empty() {
-            identifiers.push(std::mem::take(&mut token));
-        }
-    }
-    if !token.is_empty() {
-        identifiers.push(token);
-    }
-
-    identifiers
-}
-
-fn resolve_type_alias_reference<'a>(
+fn resolve_direct_type_alias<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     node: &'a typepython_graph::ModuleNode,
     name: &str,
@@ -1043,6 +1078,31 @@ fn resolve_type_alias_reference<'a>(
             && declaration.kind == DeclarationKind::TypeAlias
     }) {
         return Some((node, local));
+    }
+
+    if let Some((module_key, symbol_name)) = name.rsplit_once('.') {
+        if let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key)
+            && let Some(target_decl) = target_node.declarations.iter().find(|declaration| {
+                declaration.name == symbol_name
+                    && declaration.owner.is_none()
+                    && declaration.kind == DeclarationKind::TypeAlias
+            })
+        {
+            return Some((target_node, target_decl));
+        }
+
+        if let Some(import) = node.declarations.iter().find(|declaration| {
+            declaration.kind == DeclarationKind::Import && declaration.name == module_key
+        }) && let Some(target_node) =
+            nodes.iter().find(|candidate| candidate.module_key == import.detail)
+            && let Some(target_decl) = target_node.declarations.iter().find(|declaration| {
+                declaration.name == symbol_name
+                    && declaration.owner.is_none()
+                    && declaration.kind == DeclarationKind::TypeAlias
+            })
+        {
+            return Some((target_node, target_decl));
+        }
     }
 
     let import = node.declarations.iter().find(|declaration| {
@@ -1097,7 +1157,7 @@ fn direct_return_type_diagnostics(
             continue;
         };
 
-        if !direct_type_matches(&expected, &actual) {
+        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
             diagnostics.push(
                 Diagnostic::error(
                     "TPY4001",
@@ -1445,7 +1505,7 @@ fn direct_yield_type_diagnostics(
             actual
         };
 
-        if !direct_type_matches(&expected, &actual) {
+        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
             diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match &yield_site.owner_type_name {
@@ -1716,7 +1776,7 @@ fn annotated_assignment_type_diagnostics(
             Some(&expected),
         ) {
             diagnostics.extend(result.diagnostics);
-            if !direct_type_matches(&expected, &result.actual_type) {
+            if !direct_type_is_assignable(node, nodes, &expected, &result.actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -1758,7 +1818,7 @@ fn annotated_assignment_type_diagnostics(
             Some(&expected),
         ) {
             diagnostics.extend(result.diagnostics);
-            if !direct_type_matches(&expected, &result.actual_type) {
+            if !direct_type_is_assignable(node, nodes, &expected, &result.actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -1796,7 +1856,7 @@ fn annotated_assignment_type_diagnostics(
         let Some(actual) = resolve_assignment_site_type(node, nodes, signature, assignment) else {
             continue;
         };
-        if !direct_type_matches(&expected, &actual) {
+        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -1904,7 +1964,7 @@ fn simple_name_augmented_assignment_diagnostics(
                 &expected,
                 assignment.value_binop_right.as_deref()?,
             )?;
-            (!direct_type_matches(&expected, &actual)).then(|| {
+            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
                 Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -2242,7 +2302,7 @@ fn typed_dict_literal_entry_diagnostics(
                     continue;
                 };
 
-                if !direct_type_matches(target_field.value_type(), &field.value_type) {
+                if !direct_type_matches(node, nodes, target_field.value_type(), &field.value_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
                         line,
@@ -2264,7 +2324,12 @@ fn typed_dict_literal_entry_diagnostics(
 
             if let Some(extra_items) = &expansion_shape.extra_items
                 && target_shape.extra_items.as_ref().is_none_or(|target_extra| {
-                    !direct_type_matches(&target_extra.value_type, &extra_items.value_type)
+                    !direct_type_matches(
+                        node,
+                        nodes,
+                        &target_extra.value_type,
+                        &extra_items.value_type,
+                    )
                 })
             {
                 diagnostics.push(typed_dict_literal_diagnostic(
@@ -2309,7 +2374,7 @@ fn typed_dict_literal_entry_diagnostics(
             line,
             &entry.value,
         ) {
-            if !direct_type_matches(target_field.value_type(), &actual_type) {
+            if !direct_type_matches(node, nodes, target_field.value_type(), &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
@@ -2527,7 +2592,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                             return Some(diagnostic);
                         }
                         let actual = result.actual_type;
-                        if !direct_type_matches(field.value_type(), &actual) {
+                        if !direct_type_matches(node, nodes, field.value_type(), &actual) {
                             return Some(
                                 Diagnostic::error(
                                     "TPY4001",
@@ -2562,7 +2627,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    if !direct_type_matches(field.value_type(), &actual) {
+                    if !direct_type_matches(node, nodes, field.value_type(), &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -2599,7 +2664,7 @@ fn typed_dict_readonly_mutation_diagnostics(
                         field.value_type(),
                         value,
                     )?;
-                    if !direct_type_matches(field.value_type(), &actual) {
+                    if !direct_type_matches(node, nodes, field.value_type(), &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -3207,7 +3272,8 @@ fn attribute_assignment_type_diagnostics(
                                     return Some(diagnostic);
                                 }
                                 let actual = result.actual_type;
-                                return (!direct_type_matches(&expected, &actual)).then(|| {
+                                return (!direct_type_matches(node, nodes, &expected, &actual))
+                                    .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
@@ -3237,7 +3303,7 @@ fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!direct_type_matches(&expected, &actual)).then(|| {
+                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -3270,7 +3336,7 @@ fn attribute_assignment_type_diagnostics(
                                 &expected,
                                 value,
                             )?;
-                            (!direct_type_matches(&expected, &actual)).then(|| {
+                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -3311,7 +3377,8 @@ fn attribute_assignment_type_diagnostics(
                                     return Some(diagnostic);
                                 }
                                 let actual = result.actual_type;
-                                return (!direct_type_matches(&expected, &actual)).then(|| {
+                                return (!direct_type_matches(node, nodes, &expected, &actual))
+                                    .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
@@ -3341,7 +3408,7 @@ fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!direct_type_matches(&expected, &actual)).then(|| {
+                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -3400,7 +3467,7 @@ fn attribute_assignment_type_diagnostics(
                                 &readable_type,
                                 value,
                             )?;
-                            (!direct_type_matches(&expected, &actual)).then(|| {
+                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
@@ -3457,6 +3524,19 @@ fn resolve_direct_expression_type_from_metadata(
     current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<String> {
+    if let Some(lambda) = metadata.value_lambda.as_deref() {
+        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            lambda,
+            signature,
+            None,
+        )?;
+        return Some(format_callable_annotation(&param_types, &return_type));
+    }
     let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
     resolve_direct_expression_type(
         node,
@@ -3787,7 +3867,8 @@ fn resolve_callable_assignment_signature(
             assignment.owner_type_name.as_deref(),
             assignment.line,
             lambda,
-            expected,
+            Some(expected),
+            None,
         );
     }
 
@@ -3850,11 +3931,28 @@ fn resolve_direct_member_callable_signature(
             matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
         })?;
 
-    let method_signature = rewrite_imported_typing_aliases(
-        node,
-        &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
-    );
-    let actual_params = direct_param_types(&method_signature).unwrap_or_default();
+    let (actual_params, actual_return) = if let Some(callable_annotation) =
+        resolve_decorated_callable_annotation_for_declaration(class_node, nodes, method)
+    {
+        let (params, return_type) = parse_callable_annotation(&callable_annotation)?;
+        (params.unwrap_or_default(), return_type)
+    } else {
+        let method_signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
+        );
+        let actual_params = direct_param_types(&method_signature).unwrap_or_default();
+        let return_text = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(
+                method.detail.split_once("->")?.1.trim(),
+                Some(&owner_type_name),
+            ),
+        );
+        let actual_return =
+            normalized_direct_return_annotation(&return_text).map(normalize_type_text)?;
+        (actual_params, actual_return)
+    };
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
         typepython_syntax::MethodKind::Static => actual_params,
         typepython_syntax::MethodKind::Property => return None,
@@ -3864,15 +3962,6 @@ fn resolve_direct_member_callable_signature(
             actual_params.into_iter().skip(1).collect()
         }
     };
-    let return_text = rewrite_imported_typing_aliases(
-        node,
-        &substitute_self_annotation(
-            method.detail.split_once("->")?.1.trim(),
-            Some(&owner_type_name),
-        ),
-    );
-    let actual_return =
-        normalized_direct_return_annotation(&return_text).map(normalize_type_text)?;
     Some((bound_params, actual_return))
 }
 
@@ -3931,22 +4020,38 @@ fn resolve_contextual_lambda_callable_signature(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     lambda: &typepython_syntax::LambdaMetadata,
-    expected: &str,
+    expected: Option<&str>,
+    outer_bindings: Option<&BTreeMap<String, String>>,
 ) -> Option<(Vec<String>, String)> {
-    let (expected_params, _expected_return) = parse_callable_annotation(expected)?;
-    let expected_params = expected_params?;
-    if expected_params.len() != lambda.param_names.len() {
-        return Some((
-            vec![String::from("dynamic"); lambda.param_names.len()],
-            String::from("dynamic"),
-        ));
+    let expected_params = expected
+        .and_then(|expected| parse_callable_annotation(expected))
+        .and_then(|(expected_params, _)| expected_params);
+    if let Some(expected_params) = expected_params.as_ref()
+        && expected_params.len() != lambda.params.len()
+    {
+        return Some((vec![String::from("dynamic"); lambda.params.len()], String::from("dynamic")));
     }
-    let local_bindings = lambda
-        .param_names
+    let param_types = lambda
+        .params
         .iter()
-        .cloned()
-        .zip(expected_params.iter().cloned())
-        .collect::<BTreeMap<_, _>>();
+        .enumerate()
+        .map(|(index, param)| {
+            param
+                .annotation
+                .as_deref()
+                .map(normalize_type_text)
+                .or_else(|| {
+                    expected_params
+                        .as_ref()
+                        .and_then(|expected_params| expected_params.get(index).cloned())
+                })
+                .unwrap_or_else(|| String::from("dynamic"))
+        })
+        .collect::<Vec<_>>();
+    let mut local_bindings = outer_bindings.cloned().unwrap_or_default();
+    local_bindings.extend(
+        lambda.params.iter().map(|param| param.name.clone()).zip(param_types.iter().cloned()),
+    );
     let actual_return = resolve_direct_expression_type_from_metadata_with_bindings(
         node,
         nodes,
@@ -3957,7 +4062,7 @@ fn resolve_contextual_lambda_callable_signature(
         &lambda.body,
         &local_bindings,
     )?;
-    Some((expected_params, actual_return))
+    Some((param_types, actual_return))
 }
 
 fn format_callable_annotation(param_types: &[String], return_type: &str) -> String {
@@ -3982,7 +4087,6 @@ fn resolve_contextual_lambda_callable_type(
     expected: Option<&str>,
 ) -> Option<String> {
     let lambda = metadata.value_lambda.as_deref()?;
-    let expected = expected?;
     let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
         node,
         nodes,
@@ -3991,6 +4095,7 @@ fn resolve_contextual_lambda_callable_type(
         current_line,
         lambda,
         expected,
+        None,
     )?;
     Some(format_callable_annotation(&param_types, &return_type))
 }
@@ -4570,11 +4675,57 @@ fn normalize_type_text(text: &str) -> String {
     normalize_type_head(text).to_owned()
 }
 
-fn direct_type_matches(expected: &str, actual: &str) -> bool {
+fn expand_type_alias_once(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    text: &str,
+) -> Option<String> {
+    let normalized = normalize_type_text(text);
+    let (head, args) = split_generic_type(&normalized)
+        .map(|(head, args)| (head.to_owned(), args))
+        .unwrap_or_else(|| (normalized.clone(), Vec::new()));
+    let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
+    let substitutions = alias_type_param_substitutions(alias_decl, &args)?;
+    let detail = rewrite_imported_typing_aliases(alias_node, &alias_decl.detail);
+    let expanded = if substitutions.is_empty() {
+        detail
+    } else {
+        substitute_type_substitutions(&detail, &substitutions)
+    };
+    let expanded = normalize_type_text(&expanded);
+    (expanded != normalized).then_some(expanded)
+}
+
+fn alias_type_param_substitutions(
+    alias_decl: &Declaration,
+    args: &[String],
+) -> Option<BTreeMap<String, String>> {
+    if args.len() > alias_decl.type_params.len() {
+        return None;
+    }
+
+    let mut substitutions = BTreeMap::new();
+    for (index, type_param) in alias_decl.type_params.iter().enumerate() {
+        let argument = args
+            .get(index)
+            .cloned()
+            .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
+        substitutions.insert(type_param.name.clone(), argument);
+    }
+    Some(substitutions)
+}
+
+fn direct_type_matches(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+) -> bool {
     let expected = normalize_type_text(expected);
     let actual = normalize_type_text(actual);
+    let mut visiting = BTreeSet::new();
 
-    direct_type_matches_normalized(&expected, &actual)
+    direct_type_matches_normalized(node, nodes, &expected, &actual, &mut visiting)
 }
 
 fn direct_type_is_assignable(
@@ -4585,15 +4736,90 @@ fn direct_type_is_assignable(
 ) -> bool {
     let expected = normalize_type_text(expected);
     let actual = normalize_type_text(actual);
-    direct_type_is_assignable_normalized(node, nodes, &expected, &actual)
+    let mut visiting = BTreeSet::new();
+    direct_type_is_assignable_normalized(node, nodes, &expected, &actual, &mut visiting)
 }
 
-fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
+fn direct_type_matches_normalized(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &str,
+    actual: &str,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> bool {
     if let Some(inner) = annotated_inner(expected) {
-        return direct_type_matches_normalized(&inner, actual);
+        return direct_type_matches_normalized(node, nodes, &inner, actual, visiting);
     }
     if let Some(inner) = annotated_inner(actual) {
-        return direct_type_matches_normalized(expected, &inner);
+        return direct_type_matches_normalized(node, nodes, expected, &inner, visiting);
+    }
+
+    if expected == actual || expected == "Any" || actual == "Any" {
+        return true;
+    }
+
+    let key = (expected.to_owned(), actual.to_owned());
+    if !visiting.insert(key.clone()) {
+        return true;
+    }
+
+    let result = if let Some(expanded_expected) = expand_type_alias_once(node, nodes, expected) {
+        direct_type_matches_normalized(node, nodes, &expanded_expected, actual, visiting)
+    } else if let Some(expanded_actual) = expand_type_alias_once(node, nodes, actual) {
+        direct_type_matches_normalized(node, nodes, expected, &expanded_actual, visiting)
+    } else if let Some(branches) = union_branches(expected) {
+        if let Some(actual_branches) = union_branches(actual) {
+            actual_branches.iter().all(|actual_branch| {
+                branches.iter().any(|expected_branch| {
+                    direct_type_matches_normalized(
+                        node,
+                        nodes,
+                        expected_branch,
+                        actual_branch,
+                        visiting,
+                    )
+                })
+            }) && branches.iter().all(|expected_branch| {
+                actual_branches.iter().any(|actual_branch| {
+                    direct_type_matches_normalized(
+                        node,
+                        nodes,
+                        expected_branch,
+                        actual_branch,
+                        visiting,
+                    )
+                })
+            })
+        } else {
+            branches.into_iter().any(|branch| {
+                direct_type_matches_normalized(node, nodes, &branch, actual, visiting)
+            })
+        }
+    } else if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
+        true
+    } else {
+        match (split_generic_type(expected), split_generic_type(actual)) {
+            (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
+                if expected_head == actual_head && expected_args.len() == actual_args.len() =>
+            {
+                expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
+                    direct_type_matches_normalized(node, nodes, expected_arg, actual_arg, visiting)
+                })
+            }
+            _ => false,
+        }
+    };
+
+    visiting.remove(&key);
+    result
+}
+
+fn direct_type_matches_normalized_plain(expected: &str, actual: &str) -> bool {
+    if let Some(inner) = annotated_inner(expected) {
+        return direct_type_matches_normalized_plain(&inner, actual);
+    }
+    if let Some(inner) = annotated_inner(actual) {
+        return direct_type_matches_normalized_plain(expected, &inner);
     }
 
     if expected == actual || expected == "Any" || actual == "Any" {
@@ -4604,15 +4830,17 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
         if let Some(actual_branches) = union_branches(actual) {
             return actual_branches.iter().all(|actual_branch| {
                 branches.iter().any(|expected_branch| {
-                    direct_type_matches_normalized(expected_branch, actual_branch)
+                    direct_type_matches_normalized_plain(expected_branch, actual_branch)
                 })
             }) && branches.iter().all(|expected_branch| {
                 actual_branches.iter().any(|actual_branch| {
-                    direct_type_matches_normalized(expected_branch, actual_branch)
+                    direct_type_matches_normalized_plain(expected_branch, actual_branch)
                 })
             });
         }
-        return branches.into_iter().any(|branch| direct_type_matches_normalized(&branch, actual));
+        return branches
+            .into_iter()
+            .any(|branch| direct_type_matches_normalized_plain(&branch, actual));
     }
 
     if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
@@ -4624,7 +4852,7 @@ fn direct_type_matches_normalized(expected: &str, actual: &str) -> bool {
             if expected_head == actual_head && expected_args.len() == actual_args.len() =>
         {
             expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
-                direct_type_matches_normalized(expected_arg, actual_arg)
+                direct_type_matches_normalized_plain(expected_arg, actual_arg)
             })
         }
         _ => false,
@@ -4636,12 +4864,13 @@ fn direct_type_is_assignable_normalized(
     nodes: &[typepython_graph::ModuleNode],
     expected: &str,
     actual: &str,
+    visiting: &mut BTreeSet<(String, String)>,
 ) -> bool {
     if let Some(inner) = annotated_inner(expected) {
-        return direct_type_is_assignable_normalized(node, nodes, &inner, actual);
+        return direct_type_is_assignable_normalized(node, nodes, &inner, actual, visiting);
     }
     if let Some(inner) = annotated_inner(actual) {
-        return direct_type_is_assignable_normalized(node, nodes, expected, &inner);
+        return direct_type_is_assignable_normalized(node, nodes, expected, &inner, visiting);
     }
 
     if expected == actual
@@ -4655,41 +4884,47 @@ fn direct_type_is_assignable_normalized(
         return true;
     }
 
-    if let Some(branches) = union_branches(expected) {
+    let key = (expected.to_owned(), actual.to_owned());
+    if !visiting.insert(key.clone()) {
+        return true;
+    }
+
+    let result = if let Some(expanded_expected) = expand_type_alias_once(node, nodes, expected) {
+        direct_type_is_assignable_normalized(node, nodes, &expanded_expected, actual, visiting)
+    } else if let Some(expanded_actual) = expand_type_alias_once(node, nodes, actual) {
+        direct_type_is_assignable_normalized(node, nodes, expected, &expanded_actual, visiting)
+    } else if let Some(branches) = union_branches(expected) {
         if let Some(actual_branches) = union_branches(actual) {
-            return actual_branches.iter().all(|actual_branch| {
+            actual_branches.iter().all(|actual_branch| {
                 branches.iter().any(|expected_branch| {
                     direct_type_is_assignable_normalized(
                         node,
                         nodes,
                         expected_branch,
                         actual_branch,
+                        visiting,
                     )
                 })
-            });
+            })
+        } else {
+            branches.into_iter().any(|branch| {
+                direct_type_is_assignable_normalized(node, nodes, &branch, actual, visiting)
+            })
         }
-        return branches
-            .into_iter()
-            .any(|branch| direct_type_is_assignable_normalized(node, nodes, &branch, actual));
-    }
+    } else if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
+        true
+    } else if protocol_assignable(node, nodes, expected, actual) {
+        true
+    } else if nominal_subclass_assignable(node, nodes, expected, actual) {
+        true
+    } else if let Some(result) = assignable_generic_bridge(node, nodes, expected, actual) {
+        result
+    } else {
+        direct_type_matches(node, nodes, expected, actual)
+    };
 
-    if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
-        return true;
-    }
-
-    if protocol_assignable(node, nodes, expected, actual) {
-        return true;
-    }
-
-    if nominal_subclass_assignable(node, nodes, expected, actual) {
-        return true;
-    }
-
-    if let Some(result) = assignable_generic_bridge(node, nodes, expected, actual) {
-        return result;
-    }
-
-    direct_type_matches_normalized(expected, actual)
+    visiting.remove(&key);
+    result
 }
 
 fn nominal_subclass_assignable(
@@ -4706,7 +4941,7 @@ fn nominal_subclass_assignable(
     };
     actual_decl.bases.iter().any(|base| {
         normalize_type_text(base) == expected
-            || direct_type_is_assignable_normalized(actual_node, nodes, expected, base)
+            || direct_type_is_assignable(actual_node, nodes, expected, base)
     })
 }
 
@@ -4927,7 +5162,7 @@ fn assignable_generic_bridge(
     if expected_head == actual_head && expected_args.len() == actual_args.len() {
         return Some(expected_args.iter().zip(actual_args.iter()).all(
             |(expected_arg, actual_arg)| {
-                direct_type_is_assignable_normalized(node, nodes, expected_arg, actual_arg)
+                direct_type_is_assignable(node, nodes, expected_arg, actual_arg)
             },
         ));
     }
@@ -4935,7 +5170,7 @@ fn assignable_generic_bridge(
     match (expected_head, actual_head) {
         ("Sequence", "list") | ("Sequence", "tuple") if !expected_args.is_empty() => {
             if actual_head == "tuple" && actual_args.len() == 2 && actual_args[1] == "..." {
-                return Some(direct_type_is_assignable_normalized(
+                return Some(direct_type_is_assignable(
                     node,
                     nodes,
                     &expected_args[0],
@@ -4947,26 +5182,12 @@ fn assignable_generic_bridge(
             } else {
                 actual_args.first().cloned().unwrap_or_default()
             };
-            return Some(direct_type_is_assignable_normalized(
-                node,
-                nodes,
-                &expected_args[0],
-                &element,
-            ));
+            return Some(direct_type_is_assignable(node, nodes, &expected_args[0], &element));
         }
         ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
             return Some(
-                direct_type_is_assignable_normalized(
-                    node,
-                    nodes,
-                    &expected_args[0],
-                    &actual_args[0],
-                ) && direct_type_is_assignable_normalized(
-                    node,
-                    nodes,
-                    &expected_args[1],
-                    &actual_args[1],
-                ),
+                direct_type_is_assignable(node, nodes, &expected_args[0], &actual_args[0])
+                    && direct_type_is_assignable(node, nodes, &expected_args[1], &actual_args[1]),
             );
         }
         _ => {}
@@ -5922,6 +6143,11 @@ fn resolve_unnarrowed_name_reference_type(
     }
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
+        if let Some(callable_annotation) =
+            resolve_decorated_function_callable_annotation(node, nodes, value_name)
+        {
+            return Some(callable_annotation);
+        }
         let param_types = direct_signature_sites_from_detail(&function.detail)
             .into_iter()
             .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
@@ -6236,7 +6462,7 @@ fn narrow_to_instance_types(base_type: &str, types: &[String]) -> String {
         let kept = branches
             .into_iter()
             .filter(|branch| {
-                normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch))
+                normalized_types.iter().any(|ty| direct_type_matches_normalized_plain(ty, branch))
             })
             .collect::<Vec<_>>();
         if !kept.is_empty() {
@@ -6255,7 +6481,7 @@ fn remove_instance_types(base_type: &str, types: &[String]) -> String {
     let kept = branches
         .into_iter()
         .filter(|branch| {
-            !normalized_types.iter().any(|ty| direct_type_matches_normalized(ty, branch))
+            !normalized_types.iter().any(|ty| direct_type_matches_normalized_plain(ty, branch))
         })
         .collect::<Vec<_>>();
     if kept.is_empty() { normalized } else { join_union_branches(kept) }
@@ -6991,6 +7217,19 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
     metadata: &typepython_syntax::DirectExprMetadata,
     local_bindings: &BTreeMap<String, String>,
 ) -> Option<String> {
+    if let Some(lambda) = metadata.value_lambda.as_deref() {
+        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            lambda,
+            signature,
+            Some(local_bindings),
+        )?;
+        return Some(format_callable_annotation(&param_types, &return_type));
+    }
     if let Some(value_name) = metadata.value_name.as_deref()
         && let Some(bound_type) = local_bindings.get(value_name)
     {
@@ -7984,7 +8223,12 @@ fn direct_call_type_diagnostics(
                 resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
                 && !shape.has_explicit_init
             {
-                return dataclass_transform_constructor_type_diagnostics(node, call, &shape);
+                return dataclass_transform_constructor_type_diagnostics(
+                    node,
+                    nodes,
+                    call,
+                    &shape,
+                );
             }
             if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
                 && let Some(signature) =
@@ -8614,7 +8858,7 @@ fn positional_and_keyword_type_diagnostics(
             {
                 if !arg_ty.is_empty()
                     && !field.value_type.is_empty()
-                    && !direct_type_matches(&field.value_type, arg_ty)
+                    && !direct_type_matches(node, nodes, &field.value_type, arg_ty)
                 {
                     diagnostics.push(Diagnostic::error(
                         "TPY4001",
@@ -8633,7 +8877,9 @@ fn positional_and_keyword_type_diagnostics(
             let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type) else {
                 continue;
             };
-            if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty)
+            if !arg_ty.is_empty()
+                && !param_ty.is_empty()
+                && !direct_type_matches(node, nodes, param_ty, arg_ty)
             {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
@@ -8652,7 +8898,10 @@ fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = param_types.get(index) else {
             continue;
         };
-        if !arg_ty.is_empty() && !param_ty.is_empty() && !direct_type_matches(param_ty, arg_ty) {
+        if !arg_ty.is_empty()
+            && !param_ty.is_empty()
+            && !direct_type_matches(node, nodes, param_ty, arg_ty)
+        {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -8834,6 +9083,11 @@ fn resolve_direct_callable_signature_sites(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    if let Some(callable_annotation) =
+        resolve_decorated_function_callable_annotation(node, nodes, callee)
+    {
+        return direct_function_signature_sites_from_callable_annotation(&callable_annotation);
+    }
     let direct_function_signatures = load_direct_function_signatures(node);
     if let Some(signature) = direct_function_signatures.get(callee) {
         return Some(signature.clone());
@@ -8935,6 +9189,7 @@ fn dataclass_transform_constructor_arity_diagnostic(
 
 fn dataclass_transform_constructor_type_diagnostics(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     shape: &DataclassTransformClassShape,
 ) -> Vec<Diagnostic> {
@@ -8946,7 +9201,7 @@ fn dataclass_transform_constructor_type_diagnostics(
         .filter(|(field, arg_ty)| {
             !arg_ty.is_empty()
                 && !field.annotation.is_empty()
-                && !direct_type_matches(&field.annotation, arg_ty)
+                && !direct_type_matches(node, nodes, &field.annotation, arg_ty)
         })
         .map(|(field, arg_ty)| {
             Diagnostic::error(
@@ -8969,7 +9224,7 @@ fn dataclass_transform_constructor_type_diagnostics(
         };
         if !arg_ty.is_empty()
             && !field.annotation.is_empty()
-            && !direct_type_matches(&field.annotation, arg_ty)
+            && !direct_type_matches(node, nodes, &field.annotation, arg_ty)
         {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
@@ -9233,6 +9488,10 @@ fn infer_generic_type_param_substitutions(
         let Some(annotation) = param.annotation.as_deref() else {
             continue;
         };
+        let annotation_mentions_param_spec = parse_callable_annotation_parts(annotation)
+            .is_some_and(|(params_expr, _)| {
+                callable_param_expr_mentions_param_spec(&params_expr, &param_spec_names)
+            });
         bind_callable_param_spec_type_params(
             node,
             nodes,
@@ -9243,6 +9502,9 @@ fn infer_generic_type_param_substitutions(
             &param_spec_names,
             &mut substitutions,
         )?;
+        if annotation_mentions_param_spec {
+            continue;
+        }
         bind_generic_type_params(
             node,
             nodes,
@@ -9262,6 +9524,10 @@ fn infer_generic_type_param_substitutions(
         let Some(annotation) = param.annotation.as_deref() else {
             continue;
         };
+        let annotation_mentions_param_spec = parse_callable_annotation_parts(annotation)
+            .is_some_and(|(params_expr, _)| {
+                callable_param_expr_mentions_param_spec(&params_expr, &param_spec_names)
+            });
         bind_callable_param_spec_type_params(
             node,
             nodes,
@@ -9272,6 +9538,9 @@ fn infer_generic_type_param_substitutions(
             &param_spec_names,
             &mut substitutions,
         )?;
+        if annotation_mentions_param_spec {
+            continue;
+        }
         bind_generic_type_params(
             node,
             nodes,
@@ -9513,28 +9782,36 @@ fn resolve_callable_shape_from_metadata(
     if let Some(lambda) = actual_value.value_lambda.as_deref() {
         let (param_types, return_type) = parse_callable_annotation(actual)?;
         let param_types = param_types?;
-        if param_types.len() != lambda.param_names.len() {
+        if param_types.len() != lambda.params.len() {
             return None;
         }
         let params = lambda
-            .param_names
+            .params
             .iter()
-            .cloned()
             .zip(param_types)
-            .map(|(name, annotation)| typepython_syntax::DirectFunctionParamSite {
-                name,
+            .map(|(param, annotation)| typepython_syntax::DirectFunctionParamSite {
+                name: param.name.clone(),
                 annotation: Some(annotation),
-                has_default: false,
-                positional_only: false,
-                keyword_only: false,
-                variadic: false,
-                keyword_variadic: false,
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
             })
             .collect();
         return Some((ParamListBinding { params }, return_type));
     }
 
     let function_name = actual_value.value_name.as_deref()?;
+    if let Some(callable_annotation) =
+        resolve_decorated_function_callable_annotation(node, nodes, function_name)
+    {
+        let signature =
+            direct_function_signature_sites_from_callable_annotation(&callable_annotation)?;
+        let return_type =
+            decorated_function_return_type_from_callable_annotation(&callable_annotation)?;
+        return Some((ParamListBinding { params: signature }, return_type));
+    }
     let function = resolve_direct_function(node, nodes, function_name)?;
     let return_type = function.detail.split_once("->")?.1.trim().to_owned();
     Some((
@@ -9879,11 +10156,296 @@ fn render_param_list_binding_for_callable(
     format!("[{}]", rendered.join(", "))
 }
 
+fn load_decorator_transform_module_info(
+    node: &typepython_graph::ModuleNode,
+) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return None;
+    }
+    let source = fs::read_to_string(&node.module_path).ok()?;
+    Some(typepython_syntax::collect_decorator_transform_module_info(&source))
+}
+
+fn resolve_direct_function_with_node<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+    if let Some(local) = node.declarations.iter().find(|declaration| {
+        declaration.name == callee
+            && declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Function
+    }) {
+        return Some((node, local));
+    }
+
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == callee
+    })?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    target_node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == symbol_name
+                && declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Function
+        })
+        .map(|declaration| (target_node, declaration))
+}
+
+fn resolve_direct_function<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<&'a Declaration> {
+    resolve_direct_function_with_node(node, nodes, callee).map(|(_, declaration)| declaration)
+}
+
+fn resolve_function_provider_with_node<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    node: &'a typepython_graph::ModuleNode,
+    name: &str,
+) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+    if let Some(local) = node.declarations.iter().find(|declaration| {
+        declaration.owner.is_none()
+            && declaration.kind == DeclarationKind::Function
+            && declaration.name == name
+    }) {
+        return Some((node, local));
+    }
+
+    if let Some((module_path, symbol_name)) = name.rsplit_once('.') {
+        if let Some(target_node) =
+            nodes.iter().find(|candidate| candidate.module_key == module_path)
+            && let Some(target) = target_node.declarations.iter().find(|declaration| {
+                declaration.owner.is_none()
+                    && declaration.kind == DeclarationKind::Function
+                    && declaration.name == symbol_name
+            })
+        {
+            return Some((target_node, target));
+        }
+
+        if let Some((head, tail)) = module_path.split_once('.')
+            && let Some(import) = node.declarations.iter().find(|declaration| {
+                declaration.kind == DeclarationKind::Import && declaration.name == head
+            })
+        {
+            let resolved_module = format!("{}.{}", import.detail, tail);
+            if let Some(target_node) =
+                nodes.iter().find(|candidate| candidate.module_key == resolved_module)
+                && let Some(target) = target_node.declarations.iter().find(|declaration| {
+                    declaration.owner.is_none()
+                        && declaration.kind == DeclarationKind::Function
+                        && declaration.name == symbol_name
+                })
+            {
+                return Some((target_node, target));
+            }
+        }
+    }
+
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == name
+    })?;
+    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
+    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    target_node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Function
+                && declaration.name == symbol_name
+        })
+        .map(|declaration| (target_node, declaration))
+}
+
+fn resolve_decorated_callable_site<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> Option<typepython_syntax::DecoratedCallableSite> {
+    let info = load_decorator_transform_module_info(node)?;
+    info.callables.into_iter().find(|site| {
+        site.name == declaration.name
+            && site.owner_type_name.as_deref()
+                == declaration.owner.as_ref().map(|owner| owner.name.as_str())
+    })
+}
+
+fn callable_annotation_from_signature_sites_in_module(
+    node: &typepython_graph::ModuleNode,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    return_type: &str,
+) -> String {
+    let param_types = signature
+        .iter()
+        .map(|param| {
+            param
+                .annotation
+                .as_deref()
+                .map(|annotation| rewrite_imported_typing_aliases(node, annotation))
+                .unwrap_or_else(|| String::from("dynamic"))
+        })
+        .collect::<Vec<_>>();
+    let return_type = rewrite_imported_typing_aliases(node, return_type);
+    format_callable_annotation(&param_types, &return_type)
+}
+
+fn synthetic_direct_expr_metadata(value_type: &str) -> typepython_syntax::DirectExprMetadata {
+    typepython_syntax::DirectExprMetadata {
+        value_type: Some(value_type.to_owned()),
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    }
+}
+
+fn synthetic_decorator_application_call(
+    decorator_name: &str,
+    callable_annotation: &str,
+) -> typepython_binding::CallSite {
+    typepython_binding::CallSite {
+        callee: decorator_name.to_owned(),
+        arg_count: 1,
+        arg_types: vec![callable_annotation.to_owned()],
+        arg_values: vec![synthetic_direct_expr_metadata(callable_annotation)],
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    }
+}
+
+fn decorator_transform_accepts_callable_annotation(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> bool {
+    direct_source_function_arity_diagnostic(node, nodes, call, signature).is_none()
+        && direct_source_function_keyword_diagnostics(node, nodes, call, signature).is_empty()
+        && direct_source_function_type_diagnostics(node, nodes, call, signature).is_empty()
+}
+
+fn apply_named_callable_decorator_transform(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    decorator_name: &str,
+    current_callable: &str,
+) -> Option<String> {
+    let (decorator_node, decorator) =
+        resolve_function_provider_with_node(nodes, node, decorator_name)?;
+    let call = synthetic_decorator_application_call(decorator_name, current_callable);
+    let signature = if decorator.type_params.is_empty() {
+        direct_signature_sites_from_detail(&decorator.detail)
+    } else {
+        resolve_instantiated_direct_function_signature(decorator_node, nodes, decorator, &call)?
+    };
+    if !decorator_transform_accepts_callable_annotation(decorator_node, nodes, &call, &signature) {
+        return None;
+    }
+
+    let transformed = if decorator.type_params.is_empty() {
+        rewrite_imported_typing_aliases(decorator_node, decorator.detail.split_once("->")?.1.trim())
+    } else {
+        let instantiated = resolve_instantiated_callable_return_type_from_declaration(
+            decorator_node,
+            nodes,
+            decorator,
+            &call,
+        )?;
+        rewrite_imported_typing_aliases(decorator_node, &instantiated)
+    };
+    let (params, return_type) = parse_callable_annotation(&transformed)?;
+    Some(format_callable_annotation(&params?, &return_type))
+}
+
+fn resolve_decorated_callable_annotation_for_declaration(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+) -> Option<String> {
+    let decorated = resolve_decorated_callable_site(node, declaration)?;
+    if decorated.decorators.is_empty() {
+        return None;
+    }
+
+    let base_signature = direct_signature_sites_from_detail(&declaration.detail);
+    let base_return = if declaration.is_async {
+        format!("Awaitable[{}]", declaration.detail.split_once("->")?.1.trim())
+    } else {
+        declaration.detail.split_once("->")?.1.trim().to_owned()
+    };
+    let mut current =
+        callable_annotation_from_signature_sites_in_module(node, &base_signature, &base_return);
+    for decorator in decorated.decorators.iter().rev() {
+        current = apply_named_callable_decorator_transform(node, nodes, decorator, &current)?;
+    }
+    Some(current)
+}
+
+fn resolve_decorated_function_callable_annotation(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<String> {
+    let (function_node, function) = resolve_direct_function_with_node(node, nodes, callee)?;
+    resolve_decorated_callable_annotation_for_declaration(function_node, nodes, function)
+}
+
+fn direct_function_signature_sites_from_callable_annotation(
+    callable_annotation: &str,
+) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let (params, _return_type) = parse_callable_annotation(callable_annotation)?;
+    Some(synthesize_param_list_binding(params?).into_iter().collect())
+}
+
+fn decorated_function_return_type_from_callable_annotation(
+    callable_annotation: &str,
+) -> Option<String> {
+    parse_callable_annotation(callable_annotation).map(|(_, return_type)| return_type)
+}
+
 fn resolve_direct_callable_return_type<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<String> {
+    if let Some(callable_annotation) =
+        resolve_decorated_function_callable_annotation(node, nodes, callee)
+    {
+        return decorated_function_return_type_from_callable_annotation(&callable_annotation);
+    }
     if let Some(function) = resolve_direct_function(node, nodes, callee) {
         let return_type = substitute_self_annotation(
             function.detail.split_once("->")?.1.trim(),
@@ -9949,33 +10511,13 @@ fn resolve_direct_callable_return_type_for_line(
             node, nodes, selected, call,
         );
     }
+    if let Some(callable_annotation) =
+        resolve_decorated_function_callable_annotation(node, nodes, callee)
+    {
+        return decorated_function_return_type_from_callable_annotation(&callable_annotation);
+    }
     let function = resolve_direct_function(node, nodes, callee)?;
     resolve_instantiated_callable_return_type_from_declaration(node, nodes, function, call)
-}
-
-fn resolve_direct_function<'a>(
-    node: &'a typepython_graph::ModuleNode,
-    nodes: &'a [typepython_graph::ModuleNode],
-    callee: &str,
-) -> Option<&'a Declaration> {
-    if let Some(local) = node.declarations.iter().find(|declaration| {
-        declaration.name == callee
-            && declaration.owner.is_none()
-            && declaration.kind == DeclarationKind::Function
-    }) {
-        return Some(local);
-    }
-
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == callee
-    })?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    target_node.declarations.iter().find(|declaration| {
-        declaration.name == symbol_name
-            && declaration.owner.is_none()
-            && declaration.kind == DeclarationKind::Function
-    })
 }
 
 fn resolve_direct_callable_signature(
@@ -9983,6 +10525,15 @@ fn resolve_direct_callable_signature(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<(usize, Vec<String>)> {
+    if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, callee) {
+        return Some((
+            signature
+                .iter()
+                .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+                .count(),
+            signature.iter().map(|param| param.name.clone()).collect(),
+        ));
+    }
     if let Some(local) = resolve_direct_function(node, nodes, callee) {
         return Some((
             direct_param_count(&local.detail).unwrap_or_default(),
@@ -12593,6 +13144,123 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_generic_callable_decorator_transform() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def identity[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "@identity\n",
+            "def greet(name: str) -> str:\n",
+            "    return name\n\n",
+            "value: str = greet(\"Ada\")\n",
+        ));
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn decorated_function_transform_rewrites_effective_callable_annotation() {
+        let source_text = concat!(
+            "from typing import Callable, cast\n\n",
+            "def stringify[**P](fn: Callable[P, int]) -> Callable[P, str]:\n",
+            "    return cast(Callable[P, str], fn)\n\n",
+            "@stringify\n",
+            "def count(value: int) -> int:\n",
+            "    return value\n",
+        );
+        let root = create_temp_typepython_root();
+        let path = root.join("app.tpy");
+        fs::write(&path, source_text).expect("temp source should be written");
+        let tree = parse_with_options(
+            SourceFile {
+                path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: source_text.to_owned(),
+            },
+            ParseOptions::default(),
+        );
+        let binding = bind(&tree);
+        let graph = build(&[binding]);
+        let node = &graph.nodes[0];
+        let decorator_info =
+            typepython_syntax::collect_decorator_transform_module_info(source_text);
+
+        assert_eq!(decorator_info.callables.len(), 1);
+        assert_eq!(decorator_info.callables[0].name, "count");
+        assert_eq!(decorator_info.callables[0].decorators, vec![String::from("stringify")]);
+        let (decorator_node, decorator) =
+            super::resolve_function_provider_with_node(&graph.nodes, node, "stringify")
+                .expect("decorator provider");
+        let base_callable = String::from("Callable[[int], int]");
+        let fake_call =
+            super::synthetic_decorator_application_call(&decorator.name, &base_callable);
+        let instantiated_signature = super::resolve_instantiated_direct_function_signature(
+            decorator_node,
+            &graph.nodes,
+            decorator,
+            &fake_call,
+        );
+        assert!(instantiated_signature.is_some(), "instantiated signature");
+        let instantiated_return = super::resolve_instantiated_callable_return_type_from_declaration(
+            decorator_node,
+            &graph.nodes,
+            decorator,
+            &fake_call,
+        );
+        assert_eq!(instantiated_return, Some(String::from("Callable[[int], str]")));
+        assert_eq!(
+            super::apply_named_callable_decorator_transform(
+                decorator_node,
+                &graph.nodes,
+                &decorator.name,
+                &base_callable,
+            ),
+            Some(String::from("Callable[[int], str]"))
+        );
+
+        assert_eq!(
+            super::resolve_decorated_function_callable_annotation(node, &graph.nodes, "count"),
+            Some(String::from("Callable[[int], str]"))
+        );
+    }
+
+    #[test]
+    fn check_reports_callable_decorator_transform_return_rewrite() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable, cast\n\n",
+            "def stringify[**P](fn: Callable[P, int]) -> Callable[P, str]:\n",
+            "    return cast(Callable[P, str], fn)\n\n",
+            "@stringify\n",
+            "def count(value: int) -> int:\n",
+            "    return value\n\n",
+            "bad: int = count(1)\n",
+        ));
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("assigns `str`"));
+        assert!(rendered.contains("expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_method_callable_decorator_transform() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def identity[**P, R](fn: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return fn\n\n",
+            "class Box:\n",
+            "    @identity\n",
+            "    def render(self, value: int) -> str:\n",
+            "        return str(value)\n\n",
+            "box = Box()\n",
+            "text: str = box.render(1)\n",
+        ));
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_substitutes_source_authored_paramspec_in_return_type() {
         let result = check_temp_typepython_source(concat!(
             "from typing import Callable\n\n",
@@ -14197,7 +14865,15 @@ mod tests {
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: Some(Box::new(typepython_syntax::LambdaMetadata {
-                param_names: vec![String::from("x")],
+                params: vec![typepython_syntax::FunctionParam {
+                    name: String::from("x"),
+                    annotation: None,
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }],
                 body: Box::new(direct_expr("str")),
             })),
             value_list_comprehension: None,
@@ -20668,11 +21344,31 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_authored_lambda_parameter_annotations() {
+        let result = check_temp_typepython_source(
+            "handler: Callable[[int], str] = lambda (x: int): str(x)\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_reports_contextual_lambda_callable_assignment_mismatch() {
         let result = check_temp_typepython_source("handler: Callable[[int], str] = lambda x: 1\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("Callable[[int], str]"));
+    }
+
+    #[test]
+    fn check_reports_authored_lambda_parameter_annotation_mismatch() {
+        let result =
+            check_temp_typepython_source("handler: Callable[[int], str] = lambda (x: str): x\n");
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("(str)->str"));
         assert!(rendered.contains("Callable[[int], str]"));
     }
 
@@ -31805,52 +32501,21 @@ mod tests {
     }
 
     #[test]
-    fn check_reports_direct_recursive_type_alias() {
-        let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.tpy"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::TypePython,
-                declarations: vec![Declaration {
-                    name: String::from("Tree"),
-                    kind: DeclarationKind::TypeAlias,
-                    detail: String::from("list[Tree]"),
-                    value_type: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                }],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
-        });
+    fn check_accepts_direct_recursive_type_alias_assignment() {
+        let result = check_temp_typepython_source(
+            "typealias Tree = int | list[Tree]\n\nvalue: Tree = [1, [2, 3]]\n",
+        );
 
-        let rendered = result.diagnostics.as_text();
-        assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("type alias `Tree`"));
-        assert!(rendered.contains("Tree -> Tree"));
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_accepts_generic_recursive_type_alias_assignment() {
+        let result = check_temp_typepython_source(
+            "typealias Nested[T] = T | list[Nested[T]]\n\nvalue: Nested[int] = [1, [2, 3]]\n",
+        );
+
+        assert!(result.diagnostics.is_empty());
     }
 
     #[test]
@@ -32070,73 +32735,135 @@ mod tests {
     }
 
     #[test]
-    fn check_reports_mutual_recursive_type_aliases() {
-        let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.tpy"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::TypePython,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("Left"),
-                        kind: DeclarationKind::TypeAlias,
-                        detail: String::from("Right"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("Right"),
-                        kind: DeclarationKind::TypeAlias,
-                        detail: String::from("Left"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    },
-                ],
-                calls: Vec::new(),
-                method_calls: Vec::new(),
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-            }],
-        });
+    fn check_accepts_mutual_recursive_type_aliases() {
+        let result = check_temp_typepython_source(concat!(
+            "typealias JsonObject = dict[str, JsonValue]\n",
+            "typealias JsonArray = list[JsonValue]\n",
+            "typealias JsonValue = None | bool | int | str | JsonObject | JsonArray\n\n",
+            "payload: JsonValue = {\"items\": [1, True, None, {\"name\": \"Ada\"}]}\n",
+        ));
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_recursive_type_alias_value_mismatch() {
+        let result = check_temp_typepython_source(concat!(
+            "typealias JsonObject = dict[str, JsonValue]\n",
+            "typealias JsonArray = list[JsonValue]\n",
+            "typealias JsonValue = None | bool | int | str | JsonObject | JsonArray\n\n",
+            "payload: JsonValue = {\"items\": {1}}\n",
+        ));
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("type alias `Left`"));
-        assert!(rendered.contains("Left -> Right -> Left"));
+        assert!(rendered.contains("JsonValue"));
+        assert!(rendered.contains("set[int]"));
+    }
+
+    #[test]
+    fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
+        let node = ModuleNode {
+            module_path: PathBuf::from("src/app/module.tpy"),
+            module_key: String::from("app.module"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![
+                Declaration {
+                    name: String::from("JsonObject"),
+                    kind: DeclarationKind::TypeAlias,
+                    detail: String::from("dict[str, JsonValue]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("JsonArray"),
+                    kind: DeclarationKind::TypeAlias,
+                    detail: String::from("list[JsonValue]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("JsonValue"),
+                    kind: DeclarationKind::TypeAlias,
+                    detail: String::from("None | bool | int | str | JsonObject | JsonArray"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+        };
+        let graph = vec![node.clone()];
+
+        assert!(!super::direct_type_is_assignable(&node, &graph, "bool", "int"));
+        assert!(super::direct_type_is_assignable(&node, &graph, "JsonValue", "str"));
+        assert!(super::direct_type_is_assignable(&node, &graph, "JsonValue", "dict[str, str]"));
+        assert!(super::direct_type_is_assignable(
+            &node,
+            &graph,
+            "JsonValue",
+            "int | bool | None | dict[str, str]",
+        ));
+        assert!(super::direct_type_is_assignable(
+            &node,
+            &graph,
+            "JsonValue",
+            "list[int | bool | None | dict[str, str]]",
+        ));
+        assert!(super::direct_type_is_assignable(
+            &node,
+            &graph,
+            "JsonValue",
+            "dict[str, list[int | bool | None | dict[str, str]]]",
+        ));
     }
 
     #[test]

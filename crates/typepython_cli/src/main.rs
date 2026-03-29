@@ -20,12 +20,15 @@ use serde::{Deserialize, Serialize};
 use tar::Archive as TarArchive;
 use tracing_subscriber::EnvFilter;
 use typepython_binding::bind;
-use typepython_checking::check_with_options;
+use typepython_checking::{
+    check_with_options, collect_effective_callable_stub_overrides, collect_synthetic_method_stubs,
+};
 use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
-    EmitArtifact, InferredStubMode, generate_inferred_stub_source, plan_emits,
-    write_runtime_outputs,
+    EmitArtifact, InferredStubMode, StubCallableOverride, StubSyntheticMethod, StubValueOverride,
+    TypePythonStubContext, generate_inferred_stub_source, generate_typepython_stub_source,
+    plan_emits, write_runtime_outputs,
 };
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot, snapshot};
@@ -173,6 +176,7 @@ struct MigrateArgs {
 struct PipelineSnapshot {
     lowered_modules: Vec<LoweredModule>,
     emit_plan: Vec<EmitArtifact>,
+    stub_contexts: BTreeMap<PathBuf, TypePythonStubContext>,
     incremental: IncrementalState,
     tracked_modules: usize,
     discovered_sources: usize,
@@ -660,6 +664,7 @@ fn run_build_like_command(
             &snapshot.emit_plan,
             &snapshot.lowered_modules,
             config.config.emit.runtime_validators,
+            Some(&snapshot.stub_contexts),
         ) {
             Ok(runtime_summary) => runtime_summary,
             Err(error) if error.to_string().contains("TPY5001") => {
@@ -1360,6 +1365,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            stub_contexts: BTreeMap::new(),
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: discovery.sources.len(),
@@ -1395,6 +1401,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            stub_contexts: BTreeMap::new(),
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
@@ -1414,14 +1421,12 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     )
     .diagnostics;
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-    diagnostics
-        .diagnostics
-        .extend(public_surface_completeness_diagnostics(config, &syntax_trees).diagnostics);
 
     if diagnostics.has_errors() {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            stub_contexts: BTreeMap::new(),
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
@@ -1447,6 +1452,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
             return Ok(PipelineSnapshot {
                 lowered_modules: Vec::new(),
                 emit_plan,
+                stub_contexts: BTreeMap::new(),
                 incremental,
                 tracked_modules,
                 discovered_sources: source_paths.len(),
@@ -1464,6 +1470,7 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
+            stub_contexts: BTreeMap::new(),
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
@@ -1473,11 +1480,33 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
 
     let lowered_modules: Vec<_> =
         lowering_results.into_iter().map(|result| result.module).collect();
+    let stub_contexts = build_typepython_stub_contexts(&syntax_trees, &lowered_modules, &graph);
+    diagnostics.diagnostics.extend(
+        public_surface_completeness_diagnostics(
+            config,
+            &syntax_trees,
+            &lowered_modules,
+            &stub_contexts,
+        )
+        .diagnostics,
+    );
+    if diagnostics.has_errors() {
+        return Ok(PipelineSnapshot {
+            lowered_modules: Vec::new(),
+            emit_plan: Vec::new(),
+            stub_contexts: BTreeMap::new(),
+            incremental: IncrementalState::default(),
+            tracked_modules: 0,
+            discovered_sources: source_paths.len(),
+            diagnostics,
+        });
+    }
     let emit_plan = plan_emits(config, &lowered_modules);
 
     Ok(PipelineSnapshot {
         lowered_modules,
         emit_plan,
+        stub_contexts,
         incremental,
         tracked_modules,
         discovered_sources: source_paths.len(),
@@ -1500,6 +1529,104 @@ fn placeholder_lowered_modules(
             metadata: typepython_lowering::LoweringMetadata::default(),
         })
         .collect()
+}
+
+fn build_typepython_stub_contexts(
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+    _lowered_modules: &[LoweredModule],
+    graph: &typepython_graph::ModuleGraph,
+) -> BTreeMap<PathBuf, TypePythonStubContext> {
+    let mut contexts = syntax_trees
+        .iter()
+        .filter(|tree| tree.source.kind == SourceKind::TypePython)
+        .map(|tree| {
+            let mut context = TypePythonStubContext::default();
+            collect_value_stub_overrides(&tree.statements, &mut context.value_overrides);
+            (tree.source.path.clone(), context)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let module_paths = syntax_trees
+        .iter()
+        .map(|tree| (tree.source.logical_module.clone(), tree.source.path.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    for override_signature in collect_effective_callable_stub_overrides(graph) {
+        let Some(path) = module_paths.get(&override_signature.module_key) else {
+            continue;
+        };
+        let Some(context) = contexts.get_mut(path) else {
+            continue;
+        };
+        context.callable_overrides.push(StubCallableOverride {
+            line: override_signature.line,
+            params: override_signature.params,
+            returns: Some(override_signature.returns),
+            use_async_syntax: false,
+            drop_non_builtin_decorators: true,
+        });
+    }
+
+    for synthetic_method in collect_synthetic_method_stubs(graph) {
+        let Some(path) = module_paths.get(&synthetic_method.module_key) else {
+            continue;
+        };
+        let Some(context) = contexts.get_mut(path) else {
+            continue;
+        };
+        context.synthetic_methods.push(StubSyntheticMethod {
+            class_line: synthetic_method.class_line,
+            name: synthetic_method.name,
+            method_kind: synthetic_method.method_kind,
+            params: synthetic_method.params,
+            returns: synthetic_method.returns,
+        });
+    }
+
+    contexts
+}
+
+fn collect_value_stub_overrides(
+    statements: &[typepython_syntax::SyntaxStatement],
+    overrides: &mut Vec<StubValueOverride>,
+) {
+    for statement in statements {
+        match statement {
+            typepython_syntax::SyntaxStatement::Value(statement)
+                if statement.annotation.is_none()
+                    && statement.owner_name.is_none()
+                    && statement.value_type.as_deref().is_some_and(|value| !value.is_empty()) =>
+            {
+                overrides.push(StubValueOverride {
+                    line: statement.line,
+                    annotation: statement.value_type.clone().unwrap_or_default(),
+                });
+            }
+            typepython_syntax::SyntaxStatement::Interface(statement)
+            | typepython_syntax::SyntaxStatement::DataClass(statement)
+            | typepython_syntax::SyntaxStatement::SealedClass(statement)
+            | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
+                collect_class_member_value_stub_overrides(&statement.members, overrides);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_class_member_value_stub_overrides(
+    members: &[typepython_syntax::ClassMember],
+    overrides: &mut Vec<StubValueOverride>,
+) {
+    for member in members {
+        if member.kind == typepython_syntax::ClassMemberKind::Field
+            && member.annotation.is_none()
+            && member.value_type.as_deref().is_some_and(|value| !value.is_empty())
+        {
+            overrides.push(StubValueOverride {
+                line: member.line,
+                annotation: member.value_type.clone().unwrap_or_default(),
+            });
+        }
+    }
 }
 
 fn load_previous_incremental_state(config: &ConfigHandle) -> Result<Option<IncrementalState>> {
@@ -2055,6 +2182,8 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
             "TPY5003",
             format!("emitted artifact `{}` is not valid Python syntax", path.display()),
         ))
+    } else if path.extension().is_some_and(|extension| extension == "pyi") {
+        verify_stub_syntax_rules(path, &syntax)
     } else {
         None
     }
@@ -2064,18 +2193,105 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
 
-    if declaration_surface(&runtime_syntax) == declaration_surface(&stub_syntax) {
+    if module_level_surface_names(&runtime_syntax) == module_level_surface_names(&stub_syntax) {
         None
     } else {
         Some(Diagnostic::error(
             "TPY5003",
             format!(
-                "emitted runtime/stub declaration surfaces differ between `{}` and `{}`",
+                "emitted runtime/stub public names differ between `{}` and `{}`",
                 runtime_path.display(),
                 stub_path.display()
             ),
         ))
     }
+}
+
+fn verify_stub_syntax_rules(
+    path: &Path,
+    syntax: &typepython_syntax::SyntaxTree,
+) -> Option<Diagnostic> {
+    if syntax.statements.iter().any(stub_statement_is_runtime) {
+        return Some(Diagnostic::error(
+            "TPY5003",
+            format!("emitted stub artifact `{}` contains runtime statements", path.display()),
+        ));
+    }
+
+    for statement in &syntax.statements {
+        match statement {
+            typepython_syntax::SyntaxStatement::Value(statement)
+                if statement.owner_name.is_some() =>
+            {
+                return Some(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` contains executable assignments",
+                        path.display()
+                    ),
+                ));
+            }
+            typepython_syntax::SyntaxStatement::Value(statement)
+                if statement.owner_name.is_none() && statement.annotation.is_none() =>
+            {
+                return Some(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` contains value declarations without annotations",
+                        path.display()
+                    ),
+                ));
+            }
+            typepython_syntax::SyntaxStatement::Interface(_)
+            | typepython_syntax::SyntaxStatement::DataClass(_)
+            | typepython_syntax::SyntaxStatement::SealedClass(_)
+            | typepython_syntax::SyntaxStatement::Unsafe(_) => {
+                return Some(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "emitted stub artifact `{}` contains TypePython-only syntax",
+                        path.display()
+                    ),
+                ));
+            }
+            typepython_syntax::SyntaxStatement::ClassDef(statement) => {
+                if statement.members.iter().any(|member| {
+                    member.kind == typepython_syntax::ClassMemberKind::Field
+                        && member.annotation.is_none()
+                }) {
+                    return Some(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "emitted stub artifact `{}` contains class fields without annotations",
+                            path.display()
+                        ),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn stub_statement_is_runtime(statement: &typepython_syntax::SyntaxStatement) -> bool {
+    matches!(
+        statement,
+        typepython_syntax::SyntaxStatement::Call(_)
+            | typepython_syntax::SyntaxStatement::MemberAccess(_)
+            | typepython_syntax::SyntaxStatement::MethodCall(_)
+            | typepython_syntax::SyntaxStatement::Return(_)
+            | typepython_syntax::SyntaxStatement::Yield(_)
+            | typepython_syntax::SyntaxStatement::If(_)
+            | typepython_syntax::SyntaxStatement::Assert(_)
+            | typepython_syntax::SyntaxStatement::Invalidate(_)
+            | typepython_syntax::SyntaxStatement::Match(_)
+            | typepython_syntax::SyntaxStatement::For(_)
+            | typepython_syntax::SyntaxStatement::With(_)
+            | typepython_syntax::SyntaxStatement::ExceptHandler(_)
+            | typepython_syntax::SyntaxStatement::Unsafe(_)
+    )
 }
 
 fn emitted_syntax(path: &Path) -> Option<typepython_syntax::SyntaxTree> {
@@ -2216,6 +2432,8 @@ fn module_level_surface_names(syntax: &typepython_syntax::SyntaxTree) -> BTreeSe
 fn public_surface_completeness_diagnostics(
     config: &ConfigHandle,
     syntax_trees: &[typepython_syntax::SyntaxTree],
+    lowered_modules: &[LoweredModule],
+    stub_contexts: &BTreeMap<PathBuf, TypePythonStubContext>,
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
 
@@ -2223,8 +2441,32 @@ fn public_surface_completeness_diagnostics(
         return diagnostics;
     }
 
+    let lowered_by_source = lowered_modules
+        .iter()
+        .map(|module| (module.source_path.clone(), module))
+        .collect::<BTreeMap<_, _>>();
+
     for syntax in syntax_trees {
-        for entry in declaration_surface(syntax)
+        let surface_syntax = if syntax.source.kind == SourceKind::TypePython {
+            let Some(module) = lowered_by_source.get(&syntax.source.path) else {
+                continue;
+            };
+            let context = stub_contexts.get(&syntax.source.path).cloned().unwrap_or_default();
+            let Ok(stub_source) = generate_typepython_stub_source(module, &context) else {
+                continue;
+            };
+            let stub_file = SourceFile {
+                path: syntax.source.path.with_extension("pyi"),
+                kind: SourceKind::Stub,
+                logical_module: syntax.source.logical_module.clone(),
+                text: stub_source,
+            };
+            typepython_syntax::parse(stub_file)
+        } else {
+            syntax.clone()
+        };
+
+        for entry in declaration_surface(&surface_syntax)
             .into_iter()
             .filter(is_public_surface_entry)
             .filter(|entry| entry.kind != "import")
@@ -3882,14 +4124,14 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("declaration surfaces differ"));
+        assert!(rendered.contains("public names differ"));
     }
 
     #[test]
-    fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
+    fn verify_build_artifacts_ignores_method_kind_surface_mismatch() {
         let project_dir =
             temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
-        let rendered = {
+        let diagnostics = {
             fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
                 .expect("test setup should succeed");
             fs::create_dir_all(project_dir.join(".typepython/build/app"))
@@ -3923,12 +4165,53 @@ mod tests {
                     stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
                 }],
             )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn verify_build_artifacts_reports_runtime_statements_inside_stub() {
+        let project_dir =
+            temp_project_dir("verify_build_artifacts_reports_runtime_statements_inside_stub");
+        let rendered = {
+            fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/build/app"))
+                .expect("test setup should succeed");
+            fs::create_dir_all(project_dir.join(".typepython/cache"))
+                .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+                .expect("test setup should succeed");
+            fs::write(
+                project_dir.join(".typepython/build/app/__init__.pyi"),
+                "def build() -> int:\n    return 1\n",
+            )
+            .expect("test setup should succeed");
+            fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+                .expect("test setup should succeed");
+            write_incremental_snapshot(
+                &project_dir.join(".typepython/cache"),
+                &IncrementalState::default(),
+            )
+            .expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+
+            verify_build_artifacts(
+                &config,
+                &[EmitArtifact {
+                    source_path: project_dir.join("src/app/__init__.tpy"),
+                    runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                    stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+                }],
+            )
             .as_text()
         };
         remove_temp_project_dir(&project_dir);
 
         assert!(rendered.contains("TPY5003"));
-        assert!(rendered.contains("declaration surfaces differ"));
+        assert!(rendered.contains("contains runtime statements"));
     }
 
     #[test]
@@ -4630,8 +4913,13 @@ mod tests {
             let config = load(&project_dir).expect("test setup should succeed");
 
             let first = run_pipeline(&config).expect("test setup should succeed");
-            write_runtime_outputs(&first.emit_plan, &first.lowered_modules, false)
-                .expect("test setup should succeed");
+            write_runtime_outputs(
+                &first.emit_plan,
+                &first.lowered_modules,
+                false,
+                Some(&first.stub_contexts),
+            )
+            .expect("test setup should succeed");
             write_incremental_snapshot(
                 &config.resolve_relative_path(&config.config.project.cache_dir),
                 &first.incremental,
@@ -4660,8 +4948,13 @@ mod tests {
             let config = load(&project_dir).expect("test setup should succeed");
 
             let first = run_pipeline(&config).expect("test setup should succeed");
-            write_runtime_outputs(&first.emit_plan, &first.lowered_modules, false)
-                .expect("test setup should succeed");
+            write_runtime_outputs(
+                &first.emit_plan,
+                &first.lowered_modules,
+                false,
+                Some(&first.stub_contexts),
+            )
+            .expect("test setup should succeed");
             write_incremental_snapshot(
                 &config.resolve_relative_path(&config.config.project.cache_dir),
                 &first.incremental,

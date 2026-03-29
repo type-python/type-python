@@ -1,6 +1,7 @@
 //! Source classification and parser boundary for TypePython.
 
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     ffi::OsStr,
     fs, io,
@@ -141,7 +142,7 @@ pub struct FunctionStatement {
     pub line: usize,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionParam {
     pub name: String,
     pub annotation: Option<String>,
@@ -499,8 +500,20 @@ struct ParsedTypeParams<'source> {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct LambdaMetadata {
-    pub param_names: Vec<String>,
+    pub params: Vec<FunctionParam>,
     pub body: Box<DirectExprMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct AnnotatedLambdaSite {
+    pub line: usize,
+    pub column: usize,
+    pub param_names: Vec<String>,
+    pub annotations: Vec<Option<String>>,
+}
+
+thread_local! {
+    static ACTIVE_ANNOTATED_LAMBDA_SITES: RefCell<Vec<AnnotatedLambdaSite>> = RefCell::new(Vec::new());
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -692,6 +705,19 @@ pub struct DataclassTransformModuleInfo {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DecoratedCallableSite {
+    pub owner_type_name: Option<String>,
+    pub name: String,
+    pub decorators: Vec<String>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct DecoratorTransformModuleInfo {
+    pub callables: Vec<DecoratedCallableSite>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectFunctionParamSite {
     pub name: String,
     pub annotation: Option<String>,
@@ -774,42 +800,55 @@ pub fn parse_with_options(source: SourceFile, options: ParseOptions) -> SyntaxTr
     }
 }
 
+/// Normalizes source-authored annotated lambda syntax to ordinary Python lambda syntax.
+///
+/// This is intended for consumers that need runtime-parseable Python text after TypePython-only
+/// lambda parameter annotations have already been checked semantically.
+#[must_use]
+pub fn normalize_annotated_lambda_source_for_emission(source: &str) -> String {
+    normalize_annotated_lambda_source_lossy(source)
+}
+
 #[must_use]
 pub fn collect_typed_dict_literal_sites(source: &str) -> Vec<TypedDictLiteralSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
     let mut sites = Vec::new();
-    collect_typed_dict_literal_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    collect_typed_dict_literal_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
     sites
 }
 
 #[must_use]
 pub fn collect_direct_call_context_sites(source: &str) -> Vec<DirectCallContextSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
     let mut sites = Vec::new();
-    collect_direct_call_context_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    collect_direct_call_context_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
     sites
 }
 
 #[must_use]
 pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
     let mut sites = Vec::new();
-    collect_typed_dict_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    collect_typed_dict_mutation_sites_in_suite(&normalized, parsed.suite(), None, None, &mut sites);
     sites
 }
 
 #[must_use]
 pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMetadata> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
@@ -821,9 +860,9 @@ pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMeta
                 name: class_def.name.as_str().to_owned(),
                 total: class_keyword_static_bool(class_def, "total"),
                 closed: class_keyword_static_bool(class_def, "closed"),
-                extra_items: class_keyword_source(source, class_def, "extra_items")
+                extra_items: class_keyword_source(&normalized, class_def, "extra_items")
                     .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
-                line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
+                line: offset_to_line_column(&normalized, class_def.range.start().to_usize()).0,
             }),
             _ => None,
         })
@@ -838,7 +877,10 @@ pub fn collect_unsafe_operation_sites(source: &str) -> Vec<UnsafeOperationSite> 
         logical_module: String::new(),
         text: source.to_owned(),
     });
-    let normalized = normalize_typepython_source(source, &tree.statements);
+    let normalized = normalize_annotated_lambda_source_lossy(&normalize_typepython_source(
+        source,
+        &tree.statements,
+    ));
     let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
@@ -872,7 +914,8 @@ pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSi
 
 #[must_use]
 pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransformModuleInfo {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return DataclassTransformModuleInfo::default();
     };
 
@@ -882,30 +925,37 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
     for stmt in parsed.suite() {
         match stmt {
             Stmt::FunctionDef(function) => {
-                if let Some(metadata) =
-                    dataclass_transform_metadata(source, &function.decorator_list, &import_bindings)
-                {
+                if let Some(metadata) = dataclass_transform_metadata(
+                    &normalized,
+                    &function.decorator_list,
+                    &import_bindings,
+                ) {
                     providers.push(DataclassTransformProviderSite {
                         name: function.name.as_str().to_owned(),
                         metadata,
-                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                        line: offset_to_line_column(&normalized, function.range.start().to_usize())
+                            .0,
                     });
                 }
             }
             Stmt::ClassDef(class_def) => {
                 if let Some(metadata) = dataclass_transform_metadata(
-                    source,
+                    &normalized,
                     &class_def.decorator_list,
                     &import_bindings,
                 ) {
                     providers.push(DataclassTransformProviderSite {
                         name: class_def.name.as_str().to_owned(),
                         metadata,
-                        line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
+                        line: offset_to_line_column(
+                            &normalized,
+                            class_def.range.start().to_usize(),
+                        )
+                        .0,
                     });
                 }
                 classes.push(collect_dataclass_transform_class_site(
-                    source,
+                    &normalized,
                     class_def,
                     &import_bindings,
                 ));
@@ -918,8 +968,28 @@ pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransfo
 }
 
 #[must_use]
+pub fn collect_decorator_transform_module_info(source: &str) -> DecoratorTransformModuleInfo {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
+        return DecoratorTransformModuleInfo::default();
+    };
+
+    let import_bindings = collect_import_bindings(parsed.suite());
+    let mut callables = Vec::new();
+    collect_decorated_callable_sites(
+        &normalized,
+        parsed.suite(),
+        None,
+        &import_bindings,
+        &mut callables,
+    );
+    DecoratorTransformModuleInfo { callables }
+}
+
+#[must_use]
 pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFunctionSignatureSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
@@ -929,8 +999,8 @@ pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFuncti
         .filter_map(|stmt| match stmt {
             Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
                 name: function.name.as_str().to_owned(),
-                params: collect_direct_function_param_sites(source, &function.parameters),
-                line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                params: collect_direct_function_param_sites(&normalized, &function.parameters),
+                line: offset_to_line_column(&normalized, function.range.start().to_usize()).0,
             }),
             _ => None,
         })
@@ -939,7 +1009,8 @@ pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFuncti
 
 #[must_use]
 pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSignatureSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
@@ -955,8 +1026,12 @@ pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSi
                         owner_type_name: class_def.name.as_str().to_owned(),
                         name: function.name.as_str().to_owned(),
                         method_kind: method_kind_from_decorators(&function.decorator_list),
-                        params: collect_direct_function_param_sites(source, &function.parameters),
-                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                        params: collect_direct_function_param_sites(
+                            &normalized,
+                            &function.parameters,
+                        ),
+                        line: offset_to_line_column(&normalized, function.range.start().to_usize())
+                            .0,
                     }),
                     _ => None,
                 })
@@ -1041,12 +1116,19 @@ fn collect_direct_function_param_sites(
 
 #[must_use]
 pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutationSite> {
-    let Ok(parsed) = parse_module(source) else {
+    let normalized = normalize_annotated_lambda_source_lossy(source);
+    let Ok(parsed) = parse_module(&normalized) else {
         return Vec::new();
     };
 
     let mut sites = Vec::new();
-    collect_frozen_field_mutation_sites_in_suite(source, parsed.suite(), None, None, &mut sites);
+    collect_frozen_field_mutation_sites_in_suite(
+        &normalized,
+        parsed.suite(),
+        None,
+        None,
+        &mut sites,
+    );
     sites
 }
 
@@ -1330,6 +1412,75 @@ fn collect_dataclass_transform_class_site(
             .collect(),
         line: offset_to_line_column(source, class_def.range.start().to_usize()).0,
     }
+}
+
+fn collect_decorated_callable_sites(
+    source: &str,
+    suite: &[Stmt],
+    owner_type_name: Option<&str>,
+    import_bindings: &BTreeMap<String, String>,
+    callables: &mut Vec<DecoratedCallableSite>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                let decorators = function
+                    .decorator_list
+                    .iter()
+                    .filter_map(|decorator| decorator_target_name(&decorator.expression))
+                    .map(|name| normalize_imported_name(&name, import_bindings))
+                    .filter(|name| !is_non_transform_builtin_decorator(name))
+                    .collect::<Vec<_>>();
+                if !decorators.is_empty() {
+                    callables.push(DecoratedCallableSite {
+                        owner_type_name: owner_type_name.map(str::to_owned),
+                        name: function.name.as_str().to_owned(),
+                        decorators,
+                        line: offset_to_line_column(source, function.range.start().to_usize()).0,
+                    });
+                }
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_decorated_callable_sites(
+                    source,
+                    &class_def.body,
+                    Some(class_def.name.as_str()),
+                    import_bindings,
+                    callables,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn is_non_transform_builtin_decorator(name: &str) -> bool {
+    matches!(
+        name,
+        "overload"
+            | "typing.overload"
+            | "override"
+            | "typing.override"
+            | "typing_extensions.override"
+            | "final"
+            | "typing.final"
+            | "typing_extensions.final"
+            | "abstractmethod"
+            | "abc.abstractmethod"
+            | "classmethod"
+            | "staticmethod"
+            | "property"
+            | "dataclass"
+            | "dataclasses.dataclass"
+            | "dataclass_transform"
+            | "typing.dataclass_transform"
+            | "typing_extensions.dataclass_transform"
+            | "deprecated"
+            | "warnings.deprecated"
+            | "typing_extensions.deprecated"
+    ) || name.ends_with(".setter")
+        || name.ends_with(".getter")
+        || name.ends_with(".deleter")
 }
 
 fn extract_dataclass_transform_field(
@@ -2642,89 +2793,125 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
         } else {
             normalized_typepython_source
         };
-        match parse_module(&normalized) {
-            Ok(parsed) => {
-                collect_invalid_annotation_placement_diagnostics(
-                    &source.path,
-                    &normalized,
-                    parsed.suite(),
-                    false,
-                    &mut diagnostics,
-                );
-                refresh_custom_statements_from_ast(
-                    &source.path,
-                    &normalized,
-                    parsed.suite(),
-                    &mut statements,
-                    &mut diagnostics,
-                );
-                statements.extend(extract_ast_backed_statements(
-                    &source.path,
-                    &source.logical_module,
-                    &normalized,
-                    &normalized,
-                    parsed.suite(),
-                    &statements,
-                    &mut diagnostics,
-                ));
-                collect_return_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_yield_statements(&normalized, parsed.suite(), None, &mut statements);
-                collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_assert_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_invalidation_statements(
-                    &normalized,
-                    parsed.suite(),
-                    None,
-                    None,
-                    &mut statements,
-                );
-                collect_match_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_for_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_with_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                collect_except_handler_statements(
-                    &normalized,
-                    parsed.suite(),
-                    None,
-                    None,
-                    &mut statements,
-                );
-                collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
-                collect_function_body_assignments(
-                    &normalized,
-                    parsed.suite(),
-                    None,
-                    None,
-                    &mut statements,
-                );
-                collect_function_body_bare_assignments(
-                    &normalized,
-                    parsed.suite(),
-                    None,
-                    None,
-                    &mut statements,
-                );
-                collect_function_body_namedexpr_assignments(
-                    &normalized,
-                    parsed.suite(),
-                    None,
-                    None,
-                    &mut statements,
-                );
-                statements.sort_by_key(statement_line);
-            }
-            Err(error) => {
-                let code = parse_error_code(&error.error.to_string());
-                diagnostics.push(
-                    Diagnostic::error(code, format!("TypePython syntax error: {}", error.error))
+        let (normalized, annotated_lambda_sites) = normalize_annotated_lambda_source(&normalized);
+        with_active_annotated_lambda_sites(annotated_lambda_sites, || {
+            match parse_module(&normalized) {
+                Ok(parsed) => {
+                    collect_invalid_annotation_placement_diagnostics(
+                        &source.path,
+                        &normalized,
+                        parsed.suite(),
+                        false,
+                        &mut diagnostics,
+                    );
+                    refresh_custom_statements_from_ast(
+                        &source.path,
+                        &normalized,
+                        parsed.suite(),
+                        &mut statements,
+                        &mut diagnostics,
+                    );
+                    statements.extend(extract_ast_backed_statements(
+                        &source.path,
+                        &source.logical_module,
+                        &normalized,
+                        &normalized,
+                        parsed.suite(),
+                        &statements,
+                        &mut diagnostics,
+                    ));
+                    collect_return_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_yield_statements(&normalized, parsed.suite(), None, &mut statements);
+                    collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
+                    collect_assert_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_invalidation_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_match_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_for_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_with_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_except_handler_statements(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
+                    collect_function_body_assignments(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_function_body_bare_assignments(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    collect_function_body_namedexpr_assignments(
+                        &normalized,
+                        parsed.suite(),
+                        None,
+                        None,
+                        &mut statements,
+                    );
+                    statements.sort_by_key(statement_line);
+                }
+                Err(error) => {
+                    let code = parse_error_code(&error.error.to_string());
+                    diagnostics.push(
+                        Diagnostic::error(
+                            code,
+                            format!("TypePython syntax error: {}", error.error),
+                        )
                         .with_span(parse_error_span(
                             &source.path,
                             &source.text,
                             error.location.start().to_usize(),
                             error.location.end().to_usize(),
                         )),
-                );
+                    );
+                }
             }
-        }
+        });
     }
 
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
@@ -6010,12 +6197,20 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
     }
 
     if let Expr::Lambda(lambda) = expr {
-        let param_names = lambda
+        let mut params = lambda
             .parameters
-            .iter()
-            .flat_map(|parameters| parameters.iter_non_variadic_params())
-            .map(|param| param.name().as_str().to_owned())
-            .collect::<Vec<_>>();
+            .as_ref()
+            .map(|parameters| extract_function_params(source, parameters))
+            .unwrap_or_default();
+        let (line, column) = offset_to_line_column(source, expr.range().start().to_usize());
+        if let Some(site) = annotated_lambda_site_at(line, column)
+            && site.param_names.len() == params.len()
+            && site.param_names.iter().zip(params.iter()).all(|(name, param)| name == &param.name)
+        {
+            for (param, annotation) in params.iter_mut().zip(site.annotations) {
+                param.annotation = annotation;
+            }
+        }
         return DirectExprMetadata {
             value_type: Some(String::new()),
             is_awaited: false,
@@ -6039,7 +6234,7 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
             value_binop_right: None,
             value_binop_operator: None,
             value_lambda: Some(Box::new(LambdaMetadata {
-                param_names,
+                params,
                 body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
             })),
             value_list_comprehension: None,
@@ -7461,6 +7656,529 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
     }
 
     (line, column)
+}
+
+fn with_active_annotated_lambda_sites<T>(
+    sites: Vec<AnnotatedLambdaSite>,
+    action: impl FnOnce() -> T,
+) -> T {
+    struct LambdaSiteGuard {
+        previous: Vec<AnnotatedLambdaSite>,
+    }
+
+    impl Drop for LambdaSiteGuard {
+        fn drop(&mut self) {
+            ACTIVE_ANNOTATED_LAMBDA_SITES.with(|active| {
+                active.replace(std::mem::take(&mut self.previous));
+            });
+        }
+    }
+
+    let previous = ACTIVE_ANNOTATED_LAMBDA_SITES.with(|active| active.replace(sites));
+    let _guard = LambdaSiteGuard { previous };
+    action()
+}
+
+fn annotated_lambda_site_at(line: usize, column: usize) -> Option<AnnotatedLambdaSite> {
+    ACTIVE_ANNOTATED_LAMBDA_SITES.with(|active| {
+        active.borrow().iter().find(|site| site.line == line && site.column == column).cloned()
+    })
+}
+
+fn normalize_annotated_lambda_source(source: &str) -> (String, Vec<AnnotatedLambdaSite>) {
+    let mut normalized = source.as_bytes().to_vec();
+    let mut sites = Vec::new();
+    let mut search_from = 0usize;
+
+    while let Some(lambda_start) = find_next_lambda_keyword(source, search_from) {
+        search_from = lambda_start + "lambda".len();
+        let Some(candidate) = parse_annotated_lambda_at(source, lambda_start) else {
+            continue;
+        };
+
+        normalized[candidate.open_paren] = b' ';
+        normalized[candidate.close_paren] = b' ';
+        for (start, end) in candidate.annotation_spans {
+            normalized[start..end].fill(b' ');
+        }
+
+        sites.push(AnnotatedLambdaSite {
+            line: candidate.line,
+            column: candidate.column,
+            param_names: candidate.param_names,
+            annotations: candidate.annotations,
+        });
+        search_from = candidate.close_paren + 1;
+    }
+
+    (String::from_utf8(normalized).expect("lambda normalization must preserve utf-8"), sites)
+}
+
+fn normalize_annotated_lambda_source_lossy(source: &str) -> String {
+    normalize_annotated_lambda_source(source).0
+}
+
+struct AnnotatedLambdaCandidate {
+    open_paren: usize,
+    close_paren: usize,
+    line: usize,
+    column: usize,
+    param_names: Vec<String>,
+    annotations: Vec<Option<String>>,
+    annotation_spans: Vec<(usize, usize)>,
+}
+
+fn find_next_lambda_keyword(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = start;
+    let mut in_comment = false;
+    let mut string_quote = None::<u8>;
+    let mut string_triple = false;
+    let mut escaped = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if let Some(quote) = string_quote {
+            if string_triple {
+                if byte == quote
+                    && bytes.get(index + 1) == Some(&quote)
+                    && bytes.get(index + 2) == Some(&quote)
+                {
+                    string_quote = None;
+                    string_triple = false;
+                    index += 3;
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == quote {
+                string_quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'\'' | b'"' => {
+                string_quote = Some(byte);
+                string_triple =
+                    bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
+                index += if string_triple { 3 } else { 1 };
+            }
+            _ if source[index..].starts_with("lambda")
+                && is_lambda_keyword_boundary(bytes, index, index + "lambda".len()) =>
+            {
+                return Some(index);
+            }
+            _ => index += 1,
+        }
+    }
+
+    None
+}
+
+fn is_lambda_keyword_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
+    let before_ok = start == 0 || !is_identifier_byte(bytes[start - 1]);
+    let after_ok = end >= bytes.len() || !is_identifier_byte(bytes[end]);
+    before_ok && after_ok
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+fn parse_annotated_lambda_at(
+    source: &str,
+    lambda_start: usize,
+) -> Option<AnnotatedLambdaCandidate> {
+    let bytes = source.as_bytes();
+    let mut cursor = lambda_start + "lambda".len();
+    while let Some(byte) = bytes.get(cursor) {
+        if byte.is_ascii_whitespace() {
+            cursor += 1;
+        } else {
+            break;
+        }
+    }
+    if bytes.get(cursor) != Some(&b'(') {
+        return None;
+    }
+
+    let close_paren = find_matching_delimiter(source, cursor, b'(', b')')?;
+    let mut body_colon = close_paren + 1;
+    while let Some(byte) = bytes.get(body_colon) {
+        if byte.is_ascii_whitespace() {
+            body_colon += 1;
+        } else {
+            break;
+        }
+    }
+    if bytes.get(body_colon) != Some(&b':') {
+        return None;
+    }
+
+    let params_source = &source[cursor + 1..close_paren];
+    let parsed = parse_annotated_lambda_params(params_source, cursor + 1);
+    let (line, column) = offset_to_line_column(source, lambda_start);
+    Some(AnnotatedLambdaCandidate {
+        open_paren: cursor,
+        close_paren,
+        line,
+        column,
+        param_names: parsed.param_names,
+        annotations: parsed.annotations,
+        annotation_spans: parsed.annotation_spans,
+    })
+}
+
+fn find_matching_delimiter(source: &str, open_index: usize, open: u8, close: u8) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut index = open_index;
+    let mut in_comment = false;
+    let mut string_quote = None::<u8>;
+    let mut string_triple = false;
+    let mut escaped = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(quote) = string_quote {
+            if string_triple {
+                if byte == quote
+                    && bytes.get(index + 1) == Some(&quote)
+                    && bytes.get(index + 2) == Some(&quote)
+                {
+                    string_quote = None;
+                    string_triple = false;
+                    index += 3;
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == quote {
+                string_quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'\'' | b'"' => {
+                string_quote = Some(byte);
+                string_triple =
+                    bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
+                index += if string_triple { 3 } else { 1 };
+            }
+            _ if byte == open => {
+                depth += 1;
+                index += 1;
+            }
+            _ if byte == close => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+
+    None
+}
+
+struct ParsedAnnotatedLambdaParams {
+    param_names: Vec<String>,
+    annotations: Vec<Option<String>>,
+    annotation_spans: Vec<(usize, usize)>,
+}
+
+fn parse_annotated_lambda_params(
+    params_source: &str,
+    absolute_start: usize,
+) -> ParsedAnnotatedLambdaParams {
+    let mut param_names = Vec::new();
+    let mut annotations = Vec::new();
+    let mut annotation_spans = Vec::new();
+
+    for (start, end) in top_level_comma_ranges(params_source) {
+        let item = &params_source[start..end];
+        let trimmed = item.trim();
+        if trimmed.is_empty() || trimmed == "/" || trimmed == "*" {
+            continue;
+        }
+
+        let default_index = find_top_level_char(item, b'=');
+        let header_end = default_index.unwrap_or(item.len());
+        let annotation_index = find_top_level_char(&item[..header_end], b':');
+        let name_end = annotation_index.unwrap_or(header_end);
+        let mut name = item[..name_end].trim();
+        if let Some(rest) = name.strip_prefix("**") {
+            name = rest.trim();
+        } else if let Some(rest) = name.strip_prefix('*') {
+            name = rest.trim();
+        }
+
+        let annotation = annotation_index.and_then(|index| {
+            let annotation_end = default_index.unwrap_or(item.len());
+            let annotation = item[index + 1..annotation_end].trim();
+            (!annotation.is_empty()).then(|| annotation.to_owned())
+        });
+
+        if let Some(index) = annotation_index {
+            annotation_spans.push((
+                absolute_start + start + index,
+                absolute_start + start + default_index.unwrap_or(item.len()),
+            ));
+        }
+
+        param_names.push(name.to_owned());
+        annotations.push(annotation);
+    }
+
+    ParsedAnnotatedLambdaParams { param_names, annotations, annotation_spans }
+}
+
+fn top_level_comma_ranges(input: &str) -> Vec<(usize, usize)> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut index = 0usize;
+    let bytes = input.as_bytes();
+    let mut in_comment = false;
+    let mut string_quote = None::<u8>;
+    let mut string_triple = false;
+    let mut escaped = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(quote) = string_quote {
+            if string_triple {
+                if byte == quote
+                    && bytes.get(index + 1) == Some(&quote)
+                    && bytes.get(index + 2) == Some(&quote)
+                {
+                    string_quote = None;
+                    string_triple = false;
+                    index += 3;
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == quote {
+                string_quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'\'' | b'"' => {
+                string_quote = Some(byte);
+                string_triple =
+                    bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
+                index += if string_triple { 3 } else { 1 };
+            }
+            b'(' => {
+                paren_depth += 1;
+                index += 1;
+            }
+            b')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'[' => {
+                bracket_depth += 1;
+                index += 1;
+            }
+            b']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'{' => {
+                brace_depth += 1;
+                index += 1;
+            }
+            b'}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                index += 1;
+            }
+            b',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                parts.push((start, index));
+                index += 1;
+                start = index;
+            }
+            _ => index += 1,
+        }
+    }
+    parts.push((start, input.len()));
+    parts
+}
+
+fn find_top_level_char(input: &str, target: u8) -> Option<usize> {
+    let bytes = input.as_bytes();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut index = 0usize;
+    let mut in_comment = false;
+    let mut string_quote = None::<u8>;
+    let mut string_triple = false;
+    let mut escaped = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_comment {
+            if byte == b'\n' {
+                in_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(quote) = string_quote {
+            if string_triple {
+                if byte == quote
+                    && bytes.get(index + 1) == Some(&quote)
+                    && bytes.get(index + 2) == Some(&quote)
+                {
+                    string_quote = None;
+                    string_triple = false;
+                    index += 3;
+                    continue;
+                }
+                index += 1;
+                continue;
+            }
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == quote {
+                string_quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match byte {
+            b'#' => {
+                in_comment = true;
+                index += 1;
+            }
+            b'\'' | b'"' => {
+                string_quote = Some(byte);
+                string_triple =
+                    bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
+                index += if string_triple { 3 } else { 1 };
+            }
+            b'(' => {
+                paren_depth += 1;
+                index += 1;
+            }
+            b')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'[' => {
+                bracket_depth += 1;
+                index += 1;
+            }
+            b']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                index += 1;
+            }
+            b'{' => {
+                brace_depth += 1;
+                index += 1;
+            }
+            b'}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                index += 1;
+            }
+            _ if byte == target && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Some(index);
+            }
+            _ => index += 1,
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -9371,7 +10089,15 @@ mod tests {
                     value_binop_right: None,
                     value_binop_operator: None,
                     value_lambda: Some(Box::new(LambdaMetadata {
-                        param_names: vec![String::from("x")],
+                        params: vec![FunctionParam {
+                            name: String::from("x"),
+                            annotation: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false,
+                        }],
                         body: Box::new(DirectExprMetadata {
                             value_type: Some(String::new()),
                             is_awaited: false,
@@ -9417,6 +10143,45 @@ mod tests {
                 keyword_expansion_values: Vec::new(),
                 line: 1,
             })]
+        );
+    }
+
+    #[test]
+    fn parse_accepts_typepython_lambda_parameter_annotations() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("lambda-annotated.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("build(lambda (x: int, y: str): x)\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        let SyntaxStatement::Call(call) = &tree.statements[0] else {
+            panic!("expected call statement");
+        };
+        let lambda = call.arg_values[0].value_lambda.as_ref().expect("lambda metadata");
+        assert_eq!(
+            lambda.params,
+            vec![
+                FunctionParam {
+                    name: String::from("x"),
+                    annotation: Some(String::from("int")),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                },
+                FunctionParam {
+                    name: String::from("y"),
+                    annotation: Some(String::from("str")),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                },
+            ]
         );
     }
 
