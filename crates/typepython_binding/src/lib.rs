@@ -1001,10 +1001,10 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
 #[cfg(test)]
 mod tests {
     use super::{
-        bind, AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
+        AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
         DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GuardConditionSite,
         IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite, MatchPatternSite,
-        MatchSite, WithSite, YieldSite,
+        MatchSite, WithSite, YieldSite, bind,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;

@@ -126,7 +126,9 @@ pub fn check_with_options(
         for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
             diagnostics.push(assignment_diagnostic);
         }
-        for assignment_diagnostic in simple_name_augmented_assignment_diagnostics(node, &graph.nodes) {
+        for assignment_diagnostic in
+            simple_name_augmented_assignment_diagnostics(node, &graph.nodes)
+        {
             diagnostics.push(assignment_diagnostic);
         }
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
@@ -474,7 +476,8 @@ fn call_signature_params_are_applicable(
     }
     let resolved_keyword_arg_types =
         resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
-    let mut positional_types = resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types);
+    let mut positional_types =
+        resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types);
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
         match expansion {
@@ -1077,11 +1080,14 @@ fn direct_return_type_diagnostics(
                 return_site.owner_type_name.as_deref(),
             ),
         );
-        let Some(expected) = normalized_direct_return_annotation(&expected_text).map(normalize_type_text) else {
+        let Some(expected) =
+            normalized_direct_return_annotation(&expected_text).map(normalize_type_text)
+        else {
             continue;
         };
 
-        let contextual = resolve_contextual_return_type(node, nodes, return_site, &expected, &target.detail);
+        let contextual =
+            resolve_contextual_return_type(node, nodes, return_site, &expected, &target.detail);
         diagnostics.extend(contextual.diagnostics);
         let Some(actual) = contextual.actual_type else {
             continue;
@@ -1137,25 +1143,37 @@ fn resolve_contextual_return_type(
     signature: &str,
 ) -> ContextualReturnTypeResult {
     let metadata = direct_expr_metadata_from_return_site(return_site);
-    if let Some(actual_type) =
-        resolve_contextual_lambda_callable_type(node, nodes, return_site.line, &metadata, Some(expected))
-    {
+    if let Some(actual_type) = resolve_contextual_lambda_callable_type(
+        node,
+        nodes,
+        return_site.line,
+        &metadata,
+        Some(expected),
+    ) {
         return ContextualReturnTypeResult {
             actual_type: Some(actual_type),
             diagnostics: Vec::new(),
         };
     }
-    if let Some(result) =
-        resolve_contextual_typed_dict_literal_type(node, nodes, return_site.line, &metadata, Some(expected))
-    {
+    if let Some(result) = resolve_contextual_typed_dict_literal_type(
+        node,
+        nodes,
+        return_site.line,
+        &metadata,
+        Some(expected),
+    ) {
         return ContextualReturnTypeResult {
             actual_type: Some(result.actual_type),
             diagnostics: result.diagnostics,
         };
     }
-    if let Some(result) =
-        resolve_contextual_collection_literal_type(node, nodes, return_site.line, &metadata, Some(expected))
-    {
+    if let Some(result) = resolve_contextual_collection_literal_type(
+        node,
+        nodes,
+        return_site.line,
+        &metadata,
+        Some(expected),
+    ) {
         return ContextualReturnTypeResult {
             actual_type: Some(result.actual_type),
             diagnostics: result.diagnostics,
@@ -1278,25 +1296,37 @@ fn resolve_contextual_yield_type(
 ) -> ContextualYieldTypeResult {
     let metadata = direct_expr_metadata_from_yield_site(yield_site);
     if !yield_site.is_yield_from {
-        if let Some(actual_type) =
-            resolve_contextual_lambda_callable_type(node, nodes, yield_site.line, &metadata, Some(expected))
-        {
+        if let Some(actual_type) = resolve_contextual_lambda_callable_type(
+            node,
+            nodes,
+            yield_site.line,
+            &metadata,
+            Some(expected),
+        ) {
             return ContextualYieldTypeResult {
                 actual_type: Some(actual_type),
                 diagnostics: Vec::new(),
             };
         }
-        if let Some(result) =
-            resolve_contextual_typed_dict_literal_type(node, nodes, yield_site.line, &metadata, Some(expected))
-        {
+        if let Some(result) = resolve_contextual_typed_dict_literal_type(
+            node,
+            nodes,
+            yield_site.line,
+            &metadata,
+            Some(expected),
+        ) {
             return ContextualYieldTypeResult {
                 actual_type: Some(result.actual_type),
                 diagnostics: result.diagnostics,
             };
         }
-        if let Some(result) =
-            resolve_contextual_collection_literal_type(node, nodes, yield_site.line, &metadata, Some(expected))
-        {
+        if let Some(result) = resolve_contextual_collection_literal_type(
+            node,
+            nodes,
+            yield_site.line,
+            &metadata,
+            Some(expected),
+        ) {
             return ContextualYieldTypeResult {
                 actual_type: Some(result.actual_type),
                 diagnostics: result.diagnostics,
@@ -1338,16 +1368,24 @@ fn resolve_contextual_yield_type(
     }
 }
 
-fn site_to_guard(guard: &typepython_binding::GuardConditionSite) -> typepython_syntax::GuardCondition {
+fn site_to_guard(
+    guard: &typepython_binding::GuardConditionSite,
+) -> typepython_syntax::GuardCondition {
     match guard {
         typepython_binding::GuardConditionSite::IsNone { name, negated } => {
             typepython_syntax::GuardCondition::IsNone { name: name.clone(), negated: *negated }
         }
         typepython_binding::GuardConditionSite::IsInstance { name, types } => {
-            typepython_syntax::GuardCondition::IsInstance { name: name.clone(), types: types.clone() }
+            typepython_syntax::GuardCondition::IsInstance {
+                name: name.clone(),
+                types: types.clone(),
+            }
         }
         typepython_binding::GuardConditionSite::PredicateCall { name, callee } => {
-            typepython_syntax::GuardCondition::PredicateCall { name: name.clone(), callee: callee.clone() }
+            typepython_syntax::GuardCondition::PredicateCall {
+                name: name.clone(),
+                callee: callee.clone(),
+            }
         }
         typepython_binding::GuardConditionSite::TruthyName { name } => {
             typepython_syntax::GuardCondition::TruthyName { name: name.clone() }
@@ -1371,39 +1409,40 @@ fn direct_yield_type_diagnostics(
     let mut diagnostics = Vec::new();
 
     for yield_site in &node.yields {
-            let target = node.declarations.iter().find(|declaration| {
-                declaration.name == yield_site.owner_name
-                    && declaration.kind == DeclarationKind::Function
-                    && match (&yield_site.owner_type_name, &declaration.owner) {
-                        (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
-                        (None, None) => true,
-                        _ => false,
-                    }
-            });
-            let Some(target) = target else {
-                continue;
-            };
+        let target = node.declarations.iter().find(|declaration| {
+            declaration.name == yield_site.owner_name
+                && declaration.kind == DeclarationKind::Function
+                && match (&yield_site.owner_type_name, &declaration.owner) {
+                    (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
+                    (None, None) => true,
+                    _ => false,
+                }
+        });
+        let Some(target) = target else {
+            continue;
+        };
 
-            let Some((_, returns)) = target.detail.split_once("->") else {
-                continue;
-            };
-            let Some(expected) = unwrap_generator_yield_type(returns.trim()) else {
-                continue;
-            };
-            let contextual = resolve_contextual_yield_type(node, nodes, yield_site, &expected, &target.detail);
-            diagnostics.extend(contextual.diagnostics);
-            let Some(actual) = contextual.actual_type else {
-                continue;
-            };
+        let Some((_, returns)) = target.detail.split_once("->") else {
+            continue;
+        };
+        let Some(expected) = unwrap_generator_yield_type(returns.trim()) else {
+            continue;
+        };
+        let contextual =
+            resolve_contextual_yield_type(node, nodes, yield_site, &expected, &target.detail);
+        diagnostics.extend(contextual.diagnostics);
+        let Some(actual) = contextual.actual_type else {
+            continue;
+        };
 
-            let actual = if yield_site.is_yield_from {
-                unwrap_yield_from_type(&actual).unwrap_or(actual)
-            } else {
-                actual
-            };
+        let actual = if yield_site.is_yield_from {
+            unwrap_yield_from_type(&actual).unwrap_or(actual)
+        } else {
+            actual
+        };
 
-            if !direct_type_matches(&expected, &actual) {
-                diagnostics.push(Diagnostic::error(
+        if !direct_type_matches(&expected, &actual) {
+            diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match &yield_site.owner_type_name {
                         Some(owner_type_name) => format!(
@@ -1432,7 +1471,7 @@ fn direct_yield_type_diagnostics(
                     1,
                 ))
                 );
-            }
+        }
     }
 
     diagnostics
@@ -1650,13 +1689,14 @@ fn annotated_assignment_type_diagnostics(
         let Some(annotation) = assignment.annotation.as_deref() else {
             continue;
         };
-        let Some(expected) = normalized_assignment_annotation(annotation)
-            .map(normalize_type_text)
+        let Some(expected) = normalized_assignment_annotation(annotation).map(normalize_type_text)
         else {
             continue;
         };
 
-        if let Some(callable_result) = callable_assignment_result(node, nodes, assignment, &expected) {
+        if let Some(callable_result) =
+            callable_assignment_result(node, nodes, assignment, &expected)
+        {
             if let Some(diagnostic) = callable_result {
                 diagnostics.push(diagnostic);
             }
@@ -2127,7 +2167,8 @@ fn typed_dict_literal_entry_diagnostics(
                 continue;
             };
 
-            let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
+            let Some(expansion_shape) =
+                resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
             else {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
@@ -2189,10 +2230,7 @@ fn typed_dict_literal_entry_diagnostics(
             diagnostics.push(typed_dict_literal_diagnostic(
                 node,
                 line,
-                format!(
-                    "TypedDict literal for `{}` uses unknown key `{}`",
-                    target_shape.name, key
-                ),
+                format!("TypedDict literal for `{}` uses unknown key `{}`", target_shape.name, key),
             ));
             continue;
         };
@@ -2533,14 +2571,18 @@ fn resolve_writable_subscript_signature(
         .map(|(head, _)| head.to_owned())
         .unwrap_or_else(|| normalized.clone());
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
-    if let Some(setitem) = find_owned_callable_declaration(nodes, class_node, class_decl, "__setitem__") {
+    if let Some(setitem) =
+        find_owned_callable_declaration(nodes, class_node, class_decl, "__setitem__")
+    {
         let signature = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(&setitem.detail, Some(&normalized)),
         );
         let params = direct_param_types(&signature)?;
         let params = match setitem.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
+            typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                params
+            }
             _ => params.into_iter().skip(1).collect(),
         };
         if params.len() == 2 {
@@ -2938,7 +2980,8 @@ fn find_owned_writable_member_target<'a>(
     class_decl: &'a Declaration,
     member_name: &str,
 ) -> Option<WritableAttributeTarget<'a>> {
-    if let Some(declaration) = find_owned_value_declaration(nodes, class_node, class_decl, member_name)
+    if let Some(declaration) =
+        find_owned_value_declaration(nodes, class_node, class_decl, member_name)
         && !declaration.is_class_var
     {
         return Some(WritableAttributeTarget::Value(declaration));
@@ -3620,7 +3663,9 @@ fn resolve_direct_member_callable_signature(
         typepython_syntax::MethodKind::Property => return None,
         typepython_syntax::MethodKind::Instance
         | typepython_syntax::MethodKind::Class
-        | typepython_syntax::MethodKind::PropertySetter => actual_params.into_iter().skip(1).collect(),
+        | typepython_syntax::MethodKind::PropertySetter => {
+            actual_params.into_iter().skip(1).collect()
+        }
     };
     let return_text = rewrite_imported_typing_aliases(
         node,
@@ -3764,9 +3809,15 @@ fn resolve_contextual_collection_literal_type(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
-                        .into_iter()
-                        .flat_map(|result| result.diagnostics)
+                    resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        current_line,
+                        element,
+                        Some(&args[0]),
+                    )
+                    .into_iter()
+                    .flat_map(|result| result.diagnostics)
                 })
                 .collect::<Vec<_>>();
             let actual_element_types = if elements.is_empty() {
@@ -3775,14 +3826,26 @@ fn resolve_contextual_collection_literal_type(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
-                            .map(|result| result.actual_type)
-                            .or_else(|| {
-                                resolve_direct_expression_type_from_metadata(
-                                    node, nodes, None, None, None, current_line, element,
-                                )
-                            })
-                            .unwrap_or_else(|| String::from("Any"))
+                        resolve_contextual_call_arg_type(
+                            node,
+                            nodes,
+                            current_line,
+                            element,
+                            Some(&args[0]),
+                        )
+                        .map(|result| result.actual_type)
+                        .or_else(|| {
+                            resolve_direct_expression_type_from_metadata(
+                                node,
+                                nodes,
+                                None,
+                                None,
+                                None,
+                                current_line,
+                                element,
+                            )
+                        })
+                        .unwrap_or_else(|| String::from("Any"))
                     })
                     .collect::<Vec<_>>()
             };
@@ -3796,9 +3859,15 @@ fn resolve_contextual_collection_literal_type(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
-                        .into_iter()
-                        .flat_map(|result| result.diagnostics)
+                    resolve_contextual_call_arg_type(
+                        node,
+                        nodes,
+                        current_line,
+                        element,
+                        Some(&args[0]),
+                    )
+                    .into_iter()
+                    .flat_map(|result| result.diagnostics)
                 })
                 .collect::<Vec<_>>();
             let actual_element_types = if elements.is_empty() {
@@ -3807,14 +3876,26 @@ fn resolve_contextual_collection_literal_type(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type(node, nodes, current_line, element, Some(&args[0]))
-                            .map(|result| result.actual_type)
-                            .or_else(|| {
-                                resolve_direct_expression_type_from_metadata(
-                                    node, nodes, None, None, None, current_line, element,
-                                )
-                            })
-                            .unwrap_or_else(|| String::from("Any"))
+                        resolve_contextual_call_arg_type(
+                            node,
+                            nodes,
+                            current_line,
+                            element,
+                            Some(&args[0]),
+                        )
+                        .map(|result| result.actual_type)
+                        .or_else(|| {
+                            resolve_direct_expression_type_from_metadata(
+                                node,
+                                nodes,
+                                None,
+                                None,
+                                None,
+                                current_line,
+                                element,
+                            )
+                        })
+                        .unwrap_or_else(|| String::from("Any"))
                     })
                     .collect::<Vec<_>>()
             };
@@ -3835,7 +3916,13 @@ fn resolve_contextual_collection_literal_type(
                         .key_value
                         .as_deref()
                         .and_then(|key| {
-                            resolve_contextual_call_arg_type(node, nodes, current_line, key, Some(&args[0]))
+                            resolve_contextual_call_arg_type(
+                                node,
+                                nodes,
+                                current_line,
+                                key,
+                                Some(&args[0]),
+                            )
                         })
                         .into_iter()
                         .flat_map(|result| result.diagnostics);
@@ -3857,16 +3944,29 @@ fn resolve_contextual_collection_literal_type(
                 entries
                     .iter()
                     .map(|entry| {
-                        entry.key_value
+                        entry
+                            .key_value
                             .as_deref()
                             .and_then(|key| {
-                                resolve_contextual_call_arg_type(node, nodes, current_line, key, Some(&args[0]))
+                                resolve_contextual_call_arg_type(
+                                    node,
+                                    nodes,
+                                    current_line,
+                                    key,
+                                    Some(&args[0]),
+                                )
                             })
                             .map(|result| result.actual_type)
                             .or_else(|| {
                                 entry.key_value.as_deref().and_then(|key| {
                                     resolve_direct_expression_type_from_metadata(
-                                        node, nodes, None, None, None, current_line, key,
+                                        node,
+                                        nodes,
+                                        None,
+                                        None,
+                                        None,
+                                        current_line,
+                                        key,
                                     )
                                 })
                             })
@@ -3890,7 +3990,13 @@ fn resolve_contextual_collection_literal_type(
                         .map(|result| result.actual_type)
                         .or_else(|| {
                             resolve_direct_expression_type_from_metadata(
-                                node, nodes, None, None, None, current_line, &entry.value,
+                                node,
+                                nodes,
+                                None,
+                                None,
+                                None,
+                                current_line,
+                                &entry.value,
                             )
                         })
                         .unwrap_or_else(|| String::from("Any"))
@@ -3920,10 +4026,7 @@ fn resolve_contextual_call_arg_type(
     if let Some(actual_type) =
         resolve_contextual_lambda_callable_type(node, nodes, current_line, metadata, expected)
     {
-        return Some(ContextualCallArgResult {
-            actual_type,
-            diagnostics: Vec::new(),
-        });
+        return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
     }
     if let Some(result) =
         resolve_contextual_typed_dict_literal_type(node, nodes, current_line, metadata, expected)
@@ -3988,10 +4091,8 @@ fn expected_positional_arg_types_from_signature_sites(
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
-    let variadic_type = signature
-        .iter()
-        .find(|param| param.variadic)
-        .and_then(|param| param.annotation.clone());
+    let variadic_type =
+        signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.clone());
 
     (0..arg_count)
         .map(|index| {
@@ -4983,13 +5084,8 @@ fn resolve_direct_boolop_type(
             current_line,
             guard,
         );
-        let narrowed_bindings = apply_guard_to_local_bindings(
-            node,
-            nodes,
-            &base_bindings,
-            guard,
-            operator == "and",
-        );
+        let narrowed_bindings =
+            apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, operator == "and");
         resolve_direct_expression_type_from_metadata_with_bindings(
             node,
             nodes,
@@ -5139,9 +5235,15 @@ fn resolve_subscript_type_from_target_type(
     if let Some((head, args)) = split_generic_type(&normalized_target) {
         return match head {
             "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
-                if args.len() == 2 => Some(args[1].clone()),
+                if args.len() == 2 =>
+            {
+                Some(args[1].clone())
+            }
             "list" | "Sequence" | "typing.Sequence" | "collections.abc.Sequence"
-                if !args.is_empty() => Some(args[0].clone()),
+                if !args.is_empty() =>
+            {
+                Some(args[0].clone())
+            }
             "tuple" if !args.is_empty() => {
                 if args.len() == 2 && args[1] == "..." {
                     return Some(args[0].clone());
@@ -5170,7 +5272,10 @@ fn resolve_nominal_getitem_return_type(
     let getitem = find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")?;
     let return_text = rewrite_imported_typing_aliases(
         node,
-        &substitute_self_annotation(getitem.detail.split_once("->")?.1.trim(), Some(owner_type_name)),
+        &substitute_self_annotation(
+            getitem.detail.split_once("->")?.1.trim(),
+            Some(owner_type_name),
+        ),
     );
     normalized_direct_return_annotation(&return_text).map(normalize_type_text)
 }
@@ -6219,7 +6324,8 @@ fn resolve_module_level_assignment_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
-    let deleted_after_line = latest_delete_invalidation_line(node, None, None, current_line, value_name);
+    let deleted_after_line =
+        latest_delete_invalidation_line(node, None, None, current_line, value_name);
     if let Some(joined) = resolve_post_if_joined_assignment_type(
         node,
         nodes,
@@ -6314,15 +6420,17 @@ fn resolve_assignment_site_type(
                 assignment.line,
                 comprehension,
             ),
-            typepython_syntax::ComprehensionKind::Generator => resolve_generator_comprehension_type(
-                node,
-                nodes,
-                signature,
-                assignment.owner_name.as_deref(),
-                assignment.owner_type_name.as_deref(),
-                assignment.line,
-                comprehension,
-            ),
+            typepython_syntax::ComprehensionKind::Generator => {
+                resolve_generator_comprehension_type(
+                    node,
+                    nodes,
+                    signature,
+                    assignment.owner_name.as_deref(),
+                    assignment.owner_type_name.as_deref(),
+                    assignment.line,
+                    comprehension,
+                )
+            }
         };
     }
     if let Some(comprehension) = assignment.value_generator_comprehension.as_deref() {
@@ -6660,7 +6768,8 @@ fn resolve_direct_expression_type_from_metadata_with_bindings(
     {
         if let Some(guard) = metadata.value_if_guard.as_ref() {
             let guard = guard_to_site(guard);
-            let true_bindings = apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, true);
+            let true_bindings =
+                apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, true);
             let false_bindings =
                 apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, false);
             let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
@@ -6984,7 +7093,8 @@ fn resolve_direct_member_reference_type(
     }?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-    let member = find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
+    let member =
+        find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(format!("Literal[{}.{}]", class_decl.name, member_name));
     }
@@ -7182,9 +7292,13 @@ fn direct_member_access_diagnostics(
         .filter_map(|access| {
             let owner_type_name = resolve_member_access_owner_type(node, nodes, access)?;
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
-            let has_member =
-                find_owned_readable_member_declaration(nodes, class_node, class_decl, &access.member)
-                    .is_some();
+            let has_member = find_owned_readable_member_declaration(
+                nodes,
+                class_node,
+                class_decl,
+                &access.member,
+            )
+            .is_some();
 
             (!has_member).then(|| {
                 Diagnostic::error(
@@ -8715,7 +8829,14 @@ fn infer_generic_type_param_substitutions(
         .filter_map(|param| param.annotation.as_deref())
         .zip(call.arg_types.iter())
     {
-        bind_generic_type_params(node, nodes, annotation, actual, &generic_names, &mut substitutions)?;
+        bind_generic_type_params(
+            node,
+            nodes,
+            annotation,
+            actual,
+            &generic_names,
+            &mut substitutions,
+        )?;
     }
 
     for (keyword, actual) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
@@ -8725,7 +8846,14 @@ fn infer_generic_type_param_substitutions(
         let Some(annotation) = param.annotation.as_deref() else {
             continue;
         };
-        bind_generic_type_params(node, nodes, annotation, actual, &generic_names, &mut substitutions)?;
+        bind_generic_type_params(
+            node,
+            nodes,
+            annotation,
+            actual,
+            &generic_names,
+            &mut substitutions,
+        )?;
     }
 
     for type_param in &function.type_params {
@@ -8836,7 +8964,8 @@ fn infer_generic_type_param_bindings(
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
                 let substituted_branch = substitute_generic_type_params(&branch, &combined);
-                direct_type_is_assignable(node, nodes, &substituted_branch, &actual).then_some(candidate)
+                direct_type_is_assignable(node, nodes, &substituted_branch, &actual)
+                    .then_some(candidate)
             })
             .collect::<Vec<_>>();
         return select_best_union_branch_binding(candidates);
@@ -8868,7 +8997,9 @@ fn infer_generic_type_param_bindings(
             }
             Some(inferred)
         }
-        _ => direct_type_is_assignable(node, nodes, &annotation, &actual).then_some(BTreeMap::new()),
+        _ => {
+            direct_type_is_assignable(node, nodes, &annotation, &actual).then_some(BTreeMap::new())
+        }
     }
 }
 
@@ -8887,11 +9018,7 @@ fn select_best_union_branch_binding(
     let min_len = candidates.iter().map(BTreeMap::len).min()?;
     let mut filtered = candidates.into_iter().filter(|candidate| candidate.len() == min_len);
     let first = filtered.next()?;
-    if filtered.all(|candidate| candidate == first) {
-        Some(first)
-    } else {
-        None
-    }
+    if filtered.all(|candidate| candidate == first) { Some(first) } else { None }
 }
 
 fn merge_union_branch_bindings(
@@ -8903,10 +9030,7 @@ fn merge_union_branch_bindings(
             match merged.get(&name) {
                 Some(existing) if existing == &actual_type => {}
                 Some(existing) => {
-                    merged.insert(
-                        name,
-                        join_type_candidates(vec![existing.clone(), actual_type]),
-                    );
+                    merged.insert(name, join_type_candidates(vec![existing.clone(), actual_type]));
                 }
                 None => {
                     merged.insert(name, actual_type);
@@ -10765,7 +10889,10 @@ fn property_setter_compatibility_diagnostics(
     let mut groups: BTreeMap<(Option<String>, String), Vec<&Declaration>> = BTreeMap::new();
     for declaration in declarations {
         groups
-            .entry((declaration.owner.as_ref().map(|owner| owner.name.clone()), declaration.name.clone()))
+            .entry((
+                declaration.owner.as_ref().map(|owner| owner.name.clone()),
+                declaration.name.clone(),
+            ))
             .or_default()
             .push(declaration);
     }
@@ -11219,10 +11346,8 @@ mod tests {
             bases: Vec::new(),
             type_params: Vec::new(),
         };
-        let string_overload = Declaration {
-            detail: String::from("(user:str)->str"),
-            ..typed_dict_overload.clone()
-        };
+        let string_overload =
+            Declaration { detail: String::from("(user:str)->str"), ..typed_dict_overload.clone() };
         let typed_dict_class = Declaration {
             name: String::from("User"),
             kind: DeclarationKind::Class,
@@ -11628,7 +11753,8 @@ mod tests {
     }
 
     #[test]
-    fn check_reports_contextual_writable_typed_dict_item_assignment_nested_typed_dict_missing_key() {
+    fn check_reports_contextual_writable_typed_dict_item_assignment_nested_typed_dict_missing_key()
+    {
         let result = check_temp_typepython_source(
             "from typing import TypedDict\n\nclass Child(TypedDict):\n    name: str\n\nclass User(TypedDict):\n    child: Child\n\ndef mutate(user: User) -> None:\n    user[\"child\"] = {}\n",
         );
@@ -17453,7 +17579,9 @@ mod tests {
 
     #[test]
     fn check_accepts_local_name_augmented_assignment() {
-        let result = check_temp_typepython_source("def build() -> None:\n    value: int = 1\n    value += 2\n");
+        let result = check_temp_typepython_source(
+            "def build() -> None:\n    value: int = 1\n    value += 2\n",
+        );
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
@@ -17592,7 +17720,10 @@ mod tests {
         });
 
         let rendered = result.diagnostics.as_text();
-        assert!(!rendered.contains("assigns `int` where local `result` expects `str`"), "{rendered}");
+        assert!(
+            !rendered.contains("assigns `int` where local `result` expects `str`"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -18998,14 +19129,9 @@ mod tests {
             line: 1,
         };
 
-        let substitutions = crate::infer_generic_type_param_substitutions(
-            &node,
-            &[],
-            &function,
-            &signature,
-            &call,
-        )
-        .expect("union actual should infer through Optional-like annotation");
+        let substitutions =
+            crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
+                .expect("union actual should infer through Optional-like annotation");
 
         assert_eq!(substitutions.get("T").map(String::as_str), Some("int"));
     }
@@ -19018,7 +19144,11 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("returns `T` where `out` expects `int`") || rendered.contains("assigns `T` where `out` expects `int`") || rendered.contains("call to `choose`"));
+        assert!(
+            rendered.contains("returns `T` where `out` expects `int`")
+                || rendered.contains("assigns `T` where `out` expects `int`")
+                || rendered.contains("call to `choose`")
+        );
     }
 
     #[test]
@@ -19053,9 +19183,8 @@ mod tests {
 
     #[test]
     fn check_accepts_dict_comprehension_assignment_type_match() {
-        let result = check_temp_typepython_source(
-            "values: dict[int, int] = {x: x + 1 for x in [1, 2]}\n",
-        );
+        let result =
+            check_temp_typepython_source("values: dict[int, int] = {x: x + 1 for x in [1, 2]}\n");
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
@@ -19082,13 +19211,14 @@ mod tests {
 
     #[test]
     fn check_reports_dict_comprehension_assignment_type_mismatch() {
-        let result = check_temp_typepython_source(
-            "values: dict[str, int] = {x: x + 1 for x in [1, 2]}\n",
-        );
+        let result =
+            check_temp_typepython_source("values: dict[str, int] = {x: x + 1 for x in [1, 2]}\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns `dict[int, int]` where `values` expects `dict[str, int]`"));
+        assert!(
+            rendered.contains("assigns `dict[int, int]` where `values` expects `dict[str, int]`")
+        );
     }
 
     #[test]
@@ -19584,9 +19714,7 @@ mod tests {
 
     #[test]
     fn check_reports_fixed_tuple_destructuring_arity_mismatch() {
-        let result = check_temp_typepython_source(
-            "pair: tuple[int] = (1,)\nleft, right = pair\n",
-        );
+        let result = check_temp_typepython_source("pair: tuple[int] = (1,)\nleft, right = pair\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
@@ -29935,7 +30063,10 @@ mod tests {
 
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4001"));
-        assert!(rendered.contains("assigns `Union[bool, int, None]` where local `result` expects `int`"));
+        assert!(
+            rendered
+                .contains("assigns `Union[bool, int, None]` where local `result` expects `int`")
+        );
     }
 
     #[test]

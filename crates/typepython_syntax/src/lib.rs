@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ruff_python_ast::{visitor, visitor::Visitor, Expr, Stmt, TypeParam as AstTypeParam};
+use ruff_python_ast::{Expr, Stmt, TypeParam as AstTypeParam, visitor, visitor::Visitor};
 use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
@@ -1564,11 +1564,7 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() {
-        head
-    } else {
-        format!("{head}.{}", tail.join("."))
-    }
+    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
@@ -4276,11 +4272,7 @@ fn split_direct_generic_type(text: &str) -> Option<(String, Vec<String>)> {
 
 fn join_union_literal_type_candidates(types: Vec<String>) -> String {
     let joined = join_literal_type_candidates(types);
-    if joined.contains(" | ") {
-        format!("Union[{}]", joined.replace(" | ", ", "))
-    } else {
-        joined
-    }
+    if joined.contains(" | ") { format!("Union[{}]", joined.replace(" | ", ", ")) } else { joined }
 }
 
 fn join_literal_type_candidates(types: Vec<String>) -> String {
@@ -4290,11 +4282,7 @@ fn join_literal_type_candidates(types: Vec<String>) -> String {
             unique.push(value);
         }
     }
-    if unique.is_empty() {
-        String::from("Any")
-    } else {
-        unique.join(" | ")
-    }
+    if unique.is_empty() { String::from("Any") } else { unique.join(" | ") }
 }
 
 fn extract_supplemental_call_statement(
@@ -7344,14 +7332,14 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse, parse_with_options, AssertStatement, CallStatement, ClassMember, ClassMemberKind,
-        ComprehensionKind, DirectExprMetadata, ExceptionHandlerStatement, ForStatement,
-        FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
-        ImportStatement, InvalidationKind, InvalidationStatement, LambdaMetadata,
-        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
-        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
-        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective,
-        TypeParam, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
+        AssertStatement, CallStatement, ClassMember, ClassMemberKind, ComprehensionKind,
+        DirectExprMetadata, ExceptionHandlerStatement, ForStatement, FunctionParam,
+        FunctionStatement, GuardCondition, IfStatement, ImportBinding, ImportStatement,
+        InvalidationKind, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
+        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
+        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
+        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
+        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
 
