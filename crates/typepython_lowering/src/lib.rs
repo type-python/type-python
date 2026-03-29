@@ -230,21 +230,37 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             .is_some_and(|(transform, _)| TYPEDICT_TRANSFORMS.contains(&transform))
     });
     let has_sealed_classes = !sealed_classes.is_empty();
-    let needs_typing_extensions_typevar =
+    let needs_typing_extensions_runtime_type_params =
         runtime_type_params.values().any(|type_param| type_param.default.is_some());
+    let has_runtime_typevars = runtime_type_params
+        .values()
+        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVar);
+    let has_runtime_paramspecs = runtime_type_params
+        .values()
+        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::ParamSpec);
 
     let mut lowered_lines = Vec::new();
     let mut required_imports = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
-    if !runtime_type_params.is_empty()
-        && !has_typevar_import(&tree.source.text, needs_typing_extensions_typevar)
+    if has_runtime_typevars
+        && !has_typevar_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
     {
         push_required_import(
             &mut lowered_lines,
             &mut required_imports,
-            rewrite_typevar_import_line(needs_typing_extensions_typevar),
+            rewrite_typevar_import_line(needs_typing_extensions_runtime_type_params),
+        );
+        lowered_line_number += 1;
+    }
+    if has_runtime_paramspecs
+        && !has_paramspec_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
+    {
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            rewrite_paramspec_import_line(needs_typing_extensions_runtime_type_params),
         );
         lowered_line_number += 1;
     }
@@ -488,6 +504,7 @@ fn collect_runtime_type_params(
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct RuntimeTypeParam {
+    kind: typepython_syntax::TypeParamKind,
     bound: Option<String>,
     constraints: Vec<String>,
     default: Option<String>,
@@ -496,6 +513,7 @@ struct RuntimeTypeParam {
 impl RuntimeTypeParam {
     fn from_type_param(type_param: &typepython_syntax::TypeParam) -> Self {
         Self {
+            kind: type_param.kind.clone(),
             bound: type_param.bound.clone(),
             constraints: type_param.constraints.clone(),
             default: type_param.default.clone(),
@@ -538,7 +556,14 @@ fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
     if let Some(default) = &type_param.default {
         args.push(format!("default={default}"));
     }
-    format!("{name} = TypeVar({})", args.join(", "))
+    match type_param.kind {
+        typepython_syntax::TypeParamKind::TypeVar => {
+            format!("{name} = TypeVar({})", args.join(", "))
+        }
+        typepython_syntax::TypeParamKind::ParamSpec => {
+            format!("{name} = ParamSpec({})", args.join(", "))
+        }
+    }
 }
 
 fn has_typealias_import(source: &str) -> bool {
@@ -559,11 +584,29 @@ fn has_typevar_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
+fn has_paramspec_import(source: &str, from_typing_extensions: bool) -> bool {
+    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == format!("from {module} import ParamSpec")
+            || (trimmed.starts_with(&format!("from {module} import "))
+                && trimmed.contains("ParamSpec"))
+    })
+}
+
 fn rewrite_typevar_import_line(from_typing_extensions: bool) -> String {
     if from_typing_extensions {
         String::from("from typing_extensions import TypeVar")
     } else {
         String::from("from typing import TypeVar")
+    }
+}
+
+fn rewrite_paramspec_import_line(from_typing_extensions: bool) -> String {
+    if from_typing_extensions {
+        String::from("from typing_extensions import ParamSpec")
+    } else {
+        String::from("from typing import ParamSpec")
     }
 }
 
@@ -1222,7 +1265,7 @@ mod tests {
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
         ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
-        SyntaxTree, TypeAliasStatement, TypeParam, UnsafeStatement,
+        SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, UnsafeStatement,
     };
 
     #[test]
@@ -1399,6 +1442,7 @@ mod tests {
                 name: String::from("SupportsClose"),
                 type_params: vec![TypeParam {
                     name: String::from("T"),
+                    kind: TypeParamKind::TypeVar,
                     bound: None,
                     constraints: Vec::new(),
                     default: None,
@@ -1512,6 +1556,7 @@ mod tests {
                     name: String::from("Point"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1529,6 +1574,7 @@ mod tests {
                     name: String::from("Expr"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1687,6 +1733,7 @@ mod tests {
                 name: String::from("Pair"),
                 type_params: vec![TypeParam {
                     name: String::from("T"),
+                    kind: TypeParamKind::TypeVar,
                     bound: None,
                     constraints: Vec::new(),
                     default: None,
@@ -1718,6 +1765,7 @@ mod tests {
                 name: String::from("Pair"),
                 type_params: vec![TypeParam {
                     name: String::from("T"),
+                    kind: TypeParamKind::TypeVar,
                     bound: None,
                     constraints: vec![String::from("str"), String::from("bytes")],
                     default: Some(String::from("str")),
@@ -1756,6 +1804,7 @@ mod tests {
                 name: String::from("parse"),
                 type_params: vec![TypeParam {
                     name: String::from("T"),
+                    kind: TypeParamKind::TypeVar,
                     bound: None,
                     constraints: Vec::new(),
                     default: None,
@@ -1795,6 +1844,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1812,6 +1862,7 @@ mod tests {
                     name: String::from("first"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1845,7 +1896,57 @@ mod tests {
                 SourceMapEntry { original_line: 5, lowered_line: 8 },
             ]
         );
-    } // ─── TypedDict utility transform tests ───────────────────────────────────
+    }
+
+    #[test]
+    fn lower_rewrites_paramspec_headers() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("paramspec.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n    return cb(*args, **kwargs)\n",
+                ),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(typepython_syntax::FunctionStatement {
+                name: String::from("invoke"),
+                type_params: vec![
+                    TypeParam {
+                        name: String::from("P"),
+                        kind: TypeParamKind::ParamSpec,
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    },
+                    TypeParam {
+                        name: String::from("R"),
+                        kind: TypeParamKind::TypeVar,
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    },
+                ],
+                params: Vec::new(),
+                returns: None,
+                is_async: false,
+                is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nfrom typing import ParamSpec\nP = ParamSpec(\"P\")\nR = TypeVar(\"R\")\ndef invoke(cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n    return cb(*args, **kwargs)\n"
+        );
+    }
+
+    // ─── TypedDict utility transform tests ───────────────────────────────────
 
     #[test]
     fn lower_expands_partial_typeddict_transform() {

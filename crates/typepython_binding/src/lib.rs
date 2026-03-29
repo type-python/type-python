@@ -341,7 +341,14 @@ pub struct Declaration {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum GenericTypeParamKind {
+    TypeVar,
+    ParamSpec,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct GenericTypeParam {
+    pub kind: GenericTypeParamKind,
     pub name: String,
     pub bound: Option<String>,
     pub constraints: Vec<String>,
@@ -997,6 +1004,10 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
     type_params
         .iter()
         .map(|param| GenericTypeParam {
+            kind: match param.kind {
+                typepython_syntax::TypeParamKind::TypeVar => GenericTypeParamKind::TypeVar,
+                typepython_syntax::TypeParamKind::ParamSpec => GenericTypeParamKind::ParamSpec,
+            },
             name: param.name.clone(),
             bound: param.bound.clone(),
             constraints: param.constraints.clone(),
@@ -1009,16 +1020,16 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
 mod tests {
     use super::{
         AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
-        DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GuardConditionSite,
-        IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite, MatchPatternSite,
-        MatchSite, WithSite, YieldSite, bind,
+        DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind,
+        GuardConditionSite, IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite,
+        MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
         ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, MethodKind,
         NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-        TypeAliasStatement, TypeParam, ValueStatement,
+        TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
     };
 
     #[test]
@@ -1035,6 +1046,7 @@ mod tests {
                     name: String::from("UserId"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1046,6 +1058,7 @@ mod tests {
                     name: String::from("User"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1063,6 +1076,7 @@ mod tests {
                     name: String::from("helper"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1104,6 +1118,7 @@ mod tests {
                     bases: Vec::new(),
                     type_params: vec![GenericTypeParam {
                         name: String::from("T"),
+                        kind: GenericTypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1128,6 +1143,7 @@ mod tests {
                     bases: Vec::new(),
                     type_params: vec![GenericTypeParam {
                         name: String::from("T"),
+                        kind: GenericTypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1152,6 +1168,7 @@ mod tests {
                     bases: Vec::new(),
                     type_params: vec![GenericTypeParam {
                         name: String::from("T"),
+                        kind: GenericTypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1204,6 +1221,7 @@ mod tests {
                     name: String::from("parse"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -1254,6 +1272,7 @@ mod tests {
                     bases: Vec::new(),
                     type_params: vec![GenericTypeParam {
                         name: String::from("T"),
+                        kind: GenericTypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,

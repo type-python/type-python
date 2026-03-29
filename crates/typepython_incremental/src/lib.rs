@@ -279,7 +279,7 @@ mod tests {
     };
     use std::{collections::BTreeMap, path::PathBuf};
     use typepython_binding::{
-        Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam,
+        Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam, GenericTypeParamKind,
     };
     use typepython_graph::{ModuleGraph, ModuleNode};
     use typepython_syntax::SourceKind;
@@ -391,8 +391,11 @@ mod tests {
                         is_class_var: false,
                         bases: Vec::new(),
                         type_params: vec![GenericTypeParam {
+                            kind: GenericTypeParamKind::TypeVar,
                             name: String::from("T"),
                             bound: Some(String::from("SupportsClose")),
+                            constraints: Vec::new(),
+                            default: None,
                         }],
                     },
                     Declaration {
@@ -432,8 +435,11 @@ mod tests {
                         is_class_var: false,
                         bases: Vec::new(),
                         type_params: vec![GenericTypeParam {
+                            kind: GenericTypeParamKind::TypeVar,
                             name: String::from("T"),
                             bound: None,
+                            constraints: Vec::new(),
+                            default: None,
                         }],
                     },
                     Declaration {

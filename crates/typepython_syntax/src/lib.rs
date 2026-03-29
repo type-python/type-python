@@ -478,7 +478,14 @@ pub struct UnsafeStatement {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TypeParamKind {
+    TypeVar,
+    ParamSpec,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeParam {
+    pub kind: TypeParamKind,
     pub name: String,
     pub bound: Option<String>,
     pub constraints: Vec<String>,
@@ -3329,6 +3336,10 @@ fn render_type_params(type_params: &[TypeParam]) -> String {
 }
 
 fn render_type_param(type_param: &TypeParam) -> String {
+    let prefix = match type_param.kind {
+        TypeParamKind::TypeVar => "",
+        TypeParamKind::ParamSpec => "**",
+    };
     let mut rendered = if !type_param.constraints.is_empty() {
         format!("{}: ({})", type_param.name, type_param.constraints.join(", "))
     } else {
@@ -3337,6 +3348,7 @@ fn render_type_param(type_param: &TypeParam) -> String {
             None => type_param.name.clone(),
         }
     };
+    rendered.insert_str(0, prefix);
     if let Some(default) = &type_param.default {
         rendered.push_str(" = ");
         rendered.push_str(default);
@@ -6471,6 +6483,7 @@ fn extract_ast_type_params(
                     type_var.bound.as_deref(),
                 )?;
                 parsed.push(TypeParam {
+                    kind: TypeParamKind::TypeVar,
                     name: type_var.name.as_str().to_owned(),
                     bound,
                     constraints,
@@ -6481,7 +6494,20 @@ fn extract_ast_type_params(
                         .map(str::to_owned),
                 });
             }
-            AstTypeParam::TypeVarTuple(_) | AstTypeParam::ParamSpec(_) => {
+            AstTypeParam::ParamSpec(param_spec) => {
+                parsed.push(TypeParam {
+                    kind: TypeParamKind::ParamSpec,
+                    name: param_spec.name.as_str().to_owned(),
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: param_spec
+                        .default
+                        .as_ref()
+                        .and_then(|default| slice_range(source, default.range()))
+                        .map(str::to_owned),
+                });
+            }
+            AstTypeParam::TypeVarTuple(_) => {
                 diagnostics.push(
                     Diagnostic::error(
                         "TPY4010",
@@ -7240,6 +7266,18 @@ fn parse_type_param(
         Some((head, default)) => (head.trim(), Some(default.trim())),
         None => (item, None),
     };
+    let (kind, item) = if let Some(item) = item.strip_prefix("**") {
+        (TypeParamKind::ParamSpec, item.trim())
+    } else if item.starts_with('*') {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} uses deferred-beyond-v1 type parameter syntax"),
+        )));
+    } else {
+        (TypeParamKind::TypeVar, item)
+    };
     let (name_part, bound_or_constraints) = match split_top_level_once(item, ':') {
         Some((name_part, bound)) => (name_part.trim(), Some(bound.trim())),
         None => (item, None),
@@ -7250,6 +7288,15 @@ fn parse_type_param(
             line_number,
             line,
             format!("{label} contains an invalid type parameter name"),
+        )));
+    }
+
+    if kind == TypeParamKind::ParamSpec && bound_or_constraints.is_some() {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} ParamSpec `{name_part}` must not declare bounds or constraints"),
         )));
     }
 
@@ -7281,7 +7328,7 @@ fn parse_type_param(
         None => None,
     };
 
-    Ok(TypeParam { name: name_part.to_owned(), bound, constraints, default })
+    Ok(TypeParam { kind, name: name_part.to_owned(), bound, constraints, default })
 }
 
 fn parse_type_param_constraints(
@@ -7425,8 +7472,8 @@ mod tests {
         InvalidationKind, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
         MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
         NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, UnsafeStatement,
-        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
+        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, TypeParamKind,
+        UnsafeStatement, ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -7460,6 +7507,7 @@ mod tests {
                     name: String::from("Pair"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -7555,6 +7603,7 @@ mod tests {
                     name: String::from("Pair"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: Some(String::from("Hashable")),
                         constraints: Vec::new(),
                         default: None,
@@ -7566,6 +7615,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -7583,6 +7633,7 @@ mod tests {
                     name: String::from("Node"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: Some(String::from("Sequence[str]")),
                         constraints: Vec::new(),
                         default: None,
@@ -7600,6 +7651,7 @@ mod tests {
                     name: String::from("Result"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -7617,6 +7669,7 @@ mod tests {
                     name: String::from("first"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: Some(String::from("Sequence[str]")),
                         constraints: Vec::new(),
                         default: None,
@@ -7689,6 +7742,7 @@ mod tests {
                     name: String::from("Pair"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: Some(String::from("int")),
@@ -7700,6 +7754,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: vec![String::from("str"), String::from("bytes")],
                         default: Some(String::from("str")),
@@ -7717,6 +7772,7 @@ mod tests {
                     name: String::from("first"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: vec![String::from("A"), String::from("B")],
                         default: None,
@@ -8086,6 +8142,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -8103,6 +8160,7 @@ mod tests {
                     name: String::from("first"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
@@ -8176,6 +8234,7 @@ mod tests {
                     name: String::from("Box"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: vec![String::from("str"), String::from("bytes")],
                         default: Some(String::from("str")),
@@ -8193,6 +8252,7 @@ mod tests {
                     name: String::from("first"),
                     type_params: vec![TypeParam {
                         name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
                         bound: None,
                         constraints: Vec::new(),
                         default: Some(String::from("int")),
@@ -8245,6 +8305,34 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn parse_accepts_paramspec_type_params() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("paramspec.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "typealias Callback[**P, R] = Callable[P, R]\n\ndef invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n    return cb(*args, **kwargs)\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        let SyntaxStatement::TypeAlias(alias) = &tree.statements[0] else {
+            panic!("expected type alias");
+        };
+        assert_eq!(alias.type_params[0].kind, TypeParamKind::ParamSpec);
+        assert_eq!(alias.type_params[0].name, "P");
+        assert_eq!(alias.type_params[1].kind, TypeParamKind::TypeVar);
+
+        let SyntaxStatement::FunctionDef(function) = &tree.statements[1] else {
+            panic!("expected function definition");
+        };
+        assert_eq!(function.type_params[0].kind, TypeParamKind::ParamSpec);
+        assert_eq!(function.type_params[1].kind, TypeParamKind::TypeVar);
+        assert_eq!(function.params[1].annotation.as_deref(), Some("P.args"));
+        assert_eq!(function.params[2].annotation.as_deref(), Some("P.kwargs"));
     }
 
     #[test]

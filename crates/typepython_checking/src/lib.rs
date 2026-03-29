@@ -3873,15 +3873,9 @@ fn resolve_direct_member_callable_signature(
 }
 
 fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)> {
-    let text = normalize_type_text(text);
-    let inner = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']'))?;
-    let parts = split_top_level_type_args(inner);
-    if parts.len() != 2 {
-        return None;
-    }
-    let params = parts[0].trim();
+    let (params, return_type) = parse_callable_annotation_parts(text)?;
     if params == "..." {
-        return Some((None, normalize_type_text(parts[1])));
+        return Some((None, return_type));
     }
     let params = params.strip_prefix('[').and_then(|inner| inner.strip_suffix(']'))?;
     let param_types = if params.trim().is_empty() {
@@ -3889,7 +3883,41 @@ fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)
     } else {
         split_top_level_type_args(params).into_iter().map(normalize_type_text).collect()
     };
-    Some((Some(param_types), normalize_type_text(parts[1])))
+    Some((Some(param_types), return_type))
+}
+
+fn parse_callable_annotation_parts(text: &str) -> Option<(String, String)> {
+    let text = normalize_type_text(text);
+    let inner = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']'))?;
+    let parts = split_top_level_type_args(inner);
+    if parts.len() != 2 {
+        return None;
+    }
+    Some((normalize_callable_param_expr(parts[0]), normalize_type_text(parts[1])))
+}
+
+fn normalize_callable_param_expr(params: &str) -> String {
+    let params = params.trim();
+    if params == "..." || params.is_empty() {
+        return params.to_owned();
+    }
+    if let Some(inner) = params.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')) {
+        let rendered = split_top_level_type_args(inner)
+            .into_iter()
+            .map(normalize_type_text)
+            .collect::<Vec<_>>();
+        return format!("[{}]", rendered.join(", "));
+    }
+    if let Some(inner) =
+        params.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        let rendered = split_top_level_type_args(inner)
+            .into_iter()
+            .map(normalize_type_text)
+            .collect::<Vec<_>>();
+        return format!("Concatenate[{}]", rendered.join(", "));
+    }
+    normalize_type_text(params)
 }
 
 fn resolve_contextual_lambda_callable_signature(
@@ -4221,6 +4249,11 @@ fn resolve_contextual_call_arg_type(
     {
         return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
     }
+    if let Some(actual_type) =
+        resolve_contextual_named_callable_type(node, nodes, metadata, expected)
+    {
+        return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
+    }
     if let Some(result) =
         resolve_contextual_typed_dict_literal_type(node, nodes, current_line, metadata, expected)
     {
@@ -4230,6 +4263,23 @@ fn resolve_contextual_call_arg_type(
         });
     }
     resolve_contextual_collection_literal_type(node, nodes, current_line, metadata, expected)
+}
+
+fn resolve_contextual_named_callable_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<String> {
+    parse_callable_annotation_parts(expected?)?;
+    let function_name = metadata.value_name.as_deref()?;
+    let function = resolve_direct_function(node, nodes, function_name)?;
+    let param_types = direct_signature_sites_from_detail(&function.detail)
+        .into_iter()
+        .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+        .collect::<Vec<_>>();
+    let return_type = function.detail.split_once("->")?.1.trim();
+    Some(format_callable_annotation(&param_types, return_type))
 }
 
 fn expected_positional_arg_types_from_direct_signature(
@@ -4334,19 +4384,25 @@ fn resolve_scope_owner_signature<'a>(
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
 ) -> Option<&'a str> {
-    let owner_name = owner_name?;
-    node.declarations
-        .iter()
-        .find(|declaration| {
-            declaration.kind == DeclarationKind::Function
-                && declaration.name == owner_name
-                && match (owner_type_name, &declaration.owner) {
-                    (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
-                    (None, None) => true,
-                    _ => false,
-                }
-        })
+    resolve_scope_owner_declaration(node, owner_name, owner_type_name)
         .map(|declaration| declaration.detail.as_str())
+}
+
+fn resolve_scope_owner_declaration<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+) -> Option<&'a Declaration> {
+    let owner_name = owner_name?;
+    node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Function
+            && declaration.name == owner_name
+            && match (owner_type_name, &declaration.owner) {
+                (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
+                (None, None) => true,
+                _ => false,
+            }
+    })
 }
 
 fn resolve_for_owner_signature<'a>(
@@ -5862,14 +5918,12 @@ fn resolve_unnarrowed_name_reference_type(
     }
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
-        let return_text = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(
-                function.detail.split_once("->")?.1,
-                function.owner.as_ref().map(|owner| owner.name.as_str()),
-            ),
-        );
-        return normalized_direct_return_annotation(&return_text).map(normalize_type_text);
+        let param_types = direct_signature_sites_from_detail(&function.detail)
+            .into_iter()
+            .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+            .collect::<Vec<_>>();
+        let return_text = resolve_direct_callable_return_type(node, nodes, value_name)?;
+        return Some(format_callable_annotation(&param_types, &return_text));
     }
 
     None
@@ -7887,6 +7941,28 @@ fn direct_call_type_diagnostics(
             {
                 return direct_source_function_type_diagnostics(node, nodes, call, &signature);
             }
+            if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
+                && function.type_params.iter().any(|type_param| {
+                    type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec
+                })
+            {
+                return vec![
+                    Diagnostic::error(
+                        "TPY4014",
+                        format!(
+                            "call to `{}` in module `{}` is invalid because generic parameter list of `{}` could not be resolved from this call",
+                            call.callee, node.module_key, call.callee
+                        ),
+                    )
+                    .with_span(Span::new(
+                        node.module_path.display().to_string(),
+                        call.line,
+                        1,
+                        call.line,
+                        1,
+                    )),
+                ];
+            }
             if let Some(signature) =
                 resolve_direct_callable_signature_sites(node, nodes, &call.callee)
             {
@@ -8924,6 +9000,16 @@ fn direct_unresolved_paramspec_call_diagnostics(
     typepython_syntax::collect_direct_call_context_sites(&source)
         .into_iter()
         .filter_map(|call_site| {
+            let owner_has_paramspec = resolve_scope_owner_declaration(
+                node,
+                call_site.owner_name.as_deref(),
+                call_site.owner_type_name.as_deref(),
+            )
+            .is_some_and(|declaration| {
+                declaration.type_params.iter().any(|type_param| {
+                    type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec
+                })
+            });
             let signature = resolve_scope_owner_signature(
                 node,
                 call_site.owner_name.as_deref(),
@@ -8940,6 +9026,9 @@ fn direct_unresolved_paramspec_call_diagnostics(
                 &call_site.callee,
             )?;
             let callable_type = rewrite_imported_typing_aliases(node, &callable_type);
+            if owner_has_paramspec && callable_has_unresolved_paramlist(&callable_type) {
+                return None;
+            }
             callable_has_unresolved_paramlist(&callable_type).then(|| {
                 Diagnostic::error(
                     "TPY4014",
@@ -9049,18 +9138,18 @@ fn resolve_instantiated_direct_function_signature(
     let signature = direct_signature_sites_from_detail(&function.detail);
     let substitutions =
         infer_generic_type_param_substitutions(node, nodes, function, &signature, call)?;
-    Some(
-        signature
-            .into_iter()
-            .map(|param| typepython_syntax::DirectFunctionParamSite {
-                annotation: param
-                    .annotation
-                    .as_deref()
-                    .map(|annotation| substitute_generic_type_params(annotation, &substitutions)),
-                ..param
-            })
-            .collect(),
-    )
+    instantiate_direct_function_signature(&signature, &substitutions)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+struct GenericTypeParamSubstitutions {
+    types: BTreeMap<String, String>,
+    param_lists: BTreeMap<String, ParamListBinding>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ParamListBinding {
+    params: Vec<typepython_syntax::DirectFunctionParamSite>,
 }
 
 fn infer_generic_type_param_substitutions(
@@ -9069,62 +9158,382 @@ fn infer_generic_type_param_substitutions(
     function: &Declaration,
     signature: &[typepython_syntax::DirectFunctionParamSite],
     call: &typepython_binding::CallSite,
-) -> Option<BTreeMap<String, String>> {
-    let generic_names = function
+) -> Option<GenericTypeParamSubstitutions> {
+    let type_names = function
         .type_params
         .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVar)
         .map(|type_param| type_param.name.clone())
         .collect::<BTreeSet<_>>();
-    let mut substitutions = BTreeMap::new();
+    let param_spec_names = function
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut substitutions = GenericTypeParamSubstitutions::default();
 
-    for (annotation, actual) in signature
+    for (index, (param, actual)) in signature
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
-        .filter_map(|param| param.annotation.as_deref())
         .zip(call.arg_types.iter())
+        .enumerate()
     {
+        let Some(annotation) = param.annotation.as_deref() else {
+            continue;
+        };
+        bind_callable_param_spec_type_params(
+            node,
+            nodes,
+            annotation,
+            actual,
+            call.arg_values.get(index),
+            &type_names,
+            &param_spec_names,
+            &mut substitutions,
+        )?;
         bind_generic_type_params(
             node,
             nodes,
             annotation,
             actual,
-            &generic_names,
-            &mut substitutions,
+            &type_names,
+            &mut substitutions.types,
         )?;
     }
 
-    for (keyword, actual) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+    for (index, (keyword, actual)) in
+        call.keyword_names.iter().zip(&call.keyword_arg_types).enumerate()
+    {
         let Some(param) = signature.iter().find(|param| param.name == *keyword) else {
             continue;
         };
         let Some(annotation) = param.annotation.as_deref() else {
             continue;
         };
+        bind_callable_param_spec_type_params(
+            node,
+            nodes,
+            annotation,
+            actual,
+            call.keyword_arg_values.get(index),
+            &type_names,
+            &param_spec_names,
+            &mut substitutions,
+        )?;
         bind_generic_type_params(
             node,
             nodes,
             annotation,
             actual,
-            &generic_names,
-            &mut substitutions,
+            &type_names,
+            &mut substitutions.types,
         )?;
     }
 
     for type_param in &function.type_params {
-        if !substitutions.contains_key(&type_param.name)
-            && let Some(default) = &type_param.default
-        {
-            substitutions.insert(type_param.name.clone(), normalize_type_text(default));
-        }
-        let Some(actual) = substitutions.get(&type_param.name) else {
-            continue;
-        };
-        if !generic_type_param_accepts_actual(node, nodes, type_param, actual) {
-            return None;
+        match type_param.kind {
+            typepython_binding::GenericTypeParamKind::TypeVar => {
+                if !substitutions.types.contains_key(&type_param.name)
+                    && let Some(default) = &type_param.default
+                {
+                    substitutions
+                        .types
+                        .insert(type_param.name.clone(), normalize_type_text(default));
+                }
+                let Some(actual) = substitutions.types.get(&type_param.name) else {
+                    continue;
+                };
+                if !generic_type_param_accepts_actual(node, nodes, type_param, actual) {
+                    return None;
+                }
+            }
+            typepython_binding::GenericTypeParamKind::ParamSpec => {
+                if substitutions.param_lists.contains_key(&type_param.name) {
+                    continue;
+                }
+                let Some(default) = &type_param.default else {
+                    continue;
+                };
+                substitutions
+                    .param_lists
+                    .insert(type_param.name.clone(), param_list_binding_from_default(default)?);
+            }
         }
     }
 
     Some(substitutions)
+}
+
+fn instantiate_direct_function_signature(
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    substitutions: &GenericTypeParamSubstitutions,
+) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let mut instantiated = Vec::new();
+    let mut expanded_param_specs = BTreeSet::new();
+
+    for param in signature {
+        let param_spec_name = param.annotation.as_deref().and_then(|annotation| {
+            if param.variadic {
+                extract_param_spec_args_name(annotation)
+            } else if param.keyword_variadic {
+                extract_param_spec_kwargs_name(annotation)
+            } else {
+                None
+            }
+        });
+        if let Some(param_spec_name) = param_spec_name {
+            let binding = substitutions.param_lists.get(param_spec_name)?;
+            if expanded_param_specs.insert(param_spec_name.to_owned()) {
+                instantiated.extend(
+                    binding
+                        .params
+                        .iter()
+                        .cloned()
+                        .map(|param| instantiate_direct_function_param(param, substitutions)),
+                );
+            }
+            continue;
+        }
+        instantiated.push(instantiate_direct_function_param(param.clone(), substitutions));
+    }
+
+    Some(instantiated)
+}
+
+fn instantiate_direct_function_param(
+    mut param: typepython_syntax::DirectFunctionParamSite,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> typepython_syntax::DirectFunctionParamSite {
+    param.annotation = param
+        .annotation
+        .as_deref()
+        .map(|annotation| substitute_generic_type_params(annotation, substitutions));
+    param
+}
+
+fn bind_callable_param_spec_type_params(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &str,
+    actual: &str,
+    actual_value: Option<&typepython_syntax::DirectExprMetadata>,
+    type_names: &BTreeSet<String>,
+    param_spec_names: &BTreeSet<String>,
+    substitutions: &mut GenericTypeParamSubstitutions,
+) -> Option<()> {
+    if param_spec_names.is_empty() {
+        return Some(());
+    }
+
+    let Some((expected_params_expr, expected_return)) = parse_callable_annotation_parts(annotation)
+    else {
+        return Some(());
+    };
+    if !callable_param_expr_mentions_param_spec(&expected_params_expr, param_spec_names) {
+        return Some(());
+    }
+
+    let (actual_binding, actual_return) =
+        resolve_callable_shape_from_actual(node, nodes, actual, actual_value)?;
+    bind_callable_param_expr(
+        node,
+        nodes,
+        &expected_params_expr,
+        &actual_binding,
+        type_names,
+        param_spec_names,
+        substitutions,
+    )?;
+    bind_generic_type_params(
+        node,
+        nodes,
+        &expected_return,
+        &actual_return,
+        type_names,
+        &mut substitutions.types,
+    )
+}
+
+fn callable_param_expr_mentions_param_spec(
+    params_expr: &str,
+    param_spec_names: &BTreeSet<String>,
+) -> bool {
+    if param_spec_names.contains(params_expr.trim()) {
+        return true;
+    }
+    if let Some(inner) =
+        params_expr.trim().strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        return split_top_level_type_args(inner)
+            .last()
+            .is_some_and(|tail| param_spec_names.contains(tail.trim()));
+    }
+    false
+}
+
+fn bind_callable_param_expr(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected_params_expr: &str,
+    actual_binding: &ParamListBinding,
+    type_names: &BTreeSet<String>,
+    param_spec_names: &BTreeSet<String>,
+    substitutions: &mut GenericTypeParamSubstitutions,
+) -> Option<()> {
+    let expected_params_expr = expected_params_expr.trim();
+    if let Some(param_spec_name) =
+        param_spec_names.contains(expected_params_expr).then_some(expected_params_expr)
+    {
+        return insert_param_spec_binding(substitutions, param_spec_name, actual_binding.clone());
+    }
+
+    if let Some(inner) =
+        expected_params_expr.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        let parts = split_top_level_type_args(inner);
+        let (tail, prefixes) = parts.split_last()?;
+        let tail = tail.trim();
+        if !param_spec_names.contains(tail) || actual_binding.params.len() < prefixes.len() {
+            return None;
+        }
+        for (expected_prefix, actual_param) in prefixes.iter().zip(actual_binding.params.iter()) {
+            let actual_annotation = actual_param
+                .annotation
+                .as_deref()
+                .filter(|annotation| !annotation.is_empty())
+                .unwrap_or("dynamic");
+            bind_generic_type_params(
+                node,
+                nodes,
+                expected_prefix,
+                actual_annotation,
+                type_names,
+                &mut substitutions.types,
+            )?;
+        }
+        return insert_param_spec_binding(
+            substitutions,
+            tail,
+            ParamListBinding { params: actual_binding.params[prefixes.len()..].to_vec() },
+        );
+    }
+
+    Some(())
+}
+
+fn insert_param_spec_binding(
+    substitutions: &mut GenericTypeParamSubstitutions,
+    name: &str,
+    binding: ParamListBinding,
+) -> Option<()> {
+    match substitutions.param_lists.get(name) {
+        Some(existing) if existing != &binding => None,
+        Some(_) => Some(()),
+        None => {
+            substitutions.param_lists.insert(name.to_owned(), binding);
+            Some(())
+        }
+    }
+}
+
+fn resolve_callable_shape_from_actual(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    actual: &str,
+    actual_value: Option<&typepython_syntax::DirectExprMetadata>,
+) -> Option<(ParamListBinding, String)> {
+    if let Some(actual_value) = actual_value
+        && let Some(shape) = resolve_callable_shape_from_metadata(node, nodes, actual_value, actual)
+    {
+        return Some(shape);
+    }
+
+    let (params, return_type) = parse_callable_annotation(actual)?;
+    Some((ParamListBinding { params: synthesize_param_list_binding(params?) }, return_type))
+}
+
+fn resolve_callable_shape_from_metadata(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    actual_value: &typepython_syntax::DirectExprMetadata,
+    actual: &str,
+) -> Option<(ParamListBinding, String)> {
+    if let Some(lambda) = actual_value.value_lambda.as_deref() {
+        let (param_types, return_type) = parse_callable_annotation(actual)?;
+        let param_types = param_types?;
+        if param_types.len() != lambda.param_names.len() {
+            return None;
+        }
+        let params = lambda
+            .param_names
+            .iter()
+            .cloned()
+            .zip(param_types)
+            .map(|(name, annotation)| typepython_syntax::DirectFunctionParamSite {
+                name,
+                annotation: Some(annotation),
+                has_default: false,
+                positional_only: false,
+                keyword_only: false,
+                variadic: false,
+                keyword_variadic: false,
+            })
+            .collect();
+        return Some((ParamListBinding { params }, return_type));
+    }
+
+    let function_name = actual_value.value_name.as_deref()?;
+    let function = resolve_direct_function(node, nodes, function_name)?;
+    let return_type = function.detail.split_once("->")?.1.trim().to_owned();
+    Some((
+        ParamListBinding { params: direct_signature_sites_from_detail(&function.detail) },
+        return_type,
+    ))
+}
+
+fn synthesize_param_list_binding(
+    param_types: Vec<String>,
+) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+    param_types
+        .into_iter()
+        .enumerate()
+        .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
+            name: format!("arg{index}"),
+            annotation: Some(annotation),
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        })
+        .collect()
+}
+
+fn param_list_binding_from_default(default: &str) -> Option<ParamListBinding> {
+    let default = normalize_callable_param_expr(default);
+    if default == "..." {
+        return Some(ParamListBinding { params: Vec::new() });
+    }
+    if let Some(inner) = default.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')) {
+        let params = if inner.trim().is_empty() {
+            Vec::new()
+        } else {
+            synthesize_param_list_binding(
+                split_top_level_type_args(inner).into_iter().map(normalize_type_text).collect(),
+            )
+        };
+        return Some(ParamListBinding { params });
+    }
+    None
+}
+
+fn extract_param_spec_args_name(annotation: &str) -> Option<&str> {
+    annotation.strip_suffix(".args").map(str::trim).filter(|name| !name.is_empty())
+}
+
+fn extract_param_spec_kwargs_name(annotation: &str) -> Option<&str> {
+    annotation.strip_suffix(".kwargs").map(str::trim).filter(|name| !name.is_empty())
 }
 
 fn generic_type_param_accepts_actual(
@@ -9216,7 +9625,7 @@ fn infer_generic_type_param_bindings(
                 substitutions,
             )?;
             let combined = combine_generic_substitutions(substitutions, &candidate);
-            let substituted_annotation = substitute_generic_type_params(&annotation, &combined);
+            let substituted_annotation = substitute_type_substitutions(&annotation, &combined);
             if !direct_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
                 return None;
             }
@@ -9240,7 +9649,7 @@ fn infer_generic_type_param_bindings(
                     substitutions,
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
-                let substituted_branch = substitute_generic_type_params(&branch, &combined);
+                let substituted_branch = substitute_type_substitutions(&branch, &combined);
                 direct_type_is_assignable(node, nodes, &substituted_branch, &actual)
                     .then_some(candidate)
             })
@@ -9318,7 +9727,7 @@ fn merge_union_branch_bindings(
     Some(merged)
 }
 
-fn substitute_generic_type_params(
+fn substitute_type_substitutions(
     annotation: &str,
     substitutions: &BTreeMap<String, String>,
 ) -> String {
@@ -9339,6 +9748,84 @@ fn substitute_generic_type_params(
         output.push_str(substitutions.get(&token).map(String::as_str).unwrap_or(&token));
     }
     output
+}
+
+fn substitute_generic_type_params(
+    annotation: &str,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> String {
+    if let Some((params_expr, return_type)) = parse_callable_annotation_parts(annotation) {
+        let substituted_params = substitute_callable_param_expr(&params_expr, substitutions);
+        let substituted_return = substitute_generic_type_params(&return_type, substitutions);
+        return format!("Callable[{substituted_params}, {substituted_return}]");
+    }
+
+    substitute_type_substitutions(annotation, &substitutions.types)
+}
+
+fn substitute_callable_param_expr(
+    params_expr: &str,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> String {
+    let params_expr = params_expr.trim();
+    if params_expr == "..." || params_expr.is_empty() {
+        return params_expr.to_owned();
+    }
+    if let Some(binding) = substitutions.param_lists.get(params_expr) {
+        return render_param_list_binding_for_callable(binding, substitutions);
+    }
+    if let Some(inner) =
+        params_expr.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        let parts = split_top_level_type_args(inner);
+        if let Some((tail, prefixes)) = parts.split_last()
+            && let Some(binding) = substitutions.param_lists.get(tail.trim())
+        {
+            let mut rendered = prefixes
+                .iter()
+                .map(|part| substitute_generic_type_params(part, substitutions))
+                .collect::<Vec<_>>();
+            rendered.extend(binding.params.iter().map(|param| {
+                param
+                    .annotation
+                    .as_deref()
+                    .map(|annotation| substitute_generic_type_params(annotation, substitutions))
+                    .unwrap_or_else(|| String::from("dynamic"))
+            }));
+            return format!("[{}]", rendered.join(", "));
+        }
+    }
+    if let Some(inner) = params_expr.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')) {
+        let rendered = if inner.trim().is_empty() {
+            Vec::new()
+        } else {
+            split_top_level_type_args(inner)
+                .into_iter()
+                .map(|part| substitute_generic_type_params(part, substitutions))
+                .collect::<Vec<_>>()
+        };
+        return format!("[{}]", rendered.join(", "));
+    }
+
+    params_expr.to_owned()
+}
+
+fn render_param_list_binding_for_callable(
+    binding: &ParamListBinding,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> String {
+    let rendered = binding
+        .params
+        .iter()
+        .map(|param| {
+            param
+                .annotation
+                .as_deref()
+                .map(|annotation| substitute_generic_type_params(annotation, substitutions))
+                .unwrap_or_else(|| String::from("dynamic"))
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", rendered.join(", "))
 }
 
 fn resolve_direct_callable_return_type<'a>(
@@ -11766,6 +12253,65 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4014"));
         assert!(rendered.contains("Concatenate[int, P]"));
+    }
+
+    #[test]
+    fn check_accepts_source_authored_paramspec_forwarding_call() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
+            "    return cb(*args, **kwargs)\n\n",
+            "def greet(name: str, *, times: int) -> str:\n",
+            "    return name\n\n",
+            "result: str = invoke(greet, \"Ada\", times=1)\n",
+        ));
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_source_authored_paramspec_keyword_mismatch() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
+            "    return cb(*args, **kwargs)\n\n",
+            "def greet(name: str, *, times: int) -> str:\n",
+            "    return name\n\n",
+            "result: str = invoke(greet, \"Ada\", times=\"oops\")\n",
+        ));
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("keyword `times`"));
+        assert!(rendered.contains("expects `int`"));
+    }
+
+    #[test]
+    fn check_accepts_source_authored_concatenate_forwarding_call() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def bind_first[**P, R](cb: Callable[Concatenate[int, P], R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
+            "    return cb(1, *args, **kwargs)\n\n",
+            "def greet(prefix: int, name: str, *, times: int) -> str:\n",
+            "    return name\n\n",
+            "result: str = bind_first(greet, \"Ada\", times=1)\n",
+        ));
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_substitutes_source_authored_paramspec_in_return_type() {
+        let result = check_temp_typepython_source(concat!(
+            "from typing import Callable\n\n",
+            "def identity[**P, R](cb: Callable[P, R]) -> Callable[P, R]:\n",
+            "    return cb\n\n",
+            "def greet(name: str) -> str:\n",
+            "    return name\n\n",
+            "handler: Callable[[str], str] = identity(greet)\n",
+        ));
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
 
     #[test]
@@ -19448,6 +19994,7 @@ mod tests {
             is_class_var: false,
             bases: Vec::new(),
             type_params: vec![typepython_binding::GenericTypeParam {
+                kind: typepython_binding::GenericTypeParamKind::TypeVar,
                 name: String::from("T"),
                 bound: None,
                 constraints: Vec::new(),
@@ -19482,7 +20029,7 @@ mod tests {
             crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
                 .expect("union actual should infer through Optional-like annotation");
 
-        assert_eq!(substitutions.get("T").map(String::as_str), Some("int"));
+        assert_eq!(substitutions.types.get("T").map(String::as_str), Some("int"));
     }
 
     #[test]
