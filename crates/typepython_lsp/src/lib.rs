@@ -114,6 +114,7 @@ struct LspDiagnostic {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct LspTextEdit {
     range: LspRange,
     new_text: String,
@@ -168,6 +169,7 @@ impl Server {
                         "definitionProvider": true,
                         "referencesProvider": true,
                         "renameProvider": true,
+                        "codeActionProvider": true,
                         "completionProvider": {
                             "resolveProvider": false,
                             "triggerCharacters": ["."]
@@ -216,6 +218,11 @@ impl Server {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_rename(params)?
+            })]),
+            "textDocument/codeAction" => Ok(vec![json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": self.handle_code_action(params)?
             })]),
             "textDocument/completion" => Ok(vec![json!({
                 "jsonrpc": "2.0",
@@ -417,6 +424,20 @@ impl Server {
         Ok(json!({"changes": changes}))
     }
 
+    fn handle_code_action(&self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.rebuild_workspace()?;
+        let (uri, range) = text_document_range(&params)?;
+        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+            return Ok(json!([]));
+        };
+
+        let mut actions = Vec::new();
+        actions.extend(collect_missing_annotation_code_actions(&workspace, document, range));
+        actions.extend(collect_unsafe_code_actions(document, range, &params));
+        actions.extend(collect_missing_import_code_actions(&workspace, document, range));
+        Ok(json!(actions))
+    }
+
     fn handle_completion(&self, params: Value) -> Result<Value, LspError> {
         let workspace = self.rebuild_workspace()?;
         let (uri, position) = text_document_position(&params)?;
@@ -596,6 +617,19 @@ fn text_document_position(params: &Value) -> Result<(String, LspPosition), LspEr
             LspError::Other(String::from("textDocument/position request missing position"))
         })?)?;
     Ok((uri.to_owned(), position))
+}
+
+fn text_document_range(params: &Value) -> Result<(String, LspRange), LspError> {
+    let uri = params
+        .get("textDocument")
+        .and_then(|document| document.get("uri"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| LspError::Other(String::from("textDocument/range request missing uri")))?;
+    let range: LspRange =
+        serde_json::from_value(params.get("range").cloned().ok_or_else(|| {
+            LspError::Other(String::from("textDocument/range request missing range"))
+        })?)?;
+    Ok((uri.to_owned(), range))
 }
 
 fn resolve_symbol<'a>(
@@ -1181,7 +1215,8 @@ fn resolve_value_statement_type_text(
     value
         .annotation
         .clone()
-        .or_else(|| value.value_type.clone())
+        .filter(|annotation| !annotation.trim().is_empty())
+        .or_else(|| value.value_type.clone().filter(|value_type| !value_type.trim().is_empty()))
         .or_else(|| {
             value.value_callee.as_deref().and_then(|callee| {
                 resolve_callable_return_type_text(
@@ -1747,6 +1782,156 @@ fn line_indentation(text: &str) -> usize {
 
 fn lsp_position(line: usize) -> LspPosition {
     LspPosition { line: line.saturating_sub(1) as u32, character: 0 }
+}
+
+fn collect_missing_annotation_code_actions(
+    workspace: &WorkspaceState,
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let line = range.start.line as usize + 1;
+    document
+        .syntax
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let SyntaxStatement::Value(value) = statement else {
+                return None;
+            };
+            if value.line != line || value.annotation.is_some() || value.names.len() != 1 {
+                return None;
+            }
+            let name = value.names.first()?;
+            let inferred =
+                resolve_value_statement_type_text(workspace, document, value, line + 1, 0)?;
+            if inferred.is_empty() || inferred.contains("unknown") || inferred.contains("dynamic") {
+                return None;
+            }
+            let name_range = find_name_range(&document.text, value.line, name)?;
+            Some(code_action(
+                format!("Add type annotation `{name}: {inferred}`"),
+                &document.uri,
+                vec![LspTextEdit {
+                    range: LspRange { start: name_range.end, end: name_range.end },
+                    new_text: format!(": {inferred}"),
+                }],
+            ))
+        })
+        .collect()
+}
+
+fn collect_unsafe_code_actions(
+    document: &DocumentState,
+    range: LspRange,
+    params: &Value,
+) -> Vec<Value> {
+    let diagnostics = params
+        .get("context")
+        .and_then(|context| context.get("diagnostics"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let line = range.start.line as usize + 1;
+    let line_text = document_line_text(&document.text, line);
+    if line_text.trim_start().starts_with("unsafe:") {
+        return Vec::new();
+    }
+    let has_unsafe_diagnostic = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.get("code").and_then(Value::as_str) == Some("TPY4019"));
+    if !has_unsafe_diagnostic {
+        return Vec::new();
+    }
+
+    let indent = line_text.chars().take_while(|ch| ch.is_whitespace()).collect::<String>();
+    let trimmed = line_text.trim_start();
+    let replacement = format!("{indent}unsafe:\n{indent}    {trimmed}");
+    vec![code_action(
+        String::from("Wrap in `unsafe:` block"),
+        &document.uri,
+        vec![LspTextEdit {
+            range: LspRange {
+                start: LspPosition { line: range.start.line, character: 0 },
+                end: LspPosition {
+                    line: range.start.line,
+                    character: line_text.chars().count() as u32,
+                },
+            },
+            new_text: replacement,
+        }],
+    )]
+}
+
+fn collect_missing_import_code_actions(
+    workspace: &WorkspaceState,
+    document: &DocumentState,
+    range: LspRange,
+) -> Vec<Value> {
+    let Some(token) = token_at_position(&document.text, range.start) else {
+        return Vec::new();
+    };
+    if token.preceded_by_dot || document.local_symbols.contains_key(&token.name) {
+        return Vec::new();
+    }
+
+    let current_module = &document.syntax.source.logical_module;
+    let mut candidates = workspace
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.module_key != *current_module)
+        .filter_map(|node| {
+            node.declarations
+                .iter()
+                .find(|declaration| declaration.owner.is_none() && declaration.name == token.name)
+                .map(|_| node.module_key.clone())
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    if candidates.len() != 1 {
+        return Vec::new();
+    }
+
+    let import_line = format!("from {} import {}\n", candidates[0], token.name);
+    vec![code_action(
+        format!("Import `{}` from `{}`", token.name, candidates[0]),
+        &document.uri,
+        vec![LspTextEdit { range: import_insertion_range(document), new_text: import_line }],
+    )]
+}
+
+fn code_action(title: String, uri: &str, edits: Vec<LspTextEdit>) -> Value {
+    json!({
+        "title": title,
+        "kind": "quickfix",
+        "edit": {
+            "changes": {
+                uri: edits
+            }
+        }
+    })
+}
+
+fn import_insertion_range(document: &DocumentState) -> LspRange {
+    let import_line = document
+        .syntax
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::Import(statement) => Some(statement.line),
+            _ => None,
+        })
+        .max();
+    let insert_line = import_line.unwrap_or(0);
+    LspRange {
+        start: LspPosition { line: insert_line as u32, character: 0 },
+        end: LspPosition { line: insert_line as u32, character: 0 },
+    }
+}
+
+fn token_at_position(text: &str, position: LspPosition) -> Option<TokenOccurrence> {
+    tokenize_identifiers(text).into_iter().find(|token| range_contains(token.range, position))
 }
 
 fn resolve_owner_canonical(
@@ -2358,6 +2543,7 @@ mod tests {
         assert_eq!(capabilities["definitionProvider"], json!(true));
         assert_eq!(capabilities["referencesProvider"], json!(true));
         assert_eq!(capabilities["renameProvider"], json!(true));
+        assert_eq!(capabilities["codeActionProvider"], json!(true));
     }
 
     #[test]
@@ -2662,6 +2848,110 @@ foo.ping()
             .collect::<Vec<_>>();
         assert!(labels.contains(&"only_foo"));
         assert!(!labels.contains(&"only_bar"));
+    }
+
+    #[test]
+    fn code_actions_offer_missing_type_annotation() {
+        let config = temp_workspace(
+            "code_actions_offer_missing_type_annotation",
+            &[(
+                "src/app/__init__.tpy",
+                "class Box:\n    pass\n\ndef build() -> Box:\n    return Box()\n\nbox = build()\n",
+            )],
+        );
+        let server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let actions = server
+            .handle_code_action(json!({
+                "textDocument": {"uri": uri},
+                "range": {
+                    "start": {"line": 6, "character": 0},
+                    "end": {"line": 6, "character": 3}
+                },
+                "context": {"diagnostics": []}
+            }))
+            .expect("code action should succeed");
+        let actions = actions.as_array().expect("code actions should be an array");
+        let action = actions
+            .iter()
+            .find(|action| {
+                action["title"].as_str().is_some_and(|title| title.contains("Add type annotation"))
+            })
+            .expect("missing type annotation action should be present");
+        assert_eq!(action["edit"]["changes"][uri.as_str()][0]["newText"], json!(": Box"));
+    }
+
+    #[test]
+    fn code_actions_offer_unsafe_wrapper_fix() {
+        let config = temp_workspace(
+            "code_actions_offer_unsafe_wrapper_fix",
+            &[("src/app/__init__.tpy", "def run() -> None:\n    eval(\"1\")\n")],
+        );
+        let server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let actions = server
+            .handle_code_action(json!({
+                "textDocument": {"uri": uri},
+                "range": {
+                    "start": {"line": 1, "character": 4},
+                    "end": {"line": 1, "character": 11}
+                },
+                "context": {
+                    "diagnostics": [{
+                        "code": "TPY4019",
+                        "range": {
+                            "start": {"line": 1, "character": 4},
+                            "end": {"line": 1, "character": 11}
+                        },
+                        "message": "unsafe boundary operation `eval(...)` must appear inside `unsafe:`"
+                    }]
+                }
+            }))
+            .expect("code action should succeed");
+        let actions = actions.as_array().expect("code actions should be an array");
+        let action = actions
+            .iter()
+            .find(|action| action["title"] == json!("Wrap in `unsafe:` block"))
+            .expect("unsafe wrapper action should be present");
+        assert_eq!(
+            action["edit"]["changes"][uri.as_str()][0]["newText"],
+            json!("    unsafe:\n        eval(\"1\")")
+        );
+    }
+
+    #[test]
+    fn code_actions_offer_missing_import_fix() {
+        let config = temp_workspace(
+            "code_actions_offer_missing_import_fix",
+            &[
+                ("src/app/__init__.tpy", "def run() -> None:\n    Foo()\n"),
+                ("src/app/types.tpy", "class Foo:\n    pass\n"),
+            ],
+        );
+        let server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let actions = server
+            .handle_code_action(json!({
+                "textDocument": {"uri": uri},
+                "range": {
+                    "start": {"line": 1, "character": 4},
+                    "end": {"line": 1, "character": 7}
+                },
+                "context": {"diagnostics": []}
+            }))
+            .expect("code action should succeed");
+        let actions = actions.as_array().expect("code actions should be an array");
+        let action = actions
+            .iter()
+            .find(|action| action["title"] == json!("Import `Foo` from `app.types`"))
+            .expect("missing import action should be present");
+        assert_eq!(
+            action["edit"]["changes"][uri.as_str()][0]["newText"],
+            json!("from app.types import Foo\n")
+        );
     }
 
     #[test]
