@@ -8857,18 +8857,41 @@ fn infer_generic_type_param_substitutions(
     }
 
     for type_param in &function.type_params {
+        if !substitutions.contains_key(&type_param.name)
+            && let Some(default) = &type_param.default
+        {
+            substitutions.insert(type_param.name.clone(), normalize_type_text(default));
+        }
         let Some(actual) = substitutions.get(&type_param.name) else {
             continue;
         };
-        if let Some(bound) = &type_param.bound
-            && !actual.is_empty()
-            && !direct_type_is_assignable(node, nodes, bound, actual)
-        {
+        if !generic_type_param_accepts_actual(node, nodes, type_param, actual) {
             return None;
         }
     }
 
     Some(substitutions)
+}
+
+fn generic_type_param_accepts_actual(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_param: &typepython_binding::GenericTypeParam,
+    actual: &str,
+) -> bool {
+    if actual.is_empty() {
+        return true;
+    }
+    if let Some(bound) = &type_param.bound {
+        return direct_type_is_assignable(node, nodes, bound, actual);
+    }
+    if !type_param.constraints.is_empty() {
+        return type_param
+            .constraints
+            .iter()
+            .any(|constraint| direct_type_is_assignable(node, nodes, constraint, actual));
+    }
+    true
 }
 
 fn bind_generic_type_params(
@@ -11012,8 +11035,9 @@ mod tests {
     use super::{check, check_with_options};
     use std::{
         fs,
+        io::ErrorKind,
         path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
+        sync::atomic::{AtomicU64, Ordering},
     };
     use typepython_binding::{
         Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
@@ -11021,6 +11045,22 @@ mod tests {
     use typepython_config::DiagnosticLevel;
     use typepython_graph::{ModuleGraph, ModuleNode, build};
     use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
+
+    static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn create_temp_typepython_root() -> PathBuf {
+        let temp_dir = std::env::temp_dir();
+        loop {
+            let unique = TEMP_SOURCE_ROOT_ID.fetch_add(1, Ordering::Relaxed);
+            let root =
+                temp_dir.join(format!("typepython-checking-{}-{unique}", std::process::id()));
+            match fs::create_dir(&root) {
+                Ok(()) => return root,
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("temp directory should be created: {error}"),
+            }
+        }
+    }
 
     fn check_temp_typepython_source(source_text: &str) -> super::CheckResult {
         check_temp_typepython_source_with_options(source_text, ParseOptions::default())
@@ -11050,13 +11090,7 @@ mod tests {
         strict: bool,
         warn_unsafe: bool,
     ) -> super::CheckResult {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir()
-            .join(format!("typepython-checking-{unique}-{}", std::process::id()));
-        fs::create_dir_all(&root).expect("temp directory should be created");
+        let root = create_temp_typepython_root();
         let path = root.join("app.tpy");
         fs::write(&path, source_text).expect("temp source should be written");
 
@@ -19062,6 +19096,15 @@ mod tests {
     }
 
     #[test]
+    fn check_accepts_generic_function_call_inference_from_type_param_default() {
+        let result = check_temp_typepython_source(
+            "def build[T = int](value: T = 1) -> T:\n    return value\n\nresult: int = build()\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
     fn check_infers_generic_function_call_through_union_actual() {
         let node = ModuleNode {
             module_path: PathBuf::from("<generic-inference>"),
@@ -19103,6 +19146,8 @@ mod tests {
             type_params: vec![typepython_binding::GenericTypeParam {
                 name: String::from("T"),
                 bound: None,
+                constraints: Vec::new(),
+                default: None,
             }],
         };
         let signature = vec![typepython_syntax::DirectFunctionParamSite {
@@ -19134,6 +19179,22 @@ mod tests {
                 .expect("union actual should infer through Optional-like annotation");
 
         assert_eq!(substitutions.get("T").map(String::as_str), Some("int"));
+    }
+
+    #[test]
+    fn check_rejects_generic_function_call_outside_constraint_list() {
+        let result = check_temp_typepython_source(
+            "def choose[T: (str, bytes)](value: T) -> T:\n    return value\n\nbad: int = choose(1)\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(
+            rendered.contains("call to `choose`")
+                || rendered.contains("assigns `T` where `bad` expects `int`")
+                || rendered.contains("returns `T` where `bad` expects `int`"),
+            "{rendered}"
+        );
     }
 
     #[test]

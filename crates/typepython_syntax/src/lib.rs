@@ -481,6 +481,8 @@ pub struct UnsafeStatement {
 pub struct TypeParam {
     pub name: String,
     pub bound: Option<String>,
+    pub constraints: Vec<String>,
+    pub default: Option<String>,
 }
 
 struct ParsedTypeParams<'source> {
@@ -3332,13 +3334,26 @@ fn render_type_params(type_params: &[TypeParam]) -> String {
         "[{}]",
         type_params
             .iter()
-            .map(|type_param| match &type_param.bound {
-                Some(bound) => format!("{}: {}", type_param.name, bound),
-                None => type_param.name.clone(),
-            })
+            .map(render_type_param)
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+fn render_type_param(type_param: &TypeParam) -> String {
+    let mut rendered = if !type_param.constraints.is_empty() {
+        format!("{}: ({})", type_param.name, type_param.constraints.join(", "))
+    } else {
+        match &type_param.bound {
+            Some(bound) => format!("{}: {}", type_param.name, bound),
+            None => type_param.name.clone(),
+        }
+    };
+    if let Some(default) = &type_param.default {
+        rendered.push_str(" = ");
+        rendered.push_str(default);
+    }
+    rendered
 }
 
 fn extract_ast_backed_statements(
@@ -6463,28 +6478,16 @@ fn extract_ast_type_params(
     for type_param in type_params.into_iter().flat_map(|type_params| type_params.iter()) {
         match type_param {
             AstTypeParam::TypeVar(type_var) => {
-                if type_var.default.is_some() {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            "TPY4010",
-                            format!("{label} uses deferred-beyond-v1 type parameter defaults"),
-                        )
-                        .with_span(Span::new(
-                            path.display().to_string(),
-                            line,
-                            1,
-                            line,
-                            1,
-                        )),
-                    );
-                    return None;
-                }
+                let (bound, constraints) =
+                    extract_ast_type_param_bound_and_constraints(source, type_var.bound.as_deref())?;
                 parsed.push(TypeParam {
                     name: type_var.name.as_str().to_owned(),
-                    bound: type_var
-                        .bound
+                    bound,
+                    constraints,
+                    default: type_var
+                        .default
                         .as_ref()
-                        .and_then(|bound| slice_range(source, bound.range()))
+                        .and_then(|default| slice_range(source, default.range()))
                         .map(str::to_owned),
                 });
             }
@@ -6507,21 +6510,31 @@ fn extract_ast_type_params(
         }
     }
 
-    let mut seen = std::collections::BTreeSet::new();
-    for type_param in &parsed {
-        if !seen.insert(type_param.name.as_str()) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "TPY4004",
-                    format!("{label} declares type parameter `{}` more than once", type_param.name),
-                )
-                .with_span(Span::new(path.display().to_string(), line, 1, line, 1)),
-            );
-            return None;
-        }
+    if !validate_type_param_names(path, line, label, &parsed, diagnostics)
+        || !validate_type_param_default_order(path, line, label, &parsed, diagnostics)
+    {
+        return None;
     }
 
     Some(parsed)
+}
+
+fn extract_ast_type_param_bound_and_constraints(
+    source: &str,
+    bound: Option<&Expr>,
+) -> Option<(Option<String>, Vec<String>)> {
+    let Some(bound) = bound else {
+        return Some((None, Vec::new()));
+    };
+    if let Expr::Tuple(tuple_expr) = bound {
+        let constraints = tuple_expr
+            .elts
+            .iter()
+            .map(|constraint| slice_range(source, constraint.range()).map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?;
+        return Some((None, constraints));
+    }
+    Some((slice_range(source, bound.range()).map(str::to_owned), Vec::new()))
 }
 
 fn extract_function_params(
@@ -7097,27 +7110,66 @@ fn parse_type_params<'source>(
         }
     }
 
+    if !validate_type_param_names(path, line_number, label, &type_params, diagnostics)
+        || !validate_type_param_default_order(path, line_number, label, &type_params, diagnostics)
+    {
+        return None;
+    }
+
+    Some(ParsedTypeParams { type_params, remainder })
+}
+
+fn validate_type_param_names(
+    path: &Path,
+    line_number: usize,
+    label: &str,
+    type_params: &[TypeParam],
+    diagnostics: &mut DiagnosticReport,
+) -> bool {
     let mut seen = std::collections::BTreeSet::new();
-    for type_param in &type_params {
+    for type_param in type_params {
         if !seen.insert(type_param.name.as_str()) {
             diagnostics.push(
                 Diagnostic::error(
                     "TPY4004",
                     format!("{label} declares type parameter `{}` more than once", type_param.name),
                 )
-                .with_span(Span::new(
-                    path.display().to_string(),
-                    line_number,
-                    1,
-                    line_number,
-                    line.chars().count().max(1),
-                )),
+                .with_span(Span::new(path.display().to_string(), line_number, 1, line_number, 1)),
             );
-            return None;
+            return false;
         }
     }
+    true
+}
 
-    Some(ParsedTypeParams { type_params, remainder })
+fn validate_type_param_default_order(
+    path: &Path,
+    line_number: usize,
+    label: &str,
+    type_params: &[TypeParam],
+    diagnostics: &mut DiagnosticReport,
+) -> bool {
+    let mut seen_default = false;
+    for type_param in type_params {
+        if type_param.default.is_some() {
+            seen_default = true;
+            continue;
+        }
+        if seen_default {
+            diagnostics.push(
+                Diagnostic::error(
+                    "TPY2001",
+                    format!(
+                        "{label} type parameter `{}` without a default cannot follow a parameter with a default",
+                        type_param.name
+                    ),
+                )
+                .with_span(Span::new(path.display().to_string(), line_number, 1, line_number, 1)),
+            );
+            return false;
+        }
+    }
+    true
 }
 
 fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
@@ -7187,16 +7239,12 @@ fn parse_type_param(
             format!("{label} contains an empty type parameter entry"),
         )));
     }
-    if item.contains('=') {
-        return Err(Box::new(parse_error(
-            path,
-            line_number,
-            line,
-            format!("{label} type parameter defaults are deferred beyond v1"),
-        )));
-    }
 
-    let (name_part, bound) = match item.split_once(':') {
+    let (item, default) = match split_top_level_once(item, '=') {
+        Some((head, default)) => (head.trim(), Some(default.trim())),
+        None => (item, None),
+    };
+    let (name_part, bound_or_constraints) = match split_top_level_once(item, ':') {
         Some((name_part, bound)) => (name_part.trim(), Some(bound.trim())),
         None => (item, None),
     };
@@ -7209,7 +7257,7 @@ fn parse_type_param(
         )));
     }
 
-    let bound = match bound {
+    let (bound, constraints) = match bound_or_constraints {
         Some("") => {
             return Err(Box::new(parse_error(
                 path,
@@ -7218,19 +7266,65 @@ fn parse_type_param(
                 format!("{label} type parameter bound must not be empty"),
             )));
         }
-        Some(bound) if bound.starts_with('(') => {
+        Some(bound) if bound.starts_with('(') => (None, parse_type_param_constraints(
+            path,
+            line_number,
+            line,
+            bound,
+            label,
+        )?),
+        Some(bound) => (Some(bound.to_owned()), Vec::new()),
+        None => (None, Vec::new()),
+    };
+    let default = match default {
+        Some("") => {
             return Err(Box::new(parse_error(
                 path,
                 line_number,
                 line,
-                format!("{label} type parameter constraint lists are deferred beyond v1"),
+                format!("{label} type parameter default must not be empty"),
             )));
         }
-        Some(bound) => Some(bound.to_owned()),
+        Some(default) => Some(default.to_owned()),
         None => None,
     };
 
-    Ok(TypeParam { name: name_part.to_owned(), bound })
+    Ok(TypeParam { name: name_part.to_owned(), bound, constraints, default })
+}
+
+fn parse_type_param_constraints(
+    path: &Path,
+    line_number: usize,
+    line: &str,
+    constraints: &str,
+    label: &str,
+) -> Result<Vec<String>, Box<Diagnostic>> {
+    let Some(inner) = constraints.strip_prefix('(').and_then(|inner| inner.strip_suffix(')')) else {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} type parameter constraint list must be parenthesized"),
+        )));
+    };
+    let parsed = split_top_level_commas(inner);
+    if parsed.is_empty() {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} type parameter constraint list must not be empty"),
+        )));
+    }
+    if parsed.iter().any(|constraint| constraint.is_empty()) {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} type parameter constraint list must not contain empty entries"),
+        )));
+    }
+    Ok(parsed.into_iter().map(str::to_owned).collect())
 }
 
 fn split_bracketed(input: &str) -> Option<(&str, &str)> {
@@ -7371,7 +7465,12 @@ mod tests {
             vec![
                 SyntaxStatement::TypeAlias(TypeAliasStatement {
                     name: String::from("Pair"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
@@ -7464,13 +7563,20 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         bound: Some(String::from("Hashable")),
+                        constraints: Vec::new(),
+                        default: None,
                     }],
                     value: String::from("tuple[T, T]"),
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -7485,6 +7591,8 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
+                        constraints: Vec::new(),
+                        default: None,
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
@@ -7497,7 +7605,12 @@ mod tests {
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Result"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -7512,6 +7625,8 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         bound: Some(String::from("Sequence[str]")),
+                        constraints: Vec::new(),
+                        default: None,
                     }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
@@ -7558,24 +7673,116 @@ mod tests {
     }
 
     #[test]
+    fn parse_captures_type_param_constraints_and_defaults() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic-defaults.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: concat!(
+                "typealias Pair[T = int] = tuple[T, T]\n",
+                "interface Box[T: (str, bytes) = str]:\n",
+                "    pass\n",
+                "overload def first[T: (A, B)](value):\n",
+                "    ...\n"
+            )
+            .to_owned(),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("Pair"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: Some(String::from("int")),
+                    }],
+                    value: String::from("tuple[T, T]"),
+                    line: 1,
+                }),
+                SyntaxStatement::Interface(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: vec![String::from("str"), String::from("bytes")],
+                        default: Some(String::from("str")),
+                    }],
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: Vec::new(),
+                    line: 2,
+                }),
+                SyntaxStatement::OverloadDef(FunctionStatement {
+                    name: String::from("first"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: vec![String::from("A"), String::from("B")],
+                        default: None,
+                    }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
+                    returns: None,
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    line: 4,
+                }),
+            ]
+        );
+    }
+
+    #[test]
     fn parse_reports_malformed_type_parameter_lists() {
         let tree = parse(SourceFile {
             path: PathBuf::from("broken-generics.tpy"),
             kind: SourceKind::TypePython,
             logical_module: String::new(),
             text: concat!(
-                "typealias Pair[T = int] = tuple[T, T]\n",
+                "typealias Pair[T = ] = tuple[T, T]\n",
                 "interface Box[T:] :\n",
-                "overload def first[T: (A, B)](value):\n"
+                "overload def first[T: (, B)](value):\n",
+                "class LaterDefault[T = int, U]:\n",
+                "    pass\n"
             )
             .to_owned(),
         });
 
         assert!(tree.diagnostics.has_errors());
         let rendered = tree.diagnostics.as_text();
-        assert!(rendered.contains("type parameter defaults are deferred beyond v1"));
+        assert!(rendered.contains("type parameter default must not be empty"));
         assert!(rendered.contains("type parameter bound must not be empty"));
-        assert!(rendered.contains("type parameter constraint lists are deferred beyond v1"));
+        assert!(rendered.contains("type parameter constraint list must not contain empty entries"));
+    }
+
+    #[test]
+    fn parse_reports_type_param_default_ordering() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("type-param-default-order.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("class LaterDefault[T = int, U]:\n    pass\n"),
+        });
+
+        assert!(tree.diagnostics.has_errors());
+        let rendered = tree.diagnostics.as_text();
+        assert!(rendered.contains("without a default cannot follow a parameter with a default"));
     }
 
     #[test]
@@ -7884,7 +8091,12 @@ mod tests {
             vec![
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -7896,11 +8108,106 @@ mod tests {
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("first"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("T")),
                         has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false
+                    }],
+                    returns: Some(String::from("T")),
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    line: 4,
+                }),
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name: String::from("first"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                    line: 5,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_accepts_generic_python_headers_with_constraints_and_defaults() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic-defaults.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "class Box[T: (str, bytes) = str]:\n    pass\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        assert_eq!(
+            tree.statements,
+            vec![
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: vec![String::from("str"), String::from("bytes")],
+                        default: Some(String::from("str")),
+                    }],
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: Vec::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("first"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: Some(String::from("int")),
+                    }],
+                    params: vec![FunctionParam {
+                        name: String::from("value"),
+                        annotation: Some(String::from("T")),
+                        has_default: true,
                         positional_only: false,
                         keyword_only: false,
                         variadic: false,

@@ -344,6 +344,8 @@ pub struct Declaration {
 pub struct GenericTypeParam {
     pub name: String,
     pub bound: Option<String>,
+    pub constraints: Vec<String>,
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -994,7 +996,12 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
 fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<GenericTypeParam> {
     type_params
         .iter()
-        .map(|param| GenericTypeParam { name: param.name.clone(), bound: param.bound.clone() })
+        .map(|param| GenericTypeParam {
+            name: param.name.clone(),
+            bound: param.bound.clone(),
+            constraints: param.constraints.clone(),
+            default: param.default.clone(),
+        })
         .collect()
 }
 
@@ -1026,13 +1033,23 @@ mod tests {
             statements: vec![
                 SyntaxStatement::TypeAlias(TypeAliasStatement {
                     name: String::from("UserId"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     value: String::from("Box[T]"),
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("User"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -1044,7 +1061,12 @@ mod tests {
                 }),
                 SyntaxStatement::FunctionDef(FunctionStatement {
                     name: String::from("helper"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     params: Vec::new(),
                     returns: None,
                     is_async: false,
@@ -1080,7 +1102,12 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![GenericTypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                 },
                 Declaration {
                     name: String::from("User"),
@@ -1099,7 +1126,12 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![GenericTypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                 },
                 Declaration {
                     name: String::from("helper"),
@@ -1118,7 +1150,12 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![GenericTypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                 },
             ]
         );
@@ -1165,7 +1202,12 @@ mod tests {
             statements: vec![
                 SyntaxStatement::OverloadDef(FunctionStatement {
                     name: String::from("parse"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     params: Vec::new(),
                     returns: None,
                     is_async: false,
@@ -1210,7 +1252,12 @@ mod tests {
                     is_final: false,
                     is_class_var: false,
                     bases: Vec::new(),
-                    type_params: vec![GenericTypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![GenericTypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                 },
                 Declaration {
                     name: String::from("parse"),

@@ -230,17 +230,21 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             .is_some_and(|(transform, _)| TYPEDICT_TRANSFORMS.contains(&transform))
     });
     let has_sealed_classes = !sealed_classes.is_empty();
+    let needs_typing_extensions_typevar =
+        runtime_type_params.values().any(|type_param| type_param.default.is_some());
 
     let mut lowered_lines = Vec::new();
     let mut required_imports = Vec::new();
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
-    if !runtime_type_params.is_empty() && !has_typevar_import(&tree.source.text) {
+    if !runtime_type_params.is_empty()
+        && !has_typevar_import(&tree.source.text, needs_typing_extensions_typevar)
+    {
         push_required_import(
             &mut lowered_lines,
             &mut required_imports,
-            String::from("from typing import TypeVar"),
+            rewrite_typevar_import_line(needs_typing_extensions_typevar),
         );
         lowered_line_number += 1;
     }
@@ -252,8 +256,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         );
         lowered_line_number += 1;
     }
-    for (name, bound) in &runtime_type_params {
-        lowered_lines.push(rewrite_typevar_line(name, bound.as_deref()));
+    for (name, type_param) in &runtime_type_params {
+        lowered_lines.push(rewrite_typevar_line(name, type_param));
         lowered_line_number += 1;
     }
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
@@ -426,46 +430,77 @@ fn collect_runtime_type_params(
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
     overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
-) -> std::collections::BTreeMap<String, Option<String>> {
+) -> std::collections::BTreeMap<String, RuntimeTypeParam> {
     let mut type_params = std::collections::BTreeMap::new();
 
     for statement in type_aliases.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in interfaces.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in data_classes.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in sealed_classes.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in class_defs.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in function_defs.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
     for statement in overloads.values() {
         for type_param in &statement.type_params {
-            type_params.entry(type_param.name.clone()).or_insert_with(|| type_param.bound.clone());
+            type_params
+                .entry(type_param.name.clone())
+                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
         }
     }
 
     type_params
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RuntimeTypeParam {
+    bound: Option<String>,
+    constraints: Vec<String>,
+    default: Option<String>,
+}
+
+impl RuntimeTypeParam {
+    fn from_type_param(type_param: &typepython_syntax::TypeParam) -> Self {
+        Self {
+            bound: type_param.bound.clone(),
+            constraints: type_param.constraints.clone(),
+            default: type_param.default.clone(),
+        }
+    }
 }
 
 fn has_generic_class_like_declarations(
@@ -492,11 +527,18 @@ fn rewrite_typealias_line(line: &str, statement: &typepython_syntax::TypeAliasSt
     format!("{indentation}{}: TypeAlias = {}", statement.name, statement.value)
 }
 
-fn rewrite_typevar_line(name: &str, bound: Option<&str>) -> String {
-    match bound {
-        Some(bound) => format!("{name} = TypeVar(\"{name}\", bound={bound})"),
-        None => format!("{name} = TypeVar(\"{name}\")"),
+fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
+    let mut args = vec![format!("\"{name}\"")];
+    args.extend(type_param.constraints.iter().cloned());
+    if type_param.constraints.is_empty()
+        && let Some(bound) = &type_param.bound
+    {
+        args.push(format!("bound={bound}"));
     }
+    if let Some(default) = &type_param.default {
+        args.push(format!("default={default}"));
+    }
+    format!("{name} = TypeVar({})", args.join(", "))
 }
 
 fn has_typealias_import(source: &str) -> bool {
@@ -507,12 +549,22 @@ fn has_typealias_import(source: &str) -> bool {
     })
 }
 
-fn has_typevar_import(source: &str) -> bool {
+fn has_typevar_import(source: &str, from_typing_extensions: bool) -> bool {
+    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
     source.lines().any(|line| {
         let trimmed = line.trim();
-        trimmed == "from typing import TypeVar"
-            || (trimmed.starts_with("from typing import ") && trimmed.contains("TypeVar"))
+        trimmed == format!("from {module} import TypeVar")
+            || (trimmed.starts_with(&format!("from {module} import "))
+                && trimmed.contains("TypeVar"))
     })
+}
+
+fn rewrite_typevar_import_line(from_typing_extensions: bool) -> String {
+    if from_typing_extensions {
+        String::from("from typing_extensions import TypeVar")
+    } else {
+        String::from("from typing import TypeVar")
+    }
 }
 
 fn has_generic_import(source: &str) -> bool {
@@ -1345,7 +1397,12 @@ mod tests {
             },
             statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
                 name: String::from("SupportsClose"),
-                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                }],
                 header_suffix: String::new(),
                 bases: Vec::new(),
                 is_final_decorator: false,
@@ -1453,7 +1510,12 @@ mod tests {
             statements: vec![
                 SyntaxStatement::DataClass(NamedBlockStatement {
                     name: String::from("Point"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
                     is_final_decorator: false,
@@ -1465,7 +1527,12 @@ mod tests {
                 }),
                 SyntaxStatement::SealedClass(NamedBlockStatement {
                     name: String::from("Expr"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
@@ -1618,7 +1685,12 @@ mod tests {
             },
             statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
                 name: String::from("Pair"),
-                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                }],
                 value: String::from("tuple[T, T]"),
                 line: 1,
             })],
@@ -1634,6 +1706,44 @@ mod tests {
     }
 
     #[test]
+    fn lower_rewrites_type_param_constraints_and_defaults() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("generic-default-typealias.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from("typealias Pair[T: (str, bytes) = str] = tuple[T, T]\n"),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("Pair"),
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                    constraints: vec![String::from("str"), String::from("bytes")],
+                    default: Some(String::from("str")),
+                }],
+                value: String::from("tuple[T, T]"),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing_extensions import TypeVar\nT = TypeVar(\"T\", str, bytes, default=str)\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
+        );
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![
+                String::from("from typing_extensions import TypeVar"),
+                String::from("from typing import TypeAlias"),
+            ]
+        );
+    }
+
+    #[test]
     fn lower_still_blocks_generic_overload_def() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
@@ -1644,7 +1754,12 @@ mod tests {
             },
             statements: vec![SyntaxStatement::OverloadDef(typepython_syntax::FunctionStatement {
                 name: String::from("parse"),
-                type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                type_params: vec![TypeParam {
+                    name: String::from("T"),
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                }],
                 params: Vec::new(),
                 returns: None,
                 is_async: false,
@@ -1678,7 +1793,12 @@ mod tests {
             statements: vec![
                 SyntaxStatement::ClassDef(NamedBlockStatement {
                     name: String::from("Box"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     header_suffix: String::from("(Base)"),
                     bases: vec![String::from("Base")],
                     is_final_decorator: false,
@@ -1690,7 +1810,12 @@ mod tests {
                 }),
                 SyntaxStatement::FunctionDef(typepython_syntax::FunctionStatement {
                     name: String::from("first"),
-                    type_params: vec![TypeParam { name: String::from("T"), bound: None }],
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
                     params: Vec::new(),
                     returns: None,
                     is_async: false,
