@@ -149,6 +149,11 @@ pub fn check_with_options(
         {
             diagnostics.push(assignment_diagnostic);
         }
+        for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
+            if !diagnostics.diagnostics.contains(&typed_dict_diagnostic) {
+                diagnostics.push(typed_dict_diagnostic);
+            }
+        }
         for typed_dict_diagnostic in typed_dict_readonly_mutation_diagnostics(node, &graph.nodes) {
             diagnostics.push(typed_dict_diagnostic);
         }
@@ -663,10 +668,13 @@ fn call_signature_params_are_applicable(
         return false;
     }
     if keyword_expansions.iter().any(|expansion| match expansion {
-        KeywordExpansion::TypedDict(shape) => shape.fields.keys().any(|key| {
-            !params.iter().any(|param| param.name == *key && !param.positional_only)
-                && !accepts_extra_keywords
-        }),
+        KeywordExpansion::TypedDict(shape) => {
+            (typed_dict_shape_has_unbounded_extra_keys(shape) && !accepts_extra_keywords)
+                || shape.fields.keys().any(|key| {
+                    !params.iter().any(|param| param.name == *key && !param.positional_only)
+                        && !accepts_extra_keywords
+                })
+        }
         KeywordExpansion::Mapping(_) => !accepts_extra_keywords,
     }) {
         return false;
@@ -2137,7 +2145,6 @@ struct TypedDictExtraItemsShape {
 struct TypedDictShape {
     name: String,
     fields: BTreeMap<String, TypedDictFieldShape>,
-    #[expect(dead_code, reason = "closed/open TypedDict state is preserved for future shape ops")]
     closed: bool,
     extra_items: Option<TypedDictExtraItemsShape>,
 }
@@ -2172,6 +2179,10 @@ fn typed_dict_known_or_extra_field<'a>(
     shape.extra_items.as_ref().map(TypedDictFieldShapeRef::Extra)
 }
 
+fn typed_dict_shape_has_unbounded_extra_keys(shape: &TypedDictShape) -> bool {
+    !shape.closed && shape.extra_items.is_none()
+}
+
 enum TypedDictFieldShapeRef<'a> {
     Known(&'a TypedDictFieldShape),
     Extra(&'a TypedDictExtraItemsShape),
@@ -2193,10 +2204,6 @@ impl<'a> TypedDictFieldShapeRef<'a> {
     }
 }
 
-#[expect(
-    dead_code,
-    reason = "standalone TypedDict literal diagnostics are preserved for future call sites"
-)]
 fn typed_dict_literal_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -2288,6 +2295,20 @@ fn typed_dict_literal_entry_diagnostics(
                 ));
                 continue;
             };
+
+            if typed_dict_shape_has_unbounded_extra_keys(&expansion_shape)
+                && target_shape.extra_items.is_none()
+            {
+                diagnostics.push(typed_dict_literal_diagnostic(
+                    node,
+                    line,
+                    format!(
+                        "TypedDict literal for `{}` cannot expand open TypedDict `{}` because it may contain undeclared keys",
+                        target_shape.name, expansion_shape.name
+                    ),
+                ));
+                continue;
+            }
 
             for (key, field) in &expansion_shape.fields {
                 let Some(target_field) = typed_dict_known_or_extra_field(target_shape, key) else {
@@ -8562,6 +8583,21 @@ fn direct_source_function_keyword_diagnostics(
                     _ => None,
                 }
             })
+            .chain(
+                (typed_dict_shape_has_unbounded_extra_keys(&shape) && !accepts_extra_keywords).then(
+                    || {
+                        Diagnostic::error(
+                            "TPY4013",
+                            format!(
+                                "call to `{}` in module `{}` cannot expand open TypedDict `{}` because it may contain undeclared keys",
+                                call.callee,
+                                node.module_path.display(),
+                                shape.name
+                            ),
+                        )
+                    },
+                ),
+            )
             .chain(shape.extra_items.as_ref().into_iter().filter_map(|extra| {
                 (!accepts_extra_keywords).then(|| {
                     Diagnostic::error(
@@ -12843,6 +12879,26 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4013"));
         assert!(rendered.contains("invalid `**` expansion"));
+    }
+
+    #[test]
+    fn check_reports_open_typed_dict_expansion() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\nclass Extra(TypedDict):\n    id: int\n\ndef make_extra() -> Extra:\n    return {\"id\": 1}\n\npayload: User = {**make_extra()}\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("cannot expand open TypedDict `Extra`"));
+    }
+
+    #[test]
+    fn check_accepts_closed_typed_dict_expansion() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\nclass Extra(TypedDict, closed=True):\n    id: int\n\ndef make_extra() -> Extra:\n    return {\"id\": 1}\n\npayload: User = {**make_extra()}\n",
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     }
 
     #[test]
@@ -21738,105 +21794,23 @@ mod tests {
     }
 
     #[test]
-    fn check_accepts_typed_dict_keyword_expansion_callsite() {
-        let result = check(&ModuleGraph {
-            nodes: vec![ModuleNode {
-                module_path: PathBuf::from("src/app/module.tpy"),
-                module_key: String::from("app.module"),
-                module_kind: SourceKind::TypePython,
-                declarations: vec![
-                    Declaration {
-                        name: String::from("UserKw"),
-                        kind: DeclarationKind::Class,
-                        detail: String::new(),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: Some(DeclarationOwnerKind::Class),
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: vec![String::from("TypedDict")],
-                        type_params: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("name"),
-                        kind: DeclarationKind::Value,
-                        detail: String::from("str"),
-                        value_type: Some(String::from("str")),
-                        method_kind: None,
-                        class_kind: None,
-                        owner: Some(DeclarationOwner {
-                            name: String::from("UserKw"),
-                            kind: DeclarationOwnerKind::Class,
-                        }),
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    },
-                    Declaration {
-                        name: String::from("build"),
-                        kind: DeclarationKind::Function,
-                        detail: String::from("(*,name:str)->None"),
-                        value_type: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    },
-                ],
-                member_accesses: Vec::new(),
-                returns: Vec::new(),
-                yields: Vec::new(),
-                if_guards: Vec::new(),
-                asserts: Vec::new(),
-                invalidations: Vec::new(),
-                matches: Vec::new(),
-                for_loops: Vec::new(),
-                with_statements: Vec::new(),
-                except_handlers: Vec::new(),
-                assignments: Vec::new(),
-                summary_fingerprint: 1,
-                calls: vec![typepython_binding::CallSite {
-                    callee: String::from("build"),
-                    arg_count: 0,
-                    arg_types: Vec::new(),
-                    arg_values: Vec::new(),
-                    starred_arg_types: Vec::new(),
-                    starred_arg_values: Vec::new(),
-                    keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    keyword_arg_values: Vec::new(),
-                    keyword_expansion_types: vec![String::from("UserKw")],
-                    keyword_expansion_values: Vec::new(),
-                    line: 4,
-                }],
-                method_calls: Vec::new(),
-            }],
-        });
+    fn check_accepts_closed_typed_dict_keyword_expansion_callsite() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass UserKw(TypedDict, closed=True):\n    name: str\n\ndef build(*, name: str) -> None:\n    return None\n\ndef payload() -> UserKw:\n    return {\"name\": \"Ada\"}\n\nbuild(**payload())\n",
+        );
 
         assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_open_typed_dict_keyword_expansion_callsite() {
+        let result = check_temp_typepython_source(
+            "from typing import TypedDict\n\nclass UserKw(TypedDict):\n    name: str\n\ndef build(*, name: str) -> None:\n    return None\n\ndef payload() -> UserKw:\n    return {\"name\": \"Ada\"}\n\nbuild(**payload())\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4013"));
+        assert!(rendered.contains("cannot expand open TypedDict `UserKw`"));
     }
 
     #[test]
