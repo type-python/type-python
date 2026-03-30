@@ -2089,11 +2089,18 @@ fn render_authoritative_class_stub(
     class_def: &ruff_python_ast::StmtClassDef,
     context: &LoweredStubContext,
 ) -> String {
+    let indentation = leading_indent(
+        source
+            .lines()
+            .nth(offset_to_line(source, class_def.name.range.start().to_usize()).saturating_sub(1))
+            .unwrap_or_default(),
+    );
+    let decorators = builtin_decorator_lines(source, &class_def.decorator_list, &indentation);
     let header =
         source_header_text(source, class_def.name.range.start().to_usize(), &class_def.body)
             .trim_end()
             .to_owned();
-    let indent = format!("{}    ", leading_indent(&header.lines().next().unwrap_or_default()));
+    let indent = format!("{}    ", indentation);
     let class_line = offset_to_line(source, class_def.name.range.start().to_usize());
     let mut body_lines = render_authoritative_class_body(source, class_def, context, &indent);
 
@@ -2103,10 +2110,14 @@ fn render_authoritative_class_stub(
         }
     }
 
+    let mut lines = decorators;
     if body_lines.is_empty() {
-        rewrite_stub_header_text(&header)
+        lines.push(rewrite_stub_header_text(&header));
+        lines.join("\n")
     } else {
-        format!("{header}\n{}", body_lines.join("\n"))
+        lines.push(header);
+        lines.push(body_lines.join("\n"));
+        lines.join("\n")
     }
 }
 
@@ -2114,7 +2125,7 @@ fn render_authoritative_class_body(
     source: &str,
     class_def: &ruff_python_ast::StmtClassDef,
     context: &LoweredStubContext,
-    _indent: &str,
+    indent: &str,
 ) -> Vec<String> {
     let overloaded_names: std::collections::BTreeSet<_> = class_def
         .body
@@ -2136,14 +2147,14 @@ fn render_authoritative_class_body(
                 if let Some(replacement) =
                     render_authoritative_annotated_assignment_stub(source, assign)
                 {
-                    body_lines.push(replacement);
+                    body_lines.push(indent_block_lines(&replacement, indent));
                 }
             }
             Stmt::Assign(assign) => {
                 if let Some(replacement) =
                     render_authoritative_assignment_stub(source, assign, context)
                 {
-                    body_lines.push(replacement);
+                    body_lines.push(indent_block_lines(&replacement, indent));
                 }
             }
             Stmt::FunctionDef(function) => {
@@ -2162,6 +2173,10 @@ fn render_authoritative_class_body(
     }
 
     body_lines
+}
+
+fn indent_block_lines(block: &str, indentation: &str) -> String {
+    block.lines().map(|line| format!("{indentation}{line}")).collect::<Vec<_>>().join("\n")
 }
 
 fn render_authoritative_annotated_assignment_stub(
@@ -2298,12 +2313,18 @@ fn is_stub_surface_decorator(expression: &Expr) -> bool {
     match expression {
         Expr::Name(name) => matches!(
             name.id.as_str(),
-            "overload" | "staticmethod" | "classmethod" | "property" | "final" | "override"
+            "overload"
+                | "staticmethod"
+                | "classmethod"
+                | "property"
+                | "final"
+                | "override"
+                | "deprecated"
         ),
         Expr::Attribute(attribute) => {
             matches!(
                 attribute.attr.as_str(),
-                "overload" | "staticmethod" | "classmethod" | "setter"
+                "overload" | "staticmethod" | "classmethod" | "setter" | "deprecated"
             ) || matches!(attribute.attr.as_str(), "property")
         }
         Expr::Call(call) => is_stub_surface_decorator(call.func.as_ref()),

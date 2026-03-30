@@ -7,7 +7,7 @@ use std::{
 };
 
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
-use typepython_config::DiagnosticLevel;
+use typepython_config::{DiagnosticLevel, ImportFallback};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
 use typepython_syntax::SourceKind;
@@ -95,9 +95,10 @@ thread_local! {
     static ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE: RefCell<
         Vec<BTreeMap<String, typepython_syntax::DataclassTransformModuleInfo>>,
     > = const { RefCell::new(Vec::new()) };
+    static ACTIVE_IMPORT_FALLBACK: RefCell<Vec<ImportFallback>> = const { RefCell::new(Vec::new()) };
 }
 
-fn with_checker_source_caches<T>(action: impl FnOnce() -> T) -> T {
+fn with_checker_source_caches<T>(import_fallback: ImportFallback, action: impl FnOnce() -> T) -> T {
     struct CheckerSourceCacheGuard;
 
     impl Drop for CheckerSourceCacheGuard {
@@ -115,6 +116,9 @@ fn with_checker_source_caches<T>(action: impl FnOnce() -> T) -> T {
                 cache.borrow_mut().pop();
             });
             ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
+                cache.borrow_mut().pop();
+            });
+            ACTIVE_IMPORT_FALLBACK.with(|cache| {
                 cache.borrow_mut().pop();
             });
         }
@@ -135,14 +139,37 @@ fn with_checker_source_caches<T>(action: impl FnOnce() -> T) -> T {
     ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
         cache.borrow_mut().push(BTreeMap::new());
     });
+    ACTIVE_IMPORT_FALLBACK.with(|cache| {
+        cache.borrow_mut().push(import_fallback);
+    });
     let _guard = CheckerSourceCacheGuard;
     action()
+}
+
+fn active_import_fallback() -> ImportFallback {
+    ACTIVE_IMPORT_FALLBACK
+        .with(|cache| cache.borrow().last().copied().unwrap_or(ImportFallback::Unknown))
+}
+
+fn import_fallback_type() -> &'static str {
+    match active_import_fallback() {
+        ImportFallback::Unknown => "unknown",
+        ImportFallback::Dynamic => "dynamic",
+    }
 }
 
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
-    check_with_options(graph, false, true, DiagnosticLevel::Warning, false, false)
+    check_with_options(
+        graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+    )
 }
 
 #[must_use]
@@ -153,8 +180,9 @@ pub fn check_with_options(
     report_deprecated: DiagnosticLevel,
     strict: bool,
     warn_unsafe: bool,
+    import_fallback: ImportFallback,
 ) -> CheckResult {
-    with_checker_source_caches(|| {
+    with_checker_source_caches(import_fallback, || {
         let mut diagnostics = DiagnosticReport::default();
 
         for node in &graph.nodes {
@@ -1139,14 +1167,34 @@ fn name_is_unknown_boundary(
         return true;
     }
 
+    if let Some((head, _)) = name.split_once('.')
+        && unresolved_import_boundary_type(node, nodes, head)
+            .is_some_and(|boundary| boundary == "unknown")
+    {
+        return true;
+    }
+
     if resolve_imported_module_target(node, nodes, name).is_some() {
         return false;
     }
 
-    node.declarations
-        .iter()
-        .find(|declaration| declaration.kind == DeclarationKind::Import && declaration.name == name)
-        .is_some_and(|import| resolve_import_target(node, nodes, import).is_none())
+    unresolved_import_boundary_type(node, nodes, name).is_some_and(|boundary| boundary == "unknown")
+}
+
+fn unresolved_import_boundary_type<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    local_name: &str,
+) -> Option<&'static str> {
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == local_name
+    })?;
+    if resolve_import_target(node, nodes, import).is_some()
+        || resolve_imported_module_target(node, nodes, local_name).is_some()
+    {
+        return None;
+    }
+    Some(import_fallback_type())
 }
 
 fn resolve_direct_type_alias<'a>(
@@ -6148,9 +6196,9 @@ fn resolve_member_access_owner_type(
             nodes,
             None,
             None,
-            None,
-            None,
-            usize::MAX,
+            access.current_owner_name.as_deref(),
+            access.current_owner_type_name.as_deref(),
+            access.line,
             &access.owner_name,
         )
         .or_else(|| Some(access.owner_name.clone()))
@@ -6338,6 +6386,16 @@ fn resolve_unnarrowed_name_reference_type(
             .collect::<Vec<_>>();
         let return_text = resolve_direct_callable_return_type(node, nodes, value_name)?;
         return Some(format_callable_annotation(&param_types, &return_text));
+    }
+
+    if let Some(boundary_type) = unresolved_import_boundary_type(node, nodes, value_name) {
+        return Some(String::from(boundary_type));
+    }
+
+    if let Some((head, _)) = value_name.split_once('.')
+        && let Some(boundary_type) = unresolved_import_boundary_type(node, nodes, head)
+    {
+        return Some(String::from(boundary_type));
     }
 
     None
@@ -8005,6 +8063,39 @@ fn direct_member_access_diagnostics(
             }
 
             let owner_type_name = resolve_member_access_owner_type(node, nodes, access)?;
+            if let Some(branches) = union_branches(&owner_type_name) {
+                let available = branches
+                    .iter()
+                    .filter(|branch| type_has_readable_member(node, nodes, branch, &access.member))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if available.len() == branches.len() {
+                    return None;
+                }
+                let mut diagnostic = Diagnostic::error(
+                    "TPY4002",
+                    format!(
+                        "type `{}` in module `{}` has no member `{}` on every union branch",
+                        owner_type_name,
+                        node.module_path.display(),
+                        access.member
+                    ),
+                );
+                if let Some((span, replacement)) =
+                    union_member_guard_suggestion(&node.module_path, access, &available)
+                {
+                    diagnostic = diagnostic.with_suggestion(
+                        format!(
+                            "Insert `isinstance` guard for `{}` before accessing `{}`",
+                            access.owner_name, access.member
+                        ),
+                        span,
+                        replacement,
+                        SuggestionApplicability::MachineApplicable,
+                    );
+                }
+                return Some(diagnostic);
+            }
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
             let has_member = find_owned_readable_member_declaration(
                 nodes,
@@ -8027,6 +8118,56 @@ fn direct_member_access_diagnostics(
             })
         })
         .collect()
+}
+
+fn type_has_readable_member(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+    member: &str,
+) -> bool {
+    let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, type_name) else {
+        return false;
+    };
+    find_owned_readable_member_declaration(nodes, class_node, class_decl, member).is_some()
+}
+
+fn union_member_guard_suggestion(
+    module_path: &std::path::Path,
+    access: &typepython_binding::MemberAccessSite,
+    available_branches: &[String],
+) -> Option<(Span, String)> {
+    let guard_types = available_branches
+        .iter()
+        .filter_map(|branch| isinstance_guard_type_name(branch))
+        .collect::<Vec<_>>();
+    if guard_types.is_empty() {
+        return None;
+    }
+    let source = fs::read_to_string(module_path).ok()?;
+    let line_text = source.lines().nth(access.line.checked_sub(1)?)?;
+    let indent = leading_space_count(line_text);
+    let guard = if guard_types.len() == 1 {
+        guard_types[0].clone()
+    } else {
+        format!("({})", guard_types.join(", "))
+    };
+    Some((
+        Span::new(module_path.display().to_string(), access.line, 1, access.line, 1),
+        format!("{}assert isinstance({}, {})\n", " ".repeat(indent), access.owner_name, guard),
+    ))
+}
+
+fn isinstance_guard_type_name(type_name: &str) -> Option<String> {
+    let normalized = normalize_type_text(type_name);
+    if normalized.is_empty()
+        || matches!(normalized.as_str(), "None" | "dynamic" | "unknown")
+        || normalized.contains('[')
+        || normalized.contains('|')
+    {
+        return None;
+    }
+    Some(normalized)
 }
 
 fn direct_method_call_diagnostics(
@@ -10382,28 +10523,7 @@ fn resolve_direct_function_with_node<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
-    if let Some(local) = node.declarations.iter().find(|declaration| {
-        declaration.name == callee
-            && declaration.owner.is_none()
-            && declaration.kind == DeclarationKind::Function
-    }) {
-        return Some((node, local));
-    }
-
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == callee
-    })?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    target_node
-        .declarations
-        .iter()
-        .find(|declaration| {
-            declaration.name == symbol_name
-                && declaration.owner.is_none()
-                && declaration.kind == DeclarationKind::Function
-        })
-        .map(|declaration| (target_node, declaration))
+    resolve_function_provider_with_node(nodes, node, callee)
 }
 
 fn resolve_direct_function<'a>(
@@ -12508,7 +12628,7 @@ fn sealed_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            Some(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4009",
                 format!(
                     "non-exhaustive `match` over sealed root `{}` in module `{}`; missing subclasses: {}",
@@ -12516,6 +12636,16 @@ fn sealed_match_exhaustiveness_diagnostics(
                     node.module_path.display(),
                     missing.join(", ")
                 ),
+            );
+            let rendered_cases = missing
+                .iter()
+                .map(|name| format!("case {name}:\n    ..."))
+                .collect::<Vec<_>>();
+            Some(attach_match_case_suggestion(
+                diagnostic,
+                &node.module_path,
+                match_site,
+                &rendered_cases,
             ))
         })
         .collect()
@@ -12580,7 +12710,7 @@ fn enum_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            Some(Diagnostic::error(
+            let diagnostic = Diagnostic::error(
                 "TPY4009",
                 format!(
                     "non-exhaustive `match` over enum `{}` in module `{}`; missing members: {}",
@@ -12588,9 +12718,98 @@ fn enum_match_exhaustiveness_diagnostics(
                     node.module_path.display(),
                     missing.join(", ")
                 ),
+            );
+            let rendered_cases = missing
+                .iter()
+                .map(|name| format!("case {}.{name}:\n    ...", enum_decl.name))
+                .collect::<Vec<_>>();
+            Some(attach_match_case_suggestion(
+                diagnostic,
+                &node.module_path,
+                match_site,
+                &rendered_cases,
             ))
         })
         .collect()
+}
+
+fn attach_match_case_suggestion(
+    diagnostic: Diagnostic,
+    module_path: &std::path::Path,
+    match_site: &typepython_binding::MatchSite,
+    rendered_cases: &[String],
+) -> Diagnostic {
+    let Some((span, replacement)) =
+        match_case_insertion_edit(module_path, match_site, rendered_cases)
+    else {
+        return diagnostic;
+    };
+    diagnostic.with_suggestion(
+        "Add missing `match` case arms",
+        span,
+        replacement,
+        SuggestionApplicability::MachineApplicable,
+    )
+}
+
+fn match_case_insertion_edit(
+    module_path: &std::path::Path,
+    match_site: &typepython_binding::MatchSite,
+    rendered_cases: &[String],
+) -> Option<(Span, String)> {
+    if rendered_cases.is_empty() {
+        return None;
+    }
+    let source = fs::read_to_string(module_path).ok()?;
+    let lines = source.lines().collect::<Vec<_>>();
+    let match_line = *lines.get(match_site.line.checked_sub(1)?)?;
+    let match_indent = leading_space_count(match_line);
+    let case_indent = match_site
+        .cases
+        .iter()
+        .filter_map(|case| lines.get(case.line.checked_sub(1)?).copied())
+        .map(leading_space_count)
+        .find(|indent| *indent > match_indent)
+        .unwrap_or(match_indent + 4);
+    let body_indent = case_indent + 4;
+    let rendered = rendered_cases
+        .iter()
+        .map(|case| {
+            case.lines()
+                .enumerate()
+                .map(|(index, line)| {
+                    let indent = if index == 0 { case_indent } else { body_indent };
+                    format!("{}{}", " ".repeat(indent), line.trim_start())
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let insertion_line =
+        lines.iter().enumerate().skip(match_site.line).find_map(|(index, line)| {
+            let trimmed = line.trim();
+            (!trimmed.is_empty() && leading_space_count(line) <= match_indent).then_some(index + 1)
+        });
+
+    if let Some(insertion_line) = insertion_line {
+        return Some((
+            Span::new(module_path.display().to_string(), insertion_line, 1, insertion_line, 1),
+            format!("{rendered}\n"),
+        ));
+    }
+
+    let last_line = lines.len().max(1);
+    let last_col = lines.last().map(|line| line.chars().count() + 1).unwrap_or(1);
+    Some((
+        Span::new(module_path.display().to_string(), last_line, last_col, last_line, last_col),
+        format!("\n{rendered}\n"),
+    ))
+}
+
+fn leading_space_count(line: &str) -> usize {
+    line.chars().take_while(|character| *character == ' ').count()
 }
 
 fn resolve_match_subject_type(
@@ -13260,7 +13479,7 @@ mod tests {
     use typepython_binding::{
         Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
     };
-    use typepython_config::DiagnosticLevel;
+    use typepython_config::{DiagnosticLevel, ImportFallback};
     use typepython_graph::{ModuleGraph, ModuleNode, build};
     use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
 
@@ -13328,6 +13547,7 @@ mod tests {
             report_deprecated,
             strict,
             warn_unsafe,
+            ImportFallback::Unknown,
         );
 
         let _ = fs::remove_dir_all(&root);
@@ -27618,9 +27838,12 @@ mod tests {
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: vec![typepython_binding::MemberAccessSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("value"),
                     member: String::from("name"),
                     through_instance: false,
+                    line: 1,
                 }],
                 returns: Vec::new(),
                 yields: Vec::new(),
@@ -27766,6 +27989,164 @@ mod tests {
     }
 
     #[test]
+    fn check_reports_unknown_dotted_call_on_unresolved_import_when_imports_unknown() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![ModuleNode {
+                    module_path: PathBuf::from("src/app/module.tpy"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![Declaration {
+                        name: String::from("external"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.external"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    }],
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("external.run"),
+                        arg_count: 0,
+                        arg_types: Vec::new(),
+                        arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
+                        keyword_names: Vec::new(),
+                        keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
+                        line: 1,
+                    }],
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                }],
+            },
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            false,
+            false,
+            ImportFallback::Unknown,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("call to `external.run`"));
+    }
+
+    #[test]
+    fn check_allows_dotted_call_on_unresolved_import_when_imports_dynamic() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![ModuleNode {
+                    module_path: PathBuf::from("src/app/module.tpy"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![Declaration {
+                        name: String::from("external"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.external"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    }],
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("external.run"),
+                        arg_count: 0,
+                        arg_types: Vec::new(),
+                        arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
+                        keyword_names: Vec::new(),
+                        keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
+                        line: 1,
+                    }],
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                }],
+            },
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            false,
+            false,
+            ImportFallback::Dynamic,
+        );
+
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn check_reports_unresolved_external_module_method_call_from_real_parse_pipeline() {
+        let result = check_temp_typepython_source_with_check_options(
+            concat!(
+                "import definitely_missing_pkg\n",
+                "\n",
+                "def run() -> None:\n",
+                "    definitely_missing_pkg.work()\n",
+            ),
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            false,
+            false,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("definitely_missing_pkg"));
+    }
+
+    #[test]
     fn check_reports_missing_direct_member_access() {
         let result = check(&ModuleGraph {
             nodes: vec![ModuleNode {
@@ -27795,9 +28176,12 @@ mod tests {
                 method_calls: Vec::new(),
                 returns: Vec::new(),
                 member_accesses: vec![typepython_binding::MemberAccessSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("Box"),
                     member: String::from("missing"),
                     through_instance: false,
+                    line: 1,
                 }],
                 yields: Vec::new(),
                 if_guards: Vec::new(),
@@ -27815,6 +28199,136 @@ mod tests {
         let rendered = result.diagnostics.as_text();
         assert!(rendered.contains("TPY4002"));
         assert!(rendered.contains("has no member `missing`"));
+    }
+
+    #[test]
+    fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
+        let root = create_temp_typepython_root();
+        let path = root.join("src/app/module.tpy");
+        fs::create_dir_all(path.parent().expect("temp source parent should exist"))
+            .expect("temp source parent should be created");
+        fs::write(&path, concat!("value = None\n", "value.name\n",))
+            .expect("temp source should be written");
+
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: path.clone(),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("A"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("name"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("str")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("A"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("B"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("value"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("A | B"),
+                        value_type: None,
+                        method_kind: None,
+                        owner: None,
+                        class_kind: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                returns: Vec::new(),
+                member_accesses: vec![typepython_binding::MemberAccessSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
+                    owner_name: String::from("value"),
+                    member: String::from("name"),
+                    through_instance: false,
+                    line: 2,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            }],
+        });
+        let _ = fs::remove_dir_all(&root);
+
+        let diagnostic = result
+            .diagnostics
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "TPY4002")
+            .expect("union member access diagnostic should be present");
+        assert_eq!(diagnostic.suggestions.len(), 1);
+        assert!(diagnostic.suggestions[0].replacement.contains("assert isinstance(value, A)"));
     }
 
     #[test]
@@ -29149,6 +29663,7 @@ mod tests {
             DiagnosticLevel::Warning,
             false,
             false,
+            ImportFallback::Unknown,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -29311,6 +29826,7 @@ mod tests {
             DiagnosticLevel::Warning,
             false,
             false,
+            ImportFallback::Unknown,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -33220,6 +33736,7 @@ mod tests {
             DiagnosticLevel::Warning,
             false,
             false,
+            ImportFallback::Unknown,
         );
 
         let rendered = result.diagnostics.as_text();
@@ -33330,6 +33847,7 @@ mod tests {
             DiagnosticLevel::Ignore,
             false,
             false,
+            ImportFallback::Unknown,
         );
 
         assert!(result.diagnostics.is_empty());
@@ -34451,9 +34969,12 @@ mod tests {
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: vec![typepython_binding::MemberAccessSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("box"),
                     member: String::from("name"),
                     through_instance: false,
+                    line: 1,
                 }],
                 returns: Vec::new(),
                 yields: Vec::new(),
@@ -35039,6 +35560,186 @@ mod tests {
         assert!(rendered.contains("TPY4009"));
         assert!(rendered.contains("non-exhaustive `match` over enum `Color`"));
         assert!(rendered.contains("missing members: BLUE"));
+    }
+
+    #[test]
+    fn check_reports_non_exhaustive_match_with_case_suggestion() {
+        let root = create_temp_typepython_root();
+        let path = root.join("src/app/module.tpy");
+        fs::create_dir_all(path.parent().expect("temp source parent should exist"))
+            .expect("temp source parent should be created");
+        fs::write(
+            &path,
+            concat!(
+                "def render(expr):\n",
+                "    match expr:\n",
+                "        case Num:\n",
+                "            return 1\n",
+                "        case Add:\n",
+                "            return 2\n",
+            ),
+        )
+        .expect("temp source should be written");
+
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: path.clone(),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Expr"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::SealedClass),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Num"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Expr")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Add"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Expr")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Mul"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Expr")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("render"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(expr:Expr)->int"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: vec![typepython_binding::MatchSite {
+                    owner_name: Some(String::from("render")),
+                    owner_type_name: None,
+                    subject_type: Some(String::new()),
+                    subject_is_awaited: false,
+                    subject_callee: None,
+                    subject_name: Some(String::from("expr")),
+                    subject_member_owner_name: None,
+                    subject_member_name: None,
+                    subject_member_through_instance: false,
+                    subject_method_owner_name: None,
+                    subject_method_name: None,
+                    subject_method_through_instance: false,
+                    cases: vec![
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Class(
+                                String::from("Num"),
+                            )],
+                            has_guard: false,
+                            line: 3,
+                        },
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Class(
+                                String::from("Add"),
+                            )],
+                            has_guard: false,
+                            line: 5,
+                        },
+                    ],
+                    line: 2,
+                }],
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+        let _ = fs::remove_dir_all(&root);
+
+        let diagnostic = result
+            .diagnostics
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "TPY4009")
+            .expect("non-exhaustive match diagnostic should be present");
+        assert_eq!(diagnostic.suggestions.len(), 1);
+        assert!(diagnostic.suggestions[0].message.contains("Add missing `match` case arms"));
+        assert!(diagnostic.suggestions[0].replacement.contains("case Mul:"));
     }
 
     #[test]

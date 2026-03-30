@@ -511,6 +511,7 @@ impl Server {
                     self.config.config.typing.report_deprecated,
                     self.config.config.typing.strict,
                     self.config.config.typing.warn_unsafe,
+                    self.config.config.typing.imports,
                 )
                 .diagnostics
                 .diagnostics,

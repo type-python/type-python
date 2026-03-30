@@ -8,6 +8,20 @@ name `type-python` and the top-level import/command surface `typepython`.
 
 ## Status
 
+The current repository targets the following `TypePython_Spec_v1.md` tiers:
+
+- **Core v1**: implemented in the Rust workspace and exercised by the default
+  `typepython init/check/build/clean/verify` flows.
+- **DX v1**: implemented for `watch`, `lsp`, `migrate --report`, and the
+  current enhanced diagnostic/code-action set for missing `| None`, missing
+  `@override`, non-exhaustive `match` arms, and `Pick`/`Omit` key corrections.
+- **Experimental v1**: implemented behind explicit opt-in config only; ordinary
+  builds keep these features disabled by default. The current experimental
+  surface includes conditional return lowering, pass-through `.py` inference,
+  and runtime validator emission for `data class` output. These opt in through
+  config keys such as `typing.conditional_returns = true`,
+  `typing.infer_passthrough = true`, and `emit.runtime_validators = true`.
+
 The current tree includes:
 
 - Rust crates for config, diagnostics, syntax, lowering, binding, graph,

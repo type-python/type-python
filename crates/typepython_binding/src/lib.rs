@@ -67,9 +67,12 @@ pub struct CallSite {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MemberAccessSite {
+    pub current_owner_name: Option<String>,
+    pub current_owner_type_name: Option<String>,
     pub owner_name: String,
     pub member: String,
     pub through_instance: bool,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -435,9 +438,12 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
             .iter()
             .filter_map(|statement| match statement {
                 SyntaxStatement::MemberAccess(statement) => Some(MemberAccessSite {
+                    current_owner_name: statement.current_owner_name.clone(),
+                    current_owner_type_name: statement.current_owner_type_name.clone(),
                     owner_name: statement.owner_name.clone(),
                     member: statement.member.clone(),
                     through_instance: statement.through_instance,
+                    line: statement.line,
                 }),
                 _ => None,
             })

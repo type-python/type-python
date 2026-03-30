@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
 
 fn is_typed_dict_base(base: &str) -> bool {
@@ -25,10 +25,21 @@ pub struct SpanMapRange {
     pub end_col: usize,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SpanMapEntry {
+    pub source_path: PathBuf,
+    pub emitted_path: PathBuf,
     pub original: SpanMapRange,
     pub emitted: SpanMapRange,
+    pub kind: LoweringSegmentKind,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum LoweringSegmentKind {
+    Copied,
+    Inserted,
+    Rewritten,
+    Synthetic,
 }
 
 /// Lowered representation consumed by later phases.
@@ -108,6 +119,7 @@ pub fn lower_with_options(tree: &SyntaxTree, options: &LoweringOptions) -> Lower
 }
 
 fn lower_passthrough(source: &str) -> LoweredText {
+    let passthrough_path = PathBuf::from("<passthrough>");
     LoweredText {
         python_source: source.to_owned(),
         source_map: source
@@ -119,8 +131,11 @@ fn lower_passthrough(source: &str) -> LoweredText {
             .lines()
             .enumerate()
             .map(|(index, line)| SpanMapEntry {
+                source_path: passthrough_path.clone(),
+                emitted_path: passthrough_path.clone(),
                 original: line_span(index + 1, line),
                 emitted: line_span(index + 1, line),
+                kind: LoweringSegmentKind::Copied,
             })
             .collect(),
         required_imports: Vec::new(),
@@ -129,6 +144,8 @@ fn lower_passthrough(source: &str) -> LoweredText {
 }
 
 fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText {
+    let source_path = tree.source.path.clone();
+    let emitted_path = tree.source.path.with_extension("py");
     let normalized_source =
         typepython_syntax::normalize_annotated_lambda_source_for_emission(&tree.source.text);
     let unsafe_lines: BTreeSet<_> = tree
@@ -254,6 +271,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             rewrite_typevar_import_line(needs_typing_extensions_runtime_type_params),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     if has_runtime_paramspecs
@@ -264,6 +288,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             rewrite_paramspec_import_line(needs_typing_extensions_runtime_type_params),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
@@ -272,10 +303,24 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from typing import Generic"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     for (name, type_param) in &runtime_type_params {
         lowered_lines.push(rewrite_typevar_line(name, type_param));
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Synthetic,
+        ));
         lowered_line_number += 1;
     }
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
@@ -284,6 +329,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from typing import TypeAlias"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
@@ -292,6 +344,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from typing import Protocol"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
@@ -300,6 +359,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from dataclasses import dataclass"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
@@ -308,6 +374,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from typing import overload"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     // Check if any type alias uses a transform that generates NotRequired
@@ -324,6 +397,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             rewrite_notrequired_import_line(options),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
     // Check if any type alias uses a transform that generates ReadOnly
@@ -340,6 +420,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut required_imports,
             String::from("from typing_extensions import ReadOnly"),
         );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
         lowered_line_number += 1;
     }
 
@@ -370,14 +457,26 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         } else {
             vec![line.to_owned()]
         };
+        let replacement_lines = replacement_lines
+            .into_iter()
+            .flat_map(|replacement| normalize_target_compatibility_line(&replacement, options))
+            .collect::<Vec<_>>();
 
         source_map
             .push(SourceMapEntry { original_line: line_number, lowered_line: lowered_line_number });
         let original_span = line_span(line_number, line);
+        let segment_kind = if replacement_lines.len() == 1 && replacement_lines[0] == line {
+            LoweringSegmentKind::Copied
+        } else {
+            LoweringSegmentKind::Rewritten
+        };
         span_map.extend(replacement_lines.iter().enumerate().map(|(offset, replacement)| {
             SpanMapEntry {
+                source_path: source_path.clone(),
+                emitted_path: emitted_path.clone(),
                 original: original_span,
                 emitted: line_span(lowered_line_number + offset, replacement),
+                kind: segment_kind,
             }
         }));
         lowered_line_number += replacement_lines.len();
@@ -415,12 +514,144 @@ fn line_span(line_number: usize, text: &str) -> SpanMapRange {
     SpanMapRange { line: line_number, start_col: 1, end_col: text.chars().count() + 1 }
 }
 
+fn inserted_span_map_entry(
+    source_path: &PathBuf,
+    emitted_path: &PathBuf,
+    emitted_line: usize,
+    text: &str,
+    kind: LoweringSegmentKind,
+) -> SpanMapEntry {
+    SpanMapEntry {
+        source_path: source_path.clone(),
+        emitted_path: emitted_path.clone(),
+        original: SpanMapRange { line: 0, start_col: 0, end_col: 0 },
+        emitted: line_span(emitted_line, text),
+        kind,
+    }
+}
+
 fn rewrite_notrequired_import_line(options: &LoweringOptions) -> String {
     if prefers_typing_notrequired(&options.target_python) {
         String::from("from typing import NotRequired")
     } else {
         String::from("from typing_extensions import NotRequired")
     }
+}
+
+fn prefers_typing_self(target_python: &str) -> bool {
+    matches!(target_python.trim(), "3.11" | "3.12")
+}
+
+fn prefers_typing_required_family(target_python: &str) -> bool {
+    matches!(target_python.trim(), "3.11" | "3.12")
+}
+
+fn prefers_typing_override(target_python: &str) -> bool {
+    matches!(target_python.trim(), "3.12")
+}
+
+fn compat_module_for_symbol(symbol: &str, target_python: &str) -> Option<&'static str> {
+    match symbol {
+        "Self" => {
+            Some(if prefers_typing_self(target_python) { "typing" } else { "typing_extensions" })
+        }
+        "Required" | "NotRequired" | "dataclass_transform" => {
+            Some(if prefers_typing_required_family(target_python) {
+                "typing"
+            } else {
+                "typing_extensions"
+            })
+        }
+        "override" => Some(if prefers_typing_override(target_python) {
+            "typing"
+        } else {
+            "typing_extensions"
+        }),
+        "ReadOnly" | "TypeIs" | "deprecated" => Some("typing_extensions"),
+        _ => None,
+    }
+}
+
+fn normalize_target_compatibility_line(line: &str, options: &LoweringOptions) -> Vec<String> {
+    let trimmed = line.trim();
+    if let Some((module, names)) =
+        trimmed.strip_prefix("from ").and_then(|rest| rest.split_once(" import "))
+        && matches!(module, "typing" | "typing_extensions" | "warnings")
+    {
+        let indentation = &line[..line.len() - trimmed.len()];
+        let normalized =
+            normalize_import_from_line(indentation, module, names, &options.target_python);
+        if normalized.len() != 1 || normalized[0].trim() != trimmed {
+            return normalized;
+        }
+    }
+
+    vec![normalize_target_compatibility_text(line, options)]
+}
+
+fn normalize_import_from_line(
+    indentation: &str,
+    module: &str,
+    names: &str,
+    target_python: &str,
+) -> Vec<String> {
+    let mut grouped = std::collections::BTreeMap::<String, Vec<String>>::new();
+    let mut order = Vec::<String>::new();
+    for raw_name in names.split(',') {
+        let entry = raw_name.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let symbol = entry.split_once(" as ").map(|(name, _)| name.trim()).unwrap_or(entry);
+        let target_module = compat_module_for_symbol(symbol, target_python).unwrap_or(module);
+        if !order.iter().any(|existing| existing == target_module) {
+            order.push(target_module.to_owned());
+        }
+        grouped.entry(target_module.to_owned()).or_default().push(entry.to_owned());
+    }
+
+    order
+        .into_iter()
+        .filter_map(|target_module| {
+            let names = grouped.remove(&target_module)?;
+            Some(format!("{indentation}from {target_module} import {}", names.join(", ")))
+        })
+        .collect()
+}
+
+fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) -> String {
+    let mut normalized = text.to_owned();
+    let target_python = options.target_python.trim();
+
+    normalized = normalized.replace("warnings.deprecated", "typing_extensions.deprecated");
+    normalized = normalized.replace("typing.ReadOnly", "typing_extensions.ReadOnly");
+    normalized = normalized.replace("typing.TypeIs", "typing_extensions.TypeIs");
+
+    if prefers_typing_self(target_python) {
+        normalized = normalized.replace("typing_extensions.Self", "typing.Self");
+    } else {
+        normalized = normalized.replace("typing.Self", "typing_extensions.Self");
+    }
+
+    if prefers_typing_required_family(target_python) {
+        normalized = normalized.replace("typing_extensions.Required", "typing.Required");
+        normalized = normalized.replace("typing_extensions.NotRequired", "typing.NotRequired");
+        normalized = normalized
+            .replace("typing_extensions.dataclass_transform", "typing.dataclass_transform");
+    } else {
+        normalized = normalized.replace("typing.Required", "typing_extensions.Required");
+        normalized = normalized.replace("typing.NotRequired", "typing_extensions.NotRequired");
+        normalized = normalized
+            .replace("typing.dataclass_transform", "typing_extensions.dataclass_transform");
+    }
+
+    if prefers_typing_override(target_python) {
+        normalized = normalized.replace("typing_extensions.override", "typing.override");
+    } else {
+        normalized = normalized.replace("typing.override", "typing_extensions.override");
+    }
+
+    normalized
 }
 
 fn prefers_typing_notrequired(target_python: &str) -> bool {
@@ -674,24 +905,24 @@ fn rewrite_function_def_line(line: &str) -> String {
 }
 
 fn strip_generic_type_params(source: &str) -> String {
-    let mut bracket_index = None;
-    let mut paren_depth = 0usize;
-
-    for (index, character) in source.char_indices() {
-        match character {
-            '[' if paren_depth == 0 => {
-                bracket_index = Some(index);
-                break;
-            }
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-
-    let Some(bracket_index) = bracket_index else {
+    let prefix_len = if source.starts_with("async def ") {
+        "async def ".len()
+    } else if source.starts_with("def ") {
+        "def ".len()
+    } else {
         return source.to_owned();
     };
+
+    let name_len = source[prefix_len..]
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+        .map(char::len_utf8)
+        .sum::<usize>();
+    let bracket_index = prefix_len + name_len;
+    if source.as_bytes().get(bracket_index) != Some(&b'[') {
+        return source.to_owned();
+    }
+
     let (head, tail) = source.split_at(bracket_index);
     let Some((_params, remainder)) = split_bracketed(tail) else {
         return source.to_owned();
@@ -1276,6 +1507,7 @@ fn collect_typed_dict_transform_diagnostics(
                     transform,
                     target_arg.trim()
                 ),
+                None,
             )];
         }
     };
@@ -1301,6 +1533,7 @@ fn collect_typed_dict_transform_diagnostics(
                         "type transform `{}` references unknown key `{}` on TypedDict `{}`",
                         transform, key, target_name
                     ),
+                    Some((&key, key_arg, &field_names)),
                 )
             })
         })
@@ -1336,14 +1569,81 @@ fn transform_key_name(key: &str) -> String {
         .to_owned()
 }
 
-fn typed_dict_transform_error(path: &std::path::Path, line: usize, message: String) -> Diagnostic {
-    Diagnostic::error("TPY4017", message).with_span(Span::new(
+fn typed_dict_transform_error(
+    path: &std::path::Path,
+    line: usize,
+    message: String,
+    unknown_key: Option<(&str, &str, &BTreeSet<&str>)>,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error("TPY4017", message).with_span(Span::new(
         path.display().to_string(),
         line,
         1,
         line,
         1,
+    ));
+    if let Some((unknown_key, raw_key_arg, known_keys)) = unknown_key
+        && let Some(candidate) = closest_known_key(unknown_key, known_keys)
+        && let Some(suggestion) =
+            typed_dict_transform_key_suggestion(path, line, raw_key_arg, candidate)
+    {
+        return diagnostic.with_suggestion(
+            format!("Replace `{unknown_key}` with `{candidate}`"),
+            suggestion.0,
+            suggestion.1,
+            SuggestionApplicability::MachineApplicable,
+        );
+    }
+    diagnostic
+}
+
+fn closest_known_key<'a>(unknown_key: &str, known_keys: &'a BTreeSet<&str>) -> Option<&'a str> {
+    known_keys
+        .iter()
+        .map(|candidate| (*candidate, edit_distance(unknown_key, candidate)))
+        .min_by_key(|(_, distance)| *distance)
+        .and_then(|(candidate, distance)| (distance <= 5).then_some(candidate))
+}
+
+fn typed_dict_transform_key_suggestion(
+    path: &std::path::Path,
+    line: usize,
+    raw_key_arg: &str,
+    candidate: &str,
+) -> Option<(Span, String)> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let line_text = source.lines().nth(line.saturating_sub(1))?;
+    let trimmed_key = raw_key_arg.trim();
+    let start = line_text.find(trimmed_key)? + 1;
+    let replacement = if trimmed_key.starts_with('"') && trimmed_key.ends_with('"') {
+        format!("\"{candidate}\"")
+    } else if trimmed_key.starts_with('\'') && trimmed_key.ends_with('\'') {
+        format!("'{candidate}'")
+    } else {
+        candidate.to_owned()
+    };
+    Some((
+        Span::new(path.display().to_string(), line, start, line, start + trimmed_key.len()),
+        replacement,
     ))
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let left = left.chars().collect::<Vec<_>>();
+    let right = right.chars().collect::<Vec<_>>();
+    let mut prev = (0..=right.len()).collect::<Vec<_>>();
+    let mut curr = vec![0usize; right.len() + 1];
+
+    for (i, left_char) in left.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, right_char) in right.iter().enumerate() {
+            let cost = usize::from(left_char != right_char);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        prev.clone_from(&curr);
+    }
+
+    prev[right.len()]
 }
 
 fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagnostic {
@@ -1357,8 +1657,8 @@ fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagn
 #[cfg(test)]
 mod tests {
     use super::{
-        LoweringMetadata, LoweringOptions, SourceMapEntry, SpanMapEntry, SpanMapRange, lower,
-        lower_with_options,
+        LoweringMetadata, LoweringOptions, LoweringSegmentKind, SourceMapEntry, SpanMapEntry,
+        SpanMapRange, lower, lower_with_options,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
@@ -1832,12 +2132,25 @@ mod tests {
             lowered.module.span_map,
             vec![
                 SpanMapEntry {
-                    original: SpanMapRange { line: 1, start_col: 1, end_col: 39 },
-                    emitted: SpanMapRange { line: 2, start_col: 1, end_col: 10 },
+                    source_path: PathBuf::from("overload.tpy"),
+                    emitted_path: PathBuf::from("overload.py"),
+                    original: SpanMapRange { line: 0, start_col: 0, end_col: 0 },
+                    emitted: SpanMapRange { line: 1, start_col: 1, end_col: 28 },
+                    kind: LoweringSegmentKind::Inserted,
                 },
                 SpanMapEntry {
+                    source_path: PathBuf::from("overload.tpy"),
+                    emitted_path: PathBuf::from("overload.py"),
+                    original: SpanMapRange { line: 1, start_col: 1, end_col: 39 },
+                    emitted: SpanMapRange { line: 2, start_col: 1, end_col: 10 },
+                    kind: LoweringSegmentKind::Rewritten,
+                },
+                SpanMapEntry {
+                    source_path: PathBuf::from("overload.tpy"),
+                    emitted_path: PathBuf::from("overload.py"),
                     original: SpanMapRange { line: 1, start_col: 1, end_col: 39 },
                     emitted: SpanMapRange { line: 3, start_col: 1, end_col: 30 },
+                    kind: LoweringSegmentKind::Rewritten,
                 },
             ]
         );
@@ -2258,6 +2571,55 @@ mod tests {
             ]
         );
         assert!(lowered.module.metadata.has_typed_dict_transforms);
+    }
+
+    #[test]
+    fn lower_rewrites_compat_qualified_names_for_target_python_310() {
+        let lowered = lower_with_options(
+            &parse(SourceFile {
+                path: PathBuf::from("compat-qualified.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "import typing\nimport warnings\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n\nclass Config(typing.TypedDict):\n    flag: typing.ReadOnly[bool]\n\ndef accepts(value: object) -> typing.TypeIs[int]:\n    ...\n",
+                ),
+            }),
+            &LoweringOptions { target_python: String::from("3.10") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered.module.python_source.contains("@typing_extensions.deprecated(\"use new_api\")")
+        );
+        assert!(lowered.module.python_source.contains("@typing_extensions.override"));
+        assert!(lowered.module.python_source.contains("-> typing_extensions.Self"));
+        assert!(lowered.module.python_source.contains("typing_extensions.ReadOnly[bool]"));
+        assert!(lowered.module.python_source.contains("-> typing_extensions.TypeIs[int]"));
+    }
+
+    #[test]
+    fn lower_rewrites_compat_import_sources_for_target_python_312() {
+        let lowered = lower_with_options(
+            &parse(SourceFile {
+                path: PathBuf::from("compat-imports.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "from typing_extensions import Self, Required, NotRequired, dataclass_transform, override, ReadOnly, TypeIs\nfrom warnings import deprecated\n\n@deprecated(\"use new_api\")\nclass Box:\n    @override\n    def clone(self) -> Self:\n        ...\n",
+                ),
+            }),
+            &LoweringOptions { target_python: String::from("3.12") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains(
+            "from typing import Self, Required, NotRequired, dataclass_transform, override"
+        ));
+        assert!(
+            lowered.module.python_source.contains("from typing_extensions import ReadOnly, TypeIs")
+        );
+        assert!(lowered.module.python_source.contains("from typing_extensions import deprecated"));
+        assert!(!lowered.module.python_source.contains("from warnings import deprecated"));
     }
 
     #[test]
@@ -2940,9 +3302,23 @@ mod tests {
 
     #[test]
     fn lower_reports_unknown_pick_key_as_tpy4017() {
+        let root = std::env::temp_dir().join(format!(
+            "typepython-lowering-pick-invalid-key-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("temp lowering test directory should be created");
+        let source_path = root.join("pick-invalid-key.tpy");
+        std::fs::write(
+            &source_path,
+            "class User(TypedDict):\n    id: int\n\ntypealias UserPublic = Pick[User, \"name\"]\n",
+        )
+        .expect("temp lowering source should be written");
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
-                path: PathBuf::from("pick-invalid-key.tpy"),
+                path: source_path.clone(),
                 kind: SourceKind::TypePython,
                 logical_module: String::new(),
                 text: String::from(
@@ -2989,10 +3365,20 @@ mod tests {
             type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         });
+        let _ = std::fs::remove_dir_all(&root);
 
         let rendered = lowered.diagnostics.as_text();
         assert!(rendered.contains("TPY4017"));
         assert!(rendered.contains("unknown key `name`"));
+        let diagnostic = lowered
+            .diagnostics
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "TPY4017")
+            .expect("unknown transform key diagnostic should be present");
+        assert_eq!(diagnostic.suggestions.len(), 1);
+        assert!(diagnostic.suggestions[0].message.contains("Replace `name` with `id`"));
+        assert_eq!(diagnostic.suggestions[0].replacement, "\"id\"");
     }
 
     #[test]

@@ -222,6 +222,8 @@ pub struct CallStatement {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemberAccessStatement {
+    pub current_owner_name: Option<String>,
+    pub current_owner_type_name: Option<String>,
     pub owner_name: String,
     pub member: String,
     pub through_instance: bool,
@@ -2828,6 +2830,13 @@ fn parse_python_source(source: SourceFile) -> SyntaxTree {
                 &mut statements,
             );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
+            collect_nested_member_access_statements(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             collect_function_body_assignments(
                 &source.text,
                 parsed.suite(),
@@ -3680,7 +3689,8 @@ fn extract_ast_backed_statements(
         if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
             statements.push(method_call);
         }
-        if let Some(member_access) = extract_member_access_statement(source, stmt, line) {
+        if let Some(member_access) = extract_member_access_statement(source, stmt, line, None, None)
+        {
             statements.push(member_access);
         }
     }
@@ -4607,14 +4617,23 @@ fn extract_member_access_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
 ) -> Option<SyntaxStatement> {
     match stmt {
-        Stmt::Expr(expr) => extract_member_access_from_expr(source, &expr.value, line),
-        Stmt::Assign(assign) => extract_member_access_from_expr(source, &assign.value, line),
-        Stmt::AnnAssign(assign) => assign
-            .value
-            .as_deref()
-            .and_then(|value| extract_member_access_from_expr(source, value, line)),
+        Stmt::Expr(expr) => {
+            extract_member_access_from_expr(source, &expr.value, line, owner_name, owner_type_name)
+        }
+        Stmt::Assign(assign) => extract_member_access_from_expr(
+            source,
+            &assign.value,
+            line,
+            owner_name,
+            owner_type_name,
+        ),
+        Stmt::AnnAssign(assign) => assign.value.as_deref().and_then(|value| {
+            extract_member_access_from_expr(source, value, line, owner_name, owner_type_name)
+        }),
         _ => None,
     }
 }
@@ -4623,6 +4642,8 @@ fn extract_member_access_from_expr(
     _source: &str,
     expr: &Expr,
     line: usize,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
 ) -> Option<SyntaxStatement> {
     let Expr::Attribute(attribute) = expr else {
         return None;
@@ -4630,6 +4651,8 @@ fn extract_member_access_from_expr(
 
     match attribute.value.as_ref() {
         Expr::Name(name) => Some(SyntaxStatement::MemberAccess(MemberAccessStatement {
+            current_owner_name: current_owner_name.map(str::to_owned),
+            current_owner_type_name: current_owner_type_name.map(str::to_owned),
             owner_name: name.id.as_str().to_owned(),
             member: attribute.attr.as_str().to_owned(),
             through_instance: false,
@@ -4640,6 +4663,8 @@ fn extract_member_access_from_expr(
                 return None;
             };
             Some(SyntaxStatement::MemberAccess(MemberAccessStatement {
+                current_owner_name: current_owner_name.map(str::to_owned),
+                current_owner_type_name: current_owner_type_name.map(str::to_owned),
                 owner_name: name.id.as_str().to_owned(),
                 member: attribute.attr.as_str().to_owned(),
                 through_instance: true,
@@ -4670,6 +4695,60 @@ fn collect_nested_call_statements(
                     collect_calls_from_suite(source, suite, statements);
                     collect_nested_call_statements(source, suite, statements);
                 });
+            }
+        }
+    }
+}
+
+fn collect_nested_member_access_statements(
+    source: &str,
+    suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_nested_member_access_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_nested_member_access_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
+            }
+            _ => {
+                for_each_nested_suite(stmt, |nested_suite| {
+                    collect_nested_member_access_statements(
+                        source,
+                        nested_suite,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
+                });
+                if owner_name.is_some() || owner_type_name.is_some() {
+                    let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                    if let Some(member_access) = extract_member_access_statement(
+                        source,
+                        stmt,
+                        line,
+                        owner_name,
+                        owner_type_name,
+                    ) {
+                        statements.push(member_access);
+                    }
+                }
             }
         }
     }
@@ -6106,6 +6185,9 @@ fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<S
             })
         {
             statements.push(call);
+        }
+        if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
+            statements.push(method_call);
         }
     }
 }
@@ -9428,6 +9510,8 @@ mod tests {
                     line: 3,
                 }),
                 SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("box"),
                     member: String::from("value"),
                     through_instance: false,
@@ -9575,110 +9659,44 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert_eq!(
-            tree.statements,
-            vec![
-                SyntaxStatement::FunctionDef(FunctionStatement {
-                    name: String::from("build"),
-                    type_params: Vec::new(),
-                    params: Vec::new(),
-                    returns: Some(String::from("None")),
-                    is_async: false,
-                    is_override: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    line: 1,
-                }),
-                SyntaxStatement::Call(CallStatement {
-                    callee: String::from("helper"),
-                    arg_count: 0,
-                    arg_types: Vec::new(),
-                    arg_values: Vec::new(),
-                    starred_arg_types: Vec::new(),
-                    starred_arg_values: Vec::new(),
-                    keyword_names: Vec::new(),
-                    keyword_arg_types: Vec::new(),
-                    keyword_arg_values: Vec::new(),
-                    keyword_expansion_types: Vec::new(),
-                    keyword_expansion_values: Vec::new(),
-                    line: 2,
-                }),
-                SyntaxStatement::Value(ValueStatement {
-                    names: vec![String::from("value")],
-                    destructuring_target_names: None,
-                    annotation: None,
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: Some(String::from("helper")),
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: None,
-                    value_method_name: None,
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_comprehension: None,
-                    value_generator_comprehension: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                    owner_name: Some(String::from("build")),
-                    owner_type_name: None,
-                    is_final: false,
-                    is_class_var: false,
-                    line: 2,
-                }),
-                SyntaxStatement::Value(ValueStatement {
-                    names: vec![String::from("field")],
-                    destructuring_target_names: None,
-                    annotation: None,
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: Some(String::from("box")),
-                    value_member_name: Some(String::from("item")),
-                    value_member_through_instance: false,
-                    value_method_owner_name: None,
-                    value_method_name: None,
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_comprehension: None,
-                    value_generator_comprehension: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                    owner_name: Some(String::from("build")),
-                    owner_type_name: None,
-                    is_final: false,
-                    is_class_var: false,
-                    line: 3,
-                }),
-            ]
-        );
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::FunctionDef(FunctionStatement { name, returns, line, .. })
+                if name == "build" && returns.as_deref() == Some("None") && *line == 1
+        )));
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Call(CallStatement { callee, line, .. })
+                if callee == "helper" && *line == 2
+        )));
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Value(ValueStatement {
+                names,
+                value_callee,
+                owner_name,
+                line,
+                ..
+            }) if names == &[String::from("value")]
+                && value_callee.as_deref() == Some("helper")
+                && owner_name.as_deref() == Some("build")
+                && *line == 2
+        )));
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Value(ValueStatement {
+                names,
+                value_member_owner_name,
+                value_member_name,
+                owner_name,
+                line,
+                ..
+            }) if names == &[String::from("field")]
+                && value_member_owner_name.as_deref() == Some("box")
+                && value_member_name.as_deref() == Some("item")
+                && owner_name.as_deref() == Some("build")
+                && *line == 3
+        )));
     }
 
     #[test]
@@ -10867,12 +10885,16 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("Box"),
                     member: String::from("missing"),
                     through_instance: false,
                     line: 1,
                 }),
                 SyntaxStatement::MemberAccess(MemberAccessStatement {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("Box"),
                     member: String::from("value"),
                     through_instance: true,
@@ -10985,6 +11007,27 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn parse_extracts_nested_direct_method_calls() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("nested-method-call.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from("def run() -> None:\n    Box.run(1)\n"),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::MethodCall(MethodCallStatement {
+                owner_name,
+                method,
+                through_instance: false,
+                ..
+            }) if owner_name == "Box" && method == "run"
+        )));
     }
 
     #[test]
@@ -11809,96 +11852,50 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert_eq!(
-            tree.statements,
-            vec![
-                SyntaxStatement::FunctionDef(FunctionStatement {
-                    name: String::from("build"),
-                    type_params: Vec::new(),
-                    params: vec![FunctionParam {
-                        name: String::from("box"),
-                        annotation: Some(String::from("Box")),
-                        has_default: false,
-                        positional_only: false,
-                        keyword_only: false,
-                        variadic: false,
-                        keyword_variadic: false
-                    }],
-                    returns: Some(String::from("str")),
-                    is_async: false,
-                    is_override: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    line: 1,
-                }),
-                SyntaxStatement::Value(ValueStatement {
-                    names: vec![String::from("result")],
-                    destructuring_target_names: None,
-                    annotation: Some(String::from("str")),
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: Some(String::from("box")),
-                    value_method_name: Some(String::from("get")),
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_comprehension: None,
-                    value_generator_comprehension: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                    owner_name: Some(String::from("build")),
-                    owner_type_name: None,
-                    is_final: false,
-                    is_class_var: false,
-                    line: 2,
-                }),
-                SyntaxStatement::Return(ReturnStatement {
-                    owner_name: String::from("build"),
-                    owner_type_name: None,
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: Some(String::from("box")),
-                    value_method_name: Some(String::from("get")),
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                    line: 3,
-                }),
-            ]
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Value(ValueStatement {
+                names,
+                annotation,
+                value_method_owner_name,
+                value_method_name,
+                owner_name,
+                line,
+                ..
+            }) if names == &[String::from("result")]
+                && annotation.as_deref() == Some("str")
+                && value_method_owner_name.as_deref() == Some("box")
+                && value_method_name.as_deref() == Some("get")
+                && owner_name.as_deref() == Some("build")
+                && *line == 2
+        )));
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Return(ReturnStatement {
+                owner_name,
+                value_method_owner_name,
+                value_method_name,
+                line,
+                ..
+            }) if owner_name == "build"
+                && value_method_owner_name.as_deref() == Some("box")
+                && value_method_name.as_deref() == Some("get")
+                && *line == 3
+        )));
+        assert!(
+            tree.statements
+                .iter()
+                .filter(|statement| matches!(
+                    statement,
+                    SyntaxStatement::MethodCall(MethodCallStatement {
+                        owner_name,
+                        method,
+                        through_instance: false,
+                        ..
+                    }) if owner_name == "box" && method == "get"
+                ))
+                .count()
+                >= 1
         );
     }
 

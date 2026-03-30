@@ -189,6 +189,13 @@ struct DiscoveredSource {
     root: PathBuf,
     kind: SourceKind,
     logical_module: String,
+    load_as_inferred_stub: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct ExternalSupportRoot {
+    path: PathBuf,
+    allow_untyped_runtime: bool,
 }
 
 #[derive(Debug)]
@@ -1172,15 +1179,39 @@ fn load_support_syntax_trees(
                 continue;
             }
 
-            let mut source_file = SourceFile::from_path(&source.path)
-                .with_context(|| format!("unable to read {}", source.path.display()))?;
-            source_file.logical_module = source.logical_module.clone();
-            let tree = typepython_syntax::parse_with_options(
-                source_file,
-                typepython_syntax::ParseOptions {
-                    enable_conditional_returns: config.config.typing.conditional_returns,
-                },
-            );
+            let tree = if source.load_as_inferred_stub {
+                let runtime_source = fs::read_to_string(&source.path)
+                    .with_context(|| format!("unable to read {}", source.path.display()))?;
+                let stub_source =
+                    generate_inferred_stub_source(&runtime_source, InferredStubMode::Shadow)
+                        .with_context(|| {
+                            format!(
+                                "unable to synthesize shadow stub for {}",
+                                source.path.display()
+                            )
+                        })?;
+                typepython_syntax::parse_with_options(
+                    SourceFile {
+                        path: source.path.clone(),
+                        kind: SourceKind::Stub,
+                        logical_module: source.logical_module.clone(),
+                        text: stub_source,
+                    },
+                    typepython_syntax::ParseOptions {
+                        enable_conditional_returns: config.config.typing.conditional_returns,
+                    },
+                )
+            } else {
+                let mut source_file = SourceFile::from_path(&source.path)
+                    .with_context(|| format!("unable to read {}", source.path.display()))?;
+                source_file.logical_module = source.logical_module.clone();
+                typepython_syntax::parse_with_options(
+                    source_file,
+                    typepython_syntax::ParseOptions {
+                        enable_conditional_returns: config.config.typing.conditional_returns,
+                    },
+                )
+            };
             for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
                 for nested_module_key in
                     matching_support_module_keys(&import_path, &sources_by_module)
@@ -1538,8 +1569,10 @@ fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         config.config.typing.report_deprecated,
         config.config.typing.strict,
         config.config.typing.warn_unsafe,
+        config.config.typing.imports,
     )
     .diagnostics;
+    diagnostics = filter_project_diagnostics(&diagnostics, &source_paths);
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
 
     if diagnostics.has_errors() {
@@ -1769,6 +1802,28 @@ fn collect_lowering_diagnostics(lowering_results: &[LoweringResult]) -> Diagnost
     }
 
     diagnostics
+}
+
+fn filter_project_diagnostics(
+    diagnostics: &DiagnosticReport,
+    project_paths: &[PathBuf],
+) -> DiagnosticReport {
+    let project_paths =
+        project_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>();
+    let diagnostics = diagnostics
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            if let Some(span) = &diagnostic.span {
+                return project_paths.iter().any(|path| path == &span.path);
+            }
+            project_paths
+                .iter()
+                .any(|path| diagnostic.message.contains(&format!("module `{path}`")))
+        })
+        .cloned()
+        .collect();
+    DiagnosticReport { diagnostics }
 }
 
 fn verify_build_artifacts(config: &ConfigHandle, artifacts: &[EmitArtifact]) -> DiagnosticReport {
@@ -2795,7 +2850,13 @@ fn walk_bundled_stdlib_directory(
         let Some(logical_module) = logical_module_path(&root, &path) else {
             continue;
         };
-        sources.push(DiscoveredSource { path, root: root.to_path_buf(), kind, logical_module });
+        sources.push(DiscoveredSource {
+            path,
+            root: root.to_path_buf(),
+            kind,
+            logical_module,
+            load_as_inferred_stub: false,
+        });
     }
 
     Ok(())
@@ -2943,31 +3004,41 @@ fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSo
     Ok(sources)
 }
 
-fn configured_external_type_roots(config: &ConfigHandle) -> Result<Vec<PathBuf>> {
+fn configured_external_type_roots(config: &ConfigHandle) -> Result<Vec<ExternalSupportRoot>> {
     let mut roots = config
         .config
         .resolution
         .type_roots
         .iter()
-        .map(|root| config.resolve_relative_path(root))
+        .map(|root| ExternalSupportRoot {
+            path: config.resolve_relative_path(root),
+            allow_untyped_runtime: false,
+        })
         .collect::<Vec<_>>();
     roots.extend(discovered_python_type_roots(config));
-    roots.retain(|root| root.exists());
-    roots.sort();
-    roots.dedup();
+    roots.retain(|root| root.path.exists());
+    roots.sort_by(|left, right| left.path.cmp(&right.path));
+    roots.dedup_by(|left, right| {
+        if left.path == right.path {
+            left.allow_untyped_runtime |= right.allow_untyped_runtime;
+            true
+        } else {
+            false
+        }
+    });
     Ok(roots)
 }
 
-fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
+fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<ExternalSupportRoot> {
     let interpreter = resolve_python_executable(config);
     python_type_roots_from_interpreter(&interpreter)
 }
 
-fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
+fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<ExternalSupportRoot> {
     let output = ProcessCommand::new(&interpreter)
         .args([
             "-c",
-            "import json, site, sysconfig; roots=[]; roots.extend(filter(None, [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); roots.extend(site.getsitepackages()); usersite = site.getusersitepackages(); roots.extend(usersite if isinstance(usersite, list) else [usersite]); print(json.dumps(sorted({r for r in roots if r})))",
+            "import json, site, sysconfig; typed_roots=[]; typed_roots.extend(filter(None, [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); typed_roots.extend(site.getsitepackages()); usersite = site.getusersitepackages(); typed_roots.extend(usersite if isinstance(usersite, list) else [usersite]); payload=[{'path': root, 'allow_untyped_runtime': False} for root in sorted({r for r in typed_roots if r})]; print(json.dumps(payload))",
         ])
         .output();
     let Ok(output) = output else {
@@ -2976,18 +3047,33 @@ fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
     if !output.status.success() {
         return Vec::new();
     }
-    let Ok(roots) = serde_json::from_slice::<Vec<String>>(&output.stdout) else {
+    let Ok(roots) = serde_json::from_slice::<Vec<ExternalSupportRootProbe>>(&output.stdout) else {
         return Vec::new();
     };
-    roots.into_iter().map(PathBuf::from).collect()
+    roots
+        .into_iter()
+        .map(|root| ExternalSupportRoot {
+            path: PathBuf::from(root.path),
+            allow_untyped_runtime: root.allow_untyped_runtime,
+        })
+        .collect()
 }
 
-fn walk_external_type_root(root: &Path, sources: &mut Vec<DiscoveredSource>) -> Result<()> {
-    walk_external_type_root_directory(root, root, sources)
+#[derive(Debug, Clone, Deserialize)]
+struct ExternalSupportRootProbe {
+    path: String,
+    allow_untyped_runtime: bool,
+}
+
+fn walk_external_type_root(
+    root: &ExternalSupportRoot,
+    sources: &mut Vec<DiscoveredSource>,
+) -> Result<()> {
+    walk_external_type_root_directory(root, &root.path, sources)
 }
 
 fn walk_external_type_root_directory(
-    root: &Path,
+    root: &ExternalSupportRoot,
     directory: &Path,
     sources: &mut Vec<DiscoveredSource>,
 ) -> Result<()> {
@@ -3010,15 +3096,21 @@ fn walk_external_type_root_directory(
         if !external_source_allowed(root, &path, kind) {
             continue;
         }
-        let Some(logical_module) = external_logical_module_path(root, &path) else {
+        let Some(logical_module) = external_logical_module_path(&root.path, &path) else {
             continue;
         };
-        sources.push(DiscoveredSource { path, root: root.to_path_buf(), kind, logical_module });
+        sources.push(DiscoveredSource {
+            path,
+            root: root.path.clone(),
+            kind,
+            logical_module,
+            load_as_inferred_stub: root.allow_untyped_runtime && kind == SourceKind::Python,
+        });
     }
     Ok(())
 }
 
-fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
+fn external_source_allowed(root: &ExternalSupportRoot, path: &Path, kind: SourceKind) -> bool {
     match kind {
         SourceKind::Stub => true,
         SourceKind::Python => external_runtime_allowed(root, path),
@@ -3026,13 +3118,16 @@ fn external_source_allowed(root: &Path, path: &Path, kind: SourceKind) -> bool {
     }
 }
 
-fn external_runtime_allowed(root: &Path, path: &Path) -> bool {
-    let Some(stub_root) = sibling_stub_distribution_root(root, path) else {
-        return external_runtime_is_typed(root, path);
+fn external_runtime_allowed(root: &ExternalSupportRoot, path: &Path) -> bool {
+    if root.allow_untyped_runtime {
+        return true;
+    }
+    let Some(stub_root) = sibling_stub_distribution_root(&root.path, path) else {
+        return external_runtime_is_typed(&root.path, path);
     };
 
     partial_stub_package_marker(&stub_root)
-        && runtime_module_missing_from_stub_package(root, path, &stub_root)
+        && runtime_module_missing_from_stub_package(&root.path, path, &stub_root)
 }
 
 fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
@@ -3185,7 +3280,13 @@ fn walk_directory(
             continue;
         };
 
-        sources.push(DiscoveredSource { path, root, kind, logical_module });
+        sources.push(DiscoveredSource {
+            path,
+            root,
+            kind,
+            logical_module,
+            load_as_inferred_stub: false,
+        });
     }
 
     Ok(())
@@ -3447,7 +3548,7 @@ fn exit_code(diagnostics: &DiagnosticReport) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
+        Cli, ExternalSupportRoot, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
         build_migration_report, bundled_stdlib_snapshot_identity_for_root,
         bundled_stdlib_sources_for_root, collect_source_paths, compile_runtime_bytecode,
         embedded_config_template, emit_migration_stubs, exit_code_for_error,
@@ -3844,7 +3945,7 @@ mod tests {
         let interpreter_path = project_dir.join("python3");
         write_executable_script(
             &interpreter_path,
-            "#!/bin/sh\nprintf '[\"/tmp/site-packages\",\"/tmp/user-site\"]\\n'\n",
+            "#!/bin/sh\nprintf '[{\"path\":\"/tmp/site-packages\",\"allow_untyped_runtime\":false},{\"path\":\"/tmp/user-site\",\"allow_untyped_runtime\":false}]\\n'\n",
         );
 
         let roots = python_type_roots_from_interpreter(&interpreter_path);
@@ -3852,8 +3953,50 @@ mod tests {
 
         assert_eq!(
             roots,
-            vec![PathBuf::from("/tmp/site-packages"), PathBuf::from("/tmp/user-site")]
+            vec![
+                ExternalSupportRoot {
+                    path: PathBuf::from("/tmp/site-packages"),
+                    allow_untyped_runtime: false,
+                },
+                ExternalSupportRoot {
+                    path: PathBuf::from("/tmp/user-site"),
+                    allow_untyped_runtime: false,
+                },
+            ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_pipeline_accepts_json_from_bundled_stdlib() {
+        let project_dir = temp_project_dir("run_pipeline_accepts_json_from_bundled_stdlib");
+        let diagnostics = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"{}\"\n",
+                    probe.display()
+                ),
+            )
+            .expect("test setup should succeed");
+            fs::write(
+                project_dir.join("src/app/__init__.tpy"),
+                "import json\n\ndef encode(value: str) -> str:\n    return json.dumps(value)\n",
+            )
+            .expect("test setup should succeed");
+
+            let config = load(&project_dir).expect("test setup should succeed");
+            run_pipeline(&config).expect("pipeline should succeed").diagnostics
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
     }
 
     #[test]
