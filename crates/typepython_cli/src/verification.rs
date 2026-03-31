@@ -18,7 +18,7 @@ use typepython_lowering::LoweredModule;
 use typepython_syntax::{SourceFile, SourceKind};
 use zip::ZipArchive;
 
-use crate::VerifyArgs;
+use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
 use crate::{
     RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,

@@ -16,10 +16,8 @@ use crate::cli::{MigrateArgs, OutputFormat};
 use crate::discovery::{
     DiscoveredSource, bundled_stdlib_sources, collect_source_paths, normalize_glob_path,
 };
-use crate::{
-    CommandSummary, collect_parse_diagnostics, exit_code, load_project, load_syntax_trees,
-    print_summary,
-};
+use crate::pipeline::{collect_parse_diagnostics, load_syntax_trees};
+use crate::{CommandSummary, exit_code, load_project, print_summary};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct MigrationReport {

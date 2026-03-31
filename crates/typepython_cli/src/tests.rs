@@ -4,14 +4,15 @@ use super::discovery::{
     python_type_roots_from_interpreter,
 };
 use super::migration::{build_migration_report, emit_migration_stubs};
-use super::verification::{SuppliedArtifactKind, SuppliedVerifyArtifact};
-use super::{
-    Cli, build_diagnostics, compile_runtime_bytecode, embedded_config_template,
-    exit_code_for_error, format_watch_rebuild_note, init_project, load_syntax_trees, run_pipeline,
-    should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
-    verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
-    write_incremental_snapshot,
+use super::pipeline::{
+    build_diagnostics, compile_runtime_bytecode, format_watch_rebuild_note, load_syntax_trees,
+    run_pipeline, should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
+use super::verification::{
+    SuppliedArtifactKind, SuppliedVerifyArtifact, supplied_verify_artifacts,
+    verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
+};
+use super::{Cli, embedded_config_template, exit_code_for_error, init_project};
 use clap::Parser;
 use flate2::{Compression, write::GzEncoder};
 use notify::RecursiveMode;
