@@ -88,88 +88,236 @@ pub struct SyntheticMethodStub {
     pub returns: Option<String>,
 }
 
-type TypedDictClassMetadataCache =
-    BTreeMap<String, BTreeMap<String, typepython_syntax::TypedDictClassMetadata>>;
-type DirectFunctionSignatureCache =
-    BTreeMap<String, BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>>;
-type DirectMethodSignatureCache =
-    BTreeMap<String, BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>>;
-type DecoratorTransformModuleInfoCache =
-    BTreeMap<String, typepython_syntax::DecoratorTransformModuleInfo>;
-type DataclassTransformModuleInfoCache =
-    BTreeMap<String, typepython_syntax::DataclassTransformModuleInfo>;
+type TypedDictClassMetadataByName = BTreeMap<String, typepython_syntax::TypedDictClassMetadata>;
+type DirectFunctionSignaturesByName =
+    BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>;
+type DirectMethodSignaturesByName =
+    BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>;
 
-thread_local! {
-    static ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE:
-        RefCell<Vec<TypedDictClassMetadataCache>> = const { RefCell::new(Vec::new()) };
-    static ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE: RefCell<Vec<DirectFunctionSignatureCache>> =
-        const { RefCell::new(Vec::new()) };
-    static ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE: RefCell<Vec<DirectMethodSignatureCache>> =
-        const { RefCell::new(Vec::new()) };
-    static ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE:
-        RefCell<Vec<DecoratorTransformModuleInfoCache>> = const { RefCell::new(Vec::new()) };
-    static ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE:
-        RefCell<Vec<DataclassTransformModuleInfoCache>> = const { RefCell::new(Vec::new()) };
-    static ACTIVE_IMPORT_FALLBACK: RefCell<Vec<ImportFallback>> = const { RefCell::new(Vec::new()) };
+#[derive(Debug, Default)]
+struct ModuleSourceFacts {
+    source_loaded: bool,
+    source_text: Option<String>,
+    typed_dict_class_metadata: Option<BTreeMap<String, typepython_syntax::TypedDictClassMetadata>>,
+    direct_function_signatures:
+        Option<BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>>,
+    direct_method_signatures:
+        Option<BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>>,
+    decorator_transform_module_info:
+        Option<Option<typepython_syntax::DecoratorTransformModuleInfo>>,
+    dataclass_transform_module_info:
+        Option<Option<typepython_syntax::DataclassTransformModuleInfo>>,
 }
 
-fn with_checker_source_caches<T>(import_fallback: ImportFallback, action: impl FnOnce() -> T) -> T {
-    struct CheckerSourceCacheGuard;
+impl ModuleSourceFacts {
+    fn source_text<'a>(&'a mut self, node: &typepython_graph::ModuleNode) -> Option<&'a str> {
+        if !self.source_loaded {
+            self.source_text = fs::read_to_string(&node.module_path).ok();
+            self.source_loaded = true;
+        }
 
-    impl Drop for CheckerSourceCacheGuard {
-        fn drop(&mut self) {
-            ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
-                cache.borrow_mut().pop();
-            });
-            ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
-                cache.borrow_mut().pop();
-            });
-            ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
-                cache.borrow_mut().pop();
-            });
-            ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-                cache.borrow_mut().pop();
-            });
-            ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-                cache.borrow_mut().pop();
-            });
-            ACTIVE_IMPORT_FALLBACK.with(|cache| {
-                cache.borrow_mut().pop();
-            });
+        self.source_text.as_deref()
+    }
+}
+
+#[derive(Debug, Default)]
+struct CheckerSourceFactsProvider {
+    modules: RefCell<BTreeMap<String, ModuleSourceFacts>>,
+}
+
+impl CheckerSourceFactsProvider {
+    fn with_module_facts<T>(
+        &self,
+        node: &typepython_graph::ModuleNode,
+        action: impl FnOnce(&mut ModuleSourceFacts) -> T,
+    ) -> T {
+        let cache_key = node.module_path.display().to_string();
+        let mut modules = self.modules.borrow_mut();
+        let facts = modules.entry(cache_key).or_default();
+        action(facts)
+    }
+
+    fn typed_dict_class_metadata(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> TypedDictClassMetadataByName {
+        if node.module_path.to_string_lossy().starts_with('<') {
+            return BTreeMap::new();
+        }
+
+        self.with_module_facts(node, |facts| {
+            if let Some(metadata) = facts.typed_dict_class_metadata.clone() {
+                return metadata;
+            }
+
+            let metadata = match facts.source_text(node) {
+                Some(source) => typepython_syntax::collect_typed_dict_class_metadata(source)
+                    .into_iter()
+                    .map(|metadata| (metadata.name.clone(), metadata))
+                    .collect(),
+                None => BTreeMap::new(),
+            };
+            facts.typed_dict_class_metadata = Some(metadata.clone());
+            metadata
+        })
+    }
+
+    fn direct_function_signatures(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> DirectFunctionSignaturesByName {
+        if node.module_path.to_string_lossy().starts_with('<') {
+            return BTreeMap::new();
+        }
+
+        self.with_module_facts(node, |facts| {
+            if let Some(signatures) = facts.direct_function_signatures.clone() {
+                return signatures;
+            }
+
+            let signatures = match facts.source_text(node) {
+                Some(source) => typepython_syntax::collect_direct_function_signature_sites(source)
+                    .into_iter()
+                    .map(|signature| (signature.name, signature.params))
+                    .collect(),
+                None => BTreeMap::new(),
+            };
+            facts.direct_function_signatures = Some(signatures.clone());
+            signatures
+        })
+    }
+
+    fn direct_method_signatures(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> DirectMethodSignaturesByName {
+        if node.module_path.to_string_lossy().starts_with('<') {
+            return BTreeMap::new();
+        }
+
+        self.with_module_facts(node, |facts| {
+            if let Some(signatures) = facts.direct_method_signatures.clone() {
+                return signatures;
+            }
+
+            let signatures = match facts.source_text(node) {
+                Some(source) => typepython_syntax::collect_direct_method_signature_sites(source)
+                    .into_iter()
+                    .map(|signature| {
+                        let params = match signature.method_kind {
+                            typepython_syntax::MethodKind::Static
+                            | typepython_syntax::MethodKind::Property => signature.params,
+                            typepython_syntax::MethodKind::Instance
+                            | typepython_syntax::MethodKind::Class
+                            | typepython_syntax::MethodKind::PropertySetter => {
+                                signature.params.into_iter().skip(1).collect()
+                            }
+                        };
+                        ((signature.owner_type_name, signature.name), params)
+                    })
+                    .collect(),
+                None => BTreeMap::new(),
+            };
+            facts.direct_method_signatures = Some(signatures.clone());
+            signatures
+        })
+    }
+
+    fn decorator_transform_module_info(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
+        if node.module_path.to_string_lossy().starts_with('<') {
+            return None;
+        }
+
+        self.with_module_facts(node, |facts| {
+            if let Some(info) = &facts.decorator_transform_module_info {
+                return info.clone();
+            }
+
+            let info = facts
+                .source_text(node)
+                .map(typepython_syntax::collect_decorator_transform_module_info);
+            facts.decorator_transform_module_info = Some(info.clone());
+            info
+        })
+    }
+
+    fn dataclass_transform_module_info(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
+        if node.module_path.to_string_lossy().starts_with('<') {
+            return None;
+        }
+
+        self.with_module_facts(node, |facts| {
+            if let Some(info) = &facts.dataclass_transform_module_info {
+                return info.clone();
+            }
+
+            let info = facts
+                .source_text(node)
+                .map(typepython_syntax::collect_dataclass_transform_module_info);
+            facts.dataclass_transform_module_info = Some(info.clone());
+            info
+        })
+    }
+}
+
+#[derive(Debug)]
+struct CheckerContext<'a> {
+    nodes: &'a [typepython_graph::ModuleNode],
+    import_fallback: ImportFallback,
+    source_facts: CheckerSourceFactsProvider,
+}
+
+impl<'a> CheckerContext<'a> {
+    fn new(nodes: &'a [typepython_graph::ModuleNode], import_fallback: ImportFallback) -> Self {
+        Self { nodes, import_fallback, source_facts: CheckerSourceFactsProvider::default() }
+    }
+
+    fn import_fallback_type(&self) -> &'static str {
+        match self.import_fallback {
+            ImportFallback::Unknown => "unknown",
+            ImportFallback::Dynamic => "dynamic",
         }
     }
 
-    ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
-        cache.borrow_mut().push(BTreeMap::new());
-    });
-    ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
-        cache.borrow_mut().push(BTreeMap::new());
-    });
-    ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
-        cache.borrow_mut().push(BTreeMap::new());
-    });
-    ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-        cache.borrow_mut().push(BTreeMap::new());
-    });
-    ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-        cache.borrow_mut().push(BTreeMap::new());
-    });
-    ACTIVE_IMPORT_FALLBACK.with(|cache| {
-        cache.borrow_mut().push(import_fallback);
-    });
-    let _guard = CheckerSourceCacheGuard;
-    action()
-}
+    fn load_typed_dict_class_metadata(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> TypedDictClassMetadataByName {
+        self.source_facts.typed_dict_class_metadata(node)
+    }
 
-fn active_import_fallback() -> ImportFallback {
-    ACTIVE_IMPORT_FALLBACK
-        .with(|cache| cache.borrow().last().copied().unwrap_or(ImportFallback::Unknown))
-}
+    fn load_direct_function_signatures(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> DirectFunctionSignaturesByName {
+        self.source_facts.direct_function_signatures(node)
+    }
 
-fn import_fallback_type() -> &'static str {
-    match active_import_fallback() {
-        ImportFallback::Unknown => "unknown",
-        ImportFallback::Dynamic => "dynamic",
+    fn load_direct_method_signatures(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> DirectMethodSignaturesByName {
+        self.source_facts.direct_method_signatures(node)
+    }
+
+    fn load_decorator_transform_module_info(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
+        self.source_facts.decorator_transform_module_info(node)
+    }
+
+    fn load_dataclass_transform_module_info(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
+        self.source_facts.dataclass_transform_module_info(node)
     }
 }
 
@@ -197,22 +345,21 @@ pub fn check_with_options(
     warn_unsafe: bool,
     import_fallback: ImportFallback,
 ) -> CheckResult {
-    with_checker_source_caches(import_fallback, || {
-        let mut diagnostics = DiagnosticReport::default();
-        let options = CheckerPassOptions {
-            require_explicit_overrides,
-            enable_sealed_exhaustiveness,
-            report_deprecated,
-            strict,
-            warn_unsafe,
-        };
+    let context = CheckerContext::new(&graph.nodes, import_fallback);
+    let mut diagnostics = DiagnosticReport::default();
+    let options = CheckerPassOptions {
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+    };
 
-        for node in &graph.nodes {
-            collect_node_diagnostics(&mut diagnostics, node, &graph.nodes, options);
-        }
+    for node in &graph.nodes {
+        collect_node_diagnostics(&context, &mut diagnostics, node, options);
+    }
 
-        CheckResult { diagnostics }
-    })
+    CheckResult { diagnostics }
 }
 
 #[derive(Clone, Copy)]
@@ -225,94 +372,118 @@ struct CheckerPassOptions {
 }
 
 fn collect_node_diagnostics(
+    context: &CheckerContext<'_>,
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
     options: CheckerPassOptions,
 ) {
-    collect_node_semantic_diagnostics(diagnostics, node, nodes, options);
-    collect_node_call_diagnostics(diagnostics, node, nodes);
-    collect_node_assignment_diagnostics(diagnostics, node, nodes);
-    collect_node_declaration_diagnostics(diagnostics, node, nodes, options);
+    collect_node_semantic_diagnostics(context, diagnostics, node, options);
+    collect_node_call_diagnostics(context, diagnostics, node);
+    collect_node_assignment_diagnostics(context, diagnostics, node);
+    collect_node_declaration_diagnostics(context, diagnostics, node, options);
 }
 
 fn collect_node_semantic_diagnostics(
+    context: &CheckerContext<'_>,
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
     options: CheckerPassOptions,
 ) {
-    push_diagnostics(diagnostics, ambiguous_overload_call_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_unknown_operation_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, unresolved_import_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_member_access_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, ambiguous_overload_call_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        direct_unknown_operation_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(diagnostics, unresolved_import_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, direct_member_access_diagnostics(node, context.nodes));
     push_diagnostics(
         diagnostics,
         unsafe_boundary_diagnostics(node, options.strict, options.warn_unsafe),
     );
     push_diagnostics(
         diagnostics,
-        deprecated_use_diagnostics(node, nodes, options.report_deprecated),
+        deprecated_use_diagnostics(node, context.nodes, options.report_deprecated),
     );
-    push_diagnostics(diagnostics, direct_method_call_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_return_type_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, for_loop_target_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, with_statement_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_method_call_diagnostics(context, node, context.nodes));
+    push_diagnostics(diagnostics, direct_return_type_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, for_loop_target_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, with_statement_diagnostics(node, context.nodes));
 }
 
 fn collect_node_call_diagnostics(
+    context: &CheckerContext<'_>,
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
 ) {
-    push_diagnostics(diagnostics, direct_call_arity_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_call_type_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_call_keyword_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, direct_unresolved_paramspec_call_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_call_arity_diagnostics(context, node, context.nodes));
+    push_diagnostics(diagnostics, direct_call_type_diagnostics(context, node, context.nodes));
+    push_diagnostics(diagnostics, direct_call_keyword_diagnostics(context, node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        direct_unresolved_paramspec_call_diagnostics(node, context.nodes),
+    );
 }
 
 fn collect_node_assignment_diagnostics(
+    context: &CheckerContext<'_>,
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
 ) {
-    push_diagnostics(diagnostics, annotated_assignment_type_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, simple_name_augmented_assignment_diagnostics(node, nodes));
-    push_unique_diagnostics(diagnostics, typed_dict_literal_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, typed_dict_readonly_mutation_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, subscript_assignment_type_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, frozen_dataclass_transform_mutation_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, frozen_plain_dataclass_mutation_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, attribute_assignment_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, annotated_assignment_type_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        simple_name_augmented_assignment_diagnostics(node, context.nodes),
+    );
+    push_unique_diagnostics(
+        diagnostics,
+        typed_dict_literal_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(
+        diagnostics,
+        typed_dict_readonly_mutation_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(
+        diagnostics,
+        subscript_assignment_type_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(
+        diagnostics,
+        frozen_dataclass_transform_mutation_diagnostics(node, context.nodes),
+    );
+    push_diagnostics(diagnostics, frozen_plain_dataclass_mutation_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, attribute_assignment_type_diagnostics(node, context.nodes));
 }
 
 fn collect_node_declaration_diagnostics(
+    context: &CheckerContext<'_>,
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
     options: CheckerPassOptions,
 ) {
     push_diagnostics(
         diagnostics,
         duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations),
     );
-    push_diagnostics(diagnostics, override_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, override_compatibility_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, override_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, override_compatibility_diagnostics(node, context.nodes));
     if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
-        push_diagnostics(diagnostics, missing_override_diagnostics(node, nodes));
+        push_diagnostics(diagnostics, missing_override_diagnostics(node, context.nodes));
     }
-    push_diagnostics(diagnostics, final_decorator_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, final_override_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, abstract_member_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, abstract_instantiation_diagnostics(node, nodes));
-    push_diagnostics(diagnostics, interface_implementation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, final_decorator_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, final_override_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, abstract_member_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, abstract_instantiation_diagnostics(node, context.nodes));
+    push_diagnostics(diagnostics, interface_implementation_diagnostics(node, context.nodes));
     if options.enable_sealed_exhaustiveness {
-        push_diagnostics(diagnostics, sealed_match_exhaustiveness_diagnostics(node, nodes));
-        push_diagnostics(diagnostics, enum_match_exhaustiveness_diagnostics(node, nodes));
+        push_diagnostics(diagnostics, sealed_match_exhaustiveness_diagnostics(node, context.nodes));
+        push_diagnostics(diagnostics, enum_match_exhaustiveness_diagnostics(node, context.nodes));
     }
-    push_diagnostics(diagnostics, conditional_return_coverage_diagnostics(node, nodes));
+    push_diagnostics(
+        diagnostics,
+        conditional_return_coverage_diagnostics(context, node, context.nodes),
+    );
 }
 
 fn push_diagnostics(
@@ -339,6 +510,7 @@ fn push_unique_diagnostics(
 pub fn collect_effective_callable_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveCallableStubOverride> {
+    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown);
     let mut overrides = graph
         .nodes
         .iter()
@@ -348,12 +520,15 @@ pub fn collect_effective_callable_stub_overrides(
                 .iter()
                 .filter(|declaration| declaration.kind == DeclarationKind::Function)
                 .filter_map(|declaration| {
-                    let site = resolve_decorated_callable_site(node, declaration)?;
-                    let callable = resolve_decorated_callable_annotation_for_declaration(
-                        node,
-                        &graph.nodes,
-                        declaration,
-                    )?;
+                    let site =
+                        resolve_decorated_callable_site_with_context(&context, node, declaration)?;
+                    let callable =
+                        resolve_decorated_callable_annotation_for_declaration_with_context(
+                            &context,
+                            node,
+                            context.nodes,
+                            declaration,
+                        )?;
                     let params =
                         direct_function_signature_sites_from_callable_annotation(&callable)?;
                     let returns =
@@ -382,12 +557,14 @@ pub fn collect_effective_callable_stub_overrides(
 
 #[must_use]
 pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMethodStub> {
+    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown);
     let mut methods = graph
         .nodes
         .iter()
         .filter(|node| node.module_kind == SourceKind::TypePython)
         .flat_map(|node| {
-            let module_info = load_dataclass_transform_module_info(node).unwrap_or_default();
+            let module_info =
+                context.load_dataclass_transform_module_info(node).unwrap_or_default();
             node.declarations
                 .iter()
                 .filter(|declaration| {
@@ -975,6 +1152,16 @@ fn resolved_keyword_expansions(
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
 ) -> Vec<KeywordExpansion> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolved_keyword_expansions_with_context(&context, node, nodes, call)
+}
+
+fn resolved_keyword_expansions_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Vec<KeywordExpansion> {
     let mut expansions = Vec::new();
     let count = call.keyword_expansion_values.len().max(call.keyword_expansion_types.len());
     for index in 0..count {
@@ -989,7 +1176,7 @@ fn resolved_keyword_expansions(
             .unwrap_or_else(|| {
                 call.keyword_expansion_types.get(index).cloned().unwrap_or_default()
             });
-        if let Some(expansion) = parse_keyword_expansion(node, nodes, &value_type) {
+        if let Some(expansion) = parse_keyword_expansion(context, node, nodes, &value_type) {
             expansions.push(expansion);
         }
     }
@@ -997,12 +1184,15 @@ fn resolved_keyword_expansions(
 }
 
 fn parse_keyword_expansion(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     value_type: &str,
 ) -> Option<KeywordExpansion> {
     let normalized = normalize_type_text(value_type);
-    if let Some(shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &normalized) {
+    if let Some(shape) =
+        resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &normalized)
+    {
         return Some(KeywordExpansion::TypedDict(shape));
     }
     let (head, args) = split_generic_type(&normalized)?;
@@ -1026,13 +1216,14 @@ struct DirectSignatureParam {
 }
 
 fn direct_unknown_operation_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     for access in &node.member_accesses {
-        if name_is_unknown_boundary(node, nodes, &access.owner_name) {
+        if name_is_unknown_boundary(context, node, nodes, &access.owner_name) {
             diagnostics.push(Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -1046,7 +1237,7 @@ fn direct_unknown_operation_diagnostics(
     }
 
     for call in &node.method_calls {
-        if name_is_unknown_boundary(node, nodes, &call.owner_name) {
+        if name_is_unknown_boundary(context, node, nodes, &call.owner_name) {
             diagnostics.push(Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -1061,10 +1252,10 @@ fn direct_unknown_operation_diagnostics(
     }
 
     for call in &node.calls {
-        if plain_dataclass_field_specifier_call(node, &call.callee, call.line) {
+        if plain_dataclass_field_specifier_call(context, node, &call.callee, call.line) {
             continue;
         }
-        if name_is_unknown_boundary(node, nodes, &call.callee) {
+        if name_is_unknown_boundary(context, node, nodes, &call.callee) {
             diagnostics.push(Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -1081,17 +1272,12 @@ fn direct_unknown_operation_diagnostics(
 }
 
 fn plain_dataclass_field_specifier_call(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     _callee: &str,
     line: usize,
 ) -> bool {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return false;
-    }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return false;
-    };
-    let info = typepython_syntax::collect_dataclass_transform_module_info(&source);
+    let info = context.load_dataclass_transform_module_info(node).unwrap_or_default();
     info.classes.iter().any(|class_site| {
         class_site
             .decorators
@@ -1108,6 +1294,7 @@ fn plain_dataclass_field_specifier_call(
 }
 
 fn conditional_return_coverage_diagnostics(
+    _context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1161,6 +1348,7 @@ fn conditional_return_coverage_diagnostics(
 }
 
 fn name_is_unknown_boundary(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     name: &str,
@@ -1173,14 +1361,24 @@ fn name_is_unknown_boundary(
         return false;
     }
 
-    if resolve_direct_name_reference_type(node, nodes, None, None, None, None, usize::MAX, name)
-        .is_some_and(|resolved| normalize_type_text(&resolved) == "unknown")
+    if resolve_direct_name_reference_type_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        None,
+        None,
+        usize::MAX,
+        name,
+    )
+    .is_some_and(|resolved| normalize_type_text(&resolved) == "unknown")
     {
         return true;
     }
 
     if let Some((head, _)) = name.split_once('.')
-        && unresolved_import_boundary_type(node, nodes, head)
+        && unresolved_import_boundary_type_with_context(context, node, nodes, head)
             .is_some_and(|boundary| boundary == "unknown")
     {
         return true;
@@ -1190,10 +1388,12 @@ fn name_is_unknown_boundary(
         return false;
     }
 
-    unresolved_import_boundary_type(node, nodes, name).is_some_and(|boundary| boundary == "unknown")
+    unresolved_import_boundary_type_with_context(context, node, nodes, name)
+        .is_some_and(|boundary| boundary == "unknown")
 }
 
-fn unresolved_import_boundary_type<'a>(
+fn unresolved_import_boundary_type_with_context<'a>(
+    context: &'a CheckerContext<'_>,
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
     local_name: &str,
@@ -1206,7 +1406,7 @@ fn unresolved_import_boundary_type<'a>(
     {
         return None;
     }
-    Some(import_fallback_type())
+    Some(context.import_fallback_type())
 }
 
 fn resolve_direct_type_alias<'a>(
@@ -2358,6 +2558,7 @@ impl<'a> TypedDictFieldShapeRef<'a> {
 }
 
 fn typed_dict_literal_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -2375,8 +2576,12 @@ fn typed_dict_literal_diagnostics(
             continue;
         };
         let annotation = rewrite_imported_typing_aliases(node, annotation);
-        let Some(target_shape) = resolve_known_typed_dict_shape_from_type(node, nodes, &annotation)
-        else {
+        let Some(target_shape) = resolve_known_typed_dict_shape_from_type_with_context(
+            context,
+            node,
+            nodes,
+            &annotation,
+        ) else {
             continue;
         };
 
@@ -2668,6 +2873,7 @@ fn resolve_augmented_assignment_result_type(
 }
 
 fn typed_dict_readonly_mutation_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -2697,7 +2903,8 @@ fn typed_dict_readonly_mutation_diagnostics(
                 &site.target,
             )?;
             let key = site.key.as_deref()?;
-            let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type)?;
+            let target_shape =
+                resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &owner_type)?;
             let Some(field) = typed_dict_known_or_extra_field(&target_shape, key) else {
                 return Some(
                     Diagnostic::error(
@@ -2923,6 +3130,7 @@ fn resolve_writable_subscript_signature(
 }
 
 fn subscript_assignment_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -2956,7 +3164,9 @@ fn subscript_assignment_type_diagnostics(
                 &site.target,
             )?;
 
-            if resolve_known_typed_dict_shape_from_type(node, nodes, &owner_type).is_some() {
+            if resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &owner_type)
+                .is_some()
+            {
                 return None;
             }
 
@@ -3751,11 +3961,22 @@ fn resolve_known_typed_dict_shape_from_type(
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
 ) -> Option<TypedDictShape> {
-    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
-    resolve_known_typed_dict_shape(node, nodes, &type_name)
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_known_typed_dict_shape_from_type_with_context(&context, node, nodes, type_name)
 }
 
-fn resolve_known_typed_dict_shape(
+fn resolve_known_typed_dict_shape_from_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<TypedDictShape> {
+    let type_name = annotated_inner(type_name).unwrap_or_else(|| normalize_type_text(type_name));
+    resolve_known_typed_dict_shape_with_context(context, node, nodes, &type_name)
+}
+
+fn resolve_known_typed_dict_shape_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
@@ -3765,9 +3986,10 @@ fn resolve_known_typed_dict_shape(
         return None;
     }
 
-    let typed_dict_metadata = load_typed_dict_class_metadata(class_node);
+    let typed_dict_metadata = load_typed_dict_class_metadata(context, class_node);
     let mut fields = BTreeMap::new();
     collect_typed_dict_fields(
+        context,
         nodes,
         class_node,
         class_decl,
@@ -3775,8 +3997,14 @@ fn resolve_known_typed_dict_shape(
         &mut BTreeSet::new(),
         &mut fields,
     );
-    let (closed, extra_items) =
-        collect_typed_dict_openness(node, nodes, class_node, class_decl, &mut BTreeSet::new())?;
+    let (closed, extra_items) = collect_typed_dict_openness(
+        context,
+        node,
+        nodes,
+        class_node,
+        class_decl,
+        &mut BTreeSet::new(),
+    )?;
     Some(TypedDictShape { name: class_decl.name.clone(), fields, closed, extra_items })
 }
 
@@ -3803,6 +4031,7 @@ fn is_typed_dict_class(
 }
 
 fn collect_typed_dict_fields(
+    context: &CheckerContext<'_>,
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,
     class_decl: &Declaration,
@@ -3819,10 +4048,11 @@ fn collect_typed_dict_fields(
         if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
             if is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
                 collect_typed_dict_fields(
+                    context,
                     nodes,
                     base_node,
                     base_decl,
-                    &load_typed_dict_class_metadata(base_node),
+                    &load_typed_dict_class_metadata(context, base_node),
                     visited,
                     fields,
                 );
@@ -3850,6 +4080,7 @@ fn collect_typed_dict_fields(
 }
 
 fn collect_typed_dict_openness(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,
@@ -3871,14 +4102,14 @@ fn collect_typed_dict_openness(
             continue;
         }
         let (base_closed, base_extra_items) =
-            collect_typed_dict_openness(node, nodes, base_node, base_decl, visited)?;
+            collect_typed_dict_openness(context, node, nodes, base_node, base_decl, visited)?;
         inherited_closed |= base_closed;
         if inherited_extra_items.is_none() {
             inherited_extra_items = base_extra_items;
         }
     }
 
-    let metadata = load_typed_dict_class_metadata(class_node);
+    let metadata = load_typed_dict_class_metadata(context, class_node);
     let metadata = metadata.get(&class_decl.name);
     let mut closed = inherited_closed;
     let mut extra_items = inherited_extra_items;
@@ -3908,89 +4139,16 @@ fn collect_typed_dict_openness(
 }
 
 fn load_typed_dict_class_metadata(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> BTreeMap<String, typepython_syntax::TypedDictClassMetadata> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return BTreeMap::new();
-    }
-    let cache_key = node.module_path.display().to_string();
-    ACTIVE_TYPED_DICT_CLASS_METADATA_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let Some(active) = cache.last_mut() else {
-            return load_typed_dict_class_metadata_uncached(node);
-        };
-        if let Some(metadata) = active.get(&cache_key) {
-            return metadata.clone();
-        }
-        let metadata = load_typed_dict_class_metadata_uncached(node);
-        active.insert(cache_key, metadata.clone());
-        metadata
-    })
+    context.load_typed_dict_class_metadata(node)
 }
 
-fn load_typed_dict_class_metadata_uncached(
-    node: &typepython_graph::ModuleNode,
-) -> BTreeMap<String, typepython_syntax::TypedDictClassMetadata> {
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_typed_dict_class_metadata(&source)
-        .into_iter()
-        .map(|metadata| (metadata.name.clone(), metadata))
-        .collect()
-}
-
-fn load_direct_method_signatures_uncached(
-    node: &typepython_graph::ModuleNode,
-) -> BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>> {
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_direct_method_signature_sites(&source)
-        .into_iter()
-        .map(|signature| {
-            let params = match signature.method_kind {
-                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                    signature.params
-                }
-                typepython_syntax::MethodKind::Instance
-                | typepython_syntax::MethodKind::Class
-                | typepython_syntax::MethodKind::PropertySetter => {
-                    signature.params.into_iter().skip(1).collect()
-                }
-            };
-            ((signature.owner_type_name, signature.name), params)
-        })
-        .collect()
-}
-
-fn load_direct_function_signatures_uncached(
-    node: &typepython_graph::ModuleNode,
-) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return BTreeMap::new();
-    };
-
-    typepython_syntax::collect_direct_function_signature_sites(&source)
-        .into_iter()
-        .map(|signature| (signature.name, signature.params))
-        .collect()
-}
-
-fn load_decorator_transform_module_info_uncached(
-    node: &typepython_graph::ModuleNode,
-) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
-    let source = fs::read_to_string(&node.module_path).ok()?;
-    Some(typepython_syntax::collect_decorator_transform_module_info(&source))
-}
-
-fn load_dataclass_transform_module_info_uncached(
+fn load_dataclass_transform_module_info(
     node: &typepython_graph::ModuleNode,
 ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
-    let source = fs::read_to_string(&node.module_path).ok()?;
-    Some(typepython_syntax::collect_dataclass_transform_module_info(&source))
+    load_dataclass_transform_module_info_uncached(node)
 }
 
 fn parse_typed_dict_extra_items(
@@ -4354,10 +4512,30 @@ fn resolve_contextual_typed_dict_literal_type(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualTypedDictLiteralResult> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_contextual_typed_dict_literal_type_with_context(
+        &context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+fn resolve_contextual_typed_dict_literal_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualTypedDictLiteralResult> {
     let entries = metadata.value_dict_entries.as_ref()?;
     let expected = expected?;
     let actual_type = normalize_type_text(expected);
-    let target_shape = resolve_known_typed_dict_shape_from_type(node, nodes, &actual_type)?;
+    let target_shape =
+        resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &actual_type)?;
     let diagnostics = typed_dict_literal_entry_diagnostics(
         node,
         nodes,
@@ -6109,8 +6287,28 @@ fn resolve_subscript_type_from_target_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_subscript_type_from_target_type_with_context(
+        &context,
+        node,
+        nodes,
+        target_type,
+        string_key,
+        index_text,
+    )
+}
+
+fn resolve_subscript_type_from_target_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &str,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<String> {
     if let Some(key) = string_key
-        && let Some(shape) = resolve_known_typed_dict_shape_from_type(node, nodes, target_type)
+        && let Some(shape) =
+            resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, target_type)
     {
         return typed_dict_known_or_extra_field(&shape, key)
             .map(|field| field.value_type().to_owned());
@@ -6187,6 +6385,31 @@ fn resolve_direct_name_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_direct_name_reference_type_with_context(
+        &context,
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )
+}
+
+fn resolve_direct_name_reference_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
     if let Some(receiver_type) =
         resolve_receiver_name_type(node, current_owner_name, current_owner_type_name, value_name)
     {
@@ -6195,7 +6418,8 @@ fn resolve_direct_name_reference_type(
 
     let signature =
         signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
-    let base_type = resolve_unnarrowed_name_reference_type(
+    let base_type = resolve_unnarrowed_name_reference_type_with_context(
+        context,
         node,
         nodes,
         signature.as_deref(),
@@ -6457,7 +6681,8 @@ fn find_owned_callable_declarations_with_visited<'a>(
     clippy::too_many_arguments,
     reason = "unnarrowed name resolution needs scope and source-position context"
 )]
-fn resolve_unnarrowed_name_reference_type(
+fn resolve_unnarrowed_name_reference_type_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -6554,7 +6779,9 @@ fn resolve_unnarrowed_name_reference_type(
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
         if let Some(callable_annotation) =
-            resolve_decorated_function_callable_annotation(node, nodes, value_name)
+            resolve_decorated_function_callable_annotation_with_context(
+                context, node, nodes, value_name,
+            )
         {
             return Some(callable_annotation);
         }
@@ -6566,12 +6793,15 @@ fn resolve_unnarrowed_name_reference_type(
         return Some(format_callable_annotation(&param_types, &return_text));
     }
 
-    if let Some(boundary_type) = unresolved_import_boundary_type(node, nodes, value_name) {
+    if let Some(boundary_type) =
+        unresolved_import_boundary_type_with_context(context, node, nodes, value_name)
+    {
         return Some(String::from(boundary_type));
     }
 
     if let Some((head, _)) = value_name.split_once('.')
-        && let Some(boundary_type) = unresolved_import_boundary_type(node, nodes, head)
+        && let Some(boundary_type) =
+            unresolved_import_boundary_type_with_context(context, node, nodes, head)
     {
         return Some(String::from(boundary_type));
     }
@@ -8351,11 +8581,12 @@ fn isinstance_guard_type_name(type_name: &str) -> Option<String> {
 }
 
 fn direct_method_call_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let direct_method_signatures = load_direct_method_signatures(node);
+    let direct_method_signatures = context.load_direct_method_signatures(node);
 
     for call in &node.method_calls {
         if !call.through_instance
@@ -8366,7 +8597,8 @@ fn direct_method_call_diagnostics(
             continue;
         }
 
-        let Some(owner_type_name) = resolve_method_call_owner_type(node, nodes, call) else {
+        let Some(owner_type_name) = resolve_method_call_owner_type(context, node, nodes, call)
+        else {
             continue;
         };
         let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name)
@@ -8428,18 +8660,24 @@ fn direct_method_call_diagnostics(
             }
             if let Some(applicable) = applicable.first().copied() {
                 let signature = direct_method_signature_sites(applicable, &owner_type_name);
-                if let Some(diagnostic) =
-                    direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
-                {
+                if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                ) {
                     diagnostics.push(diagnostic);
                 }
-                diagnostics.extend(direct_source_function_keyword_diagnostics(
+                diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                    context,
                     node,
                     nodes,
                     &direct_call,
                     &signature,
                 ));
-                diagnostics.extend(direct_source_function_type_diagnostics(
+                diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+                    context,
                     node,
                     nodes,
                     &direct_call,
@@ -8452,18 +8690,24 @@ fn direct_method_call_diagnostics(
         if let Some(signature) =
             direct_method_signatures.get(&(class_decl.name.clone(), call.method.clone()))
         {
-            if let Some(diagnostic) =
-                direct_source_function_arity_diagnostic(node, nodes, &direct_call, signature)
-            {
+            if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                context,
+                node,
+                nodes,
+                &direct_call,
+                signature,
+            ) {
                 diagnostics.push(diagnostic);
             }
-            diagnostics.extend(direct_source_function_keyword_diagnostics(
+            diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                context,
                 node,
                 nodes,
                 &direct_call,
                 signature,
             ));
-            diagnostics.extend(direct_source_function_type_diagnostics(
+            diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+                context,
                 node,
                 nodes,
                 &direct_call,
@@ -8497,18 +8741,24 @@ fn direct_method_call_diagnostics(
                     fallback_signature.into_iter().skip(1).collect()
                 }
             };
-        if let Some(diagnostic) =
-            direct_source_function_arity_diagnostic(node, nodes, &direct_call, &fallback_signature)
-        {
+        if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+            context,
+            node,
+            nodes,
+            &direct_call,
+            &fallback_signature,
+        ) {
             diagnostics.push(diagnostic);
         }
-        diagnostics.extend(direct_source_function_keyword_diagnostics(
+        diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+            context,
             node,
             nodes,
             &direct_call,
             &fallback_signature,
         ));
-        diagnostics.extend(direct_source_function_type_diagnostics(
+        diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+            context,
             node,
             nodes,
             &direct_call,
@@ -8564,28 +8814,8 @@ fn method_overload_is_applicable(
     call_signature_params_are_applicable(node, nodes, call, &params)
 }
 
-fn load_direct_method_signatures(
-    node: &typepython_graph::ModuleNode,
-) -> BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return BTreeMap::new();
-    }
-    let cache_key = node.module_path.display().to_string();
-    ACTIVE_DIRECT_METHOD_SIGNATURES_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let Some(active) = cache.last_mut() else {
-            return load_direct_method_signatures_uncached(node);
-        };
-        if let Some(signatures) = active.get(&cache_key) {
-            return signatures.clone();
-        }
-        let signatures = load_direct_method_signatures_uncached(node);
-        active.insert(cache_key, signatures.clone());
-        signatures
-    })
-}
-
 fn resolve_method_call_owner_type(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::MethodCallSite,
@@ -8596,7 +8826,8 @@ fn resolve_method_call_owner_type(
             .or_else(|| Some(call.owner_name.clone()));
     }
 
-    resolve_direct_name_reference_type(
+    resolve_direct_name_reference_type_with_context(
+        context,
         node,
         nodes,
         None,
@@ -8610,6 +8841,7 @@ fn resolve_method_call_owner_type(
 }
 
 fn direct_call_arity_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -8621,9 +8853,21 @@ fn direct_call_arity_diagnostics(
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
             }
-            if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee)
+            if let Some(signature) =
+                resolve_direct_callable_signature_sites_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &call.callee,
+                )
             {
-                return direct_source_function_arity_diagnostic(node, nodes, call, &signature);
+                return direct_source_function_arity_diagnostic_with_context(
+                    context,
+                    node,
+                    nodes,
+                    call,
+                    &signature,
+                );
             }
             let (expected, _) = resolve_direct_callable_signature(node, nodes, &call.callee)?;
             (call.arg_count != expected).then(|| {
@@ -8711,6 +8955,7 @@ fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>>
 }
 
 fn direct_call_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -8732,7 +8977,13 @@ fn direct_call_type_diagnostics(
                 && let Some(signature) =
                     resolve_instantiated_direct_function_signature(node, nodes, function, call)
             {
-                return direct_source_function_type_diagnostics(node, nodes, call, &signature);
+                return direct_source_function_type_diagnostics_with_context(
+                    context,
+                    node,
+                    nodes,
+                    call,
+                    &signature,
+                );
             }
             if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
                 && function.type_params.iter().any(|type_param| {
@@ -8757,9 +9008,15 @@ fn direct_call_type_diagnostics(
                 ];
             }
             if let Some(signature) =
-                resolve_direct_callable_signature_sites(node, nodes, &call.callee)
+                resolve_direct_callable_signature_sites_with_context(context, node, nodes, &call.callee)
             {
-                return direct_source_function_type_diagnostics(node, nodes, call, &signature);
+                return direct_source_function_type_diagnostics_with_context(
+                    context,
+                    node,
+                    nodes,
+                    call,
+                    &signature,
+                );
             }
             let Some(param_types) = resolve_direct_callable_param_types(node, nodes, &call.callee)
             else {
@@ -8786,6 +9043,7 @@ fn direct_call_type_diagnostics(
 }
 
 fn direct_call_keyword_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -8799,10 +9057,12 @@ fn direct_call_keyword_diagnostics(
                 .extend(dataclass_transform_constructor_keyword_diagnostics(node, call, &shape));
             continue;
         }
-        if let Some(signature) = resolve_direct_callable_signature_sites(node, nodes, &call.callee)
+        if let Some(signature) =
+            resolve_direct_callable_signature_sites_with_context(context, node, nodes, &call.callee)
         {
-            diagnostics
-                .extend(direct_source_function_keyword_diagnostics(node, nodes, call, &signature));
+            diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                context, node, nodes, call, &signature,
+            ));
             continue;
         }
         let Some((_, param_names)) = resolve_direct_callable_signature(node, nodes, &call.callee)
@@ -8833,6 +9093,17 @@ fn direct_source_function_arity_diagnostic(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    direct_source_function_arity_diagnostic_with_context(&context, node, nodes, call, signature)
+}
+
+fn direct_source_function_arity_diagnostic_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Option<Diagnostic> {
     let positional_params = signature
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
@@ -8858,8 +9129,9 @@ fn direct_source_function_arity_diagnostic(
     }
 
     let provided_keywords = call.keyword_names.iter().collect::<BTreeSet<_>>();
-    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
-    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
+    let unpack_shape =
+        unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let missing = signature
         .iter()
         .enumerate()
@@ -8919,7 +9191,19 @@ fn direct_source_function_keyword_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    direct_source_function_keyword_diagnostics_with_context(&context, node, nodes, call, signature)
+}
+
+fn direct_source_function_keyword_diagnostics_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Vec<Diagnostic> {
+    let unpack_shape =
+        unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_annotation = signature
         .iter()
         .find(|param| param.keyword_variadic)
@@ -8938,7 +9222,7 @@ fn direct_source_function_keyword_diagnostics(
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, _) =
         expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
-    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
     let mut diagnostics = call.keyword_names
         .iter()
         .filter_map(|keyword| {
@@ -9135,6 +9419,17 @@ fn direct_source_function_type_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    direct_source_function_type_diagnostics_with_context(&context, node, nodes, call, signature)
+}
+
+fn direct_source_function_type_diagnostics_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+) -> Vec<Diagnostic> {
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let expected_keyword_arg_types =
@@ -9170,7 +9465,7 @@ fn direct_source_function_type_diagnostics(
         resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
     let (expanded_arg_types, variadic_starred_types) =
         expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
-    let keyword_expansions = resolved_keyword_expansions(node, nodes, call);
+    let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
     let param_types = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
@@ -9183,7 +9478,8 @@ fn direct_source_function_type_diagnostics(
         .collect::<Vec<_>>();
     let variadic_type =
         signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.as_deref());
-    let unpack_shape = unpack_typed_dict_shape_from_signature(node, nodes, signature);
+    let unpack_shape =
+        unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
@@ -9546,7 +9842,8 @@ fn positional_and_keyword_type_diagnostics(
     diagnostics
 }
 
-fn unpack_typed_dict_shape_from_signature(
+fn unpack_typed_dict_shape_from_signature_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: &[typepython_syntax::DirectFunctionParamSite],
@@ -9557,34 +9854,15 @@ fn unpack_typed_dict_shape_from_signature(
         .and_then(|param| param.annotation.as_deref())?;
     let annotation = normalize_type_text(annotation);
     let inner = annotation.strip_prefix("Unpack[")?.strip_suffix(']')?;
-    resolve_known_typed_dict_shape_from_type(node, nodes, inner)
+    resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, inner)
 }
 
-fn load_direct_function_signatures(
+fn load_direct_init_signatures_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
 ) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return BTreeMap::new();
-    }
-    let cache_key = node.module_path.display().to_string();
-    ACTIVE_DIRECT_FUNCTION_SIGNATURES_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let Some(active) = cache.last_mut() else {
-            return load_direct_function_signatures_uncached(node);
-        };
-        if let Some(signatures) = active.get(&cache_key) {
-            return signatures.clone();
-        }
-        let signatures = load_direct_function_signatures_uncached(node);
-        active.insert(cache_key, signatures.clone());
-        signatures
-    })
-}
-
-fn load_direct_init_signatures(
-    node: &typepython_graph::ModuleNode,
-) -> BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>> {
-    load_direct_method_signatures(node)
+    context
+        .load_direct_method_signatures(node)
         .into_iter()
         .filter(|((_, method_name), _)| method_name == "__init__")
         .map(|((owner_type_name, _), params)| (owner_type_name, params))
@@ -9614,17 +9892,27 @@ fn resolve_direct_callable_signature_sites(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_direct_callable_signature_sites_with_context(&context, node, nodes, callee)
+}
+
+fn resolve_direct_callable_signature_sites_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
     if let Some(callable_annotation) =
-        resolve_decorated_function_callable_annotation(node, nodes, callee)
+        resolve_decorated_function_callable_annotation_with_context(context, node, nodes, callee)
     {
         return direct_function_signature_sites_from_callable_annotation(&callable_annotation);
     }
-    let direct_function_signatures = load_direct_function_signatures(node);
+    let direct_function_signatures = context.load_direct_function_signatures(node);
     if let Some(signature) = direct_function_signatures.get(callee) {
         return Some(signature.clone());
     }
 
-    let direct_init_signatures = load_direct_init_signatures(node);
+    let direct_init_signatures = load_direct_init_signatures_with_context(context, node);
     if let Some(signature) = direct_init_signatures.get(callee) {
         return Some(signature.clone());
     }
@@ -10699,27 +10987,6 @@ fn render_param_list_binding_for_callable(
     format!("[{}]", rendered.join(", "))
 }
 
-fn load_decorator_transform_module_info(
-    node: &typepython_graph::ModuleNode,
-) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return None;
-    }
-    let cache_key = node.module_path.display().to_string();
-    ACTIVE_DECORATOR_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let Some(active) = cache.last_mut() else {
-            return load_decorator_transform_module_info_uncached(node);
-        };
-        if let Some(info) = active.get(&cache_key) {
-            return Some(info.clone());
-        }
-        let info = load_decorator_transform_module_info_uncached(node)?;
-        active.insert(cache_key, info.clone());
-        Some(info)
-    })
-}
-
 fn resolve_direct_function_with_node<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
@@ -10796,11 +11063,12 @@ fn resolve_function_provider_with_node<'a>(
         .map(|declaration| (target_node, declaration))
 }
 
-fn resolve_decorated_callable_site(
+fn resolve_decorated_callable_site_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,
 ) -> Option<typepython_syntax::DecoratedCallableSite> {
-    let info = load_decorator_transform_module_info(node)?;
+    let info = context.load_decorator_transform_module_info(node)?;
     info.callables.into_iter().find(|site| {
         site.name == declaration.name
             && site.owner_type_name.as_deref()
@@ -10879,18 +11147,44 @@ fn synthetic_decorator_application_call(
     }
 }
 
-fn decorator_transform_accepts_callable_annotation(
+fn decorator_transform_accepts_callable_annotation_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> bool {
-    direct_source_function_arity_diagnostic(node, nodes, call, signature).is_none()
-        && direct_source_function_keyword_diagnostics(node, nodes, call, signature).is_empty()
-        && direct_source_function_type_diagnostics(node, nodes, call, signature).is_empty()
+    direct_source_function_arity_diagnostic_with_context(context, node, nodes, call, signature)
+        .is_none()
+        && direct_source_function_keyword_diagnostics_with_context(
+            context, node, nodes, call, signature,
+        )
+        .is_empty()
+        && direct_source_function_type_diagnostics_with_context(
+            context, node, nodes, call, signature,
+        )
+        .is_empty()
 }
 
+#[cfg(test)]
 fn apply_named_callable_decorator_transform(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    decorator_name: &str,
+    current_callable: &str,
+) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    apply_named_callable_decorator_transform_with_context(
+        &context,
+        node,
+        nodes,
+        decorator_name,
+        current_callable,
+    )
+}
+
+fn apply_named_callable_decorator_transform_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     decorator_name: &str,
@@ -10904,7 +11198,13 @@ fn apply_named_callable_decorator_transform(
     } else {
         resolve_instantiated_direct_function_signature(decorator_node, nodes, decorator, &call)?
     };
-    if !decorator_transform_accepts_callable_annotation(decorator_node, nodes, &call, &signature) {
+    if !decorator_transform_accepts_callable_annotation_with_context(
+        context,
+        decorator_node,
+        nodes,
+        &call,
+        &signature,
+    ) {
         return None;
     }
 
@@ -10928,7 +11228,22 @@ fn resolve_decorated_callable_annotation_for_declaration(
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
 ) -> Option<String> {
-    let decorated = resolve_decorated_callable_site(node, declaration)?;
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_decorated_callable_annotation_for_declaration_with_context(
+        &context,
+        node,
+        nodes,
+        declaration,
+    )
+}
+
+fn resolve_decorated_callable_annotation_for_declaration_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+) -> Option<String> {
+    let decorated = resolve_decorated_callable_site_with_context(context, node, declaration)?;
     if decorated.decorators.is_empty() {
         return None;
     }
@@ -10942,7 +11257,9 @@ fn resolve_decorated_callable_annotation_for_declaration(
     let mut current =
         callable_annotation_from_signature_sites_in_module(node, &base_signature, &base_return);
     for decorator in decorated.decorators.iter().rev() {
-        current = apply_named_callable_decorator_transform(node, nodes, decorator, &current)?;
+        current = apply_named_callable_decorator_transform_with_context(
+            context, node, nodes, decorator, &current,
+        )?;
     }
     Some(current)
 }
@@ -10952,8 +11269,23 @@ fn resolve_decorated_function_callable_annotation(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    resolve_decorated_function_callable_annotation_with_context(&context, node, nodes, callee)
+}
+
+fn resolve_decorated_function_callable_annotation_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<String> {
     let (function_node, function) = resolve_direct_function_with_node(node, nodes, callee)?;
-    resolve_decorated_callable_annotation_for_declaration(function_node, nodes, function)
+    resolve_decorated_callable_annotation_for_declaration_with_context(
+        context,
+        function_node,
+        nodes,
+        function,
+    )
 }
 
 fn direct_function_signature_sites_from_callable_annotation(
@@ -11485,25 +11817,14 @@ fn is_descriptor_type(
     })
 }
 
-fn load_dataclass_transform_module_info(
+fn load_dataclass_transform_module_info_uncached(
     node: &typepython_graph::ModuleNode,
 ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
     if node.module_path.to_string_lossy().starts_with('<') {
         return None;
     }
-    let cache_key = node.module_path.display().to_string();
-    ACTIVE_DATACLASS_TRANSFORM_MODULE_INFO_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let Some(active) = cache.last_mut() else {
-            return load_dataclass_transform_module_info_uncached(node);
-        };
-        if let Some(info) = active.get(&cache_key) {
-            return Some(info.clone());
-        }
-        let info = load_dataclass_transform_module_info_uncached(node)?;
-        active.insert(cache_key, info.clone());
-        Some(info)
-    })
+    let source = fs::read_to_string(&node.module_path).ok()?;
+    Some(typepython_syntax::collect_dataclass_transform_module_info(&source))
 }
 
 fn resolve_dataclass_transform_provider<'a>(
