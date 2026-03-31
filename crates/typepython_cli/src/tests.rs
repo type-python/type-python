@@ -1,10 +1,10 @@
+use super::verification::{SuppliedArtifactKind, SuppliedVerifyArtifact};
 use super::{
-    Cli, ExternalSupportRoot, SuppliedArtifactKind, SuppliedVerifyArtifact, build_diagnostics,
-    build_migration_report, bundled_stdlib_snapshot_identity_for_root,
-    bundled_stdlib_sources_for_root, collect_source_paths, compile_runtime_bytecode,
-    embedded_config_template, emit_migration_stubs, exit_code_for_error,
-    external_resolution_sources, format_watch_rebuild_note, init_project, load_syntax_trees,
-    python_type_roots_from_interpreter, run_pipeline, should_emit_build_outputs,
+    Cli, ExternalSupportRoot, build_diagnostics, build_migration_report,
+    bundled_stdlib_snapshot_identity_for_root, bundled_stdlib_sources_for_root,
+    collect_source_paths, compile_runtime_bytecode, embedded_config_template, emit_migration_stubs,
+    exit_code_for_error, external_resolution_sources, format_watch_rebuild_note, init_project,
+    load_syntax_trees, python_type_roots_from_interpreter, run_pipeline, should_emit_build_outputs,
     supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
     verify_runtime_public_name_parity, watch_targets, write_incremental_snapshot,
 };
@@ -36,8 +36,7 @@ fn collect_source_paths_includes_implicit_namespace_packages() {
     let result = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
-        fs::create_dir_all(project_dir.join("src/pkg/subpkg"))
-            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join("src/pkg/subpkg")).expect("test setup should succeed");
         fs::write(project_dir.join("src/pkg/__init__.tpy"), "pass\n")
             .expect("test setup should succeed");
         fs::write(project_dir.join("src/pkg/subpkg/mod.tpy"), "pass\n")
@@ -84,11 +83,8 @@ fn embedded_config_template_rewrites_sections_under_tool_typepython() {
 #[test]
 fn init_project_embeds_config_into_existing_pyproject() {
     let project_dir = temp_project_dir("init_project_embeds_config_into_existing_pyproject");
-    fs::write(
-        project_dir.join("pyproject.toml"),
-        "[build-system]\nrequires = [\"setuptools\"]\n",
-    )
-    .expect("pyproject.toml should be written");
+    fs::write(project_dir.join("pyproject.toml"), "[build-system]\nrequires = [\"setuptools\"]\n")
+        .expect("pyproject.toml should be written");
 
     let init_result = init_project(super::InitArgs {
         dir: project_dir.clone(),
@@ -122,9 +118,7 @@ fn init_project_rejects_embed_without_existing_pyproject() {
     remove_temp_project_dir(&project_dir);
 
     let error = init_result.expect_err("embed should require an existing pyproject");
-    assert!(
-        error.to_string().contains("--embed-pyproject requires an existing pyproject.toml")
-    );
+    assert!(error.to_string().contains("--embed-pyproject requires an existing pyproject.toml"));
 }
 
 #[test]
@@ -212,9 +206,8 @@ fn collect_source_paths_rejects_invalid_include_glob_patterns() {
 #[cfg(unix)]
 #[test]
 fn external_resolution_merges_partial_stub_packages_with_runtime_fallback() {
-    let project_dir = temp_project_dir(
-        "external_resolution_merges_partial_stub_packages_with_runtime_fallback",
-    );
+    let project_dir =
+        temp_project_dir("external_resolution_merges_partial_stub_packages_with_runtime_fallback");
     let modules = {
         let probe = project_dir.join("python-probe");
         write_executable_script(
@@ -310,18 +303,12 @@ fn run_pipeline_prefers_local_companion_stub_surfaces() {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join("src/lib")).expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/lib/__init__.py"),
-            "def make() -> int:\n    return 1\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/lib/__init__.py"), "def make() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
         fs::write(project_dir.join("src/lib/__init__.pyi"), "def make() -> str: ...\n")
             .expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/app.tpy"),
-            "from lib import make\n\nname: str = make()\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "from lib import make\n\nname: str = make()\n")
+            .expect("test setup should succeed");
 
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
@@ -374,11 +361,8 @@ fn run_pipeline_prefers_stub_packages_over_typed_runtime_packages() {
         .expect("test setup should succeed");
         fs::write(project_dir.join("site-packages/demo-stubs/py.typed"), "")
             .expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/app.tpy"),
-            "from demo import make\n\nname: str = make()\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "from demo import make\n\nname: str = make()\n")
+            .expect("test setup should succeed");
 
         let config = load(&project_dir).expect("test setup should succeed");
         run_pipeline(&config).expect("test setup should succeed").diagnostics
@@ -481,14 +465,8 @@ fn bundled_stdlib_sources_filter_version_marked_files_by_target_python() {
         .collect::<BTreeSet<_>>();
     remove_temp_project_dir(&project_dir);
 
-    assert_eq!(
-        modules_310,
-        BTreeSet::from([String::from("legacy_only"), String::from("shared"),])
-    );
-    assert_eq!(
-        modules_311,
-        BTreeSet::from([String::from("modern_only"), String::from("shared"),])
-    );
+    assert_eq!(modules_310, BTreeSet::from([String::from("legacy_only"), String::from("shared"),]));
+    assert_eq!(modules_311, BTreeSet::from([String::from("modern_only"), String::from("shared"),]));
 }
 
 #[test]
@@ -622,9 +600,8 @@ fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
 
 #[test]
 fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
-    let project_dir = temp_project_dir(
-        "verify_build_artifacts_accepts_present_runtime_stub_and_marker_files",
-    );
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
     let diagnostics = {
         fs::write(
             project_dir.join("typepython.toml"),
@@ -1057,8 +1034,7 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
 
 #[test]
 fn verify_packaged_artifacts_reports_missing_stub_in_wheel() {
-    let project_dir =
-        temp_project_dir("verify_packaged_artifacts_reports_missing_stub_in_wheel");
+    let project_dir = temp_project_dir("verify_packaged_artifacts_reports_missing_stub_in_wheel");
     let rendered = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
@@ -1344,9 +1320,8 @@ fn verify_runtime_public_name_parity_accepts_matching_all_exports() {
 
 #[test]
 fn verify_runtime_public_name_parity_reports_runtime_missing_stub_export() {
-    let project_dir = temp_project_dir(
-        "verify_runtime_public_name_parity_reports_runtime_missing_stub_export",
-    );
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_reports_runtime_missing_stub_export");
     let rendered = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
@@ -1357,7 +1332,11 @@ fn verify_runtime_public_name_parity_reports_runtime_missing_stub_export() {
             "def build_user() -> int:\n    return 1\n",
         )
         .expect("test setup should succeed");
-        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "__all__ = [\"build_user\", \"extra\"]\n\ndef build_user() -> int: ...\nextra: int\n").expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\", \"extra\"]\n\ndef build_user() -> int: ...\nextra: int\n",
+        )
+        .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");
 
         verify_runtime_public_name_parity(
@@ -1379,9 +1358,8 @@ fn verify_runtime_public_name_parity_reports_runtime_missing_stub_export() {
 
 #[test]
 fn verify_runtime_public_name_parity_reports_stub_missing_runtime_export() {
-    let project_dir = temp_project_dir(
-        "verify_runtime_public_name_parity_reports_stub_missing_runtime_export",
-    );
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_reports_stub_missing_runtime_export");
     let rendered = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
@@ -1409,8 +1387,7 @@ fn verify_runtime_public_name_parity_reports_stub_missing_runtime_export() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(
-        rendered
-            .contains("authoritative type surface for `app` is missing runtime public names")
+        rendered.contains("authoritative type surface for `app` is missing runtime public names")
     );
     assert!(rendered.contains("extra"));
 }
@@ -1501,11 +1478,8 @@ fn run_pipeline_stops_before_lowering_when_checker_fails() {
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/app.tpy"),
-            "def build() -> int:\n    return \"oops\"\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");
         run_pipeline(&config).expect("test setup should succeed")
     };
@@ -1589,10 +1563,9 @@ fn run_pipeline_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_ena
             let config = load(&project_dir).expect("test setup should succeed");
             run_pipeline(&config).expect("test setup should succeed").diagnostics
         };
-        let shadow = fs::read_to_string(
-            project_dir.join(".typepython/cache/shadow-stubs/app/helpers.pyi"),
-        )
-        .expect("shadow stub should be written");
+        let shadow =
+            fs::read_to_string(project_dir.join(".typepython/cache/shadow-stubs/app/helpers.pyi"))
+                .expect("shadow stub should be written");
 
         (with, shadow)
     };
@@ -1677,8 +1650,7 @@ fn run_pipeline_invalidates_cache_when_public_summary_changes() {
 
 #[test]
 fn build_diagnostics_adds_emit_blocked_error_when_configured() {
-    let project_dir =
-        temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
+    let project_dir = temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
     let rendered = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
@@ -1819,8 +1791,7 @@ fn compile_runtime_bytecode_uses_configured_python_executable() {
 
 #[test]
 fn watch_targets_include_config_and_existing_source_roots() {
-    let project_dir =
-        temp_project_dir("watch_targets_include_config_and_existing_source_roots");
+    let project_dir = temp_project_dir("watch_targets_include_config_and_existing_source_roots");
     let targets = {
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
@@ -1885,19 +1856,15 @@ fn build_migration_report_counts_file_coverage_and_boundaries() {
 
 #[test]
 fn build_migration_report_ranks_high_impact_untyped_files() {
-    let project_dir =
-        temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
+    let project_dir = temp_project_dir("build_migration_report_ranks_high_impact_untyped_files");
     let report = {
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
         fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n")
             .expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/app/a.tpy"),
-            "def untyped(value) -> int:\n    return 0\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/a.tpy"), "def untyped(value) -> int:\n    return 0\n")
+            .expect("test setup should succeed");
         fs::write(
             project_dir.join("src/app/b.tpy"),
             "from app.a import untyped\n\ndef use(value: int) -> int:\n    return value\n",
@@ -1954,8 +1921,7 @@ fn emit_migration_stubs_writes_generated_pyi_to_configured_output_dir() {
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
-        fs::write(project_dir.join("src/app/__init__.py"), "")
-            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/__init__.py"), "").expect("test setup should succeed");
         fs::write(
             project_dir.join("src/app/helpers.py"),
             "VALUE = 1\n\ndef parse(text):\n    return VALUE\n",
@@ -1971,8 +1937,8 @@ fn emit_migration_stubs_writes_generated_pyi_to_configured_output_dir() {
         )
         .expect("migration stub emission should succeed");
         let stub_path = project_dir.join(".generated-stubs/app/helpers.pyi");
-        let stub = fs::read_to_string(&stub_path)
-            .expect("generated migration stub should be readable");
+        let stub =
+            fs::read_to_string(&stub_path).expect("generated migration stub should be readable");
 
         (written, stub)
     };
