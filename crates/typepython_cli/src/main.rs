@@ -1,5 +1,7 @@
 //! `typepython` command-line entrypoint.
 
+mod cli;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     env, fs,
@@ -12,7 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::Parser;
 use flate2::read::GzDecoder;
 use glob::Pattern;
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
@@ -36,6 +38,10 @@ use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 use zip::ZipArchive;
 
+use crate::cli::{
+    CleanArgs, Cli, Command, InitArgs, MigrateArgs, OutputFormat, RunArgs, VerifyArgs,
+};
+
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
 const INIT_SOURCE_TEMPLATE: &str =
@@ -44,103 +50,6 @@ const RUNTIME_PUBLIC_NAMES_SCRIPT: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/runtime_public_names.py"));
 const STATIC_ALL_NAMES_SCRIPT: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/static_all_names.py"));
-
-#[derive(Debug, Parser)]
-#[command(name = "typepython", version, about = "Rust compiler and tooling for TypePython")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Create a starter TypePython config and source tree.
-    Init(InitArgs),
-    /// Load the project and run the TypePython checking pipeline.
-    Check(RunArgs),
-    /// Build Python output, stubs, and cache artifacts for the project.
-    Build(RunArgs),
-    /// Watch project inputs and rebuild/check when files change.
-    Watch(RunArgs),
-    /// Remove configured build and cache directories.
-    Clean(CleanArgs),
-    /// Start the TypePython language server.
-    Lsp(RunArgs),
-    /// Verify emitted artifacts and incremental state.
-    Verify(VerifyArgs),
-    /// Analyze migration coverage and dynamic boundaries.
-    Migrate(MigrateArgs),
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
-enum OutputFormat {
-    /// Human-readable output.
-    Text,
-    /// Machine-readable JSON output.
-    Json,
-}
-
-#[derive(Debug, Args)]
-struct RunArgs {
-    /// Project directory to search from.
-    #[arg(long, value_name = "PATH")]
-    project: Option<PathBuf>,
-    /// Output format.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    format: OutputFormat,
-}
-
-#[derive(Debug, Args)]
-struct InitArgs {
-    /// Target directory for generated files.
-    #[arg(long, value_name = "PATH", default_value = ".")]
-    dir: PathBuf,
-    /// Overwrite existing generated files.
-    #[arg(long)]
-    force: bool,
-    #[arg(long)]
-    embed_pyproject: bool,
-}
-
-#[derive(Debug, Args)]
-struct CleanArgs {
-    /// Project directory to search from.
-    #[arg(long, value_name = "PATH")]
-    project: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct VerifyArgs {
-    #[command(flatten)]
-    run: RunArgs,
-    #[arg(
-        long = "wheel",
-        value_name = "PATH",
-        help = "Verify a published wheel artifact against the build output"
-    )]
-    wheels: Vec<PathBuf>,
-    #[arg(
-        long = "sdist",
-        value_name = "PATH",
-        help = "Verify a published source distribution against the build output"
-    )]
-    sdists: Vec<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct MigrateArgs {
-    #[command(flatten)]
-    run: RunArgs,
-    /// Emit the migration coverage report.
-    #[arg(long)]
-    report: bool,
-    /// Generate inferred `.pyi` stubs for the selected `.py` files or directories.
-    #[arg(long = "emit-stubs", value_name = "PATH")]
-    emit_stubs: Vec<PathBuf>,
-    /// Output directory for generated stubs. Defaults to writing alongside the source `.py` files.
-    #[arg(long = "stub-out-dir", value_name = "PATH")]
-    stub_out_dir: Option<PathBuf>,
-}
 
 #[derive(Debug)]
 struct PipelineSnapshot {
