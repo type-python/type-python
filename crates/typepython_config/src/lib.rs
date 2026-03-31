@@ -656,6 +656,34 @@ fn validate_project_paths(
         });
     }
 
+    if let (Some(existing_out_dir), Some(existing_cache_dir)) = (
+        best_effort_existing_project_path(&normalized_out_dir),
+        best_effort_existing_project_path(&normalized_cache_dir),
+    ) {
+        if existing_out_dir == existing_cache_dir {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: format!(
+                    "project.out_dir = `{out_dir}` and project.cache_dir = `{cache_dir}` resolve through existing path aliases to the same path `{}`",
+                    existing_out_dir.display()
+                ),
+            });
+        }
+
+        if existing_out_dir.starts_with(&existing_cache_dir)
+            || existing_cache_dir.starts_with(&existing_out_dir)
+        {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: format!(
+                    "project.out_dir = `{out_dir}` and project.cache_dir = `{cache_dir}` resolve through existing path aliases to overlapping paths `{}` and `{}`",
+                    existing_out_dir.display(),
+                    existing_cache_dir.display()
+                ),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -695,6 +723,24 @@ fn normalize_lexical_path(path: &Path) -> PathBuf {
     }
 
     normalized
+}
+
+fn best_effort_existing_project_path(path: &Path) -> Option<PathBuf> {
+    let mut existing_prefix = normalize_lexical_path(path);
+    let mut remainder = Vec::new();
+
+    while !existing_prefix.exists() {
+        let component = existing_prefix.file_name()?.to_os_string();
+        remainder.push(component);
+        existing_prefix.pop();
+    }
+
+    let mut resolved = fs::canonicalize(&existing_prefix).ok()?;
+    for component in remainder.into_iter().rev() {
+        resolved.push(component);
+    }
+
+    Some(normalize_lexical_path(&resolved))
 }
 
 fn validate_target_python(config_path: &Path, target_python: &str) -> Result<(), ConfigError> {
@@ -777,7 +823,7 @@ mod tests {
     };
 
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
     fn prefers_typepython_toml_over_pyproject() {
@@ -865,6 +911,65 @@ mod tests {
         assert!(message.contains("project.cache_dir = `.typepython/build/cache`"));
         assert!(message.contains("must not overlap"));
         assert!(message.contains("are nested"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_out_dir_and_cache_dir_with_existing_symlink_alias() {
+        let project_dir = temp_project_dir("rejects_out_dir_and_cache_dir_with_existing_symlink_alias");
+        fs::create_dir_all(project_dir.join("real-build"))
+            .expect("real output directory should be created");
+        symlink(project_dir.join("real-build"), project_dir.join("build-link"))
+            .expect("symlink alias should be created");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "out_dir = \"real-build\"\n",
+                "cache_dir = \"build-link\"\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected symlink alias paths to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("resolve through existing path aliases"));
+    }
+
+    #[test]
+    fn rejects_case_alias_out_dir_and_cache_dir_when_filesystem_collapses_them() {
+        let project_dir =
+            temp_project_dir("rejects_case_alias_out_dir_and_cache_dir_when_filesystem_collapses_them");
+        fs::create_dir_all(project_dir.join("Build"))
+            .expect("existing output directory should be created");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "out_dir = \"Build\"\n",
+                "cache_dir = \"build\"\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+        let filesystem_collapses_case = project_dir.join("build").exists();
+
+        remove_temp_project_dir(&project_dir);
+
+        if filesystem_collapses_case {
+            let error = load_result.expect_err("expected case-collapsed alias paths to fail");
+            let message = error.to_string();
+            assert!(message.contains("TPY1002"));
+            assert!(message.contains("resolve through existing path aliases"));
+        } else {
+            load_result.expect("case-sensitive filesystems should keep paths distinct");
+        }
     }
 
     #[test]
