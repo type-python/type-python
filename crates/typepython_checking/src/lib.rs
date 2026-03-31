@@ -199,143 +199,140 @@ pub fn check_with_options(
 ) -> CheckResult {
     with_checker_source_caches(import_fallback, || {
         let mut diagnostics = DiagnosticReport::default();
+        let options = CheckerPassOptions {
+            require_explicit_overrides,
+            enable_sealed_exhaustiveness,
+            report_deprecated,
+            strict,
+            warn_unsafe,
+        };
 
         for node in &graph.nodes {
-            for overload_diagnostic in ambiguous_overload_call_diagnostics(node, &graph.nodes) {
-                diagnostics.push(overload_diagnostic);
-            }
-            for unknown_diagnostic in direct_unknown_operation_diagnostics(node, &graph.nodes) {
-                diagnostics.push(unknown_diagnostic);
-            }
-            for resolution_diagnostic in unresolved_import_diagnostics(node, &graph.nodes) {
-                diagnostics.push(resolution_diagnostic);
-            }
-            for access_diagnostic in direct_member_access_diagnostics(node, &graph.nodes) {
-                diagnostics.push(access_diagnostic);
-            }
-            for unsafe_diagnostic in unsafe_boundary_diagnostics(node, strict, warn_unsafe) {
-                diagnostics.push(unsafe_diagnostic);
-            }
-            for deprecated_diagnostic in
-                deprecated_use_diagnostics(node, &graph.nodes, report_deprecated)
-            {
-                diagnostics.push(deprecated_diagnostic);
-            }
-            for call_diagnostic in direct_method_call_diagnostics(node, &graph.nodes) {
-                diagnostics.push(call_diagnostic);
-            }
-            for return_diagnostic in direct_return_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(return_diagnostic);
-            }
-            for yield_diagnostic in direct_yield_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(yield_diagnostic);
-            }
-            for for_diagnostic in for_loop_target_diagnostics(node, &graph.nodes) {
-                diagnostics.push(for_diagnostic);
-            }
-            for destructuring_diagnostic in destructuring_assignment_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(destructuring_diagnostic);
-            }
-            for with_diagnostic in with_statement_diagnostics(node, &graph.nodes) {
-                diagnostics.push(with_diagnostic);
-            }
-            for call_diagnostic in direct_call_arity_diagnostics(node, &graph.nodes) {
-                diagnostics.push(call_diagnostic);
-            }
-            for call_diagnostic in direct_call_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(call_diagnostic);
-            }
-            for call_diagnostic in direct_call_keyword_diagnostics(node, &graph.nodes) {
-                diagnostics.push(call_diagnostic);
-            }
-            for call_diagnostic in direct_unresolved_paramspec_call_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(call_diagnostic);
-            }
-            for assignment_diagnostic in annotated_assignment_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(assignment_diagnostic);
-            }
-            for assignment_diagnostic in
-                simple_name_augmented_assignment_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(assignment_diagnostic);
-            }
-            for typed_dict_diagnostic in typed_dict_literal_diagnostics(node, &graph.nodes) {
-                if !diagnostics.diagnostics.contains(&typed_dict_diagnostic) {
-                    diagnostics.push(typed_dict_diagnostic);
-                }
-            }
-            for typed_dict_diagnostic in
-                typed_dict_readonly_mutation_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(typed_dict_diagnostic);
-            }
-            for subscript_diagnostic in subscript_assignment_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(subscript_diagnostic);
-            }
-            for dataclass_diagnostic in
-                frozen_dataclass_transform_mutation_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(dataclass_diagnostic);
-            }
-            for dataclass_diagnostic in
-                frozen_plain_dataclass_mutation_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(dataclass_diagnostic);
-            }
-            for attribute_diagnostic in attribute_assignment_type_diagnostics(node, &graph.nodes) {
-                diagnostics.push(attribute_diagnostic);
-            }
-            for duplicate in
-                duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations)
-            {
-                diagnostics.push(duplicate);
-            }
-            for override_violation in override_diagnostics(node, &graph.nodes) {
-                diagnostics.push(override_violation);
-            }
-            for override_violation in override_compatibility_diagnostics(node, &graph.nodes) {
-                diagnostics.push(override_violation);
-            }
-            if require_explicit_overrides && node.module_kind == SourceKind::TypePython {
-                for override_violation in missing_override_diagnostics(node, &graph.nodes) {
-                    diagnostics.push(override_violation);
-                }
-            }
-            for final_violation in final_decorator_diagnostics(node, &graph.nodes) {
-                diagnostics.push(final_violation);
-            }
-            for override_violation in final_override_diagnostics(node, &graph.nodes) {
-                diagnostics.push(override_violation);
-            }
-            for abstract_violation in abstract_member_diagnostics(node, &graph.nodes) {
-                diagnostics.push(abstract_violation);
-            }
-            for instantiation_violation in abstract_instantiation_diagnostics(node, &graph.nodes) {
-                diagnostics.push(instantiation_violation);
-            }
-            for implementation_violation in interface_implementation_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(implementation_violation);
-            }
-            if enable_sealed_exhaustiveness {
-                for match_violation in sealed_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-                    diagnostics.push(match_violation);
-                }
-                for match_violation in enum_match_exhaustiveness_diagnostics(node, &graph.nodes) {
-                    diagnostics.push(match_violation);
-                }
-            }
-            for conditional_return_diagnostic in
-                conditional_return_coverage_diagnostics(node, &graph.nodes)
-            {
-                diagnostics.push(conditional_return_diagnostic);
-            }
+            collect_node_diagnostics(&mut diagnostics, node, &graph.nodes, options);
         }
 
         CheckResult { diagnostics }
     })
+}
+
+#[derive(Clone, Copy)]
+struct CheckerPassOptions {
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+}
+
+fn collect_node_diagnostics(
+    diagnostics: &mut DiagnosticReport,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    options: CheckerPassOptions,
+) {
+    collect_node_semantic_diagnostics(diagnostics, node, nodes, options);
+    collect_node_call_diagnostics(diagnostics, node, nodes);
+    collect_node_assignment_diagnostics(diagnostics, node, nodes);
+    collect_node_declaration_diagnostics(diagnostics, node, nodes, options);
+}
+
+fn collect_node_semantic_diagnostics(
+    diagnostics: &mut DiagnosticReport,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    options: CheckerPassOptions,
+) {
+    push_diagnostics(diagnostics, ambiguous_overload_call_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_unknown_operation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, unresolved_import_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_member_access_diagnostics(node, nodes));
+    push_diagnostics(
+        diagnostics,
+        unsafe_boundary_diagnostics(node, options.strict, options.warn_unsafe),
+    );
+    push_diagnostics(
+        diagnostics,
+        deprecated_use_diagnostics(node, nodes, options.report_deprecated),
+    );
+    push_diagnostics(diagnostics, direct_method_call_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_return_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_yield_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, for_loop_target_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, destructuring_assignment_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, with_statement_diagnostics(node, nodes));
+}
+
+fn collect_node_call_diagnostics(
+    diagnostics: &mut DiagnosticReport,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) {
+    push_diagnostics(diagnostics, direct_call_arity_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_call_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_call_keyword_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, direct_unresolved_paramspec_call_diagnostics(node, nodes));
+}
+
+fn collect_node_assignment_diagnostics(
+    diagnostics: &mut DiagnosticReport,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) {
+    push_diagnostics(diagnostics, annotated_assignment_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, simple_name_augmented_assignment_diagnostics(node, nodes));
+    push_unique_diagnostics(diagnostics, typed_dict_literal_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, typed_dict_readonly_mutation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, subscript_assignment_type_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, frozen_dataclass_transform_mutation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, frozen_plain_dataclass_mutation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, attribute_assignment_type_diagnostics(node, nodes));
+}
+
+fn collect_node_declaration_diagnostics(
+    diagnostics: &mut DiagnosticReport,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    options: CheckerPassOptions,
+) {
+    push_diagnostics(
+        diagnostics,
+        duplicate_diagnostics(&node.module_path, node.module_kind, &node.declarations),
+    );
+    push_diagnostics(diagnostics, override_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, override_compatibility_diagnostics(node, nodes));
+    if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
+        push_diagnostics(diagnostics, missing_override_diagnostics(node, nodes));
+    }
+    push_diagnostics(diagnostics, final_decorator_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, final_override_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, abstract_member_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, abstract_instantiation_diagnostics(node, nodes));
+    push_diagnostics(diagnostics, interface_implementation_diagnostics(node, nodes));
+    if options.enable_sealed_exhaustiveness {
+        push_diagnostics(diagnostics, sealed_match_exhaustiveness_diagnostics(node, nodes));
+        push_diagnostics(diagnostics, enum_match_exhaustiveness_diagnostics(node, nodes));
+    }
+    push_diagnostics(diagnostics, conditional_return_coverage_diagnostics(node, nodes));
+}
+
+fn push_diagnostics(
+    report: &mut DiagnosticReport,
+    new_diagnostics: impl IntoIterator<Item = Diagnostic>,
+) {
+    for diagnostic in new_diagnostics {
+        report.push(diagnostic);
+    }
+}
+
+fn push_unique_diagnostics(
+    report: &mut DiagnosticReport,
+    new_diagnostics: impl IntoIterator<Item = Diagnostic>,
+) {
+    for diagnostic in new_diagnostics {
+        if !report.diagnostics.contains(&diagnostic) {
+            report.push(diagnostic);
+        }
+    }
 }
 
 #[must_use]
