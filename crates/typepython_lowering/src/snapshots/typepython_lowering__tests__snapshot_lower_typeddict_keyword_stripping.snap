@@ -1,0 +1,8 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypedDict
+
+class User(TypedDict, total=False):
+    name: str

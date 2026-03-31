@@ -12,5 +12,12 @@ version.workspace = true
 typepython-binding = { path = "../typepython_binding" }
 typepython-syntax = { path = "../typepython_syntax" }
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "graph"
+harness = false
+
 [lints]
 workspace = true

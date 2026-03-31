@@ -916,18 +916,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_out_dir_and_cache_dir_with_existing_symlink_alias() {
-        let project_dir = temp_project_dir("rejects_out_dir_and_cache_dir_with_existing_symlink_alias");
+        let project_dir =
+            temp_project_dir("rejects_out_dir_and_cache_dir_with_existing_symlink_alias");
         fs::create_dir_all(project_dir.join("real-build"))
             .expect("real output directory should be created");
         symlink(project_dir.join("real-build"), project_dir.join("build-link"))
             .expect("symlink alias should be created");
         fs::write(
             project_dir.join("typepython.toml"),
-            concat!(
-                "[project]\n",
-                "out_dir = \"real-build\"\n",
-                "cache_dir = \"build-link\"\n"
-            ),
+            concat!("[project]\n", "out_dir = \"real-build\"\n", "cache_dir = \"build-link\"\n"),
         )
         .expect("typepython.toml should be written");
 
@@ -943,17 +940,14 @@ mod tests {
 
     #[test]
     fn rejects_case_alias_out_dir_and_cache_dir_when_filesystem_collapses_them() {
-        let project_dir =
-            temp_project_dir("rejects_case_alias_out_dir_and_cache_dir_when_filesystem_collapses_them");
+        let project_dir = temp_project_dir(
+            "rejects_case_alias_out_dir_and_cache_dir_when_filesystem_collapses_them",
+        );
         fs::create_dir_all(project_dir.join("Build"))
             .expect("existing output directory should be created");
         fs::write(
             project_dir.join("typepython.toml"),
-            concat!(
-                "[project]\n",
-                "out_dir = \"Build\"\n",
-                "cache_dir = \"build\"\n"
-            ),
+            concat!("[project]\n", "out_dir = \"Build\"\n", "cache_dir = \"build\"\n"),
         )
         .expect("typepython.toml should be written");
 

@@ -1,0 +1,6 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypeAlias
+UserId: TypeAlias = int

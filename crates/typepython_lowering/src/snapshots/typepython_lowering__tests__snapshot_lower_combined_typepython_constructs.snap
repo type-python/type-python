@@ -1,0 +1,26 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypeAlias
+from typing import Protocol
+from dataclasses import dataclass
+from typing import overload
+UserId: TypeAlias = int
+
+class Closable(Protocol):
+    def close(self) -> None: ...
+
+@dataclass
+class Point:
+    x: float
+    y: float
+
+class Expr:  # tpy:sealed
+    ...
+
+@overload
+def parse(x: str) -> int: ...
+
+def helper() -> int:
+    return 1

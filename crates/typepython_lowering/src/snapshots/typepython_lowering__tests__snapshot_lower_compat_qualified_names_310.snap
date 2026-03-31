@@ -1,0 +1,12 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+import typing
+import warnings
+
+@typing_extensions.deprecated("use new_api")
+class Box:
+    @typing_extensions.override
+    def clone(self) -> typing_extensions.Self:
+        ...

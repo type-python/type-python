@@ -1,0 +1,10 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypeVar
+from typing import ParamSpec
+P = ParamSpec("P")
+R = TypeVar("R")
+def invoke(cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    return cb(*args, **kwargs)

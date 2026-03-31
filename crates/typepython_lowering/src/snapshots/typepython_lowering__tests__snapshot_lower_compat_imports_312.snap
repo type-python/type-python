@@ -1,0 +1,13 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import Self, Required, NotRequired, dataclass_transform, override
+from typing_extensions import ReadOnly, TypeIs
+from typing_extensions import deprecated
+
+@deprecated("use new_api")
+class Box:
+    @override
+    def clone(self) -> Self:
+        ...

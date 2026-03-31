@@ -1,0 +1,9 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+def hello(name: str) -> str:
+    return f"Hello, {name}"
+
+class User:
+    name: str

@@ -601,4 +601,390 @@ mod tests {
 
         assert_eq!(error, SnapshotDecodeError::IncompatibleSchemaVersion(999));
     }
+
+    #[test]
+    fn diff_reports_only_additions_when_previous_is_empty() {
+        let previous = IncrementalState::default();
+        let current = IncrementalState {
+            fingerprints: BTreeMap::from([
+                (String::from("pkg.x"), 1),
+                (String::from("pkg.y"), 2),
+                (String::from("pkg.z"), 3),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+
+        let snapshot_diff = diff(&previous, &current);
+        assert_eq!(snapshot_diff.added.len(), 3);
+        assert!(snapshot_diff.removed.is_empty());
+        assert!(snapshot_diff.changed.is_empty());
+        assert_eq!(
+            snapshot_diff.added,
+            vec![
+                Fingerprint { module_key: String::from("pkg.x"), fingerprint: 1 },
+                Fingerprint { module_key: String::from("pkg.y"), fingerprint: 2 },
+                Fingerprint { module_key: String::from("pkg.z"), fingerprint: 3 },
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_reports_only_removals_when_current_is_empty() {
+        let previous = IncrementalState {
+            fingerprints: BTreeMap::from([
+                (String::from("pkg.a"), 10),
+                (String::from("pkg.b"), 20),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+        let current = IncrementalState::default();
+
+        let snapshot_diff = diff(&previous, &current);
+        assert!(snapshot_diff.added.is_empty());
+        assert!(snapshot_diff.changed.is_empty());
+        assert_eq!(snapshot_diff.removed.len(), 2);
+        assert_eq!(
+            snapshot_diff.removed,
+            vec![
+                Fingerprint { module_key: String::from("pkg.a"), fingerprint: 10 },
+                Fingerprint { module_key: String::from("pkg.b"), fingerprint: 20 },
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_handles_many_modules_correctly() {
+        let previous = IncrementalState {
+            fingerprints: BTreeMap::from([
+                (String::from("mod.a"), 1),
+                (String::from("mod.b"), 2),
+                (String::from("mod.c"), 3),
+                (String::from("mod.d"), 4),
+                (String::from("mod.e"), 5),
+                (String::from("mod.f"), 6),
+                (String::from("mod.g"), 7),
+                (String::from("mod.h"), 8),
+                (String::from("mod.i"), 9),
+                (String::from("mod.j"), 10),
+                (String::from("mod.k"), 11),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+        let current = IncrementalState {
+            fingerprints: BTreeMap::from([
+                // mod.a unchanged
+                (String::from("mod.a"), 1),
+                // mod.b changed
+                (String::from("mod.b"), 200),
+                // mod.c changed
+                (String::from("mod.c"), 300),
+                // mod.d unchanged
+                (String::from("mod.d"), 4),
+                // mod.e through mod.g removed (absent)
+                // mod.h unchanged
+                (String::from("mod.h"), 8),
+                // mod.i changed
+                (String::from("mod.i"), 900),
+                // mod.j unchanged
+                (String::from("mod.j"), 10),
+                // mod.k removed (absent)
+                // new modules added
+                (String::from("mod.l"), 12),
+                (String::from("mod.m"), 13),
+                (String::from("mod.n"), 14),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+
+        let snapshot_diff = diff(&previous, &current);
+        assert_eq!(snapshot_diff.added.len(), 3);
+        assert_eq!(snapshot_diff.removed.len(), 4);
+        assert_eq!(snapshot_diff.changed.len(), 3);
+
+        let added_keys: Vec<&str> =
+            snapshot_diff.added.iter().map(|f| f.module_key.as_str()).collect();
+        assert!(added_keys.contains(&"mod.l"));
+        assert!(added_keys.contains(&"mod.m"));
+        assert!(added_keys.contains(&"mod.n"));
+
+        let removed_keys: Vec<&str> =
+            snapshot_diff.removed.iter().map(|f| f.module_key.as_str()).collect();
+        assert!(removed_keys.contains(&"mod.e"));
+        assert!(removed_keys.contains(&"mod.f"));
+        assert!(removed_keys.contains(&"mod.g"));
+        assert!(removed_keys.contains(&"mod.k"));
+
+        let changed_keys: Vec<&str> =
+            snapshot_diff.changed.iter().map(|f| f.module_key.as_str()).collect();
+        assert!(changed_keys.contains(&"mod.b"));
+        assert!(changed_keys.contains(&"mod.c"));
+        assert!(changed_keys.contains(&"mod.i"));
+    }
+
+    #[test]
+    fn encode_decode_round_trip_preserves_all_fields() {
+        let original = IncrementalState {
+            fingerprints: BTreeMap::from([
+                (String::from("pkg.alpha"), 111),
+                (String::from("pkg.beta"), 222),
+            ]),
+            summaries: vec![
+                PublicSummary {
+                    module: String::from("pkg.alpha"),
+                    is_package_entry: true,
+                    exports: vec![SummaryExport {
+                        name: String::from("Widget"),
+                        kind: String::from("class"),
+                        type_repr: String::from("Widget"),
+                        type_params: vec![SummaryTypeParam {
+                            name: String::from("T"),
+                            bound: Some(String::from("Comparable")),
+                        }],
+                        public: true,
+                    }],
+                    imports: vec![String::from("pkg.base")],
+                    sealed_roots: vec![SealedRootSummary {
+                        root: String::from("Shape"),
+                        members: vec![String::from("Circle"), String::from("Rect")],
+                    }],
+                },
+                PublicSummary {
+                    module: String::from("pkg.beta"),
+                    is_package_entry: false,
+                    exports: vec![SummaryExport {
+                        name: String::from("run"),
+                        kind: String::from("function"),
+                        type_repr: String::from("()->None"),
+                        type_params: Vec::new(),
+                        public: true,
+                    }],
+                    imports: Vec::new(),
+                    sealed_roots: Vec::new(),
+                },
+            ],
+            stdlib_snapshot: Some(String::from("fnv1a64:stdlib_hash")),
+        };
+
+        let encoded = encode_snapshot(&original).expect("encoding should succeed");
+        let decoded = decode_snapshot(&encoded).expect("decoding should succeed");
+
+        assert_eq!(decoded.fingerprints, original.fingerprints);
+        assert_eq!(decoded.summaries, original.summaries);
+        assert_eq!(decoded.stdlib_snapshot, original.stdlib_snapshot);
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn decode_snapshot_rejects_malformed_json() {
+        let error = decode_snapshot("this is not json at all {{{{")
+            .expect_err("malformed JSON should be rejected");
+        match error {
+            SnapshotDecodeError::InvalidJson(message) => {
+                assert!(!message.is_empty(), "error message should not be empty");
+            }
+            other => panic!("expected InvalidJson, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_snapshot_accepts_current_schema_version() {
+        let json = format!(
+            r#"{{"schema_version":{},"fingerprints":{{"mod.a":42}}}}"#,
+            SNAPSHOT_SCHEMA_VERSION
+        );
+        let state = decode_snapshot(&json).expect("valid schema version should be accepted");
+        assert_eq!(state.fingerprints.get("mod.a"), Some(&42));
+    }
+
+    #[test]
+    fn snapshot_captures_package_entry_status() {
+        let state = snapshot(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/pkg/__init__.tpy"),
+                module_key: String::from("pkg"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("VERSION"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("1.0"),
+                    value_type: Some(String::from("str")),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 0,
+            }],
+        });
+
+        assert_eq!(state.summaries.len(), 1);
+        assert!(state.summaries[0].is_package_entry);
+    }
+
+    #[test]
+    fn snapshot_fingerprint_changes_when_export_signature_changes() {
+        let make_graph = |detail: &str| ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/pkg/ops.tpy"),
+                module_key: String::from("pkg.ops"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("compute"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from(detail),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 0,
+            }],
+        };
+
+        let state_v1 = snapshot(&make_graph("(x: int)->int"));
+        let state_v2 = snapshot(&make_graph("(x: int, y: int)->int"));
+
+        let fp_v1 = state_v1.fingerprints.get("pkg.ops").expect("fingerprint should exist");
+        let fp_v2 = state_v2.fingerprints.get("pkg.ops").expect("fingerprint should exist");
+        assert_ne!(fp_v1, fp_v2, "fingerprint should change when export signature changes");
+    }
+
+    #[test]
+    fn snapshot_with_multiple_modules_sorts_summaries_by_module_key() {
+        let state = snapshot(&ModuleGraph {
+            nodes: vec![
+                ModuleNode {
+                    module_path: PathBuf::from("src/pkg/zebra.tpy"),
+                    module_key: String::from("pkg.zebra"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: Vec::new(),
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 0,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/pkg/alpha.tpy"),
+                    module_key: String::from("pkg.alpha"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: Vec::new(),
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 0,
+                },
+                ModuleNode {
+                    module_path: PathBuf::from("src/pkg/mid.tpy"),
+                    module_key: String::from("pkg.mid"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: Vec::new(),
+                    calls: Vec::new(),
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 0,
+                },
+            ],
+        });
+
+        let module_keys: Vec<&str> = state.summaries.iter().map(|s| s.module.as_str()).collect();
+        assert_eq!(module_keys, vec!["pkg.alpha", "pkg.mid", "pkg.zebra"]);
+    }
+
+    #[test]
+    fn snapshot_diff_display_formats_error_messages() {
+        let invalid_json_error = SnapshotDecodeError::InvalidJson(String::from("unexpected EOF"));
+        let display_text = format!("{}", invalid_json_error);
+        assert_eq!(display_text, "invalid incremental snapshot JSON: unexpected EOF");
+
+        let version_error = SnapshotDecodeError::IncompatibleSchemaVersion(42);
+        let display_text = format!("{}", version_error);
+        assert!(display_text.contains("42"));
+        assert!(display_text.contains(&SNAPSHOT_SCHEMA_VERSION.to_string()));
+        assert_eq!(
+            display_text,
+            format!(
+                "incremental snapshot schema version 42 is incompatible with expected version {}",
+                SNAPSHOT_SCHEMA_VERSION
+            )
+        );
+    }
 }

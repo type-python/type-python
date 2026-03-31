@@ -1,0 +1,8 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing_extensions import TypeVar
+T = TypeVar("T", "str", "bytes", default="str")
+from typing import TypeAlias
+Pair: TypeAlias = tuple[T, T]

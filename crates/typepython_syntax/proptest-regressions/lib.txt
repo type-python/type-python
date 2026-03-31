@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 44c1fdff5efe89b2708394dfb8bd0b2508e30d15cc5d6962b1deb81d06e856e0 # shrinks to name = "𞺋"
+cc e05ca3ec82753d23147f650a1f61f5d32ad0987ed920deee98848dad23d660d2 # shrinks to keyword = "typealias", name = "A", rest = "=A\u{3000}]"
+cc ae2619de782d37b839b5f25424528cdcb0ed921c54d5a7c1ffa088e63d742112 # shrinks to indent = "", keyword = "def", rest = "\u{1680}"
+cc 0c4a9fd95c44704b8e40f87b5373a67fb5b5be083406eb5ed2c90ba0aa9271f8 # shrinks to input = "𐌭"

@@ -1,0 +1,7 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import Protocol
+class SupportsClose(Closable, Protocol):
+    def close(self): ...

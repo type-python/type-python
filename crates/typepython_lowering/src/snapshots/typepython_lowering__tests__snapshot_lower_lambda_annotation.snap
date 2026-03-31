@@ -1,0 +1,5 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+handler = lambda  value      : value + 1

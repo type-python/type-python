@@ -8044,7 +8044,7 @@ fn find_next_lambda_keyword(source: &str, start: usize) -> Option<usize> {
                     bytes.get(index + 1) == Some(&byte) && bytes.get(index + 2) == Some(&byte);
                 index += if string_triple { 3 } else { 1 };
             }
-            _ if source[index..].starts_with("lambda")
+            _ if source.get(index..).is_some_and(|s| s.starts_with("lambda"))
                 && is_lambda_keyword_boundary(bytes, index, index + "lambda".len()) =>
             {
                 return Some(index);
@@ -13151,5 +13151,104 @@ mod tests {
                 line: 1,
             }]
         );
+    }
+
+    // ─── Property-based / fuzz tests ────────────────────────────────────────
+
+    mod fuzz {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn parse_does_not_panic_on_arbitrary_typepython_input(input in "\\PC{0,500}") {
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: input,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_arbitrary_python_input(input in "\\PC{0,500}") {
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz.py"),
+                    kind: SourceKind::Python,
+                    logical_module: String::new(),
+                    text: input,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_arbitrary_stub_input(input in "\\PC{0,500}") {
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz.pyi"),
+                    kind: SourceKind::Stub,
+                    logical_module: String::new(),
+                    text: input,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_python_like_constructs(
+                indent in "[\\s]{0,4}",
+                keyword in "(def|class|if|for|while|with|try|match|import|from|return|yield|raise|async|await)",
+                rest in "[a-zA-Z0-9_\\s:,.()\\[\\]\\->=!+*/@]{0,100}"
+            ) {
+                let input = format!("{indent}{keyword} {rest}\n");
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz-keyword.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: input,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_typepython_keyword_constructs(
+                keyword in "(typealias|interface|sealed class|data class|overload def|unsafe)",
+                name in "[A-Z][a-zA-Z0-9_]{0,20}",
+                rest in "[a-zA-Z0-9_\\s:,.()\\[\\]\\->=]{0,80}"
+            ) {
+                let input = format!("{keyword} {name}{rest}\n");
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz-tpy-keyword.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: input,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_deeply_nested_input(depth in 1usize..20) {
+                let mut source = String::new();
+                for i in 0..depth {
+                    let indent = "    ".repeat(i);
+                    source.push_str(&format!("{indent}if True:\n"));
+                }
+                let final_indent = "    ".repeat(depth);
+                source.push_str(&format!("{final_indent}pass\n"));
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz-nested.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: source,
+                });
+            }
+
+            #[test]
+            fn parse_does_not_panic_on_unicode_identifiers(
+                name in "[\\p{L}][\\p{L}\\p{N}_]{0,30}"
+            ) {
+                let source = format!("def {name}() -> None:\n    pass\n");
+                let _ = parse(SourceFile {
+                    path: PathBuf::from("fuzz-unicode.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: source,
+                });
+            }
+        }
     }
 }

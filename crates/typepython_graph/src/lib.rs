@@ -598,7 +598,9 @@ fn prelude_protocol_class_with_methods(
 mod tests {
     use super::build;
     use std::path::PathBuf;
-    use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
+    use typepython_binding::{
+        BindingTable, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
+    };
     use typepython_syntax::SourceKind;
 
     #[test]
@@ -1087,5 +1089,645 @@ mod tests {
             .expect("expected synthetic pkg namespace node");
 
         assert_ne!(first_pkg.summary_fingerprint, second_pkg.summary_fingerprint);
+    }
+
+    #[test]
+    fn build_with_empty_bindings_still_produces_prelude_nodes() {
+        let graph = build(&[]);
+
+        let typing = graph.nodes.iter().find(|node| node.module_key == "typing");
+        let typing_extensions =
+            graph.nodes.iter().find(|node| node.module_key == "typing_extensions");
+        let collections_abc = graph.nodes.iter().find(|node| node.module_key == "collections.abc");
+
+        assert!(typing.is_some(), "expected typing prelude node");
+        assert!(typing_extensions.is_some(), "expected typing_extensions prelude node");
+        assert!(collections_abc.is_some(), "expected collections.abc prelude node");
+    }
+
+    #[test]
+    fn build_does_not_duplicate_typing_when_user_provides_it() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/typing.tpy"),
+            module_key: String::from("typing"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![Declaration {
+                name: String::from("List"),
+                kind: DeclarationKind::Class,
+                detail: String::new(),
+                value_type: None,
+                method_kind: None,
+                class_kind: Some(DeclarationOwnerKind::Class),
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let count = graph.nodes.iter().filter(|node| node.module_key == "typing").count();
+        assert_eq!(count, 1, "typing module should not be duplicated");
+    }
+
+    #[test]
+    fn build_does_not_duplicate_typing_extensions_when_user_provides_it() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/typing_extensions.tpy"),
+            module_key: String::from("typing_extensions"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![Declaration {
+                name: String::from("Protocol"),
+                kind: DeclarationKind::Class,
+                detail: String::new(),
+                value_type: None,
+                method_kind: None,
+                class_kind: Some(DeclarationOwnerKind::Class),
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let count =
+            graph.nodes.iter().filter(|node| node.module_key == "typing_extensions").count();
+        assert_eq!(count, 1, "typing_extensions module should not be duplicated");
+    }
+
+    #[test]
+    fn build_does_not_duplicate_collections_abc_when_user_provides_it() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/collections/abc.tpy"),
+            module_key: String::from("collections.abc"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![Declaration {
+                name: String::from("Iterable"),
+                kind: DeclarationKind::Class,
+                detail: String::new(),
+                value_type: None,
+                method_kind: None,
+                class_kind: Some(DeclarationOwnerKind::Class),
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let count = graph.nodes.iter().filter(|node| node.module_key == "collections.abc").count();
+        assert_eq!(count, 1, "collections.abc module should not be duplicated");
+    }
+
+    #[test]
+    fn build_with_multiple_sibling_modules_in_same_package() {
+        let graph = build(&[
+            BindingTable {
+                module_path: PathBuf::from("src/pkg/a.py"),
+                module_key: String::from("pkg.a"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("alpha"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+            },
+            BindingTable {
+                module_path: PathBuf::from("src/pkg/b.py"),
+                module_key: String::from("pkg.b"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("beta"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+            },
+        ]);
+
+        let pkg = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "pkg")
+            .expect("expected synthetic pkg namespace node");
+
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "a"
+                && declaration.detail == "pkg.a")
+        );
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "b"
+                && declaration.detail == "pkg.b")
+        );
+    }
+
+    #[test]
+    fn build_deeply_nested_packages_create_all_intermediates() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/a/b/c/d.py"),
+            module_key: String::from("a.b.c.d"),
+            module_kind: SourceKind::Python,
+            declarations: vec![Declaration {
+                name: String::from("deep"),
+                kind: DeclarationKind::Function,
+                detail: String::from("()->None"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let a = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "a")
+            .expect("expected synthetic a namespace node");
+        let ab = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "a.b")
+            .expect("expected synthetic a.b namespace node");
+        let abc = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "a.b.c")
+            .expect("expected synthetic a.b.c namespace node");
+
+        assert!(a.module_path.to_string_lossy().contains("<namespace-package:a>"));
+        assert!(ab.module_path.to_string_lossy().contains("<namespace-package:a.b>"));
+        assert!(abc.module_path.to_string_lossy().contains("<namespace-package:a.b.c>"));
+
+        assert!(
+            a.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "b"
+                && declaration.detail == "a.b")
+        );
+        assert!(
+            ab.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "c"
+                && declaration.detail == "a.b.c")
+        );
+        assert!(
+            abc.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "d"
+                && declaration.detail == "a.b.c.d")
+        );
+    }
+
+    #[test]
+    fn build_existing_init_gets_child_imports_added() {
+        let graph = build(&[
+            BindingTable {
+                module_path: PathBuf::from("src/app/__init__.tpy"),
+                module_key: String::from("app"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("init_app"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+            },
+            BindingTable {
+                module_path: PathBuf::from("src/app/sub.py"),
+                module_key: String::from("app.sub"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("helper"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->None"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+            },
+        ]);
+
+        let app =
+            graph.nodes.iter().find(|node| node.module_key == "app").expect("expected app node");
+
+        assert!(
+            app.declarations.iter().any(|declaration| declaration.name == "init_app"),
+            "original declaration should be preserved"
+        );
+        assert!(
+            app.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.name == "sub"
+                && declaration.detail == "app.sub"),
+            "child import for sub should be added"
+        );
+    }
+
+    #[test]
+    fn build_fingerprint_is_deterministic() {
+        let bindings = vec![BindingTable {
+            module_path: PathBuf::from("src/app/__init__.tpy"),
+            module_key: String::from("app"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![Declaration {
+                name: String::from("run"),
+                kind: DeclarationKind::Function,
+                detail: String::from("()->None"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }];
+
+        let first = build(&bindings);
+        let second = build(&bindings);
+
+        let first_app =
+            first.nodes.iter().find(|node| node.module_key == "app").expect("expected app node");
+        let second_app =
+            second.nodes.iter().find(|node| node.module_key == "app").expect("expected app node");
+
+        assert_eq!(first_app.summary_fingerprint, second_app.summary_fingerprint);
+    }
+
+    #[test]
+    fn build_fingerprint_differs_for_different_module_paths() {
+        let first = build(&[BindingTable {
+            module_path: PathBuf::from("src/alpha.py"),
+            module_key: String::from("alpha"),
+            module_kind: SourceKind::Python,
+            declarations: vec![Declaration {
+                name: String::from("x"),
+                kind: DeclarationKind::Value,
+                detail: String::from("int"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+        let second = build(&[BindingTable {
+            module_path: PathBuf::from("src/beta.py"),
+            module_key: String::from("beta"),
+            module_kind: SourceKind::Python,
+            declarations: vec![Declaration {
+                name: String::from("x"),
+                kind: DeclarationKind::Value,
+                detail: String::from("int"),
+                value_type: None,
+                method_kind: None,
+                class_kind: None,
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            }],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let first_node = first
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "alpha")
+            .expect("expected alpha node");
+        let second_node =
+            second.nodes.iter().find(|node| node.module_key == "beta").expect("expected beta node");
+
+        assert_ne!(
+            first_node.summary_fingerprint, second_node.summary_fingerprint,
+            "different module paths should produce different fingerprints"
+        );
+    }
+
+    #[test]
+    fn build_with_owned_declaration_excluded_from_top_level() {
+        let graph = build(&[BindingTable {
+            module_path: PathBuf::from("src/models.tpy"),
+            module_key: String::from("models"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![
+                Declaration {
+                    name: String::from("User"),
+                    kind: DeclarationKind::Class,
+                    detail: String::new(),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("name"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("User"),
+                        kind: DeclarationOwnerKind::Class,
+                    }),
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+        }]);
+
+        let models = graph
+            .nodes
+            .iter()
+            .find(|node| node.module_key == "models")
+            .expect("expected models node");
+
+        let top_level_declarations: Vec<_> =
+            models.declarations.iter().filter(|declaration| declaration.owner.is_none()).collect();
+
+        assert!(
+            top_level_declarations.iter().any(|declaration| declaration.name == "User"),
+            "User class should appear as top-level"
+        );
+        assert!(
+            !top_level_declarations.iter().any(|declaration| declaration.name == "name"),
+            "owned declaration 'name' should not appear as top-level"
+        );
     }
 }

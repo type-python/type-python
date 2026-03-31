@@ -2516,7 +2516,7 @@ fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
 mod tests {
     use super::{
         EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary,
-        StubCallableOverride, StubSyntheticMethod, TypePythonStubContext,
+        StubCallableOverride, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
         generate_inferred_stub_source, generate_typepython_stub_source, plan_emits_for_sources,
         write_runtime_outputs,
     };
@@ -3030,6 +3030,277 @@ mod tests {
         assert!(!stub.contains("if True"));
         assert!(!stub.contains("return VALUE"));
         assert!(stub.contains("def build() -> int: ..."));
+    }
+
+    #[test]
+    fn plan_emits_for_sources_returns_empty_for_no_modules() {
+        let temp_dir = temp_dir("plan_emits_for_sources_returns_empty_for_no_modules");
+        fs::create_dir_all(temp_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            temp_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\nout_dir = \"build\"\n[emit]\nemit_pyi = true\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&temp_dir).expect("config should load");
+        let artifacts = plan_emits_for_sources(&config, &[]);
+
+        remove_temp_dir(&temp_dir);
+        assert!(artifacts.is_empty());
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_handles_async_function() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from("async def build() -> int:\n    return 1\n"),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("async stub should generate");
+
+        assert!(stub.contains("async def build() -> int: ..."));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_handles_property_decorator() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class User:\n    @property\n    def name(self) -> str:\n        return self._name\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("property stub should generate");
+
+        assert!(stub.contains("@property"));
+        assert!(stub.contains("def name(self) -> str: ..."));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_handles_multiple_classes() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class First:\n    value: int\n\nclass Second:\n    name: str\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("multi-class stub should generate");
+
+        assert!(stub.contains("class First:"));
+        assert!(stub.contains("class Second:"));
+        assert!(stub.contains("value: int"));
+        assert!(stub.contains("name: str"));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_handles_import_statements() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import Optional\nimport os\n\ndef build() -> Optional[str]:\n    return None\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("import stub should generate");
+
+        assert!(stub.contains("from typing import Optional"));
+        assert!(stub.contains("import os"));
+        assert!(stub.contains("def build() -> Optional[str]: ..."));
+    }
+
+    #[test]
+    fn generate_inferred_shadow_stub_handles_empty_module() {
+        let stub = generate_inferred_stub_source("", InferredStubMode::Shadow)
+            .expect("empty shadow stub generation should succeed");
+
+        assert!(stub.is_empty() || stub.trim().is_empty());
+    }
+
+    #[test]
+    fn generate_inferred_migration_stub_handles_standalone_functions() {
+        let stub = generate_inferred_stub_source(
+            "def first(a, b):\n    return a + b\n\ndef second(x):\n    return x * 2\n",
+            InferredStubMode::Migration,
+        )
+        .expect("migration stub with multiple functions should succeed");
+
+        assert!(stub.contains("def first("));
+        assert!(stub.contains("def second("));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_with_value_override() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from("VALUE = 1\n\ndef build() -> int:\n    return VALUE\n"),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let context = TypePythonStubContext {
+            value_overrides: vec![StubValueOverride {
+                line: 1,
+                annotation: String::from("Final[int]"),
+            }],
+            callable_overrides: Vec::new(),
+            synthetic_methods: Vec::new(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &context)
+            .expect("value override stub should generate");
+
+        assert!(stub.contains("VALUE: Final[int]"));
+        assert!(stub.contains("def build() -> int: ..."));
+    }
+
+    // ─── Snapshot (golden) tests for stub generation ──────────────────────
+
+    #[test]
+    fn snapshot_stub_basic_module() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import TypeAlias\nUserId: TypeAlias = int\ncount: int = 1\n\ndef build_user() -> int:\n    return 1\n",
+            ),
+            source_map: (1..=6)
+                .map(|i| SourceMapEntry { original_line: i, lowered_line: i })
+                .collect(),
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("stub generation should succeed");
+        insta::assert_snapshot!(stub);
+    }
+
+    #[test]
+    fn snapshot_stub_class_with_methods() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class User:\n    name: str\n    age: int\n\n    def greet(self) -> str:\n        return self.name\n\n    @staticmethod\n    def default() -> \"User\":\n        return User()\n",
+            ),
+            source_map: (1..=10)
+                .map(|i| SourceMapEntry { original_line: i, lowered_line: i })
+                .collect(),
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("stub generation should succeed");
+        insta::assert_snapshot!(stub);
+    }
+
+    #[test]
+    fn snapshot_stub_overloaded_function() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import overload\n\n@overload\ndef parse(x: str) -> int: ...\n@overload\ndef parse(x: bytes) -> int: ...\n\ndef parse(x):\n    return 0\n",
+            ),
+            source_map: (1..=9)
+                .map(|i| SourceMapEntry { original_line: i, lowered_line: i })
+                .collect(),
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("stub generation should succeed");
+        insta::assert_snapshot!(stub);
+    }
+
+    #[test]
+    fn snapshot_stub_async_function() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "async def fetch(url: str) -> str:\n    return \"\"\n\nasync def process(data: list[int]) -> int:\n    return sum(data)\n",
+            ),
+            source_map: (1..=5)
+                .map(|i| SourceMapEntry { original_line: i, lowered_line: i })
+                .collect(),
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("stub generation should succeed");
+        insta::assert_snapshot!(stub);
+    }
+
+    #[test]
+    fn snapshot_inferred_shadow_stub() {
+        let stub = generate_inferred_stub_source(
+            "VALUE = 1\nNAME = \"hello\"\n\ndef parse(text, retries=3):\n    return 1\n\nclass Config:\n    debug = False\n    def __init__(self, host):\n        self.host = host\n",
+            InferredStubMode::Shadow,
+        )
+        .expect("shadow stub generation should succeed");
+        insta::assert_snapshot!(stub);
+    }
+
+    #[test]
+    fn snapshot_inferred_migration_stub() {
+        let stub = generate_inferred_stub_source(
+            "class User:\n    def __init__(self, name, age):\n        self.name = name\n        self.age = age\n\n    @property\n    def title(self):\n        return self.name\n\ndef greet(user):\n    return f\"Hello, {user.name}\"\n",
+            InferredStubMode::Migration,
+        )
+        .expect("migration stub generation should succeed");
+        insta::assert_snapshot!(stub);
     }
 
     fn temp_dir(test_name: &str) -> PathBuf {

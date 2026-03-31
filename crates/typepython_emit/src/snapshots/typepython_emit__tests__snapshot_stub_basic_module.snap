@@ -1,0 +1,9 @@
+---
+source: crates/typepython_emit/src/lib.rs
+expression: stub
+---
+from typing import TypeAlias
+UserId: TypeAlias = int
+count: int
+
+def build_user() -> int: ...

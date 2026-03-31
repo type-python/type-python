@@ -1,0 +1,10 @@
+---
+source: crates/typepython_emit/src/lib.rs
+expression: stub
+---
+class User:
+    name: str
+    age: int
+    def greet(self) -> str: ...
+    @staticmethod
+    def default() -> "User": ...

@@ -1,0 +1,10 @@
+---
+source: crates/typepython_emit/src/lib.rs
+expression: stub
+---
+from typing import overload
+
+@overload
+def parse(x: str) -> int: ...
+@overload
+def parse(x: bytes) -> int: ...

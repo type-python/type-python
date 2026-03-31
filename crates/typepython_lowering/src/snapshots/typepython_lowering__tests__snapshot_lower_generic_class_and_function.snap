@@ -1,0 +1,12 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypeVar
+from typing import Generic
+T = TypeVar("T")
+class Box(Base, Generic[T]):
+    pass
+
+def first(value: T) -> T:
+    return value

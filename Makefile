@@ -1,7 +1,7 @@
 CARGO ?= cargo
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check lint test docs ci
+.PHONY: bootstrap fmt fmt-check check lint test bench bench-check snapshot-review docs ci
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -21,7 +21,16 @@ lint:
 test:
 	$(CARGO) test --workspace
 
+bench:
+	$(CARGO) bench --workspace
+
+bench-check:
+	$(CARGO) bench --workspace --no-run
+
+snapshot-review:
+	$(CARGO) insta review
+
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test
+ci: fmt-check lint test bench-check

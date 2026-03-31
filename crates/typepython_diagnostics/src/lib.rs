@@ -221,3 +221,169 @@ impl Display for DiagnosticReport {
         formatter.write_str(&self.as_text())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_display_renders_lowercase() {
+        assert_eq!(Severity::Error.to_string(), "error");
+        assert_eq!(Severity::Warning.to_string(), "warning");
+        assert_eq!(Severity::Note.to_string(), "note");
+    }
+
+    #[test]
+    fn span_new_stores_all_fields() {
+        let span = Span::new("src/main.py", 10, 5, 10, 20);
+        assert_eq!(span.path, "src/main.py");
+        assert_eq!(span.line, 10);
+        assert_eq!(span.column, 5);
+        assert_eq!(span.end_line, 10);
+        assert_eq!(span.end_column, 20);
+    }
+
+    #[test]
+    fn error_diagnostic_has_error_severity() {
+        let diag = Diagnostic::error("TPY1001", "type mismatch");
+        assert_eq!(diag.severity, Severity::Error);
+        assert_eq!(diag.code, "TPY1001");
+        assert_eq!(diag.message, "type mismatch");
+        assert!(diag.notes.is_empty());
+        assert!(diag.suggestions.is_empty());
+        assert!(diag.span.is_none());
+    }
+
+    #[test]
+    fn warning_diagnostic_has_warning_severity() {
+        let diag = Diagnostic::warning("TPY2001", "unused variable");
+        assert_eq!(diag.severity, Severity::Warning);
+        assert_eq!(diag.code, "TPY2001");
+        assert_eq!(diag.message, "unused variable");
+    }
+
+    #[test]
+    fn diagnostic_with_span_attaches_span() {
+        let span = Span::new("lib.py", 3, 1, 3, 10);
+        let diag = Diagnostic::error("TPY1002", "undefined name").with_span(span.clone());
+        assert_eq!(diag.span, Some(span));
+    }
+
+    #[test]
+    fn diagnostic_with_note_appends_note() {
+        let diag = Diagnostic::error("TPY1003", "bad call").with_note("expected 2 arguments");
+        assert_eq!(diag.notes, vec!["expected 2 arguments"]);
+    }
+
+    #[test]
+    fn diagnostic_with_multiple_notes() {
+        let diag = Diagnostic::warning("TPY2002", "ambiguous type")
+            .with_note("first note")
+            .with_note("second note");
+        assert_eq!(diag.notes.len(), 2);
+        assert_eq!(diag.notes[0], "first note");
+        assert_eq!(diag.notes[1], "second note");
+    }
+
+    #[test]
+    fn diagnostic_with_suggestion_attaches_suggestion() {
+        let span = Span::new("app.py", 5, 1, 5, 4);
+        let diag = Diagnostic::error("TPY1004", "wrong type").with_suggestion(
+            "use str instead",
+            span.clone(),
+            "str",
+            SuggestionApplicability::MachineApplicable,
+        );
+        assert_eq!(diag.suggestions.len(), 1);
+        let s = &diag.suggestions[0];
+        assert_eq!(s.message, "use str instead");
+        assert_eq!(s.span, span);
+        assert_eq!(s.replacement, "str");
+        assert_eq!(s.applicability, SuggestionApplicability::MachineApplicable);
+    }
+
+    #[test]
+    fn report_is_empty_for_default_report() {
+        let report = DiagnosticReport::default();
+        assert!(report.is_empty());
+        assert!(!report.has_errors());
+    }
+
+    #[test]
+    fn report_push_adds_diagnostic() {
+        let mut report = DiagnosticReport::default();
+        report.push(Diagnostic::error("TPY1001", "err"));
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(!report.is_empty());
+    }
+
+    #[test]
+    fn report_has_errors_returns_true_for_error() {
+        let mut report = DiagnosticReport::default();
+        report.push(Diagnostic::warning("TPY2001", "warn"));
+        report.push(Diagnostic::error("TPY1001", "err"));
+        assert!(report.has_errors());
+    }
+
+    #[test]
+    fn report_has_errors_returns_false_for_warnings_only() {
+        let mut report = DiagnosticReport::default();
+        report.push(Diagnostic::warning("TPY2001", "warn1"));
+        report.push(Diagnostic::warning("TPY2002", "warn2"));
+        assert!(!report.has_errors());
+    }
+
+    #[test]
+    fn report_as_text_formats_error_with_span_notes_and_suggestions() {
+        let mut report = DiagnosticReport::default();
+        report.push(
+            Diagnostic::error("TPY1001", "type mismatch")
+                .with_span(Span::new("main.py", 10, 5, 10, 20))
+                .with_note("expected int, got str")
+                .with_suggestion(
+                    "cast to int",
+                    Span::new("main.py", 10, 5, 10, 20),
+                    "int(x)",
+                    SuggestionApplicability::MaybeIncorrect,
+                ),
+        );
+        let text = report.as_text();
+        assert!(text.contains("error[TPY1001]: type mismatch"));
+        assert!(text.contains("  --> main.py:10:5-10:20"));
+        assert!(text.contains("  = note: expected int, got str"));
+        assert!(text.contains("  = help: cast to int (replace main.py:10:5-10:20 with `int(x)`; applicability: MaybeIncorrect)"));
+    }
+
+    #[test]
+    fn report_display_matches_as_text() {
+        let mut report = DiagnosticReport::default();
+        report.push(Diagnostic::warning("TPY2001", "unused import"));
+        assert_eq!(format!("{report}"), report.as_text());
+    }
+
+    #[test]
+    fn diagnostic_serde_round_trip() {
+        let diag = Diagnostic::error("TPY1005", "missing return")
+            .with_span(Span::new("foo.py", 1, 1, 2, 1))
+            .with_note("function declared with return type")
+            .with_suggestion(
+                "add return statement",
+                Span::new("foo.py", 2, 1, 2, 1),
+                "return None",
+                SuggestionApplicability::MachineApplicable,
+            );
+        let json = serde_json::to_string(&diag).expect("serialize");
+        let deserialized: Diagnostic = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(diag, deserialized);
+    }
+
+    #[test]
+    fn report_serde_round_trip() {
+        let mut report = DiagnosticReport::default();
+        report.push(Diagnostic::error("TPY1001", "err").with_note("n1"));
+        report.push(Diagnostic::warning("TPY2001", "warn"));
+        let json = serde_json::to_string(&report).expect("serialize");
+        let deserialized: DiagnosticReport = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(report.diagnostics, deserialized.diagnostics);
+    }
+}

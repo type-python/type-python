@@ -16,5 +16,8 @@ typepython-config = { path = "../typepython_config" }
 typepython-lowering = { path = "../typepython_lowering" }
 typepython-syntax = { path = "../typepython_syntax" }
 
+[dev-dependencies]
+insta.workspace = true
+
 [lints]
 workspace = true

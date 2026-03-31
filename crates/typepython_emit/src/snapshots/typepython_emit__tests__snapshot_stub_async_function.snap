@@ -1,0 +1,7 @@
+---
+source: crates/typepython_emit/src/lib.rs
+expression: stub
+---
+async def fetch(url: str) -> str: ...
+
+async def process(data: list[int]) -> int: ...

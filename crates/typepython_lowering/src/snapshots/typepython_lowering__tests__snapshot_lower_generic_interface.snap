@@ -1,0 +1,10 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+from typing import TypeVar
+from typing import Generic
+T = TypeVar("T")
+from typing import Protocol
+class SupportsClose(Protocol, Generic[T]):
+    def close(self, value: T) -> T: ...

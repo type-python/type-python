@@ -3486,4 +3486,297 @@ mod tests {
         assert!(lowered.module.python_source.contains("from typing import TypeAlias"));
         assert!(lowered.module.python_source.contains("UserId: TypeAlias = int"));
     }
+
+    // ─── Snapshot (golden) tests ────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_lower_typealias() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("typealias.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("typealias UserId = int\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_generic_typealias() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic-typealias.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("typealias Pair[T] = tuple[T, T]\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_interface() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("interface.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("interface Closable:\n    def close(self) -> None: ...\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_interface_with_bases() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("interface-bases.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("interface SupportsClose(Closable):\n    def close(self): ...\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_generic_interface() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic-interface.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "interface SupportsClose[T]:\n    def close(self, value: T) -> T: ...\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_data_class() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("data-class.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("data class Point:\n    x: float\n    y: float\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_data_class_with_bases() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("data-class-bases.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("data class Point(Base):\n    x: float\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_sealed_class() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("sealed-class.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("sealed class Expr:\n    ...\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_sealed_class_with_bases() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("sealed-class-bases.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("sealed class Expr(Base):\n    ...\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_overload_def() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("overload.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("overload def parse(x: str) -> int: ...\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_unsafe_block() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("unsafe.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("unsafe:\n    x = eval('1')\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_nested_unsafe_in_function() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("nested-unsafe.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("def update():\n    unsafe:\n        x = eval('1')\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_lambda_annotation() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("lambda-annotation.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("handler = lambda (value: int): value + 1\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_typeddict_keyword_stripping() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("typed-dict-runtime.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing import TypedDict\n\nclass User(TypedDict, total=False, closed=True, extra_items=int):\n    name: str\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_generic_class_and_function() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("ordinary-generics.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "class Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_paramspec() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("paramspec.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n    return cb(*args, **kwargs)\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_type_param_with_bounds_constraints_defaults() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("generic-default-typealias.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("typealias Pair[T: (str, bytes) = str] = tuple[T, T]\n"),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_combined_typepython_constructs() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("combined.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "typealias UserId = int\n\ninterface Closable:\n    def close(self) -> None: ...\n\ndata class Point:\n    x: float\n    y: float\n\nsealed class Expr:\n    ...\n\noverload def parse(x: str) -> int: ...\n\ndef helper() -> int:\n    return 1\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_compat_qualified_names_310() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("compat-qualified.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "import typing\nimport warnings\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n",
+            ),
+        });
+        let lowered =
+            lower_with_options(&tree, &LoweringOptions { target_python: String::from("3.10") });
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_compat_imports_312() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("compat-imports.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing_extensions import Self, Required, NotRequired, dataclass_transform, override, ReadOnly, TypeIs\nfrom warnings import deprecated\n\n@deprecated(\"use new_api\")\nclass Box:\n    @override\n    def clone(self) -> Self:\n        ...\n",
+            ),
+        });
+        let lowered =
+            lower_with_options(&tree, &LoweringOptions { target_python: String::from("3.12") });
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
+
+    #[test]
+    fn snapshot_lower_passthrough_python_source() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("passthrough.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "def hello(name: str) -> str:\n    return f\"Hello, {name}\"\n\nclass User:\n    name: str\n",
+            ),
+        });
+        let lowered = lower(&tree);
+        assert!(lowered.diagnostics.is_empty());
+        insta::assert_snapshot!(lowered.module.python_source);
+    }
 }

@@ -1,0 +1,13 @@
+---
+source: crates/typepython_emit/src/lib.rs
+expression: stub
+---
+VALUE: int
+NAME: str
+
+def parse(text: unknown, retries: int = ...) -> int: ...
+
+class Config:
+    debug: bool
+    def __init__(self, host: unknown) -> None: ...
+    host: unknown

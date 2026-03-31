@@ -826,18 +826,6 @@ fn collect_declarations(
             SyntaxStatement::Import(statement) => {
                 for binding in &statement.bindings {
                     local_symbols.insert(binding.local_name.clone(), binding.source_path.clone());
-                    if let Some(range) =
-                        find_name_range(&document.text, statement.line, &binding.local_name)
-                    {
-                        declarations.push(SymbolOccurrence {
-                            canonical: binding.source_path.clone(),
-                            name: binding.local_name.clone(),
-                            uri: document.uri.clone(),
-                            range,
-                            detail: format!("import {}", binding.source_path),
-                            declaration: true,
-                        });
-                    }
                 }
             }
             SyntaxStatement::Value(statement) => {
@@ -2960,6 +2948,52 @@ mod tests {
     }
 
     #[test]
+    fn import_binding_definition_and_hover_resolve_to_original_declaration() {
+        let config = temp_workspace(
+            "import_binding_definition_and_hover_resolve_to_original_declaration",
+            &[
+                ("src/app/a.tpy", "def target(value: int) -> int:\n    return value\n"),
+                ("src/app/b.tpy", "from app.a import target\n"),
+            ],
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/b.tpy"));
+        let a_uri = path_to_uri(&config.config_dir.join("src/app/a.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/b.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let hover = server
+            .handle_hover(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 18}
+            }))
+            .expect("hover should succeed");
+        assert!(
+            hover["contents"]["value"]
+                .as_str()
+                .expect("hover contents should be a string")
+                .contains("function target")
+        );
+
+        let definition = server
+            .handle_definition(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 18}
+            }))
+            .expect("definition should succeed");
+        let entries = definition.as_array().expect("definition should be an array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["uri"], json!(a_uri));
+    }
+
+    #[test]
     fn completion_returns_local_symbols_and_member_symbols() {
         let config = temp_workspace(
             "completion_returns_local_symbols_and_member_symbols",
@@ -3494,6 +3528,274 @@ foo.ping()
 
         assert_eq!(uri, "file:///tmp/typepython%20spaced/project/__init__.tpy");
         assert_eq!(uri_to_path(&uri).expect("URI should decode to file path"), path);
+    }
+
+    #[test]
+    fn did_change_updates_overlay_and_republishes_diagnostics() {
+        let config = temp_config(
+            "did_change_updates_overlay_and_republishes_diagnostics",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def broken(:\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let responses = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [{"text": "def fixed() -> int:\n    return 1\n"}]
+                }
+            }))
+            .expect("didChange should republish diagnostics");
+        assert!(
+            responses
+                .iter()
+                .any(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+        );
+    }
+
+    #[test]
+    fn did_close_clears_overlay() {
+        let config = temp_config("did_close_clears_overlay", "def ok() -> int:\n    return 1\n");
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didClose",
+                "params": {"textDocument": {"uri": uri}}
+            }))
+            .expect("didClose should succeed");
+    }
+
+    #[test]
+    fn hover_returns_null_for_whitespace_position() {
+        let config = temp_config(
+            "hover_returns_null_for_whitespace_position",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let hover = server
+            .handle_hover(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 1, "character": 0}
+            }))
+            .expect("hover should succeed");
+        assert_eq!(hover, Value::Null);
+    }
+
+    #[test]
+    fn definition_returns_empty_for_unresolved_symbol() {
+        let config = temp_config(
+            "definition_returns_empty_for_unresolved_symbol",
+            "def ok() -> int:\n    return nonexistent\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let definition = server
+            .handle_definition(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 1, "character": 11}
+            }))
+            .expect("definition should succeed");
+        assert_eq!(definition, Value::Null);
+    }
+
+    #[test]
+    fn completion_returns_items_for_empty_prefix() {
+        let config = temp_config(
+            "completion_returns_items_for_empty_prefix",
+            "def greet() -> int:\n    return 1\n\nclass Widget:\n    pass\n\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let completion = server
+            .handle_completion(json!({
+                "textDocument": {"uri": uri},
+                "position": {"line": 5, "character": 0}
+            }))
+            .expect("completion should succeed");
+        let labels = completion["items"]
+            .as_array()
+            .expect("completion items should be an array")
+            .iter()
+            .map(|item| item["label"].as_str().expect("label should be a string"))
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"greet"));
+        assert!(labels.contains(&"Widget"));
+    }
+
+    #[test]
+    fn code_action_returns_empty_when_no_actions_apply() {
+        let config = temp_config("code_action_returns_empty_when_no_actions_apply", "x: int = 1\n");
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let actions = server
+            .handle_code_action(json!({
+                "textDocument": {"uri": uri},
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 1}
+                },
+                "context": {"diagnostics": []}
+            }))
+            .expect("code action should succeed");
+        let actions = actions.as_array().expect("code actions should be an array");
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn multi_file_workspace_navigation() {
+        let config = temp_workspace(
+            "multi_file_workspace_navigation",
+            &[
+                ("src/app/models.tpy", "class User:\n    name: str\n"),
+                (
+                    "src/app/services.tpy",
+                    "from app.models import User\n\ndef create_user() -> User:\n    return User()\n",
+                ),
+                (
+                    "src/app/handlers.tpy",
+                    "from app.services import create_user\nfrom app.models import User\n\ndef handle() -> User:\n    return create_user()\n",
+                ),
+            ],
+        );
+        let mut server = Server::new(config.clone());
+
+        let models_uri = path_to_uri(&config.config_dir.join("src/app/models.tpy"));
+        let services_uri = path_to_uri(&config.config_dir.join("src/app/services.tpy"));
+        let handlers_uri = path_to_uri(&config.config_dir.join("src/app/handlers.tpy"));
+
+        let models_text = fs::read_to_string(config.config_dir.join("src/app/models.tpy"))
+            .expect("source file should be readable");
+        let services_text = fs::read_to_string(config.config_dir.join("src/app/services.tpy"))
+            .expect("source file should be readable");
+        let handlers_text = fs::read_to_string(config.config_dir.join("src/app/handlers.tpy"))
+            .expect("source file should be readable");
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": models_uri, "text": models_text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen models should succeed");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": services_uri, "text": services_text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen services should succeed");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": handlers_uri, "text": handlers_text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen handlers should succeed");
+
+        let definition = server
+            .handle_definition(json!({
+                "textDocument": {"uri": handlers_uri},
+                "position": {"line": 4, "character": 11}
+            }))
+            .expect("definition should succeed");
+        let entries = definition.as_array().expect("definition should be an array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["uri"], json!(services_uri));
+
+        let references = server
+            .handle_references(json!({
+                "textDocument": {"uri": models_uri},
+                "position": {"line": 0, "character": 6},
+                "context": {"includeDeclaration": true}
+            }))
+            .expect("references should succeed");
+        let refs = references.as_array().expect("references should be an array");
+        assert!(refs.len() >= 2);
+        let ref_uris = refs
+            .iter()
+            .map(|r| r["uri"].as_str().expect("uri should be a string"))
+            .collect::<Vec<_>>();
+        assert!(ref_uris.iter().any(|uri| uri.contains("models")));
+        assert!(ref_uris.iter().any(|uri| uri.contains("services")));
+        assert!(ref_uris.iter().any(|uri| uri.contains("handlers")));
+    }
+
+    #[test]
+    fn did_open_with_syntax_error_reports_diagnostics() {
+        let config = temp_config("did_open_with_syntax_error_reports_diagnostics", "pass\n");
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+        let responses = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def missing_colon()\n    return 1\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should publish diagnostics");
+        let payload = responses
+            .iter()
+            .find(|response| {
+                response["method"] == json!("textDocument/publishDiagnostics")
+                    && response["params"]["uri"] == json!(uri)
+            })
+            .expect("publishDiagnostics notification should be present");
+        let diagnostics = payload["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics payload should be an array");
+        assert!(!diagnostics.is_empty());
     }
 
     fn temp_config(test_name: &str, source: &str) -> ConfigHandle {

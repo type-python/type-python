@@ -37,6 +37,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
+# Testing and benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+insta = "1"
+proptest = "1"
+
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 unsafe_code = "forbid"

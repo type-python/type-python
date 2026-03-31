@@ -1,0 +1,6 @@
+---
+source: crates/typepython_lowering/src/lib.rs
+expression: lowered.module.python_source
+---
+if True:
+    x = eval('1')
