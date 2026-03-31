@@ -1,0 +1,106 @@
+# TypePython Showcase
+#
+# This module demonstrates the major TypePython language features.
+# Run:  typepython check --project examples/showcase
+# Build: typepython build --project examples/showcase
+
+from app.models import User, AdminUser
+from app.expr import Expr, evaluate
+from app.services import Serializable, Repository
+
+
+# ---------------------------------------------------------------------------
+# 1. Type aliases (including recursive)
+# ---------------------------------------------------------------------------
+
+typealias UserId = int
+typealias JsonPrimitive = str | int | float | bool | None
+typealias JsonValue = dict[str, "JsonValue"] | list["JsonValue"] | JsonPrimitive
+
+
+# ---------------------------------------------------------------------------
+# 2. Generic functions with inline type parameters
+# ---------------------------------------------------------------------------
+
+def first[T](items: list[T]) -> T:
+    return items[0]
+
+def merge[K, V](a: dict[K, V], b: dict[K, V]) -> dict[K, V]:
+    return {**a, **b}
+
+def identity[T](value: T) -> T:
+    return value
+
+
+# ---------------------------------------------------------------------------
+# 3. Overloaded functions
+# ---------------------------------------------------------------------------
+
+overload def parse_id(value: str) -> UserId: ...
+overload def parse_id(value: int) -> UserId: ...
+
+def parse_id(value: str | int) -> UserId:
+    if isinstance(value, str):
+        return int(value)
+    return value
+
+
+# ---------------------------------------------------------------------------
+# 4. Type narrowing and strict null safety
+# ---------------------------------------------------------------------------
+
+def greet(user: User | None) -> str:
+    if user is None:
+        return "Hello, guest!"
+    # user is narrowed to User here
+    return f"Hello, {user.name}!"
+
+def find_user(users: list[User], name: str) -> User | None:
+    for user in users:
+        if user.name == name:
+            return user
+    return None
+
+def must_find_user(users: list[User], name: str) -> User:
+    result = find_user(users, name)
+    assert result is not None
+    # result is narrowed to User here
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 5. isinstance narrowing
+# ---------------------------------------------------------------------------
+
+def describe(value: int | str | list[int]) -> str:
+    if isinstance(value, int):
+        return f"integer: {value}"
+    if isinstance(value, str):
+        return f"string: {value}"
+    return f"list of {len(value)} items"
+
+
+# ---------------------------------------------------------------------------
+# 6. Unsafe blocks
+# ---------------------------------------------------------------------------
+
+def eval_expression(expr: str) -> JsonValue:
+    unsafe:
+        return eval(expr)
+
+
+# ---------------------------------------------------------------------------
+# 7. Using sealed classes (from app.expr)
+# ---------------------------------------------------------------------------
+
+def format_expr(expr: Expr) -> str:
+    return f"result = {evaluate(expr)}"
+
+
+# ---------------------------------------------------------------------------
+# 8. Using interfaces (from app.services)
+# ---------------------------------------------------------------------------
+
+def save_user[T: Serializable](repo: Repository[T], item: T) -> bool:
+    data = item.to_json()
+    return repo.save(data)

@@ -861,6 +861,7 @@ fn render_function_stub(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_function_stub_parts(
     source: &str,
     name: &str,
@@ -1037,6 +1038,7 @@ enum ParameterPrefix {
     KeywordVariadic,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_parameter(
     source: &str,
     name: &str,
@@ -1787,9 +1789,7 @@ fn infer_expr_type(expr: &Expr, context: &StubInferenceContext) -> Option<String
             let mut keys = Vec::new();
             let mut values = Vec::new();
             for item in &dict.items {
-                let Some(key) = item.key.as_ref() else {
-                    return None;
-                };
+                let key = item.key.as_ref()?;
                 keys.push(infer_expr_type(key, context).unwrap_or_else(|| String::from("unknown")));
                 values.push(
                     infer_expr_type(&item.value, context)

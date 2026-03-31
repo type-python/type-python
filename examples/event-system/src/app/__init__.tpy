@@ -1,0 +1,125 @@
+# Event System
+#
+# Demonstrates: sealed class, interface, data class, generics,
+#               match exhaustiveness, typealias, overload.
+#
+# Models a typed event bus where event types form a sealed hierarchy.
+# Adding a new event kind without updating all handlers will trigger
+# a compile-time TPY4009 diagnostic.
+#
+# Run: typepython check --project examples/event-system
+
+
+# --- Sealed event hierarchy ---------------------------------------------------
+#
+# All event kinds must be defined in this module. The compiler knows
+# the full set and can check exhaustiveness in match statements.
+
+sealed class Event:
+    pass
+
+data class UserCreated(Event):
+    user_id: int
+    username: str
+
+data class UserDeleted(Event):
+    user_id: int
+
+data class MessageSent(Event):
+    from_id: int
+    to_id: int
+    body: str
+
+data class SystemAlert(Event):
+    level: str
+    message: str
+
+
+# --- Interface for event handlers ---------------------------------------------
+
+interface EventHandler:
+    def handle(self, event: Event) -> None: ...
+
+interface EventFormatter:
+    def format(self, event: Event) -> str: ...
+
+
+# --- Exhaustive formatting ----------------------------------------------------
+
+def format_event(event: Event) -> str:
+    """Format any event as a human-readable string.
+
+    The match is exhaustive: every Event subclass must be covered.
+    If you add a new event kind above, the compiler will flag this
+    function until you add the corresponding case.
+    """
+    match event:
+        case UserCreated(user_id=uid, username=name):
+            return f"[user:created] {name} (id={uid})"
+        case UserDeleted(user_id=uid):
+            return f"[user:deleted] id={uid}"
+        case MessageSent(from_id=src, to_id=dst, body=text):
+            return f"[msg:sent] {src} -> {dst}: {text}"
+        case SystemAlert(level=lvl, message=msg):
+            return f"[system:{lvl}] {msg}"
+
+
+# --- Type-safe routing --------------------------------------------------------
+
+typealias Callback = str
+
+def route_event(event: Event) -> Callback:
+    """Route an event to its handler name -- another exhaustive match."""
+    match event:
+        case UserCreated():
+            return "on_user_created"
+        case UserDeleted():
+            return "on_user_deleted"
+        case MessageSent():
+            return "on_message_sent"
+        case SystemAlert():
+            return "on_system_alert"
+
+
+# --- Overloaded event constructors -------------------------------------------
+
+overload def quick_event(kind: str, user_id: int) -> UserCreated: ...
+overload def quick_event(kind: str, message: str) -> SystemAlert: ...
+
+def quick_event(kind: str, user_id: int = 0, message: str = "") -> Event:
+    if kind == "user":
+        return UserCreated(user_id=user_id, username="anonymous")
+    return SystemAlert(level="info", message=message)
+
+
+# --- Generic event collector --------------------------------------------------
+
+class EventLog[E: Event]:
+    """A typed log that collects events of a specific kind."""
+    _events: list[E]
+
+    def __init__(self) -> None:
+        self._events = []
+
+    def append(self, event: E) -> None:
+        self._events.append(event)
+
+    def count(self) -> int:
+        return len(self._events)
+
+    def latest(self) -> E | None:
+        if len(self._events) == 0:
+            return None
+        return self._events[len(self._events) - 1]
+
+
+# --- Combining features -------------------------------------------------------
+
+def process_events(events: list[Event]) -> list[str]:
+    """Process a batch of events: format each one and collect the output."""
+    output: list[str] = []
+    for event in events:
+        formatted = format_event(event)
+        handler = route_event(event)
+        output.append(f"{formatted} -> {handler}")
+    return output

@@ -1,0 +1,100 @@
+# Shapes
+#
+# Demonstrates: sealed class, match exhaustiveness, data class,
+#               interface, generic function.
+#
+# The compiler proves that every match statement covers all sealed
+# subclasses. Adding a new shape without updating the match will
+# produce a TPY4009 diagnostic at compile time.
+#
+# Run: typepython check --project examples/shapes
+
+import math
+
+
+# --- Interface: any shape must be drawable ------------------------------------
+
+interface Drawable:
+    def draw(self) -> str: ...
+
+
+# --- Sealed class hierarchy ---------------------------------------------------
+
+sealed class Shape:
+    pass
+
+data class Circle(Shape):
+    radius: float
+
+data class Rectangle(Shape):
+    width: float
+    height: float
+
+data class Triangle(Shape):
+    base: float
+    height: float
+
+
+# --- Exhaustive pattern matching ----------------------------------------------
+
+def area(shape: Shape) -> float:
+    """Compute the area. The compiler guarantees all cases are handled."""
+    match shape:
+        case Circle(radius=r):
+            return math.pi * r * r
+        case Rectangle(width=w, height=h):
+            return w * h
+        case Triangle(base=b, height=h):
+            return 0.5 * b * h
+    # No default branch needed -- the match is proven exhaustive.
+
+
+def perimeter(shape: Shape) -> float:
+    match shape:
+        case Circle(radius=r):
+            return 2.0 * math.pi * r
+        case Rectangle(width=w, height=h):
+            return 2.0 * (w + h)
+        case Triangle(base=b, height=h):
+            # Simplified: assumes isosceles triangle.
+            side = math.sqrt((b / 2.0) ** 2 + h ** 2)
+            return b + 2.0 * side
+
+
+def describe(shape: Shape) -> str:
+    match shape:
+        case Circle(radius=r):
+            return f"circle with radius {r}"
+        case Rectangle(width=w, height=h):
+            return f"{w}x{h} rectangle"
+        case Triangle(base=b, height=h):
+            return f"triangle (base={b}, height={h})"
+
+
+# --- Generic utility ----------------------------------------------------------
+
+def largest[T: Shape](shapes: list[T]) -> T | None:
+    """Find the shape with the largest area."""
+    if len(shapes) == 0:
+        return None
+    best: T = shapes[0]
+    best_area: float = area(best)
+    for s in shapes:
+        a = area(s)
+        if a > best_area:
+            best = s
+            best_area = a
+    return best
+
+
+# --- Combining features -------------------------------------------------------
+
+def report(shapes: list[Shape]) -> list[str]:
+    """Generate a human-readable report for a list of shapes."""
+    lines: list[str] = []
+    for shape in shapes:
+        name = describe(shape)
+        a = area(shape)
+        p = perimeter(shape)
+        lines.append(f"{name}: area={a:.2f}, perimeter={p:.2f}")
+    return lines

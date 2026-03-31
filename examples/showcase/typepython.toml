@@ -1,0 +1,28 @@
+[project]
+src = ["src"]
+include = ["src/**/*.tpy", "src/**/*.py", "src/**/*.pyi"]
+exclude = [".typepython/**"]
+root_dir = "src"
+out_dir = ".typepython/build"
+cache_dir = ".typepython/cache"
+target_python = "3.10"
+
+[resolution]
+base_url = "."
+type_roots = []
+
+[emit]
+emit_pyi = true
+write_py_typed = true
+no_emit_on_error = true
+
+[typing]
+profile = "application"
+strict = true
+strict_nulls = true
+warn_unsafe = true
+enable_sealed_exhaustiveness = true
+report_deprecated = "warning"
+
+[watch]
+debounce_ms = 80

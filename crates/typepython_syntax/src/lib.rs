@@ -515,7 +515,8 @@ struct AnnotatedLambdaSite {
 }
 
 thread_local! {
-    static ACTIVE_ANNOTATED_LAMBDA_SITES: RefCell<Vec<AnnotatedLambdaSite>> = RefCell::new(Vec::new());
+    static ACTIVE_ANNOTATED_LAMBDA_SITES: RefCell<Vec<AnnotatedLambdaSite>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -1387,6 +1388,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
 ) -> Vec<FrozenFieldMutationSite> {
+    let owner = MutationOwnerContext { line, owner_name, owner_type_name };
     match stmt {
         Stmt::Assign(assign) => assign
             .targets
@@ -1398,9 +1400,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
                     Some(&assign.value),
                     FrozenFieldMutationKind::Assignment,
                     None,
-                    line,
-                    owner_name,
-                    owner_type_name,
+                    owner,
                 )
             })
             .collect(),
@@ -1410,9 +1410,7 @@ fn extract_frozen_field_mutation_sites_from_stmt(
             Some(&assign.value),
             FrozenFieldMutationKind::AugmentedAssignment,
             Some(direct_operator_text(assign.op)),
-            line,
-            owner_name,
-            owner_type_name,
+            owner,
         )
         .into_iter()
         .collect(),
@@ -1426,14 +1424,19 @@ fn extract_frozen_field_mutation_sites_from_stmt(
                     None,
                     FrozenFieldMutationKind::Delete,
                     None,
-                    line,
-                    owner_name,
-                    owner_type_name,
+                    owner,
                 )
             })
             .collect(),
         _ => Vec::new(),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MutationOwnerContext<'a> {
+    line: usize,
+    owner_name: Option<&'a str>,
+    owner_type_name: Option<&'a str>,
 }
 
 fn extract_frozen_field_mutation_site(
@@ -1442,9 +1445,7 @@ fn extract_frozen_field_mutation_site(
     value: Option<&Expr>,
     kind: FrozenFieldMutationKind,
     operator: Option<String>,
-    line: usize,
-    owner_name: Option<&str>,
-    owner_type_name: Option<&str>,
+    owner: MutationOwnerContext<'_>,
 ) -> Option<FrozenFieldMutationSite> {
     let Expr::Attribute(attribute) = expr else {
         return None;
@@ -1455,9 +1456,9 @@ fn extract_frozen_field_mutation_site(
         operator,
         target: extract_direct_expr_metadata(source, &attribute.value),
         value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
-        owner_name: owner_name.map(str::to_owned),
-        owner_type_name: owner_type_name.map(str::to_owned),
-        line,
+        owner_name: owner.owner_name.map(str::to_owned),
+        owner_type_name: owner.owner_type_name.map(str::to_owned),
+        line: owner.line,
     })
 }
 
@@ -2198,6 +2199,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
 ) -> Vec<TypedDictMutationSite> {
+    let owner = MutationOwnerContext { line, owner_name, owner_type_name };
     match stmt {
         Stmt::Assign(assign) => assign
             .targets
@@ -2209,9 +2211,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                     Some(&assign.value),
                     TypedDictMutationKind::Assignment,
                     None,
-                    line,
-                    owner_name,
-                    owner_type_name,
+                    owner,
                 )
             })
             .collect(),
@@ -2221,9 +2221,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
             Some(&assign.value),
             TypedDictMutationKind::AugmentedAssignment,
             Some(direct_operator_text(assign.op)),
-            line,
-            owner_name,
-            owner_type_name,
+            owner,
         )
         .into_iter()
         .collect(),
@@ -2237,9 +2235,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
                     None,
                     TypedDictMutationKind::Delete,
                     None,
-                    line,
-                    owner_name,
-                    owner_type_name,
+                    owner,
                 )
             })
             .collect(),
@@ -2253,9 +2249,7 @@ fn extract_typed_dict_mutation_site(
     value: Option<&Expr>,
     kind: TypedDictMutationKind,
     operator: Option<String>,
-    line: usize,
-    owner_name: Option<&str>,
-    owner_type_name: Option<&str>,
+    owner: MutationOwnerContext<'_>,
 ) -> Option<TypedDictMutationSite> {
     let Expr::Subscript(subscript) = expr else {
         return None;
@@ -2267,9 +2261,9 @@ fn extract_typed_dict_mutation_site(
         key_value: extract_direct_expr_metadata(source, &subscript.slice),
         target: extract_direct_expr_metadata(source, &subscript.value),
         value: value.map(|expr| extract_direct_expr_metadata(source, expr)),
-        owner_name: owner_name.map(str::to_owned),
-        owner_type_name: owner_type_name.map(str::to_owned),
-        line,
+        owner_name: owner.owner_name.map(str::to_owned),
+        owner_type_name: owner.owner_type_name.map(str::to_owned),
+        line: owner.line,
     })
 }
 

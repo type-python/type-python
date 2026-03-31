@@ -1,0 +1,30 @@
+# Interfaces (structural protocols) and generic classes.
+
+
+# ---------------------------------------------------------------------------
+# Interfaces
+# ---------------------------------------------------------------------------
+
+interface Serializable:
+    def to_json(self) -> str: ...
+
+interface Comparable[T]:
+    def compare(self, other: T) -> int: ...
+
+
+# ---------------------------------------------------------------------------
+# Generic class using an interface bound
+# ---------------------------------------------------------------------------
+
+class Repository[T: Serializable]:
+    _items: list[str]
+
+    def __init__(self) -> None:
+        self._items = []
+
+    def save(self, data: str) -> bool:
+        self._items.append(data)
+        return True
+
+    def count(self) -> int:
+        return len(self._items)

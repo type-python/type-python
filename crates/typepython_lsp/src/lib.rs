@@ -362,7 +362,7 @@ impl Server {
     fn handle_hover(&mut self, params: Value) -> Result<Value, LspError> {
         let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
-        let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
+        let Some(symbol) = resolve_symbol(workspace, &uri, position) else {
             return Ok(Value::Null);
         };
         let detail = workspace
@@ -382,7 +382,7 @@ impl Server {
     fn handle_definition(&mut self, params: Value) -> Result<Value, LspError> {
         let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
-        let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
+        let Some(symbol) = resolve_symbol(workspace, &uri, position) else {
             return Ok(Value::Null);
         };
         let Some(declaration) = workspace.declarations_by_canonical.get(&symbol.canonical) else {
@@ -399,7 +399,7 @@ impl Server {
             .and_then(|context| context.get("includeDeclaration"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
+        let Some(symbol) = resolve_symbol(workspace, &uri, position) else {
             return Ok(json!([]));
         };
         let references = workspace
@@ -419,7 +419,7 @@ impl Server {
             .get("newName")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("rename missing newName")))?;
-        let Some(symbol) = resolve_symbol(&workspace, &uri, position) else {
+        let Some(symbol) = resolve_symbol(workspace, &uri, position) else {
             return Ok(Value::Null);
         };
         let mut changes = BTreeMap::<String, Vec<LspTextEdit>>::new();
@@ -445,9 +445,9 @@ impl Server {
 
         let mut actions = Vec::new();
         actions.extend(collect_diagnostic_suggestion_code_actions(document, range, &params));
-        actions.extend(collect_missing_annotation_code_actions(&workspace, document, range));
+        actions.extend(collect_missing_annotation_code_actions(workspace, document, range));
         actions.extend(collect_unsafe_code_actions(document, range, &params));
-        actions.extend(collect_missing_import_code_actions(&workspace, document, range));
+        actions.extend(collect_missing_import_code_actions(workspace, document, range));
         Ok(json!(actions))
     }
 
@@ -460,7 +460,7 @@ impl Server {
         let is_member_access = line_prefix(&document.text, position).trim_end().ends_with('.');
 
         let items = if is_member_access {
-            collect_member_completion_items(&workspace, document, position)
+            collect_member_completion_items(workspace, document, position)
         } else {
             let mut keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
             keys.sort();
@@ -2419,7 +2419,7 @@ fn walk_bundled_stdlib_directory(
             continue;
         }
 
-        let Some(logical_module) = logical_module_path(&root, &path) else {
+        let Some(logical_module) = logical_module_path(root, &path) else {
             continue;
         };
         if !sources.iter().any(|source| source.path == path) {
@@ -2460,7 +2460,7 @@ fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<PathBuf> {
 }
 
 fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<PathBuf> {
-    let output = ProcessCommand::new(&interpreter)
+    let output = ProcessCommand::new(interpreter)
         .args([
             "-c",
             "import json, site, sysconfig; roots=[]; roots.extend(filter(None, [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); roots.extend(site.getsitepackages()); usersite = site.getusersitepackages(); roots.extend(usersite if isinstance(usersite, list) else [usersite]); print(json.dumps(sorted({r for r in roots if r})))",
@@ -2522,7 +2522,7 @@ fn parse_bundled_stdlib_version_filter(source: &str) -> BundledStdlibVersionFilt
         let Some(metadata) = metadata.strip_prefix("typepython:") else {
             continue;
         };
-        for field in metadata.trim().split_whitespace() {
+        for field in metadata.split_whitespace() {
             if let Some(value) = field.strip_prefix("min-python=") {
                 filter.min_python = Some(value.to_owned());
             } else if let Some(value) = field.strip_prefix("max-python=") {
@@ -2610,11 +2610,8 @@ fn external_runtime_allowed(root: &Path, path: &Path) -> bool {
 
 fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
-    let Some(first) =
-        relative.components().next().and_then(|component| component.as_os_str().to_str())
-    else {
-        return None;
-    };
+    let first =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())?;
     if first.ends_with("-stubs") {
         let stub_distribution_root = root.join(first);
         let Ok(relative_inside_distribution) = relative.strip_prefix(first) else {
@@ -2648,9 +2645,7 @@ fn sibling_stub_distribution_root(root: &Path, path: &Path) -> Option<PathBuf> {
         return None;
     };
     let mut components = relative.components();
-    let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
-        return None;
-    };
+    let first = components.next().and_then(|component| component.as_os_str().to_str())?;
     if first.ends_with("-stubs") {
         return None;
     }

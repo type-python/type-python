@@ -1,0 +1,25 @@
+# Sealed classes for exhaustive pattern matching.
+
+
+sealed class Expr:
+    pass
+
+class Num(Expr):
+    value: int
+
+class Add(Expr):
+    left: Expr
+    right: Expr
+
+class Neg(Expr):
+    operand: Expr
+
+
+def evaluate(expr: Expr) -> int:
+    match expr:
+        case Num(value=v):
+            return v
+        case Add(left=l, right=r):
+            return evaluate(l) + evaluate(r)
+        case Neg(operand=o):
+            return -evaluate(o)

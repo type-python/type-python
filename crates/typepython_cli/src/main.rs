@@ -2304,9 +2304,7 @@ fn common_archive_root(entries: &[(String, Vec<u8>)]) -> Option<String> {
     for (path, _) in entries {
         let mut components = path.split('/').filter(|component| !component.is_empty());
         let first = components.next()?;
-        if components.next().is_none() {
-            return None;
-        }
+        components.next()?;
         match root {
             Some(existing) if existing != first => return None,
             Some(_) => {}
@@ -2847,7 +2845,7 @@ fn walk_bundled_stdlib_directory(
             continue;
         }
 
-        let Some(logical_module) = logical_module_path(&root, &path) else {
+        let Some(logical_module) = logical_module_path(root, &path) else {
             continue;
         };
         sources.push(DiscoveredSource {
@@ -2977,7 +2975,7 @@ fn parse_bundled_stdlib_version_filter(source: &str) -> BundledStdlibVersionFilt
         let Some(metadata) = metadata.strip_prefix("typepython:") else {
             continue;
         };
-        for field in metadata.trim().split_whitespace() {
+        for field in metadata.split_whitespace() {
             if let Some(value) = field.strip_prefix("min-python=") {
                 filter.min_python = Some(value.to_owned());
             } else if let Some(value) = field.strip_prefix("max-python=") {
@@ -3035,7 +3033,7 @@ fn discovered_python_type_roots(config: &ConfigHandle) -> Vec<ExternalSupportRoo
 }
 
 fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<ExternalSupportRoot> {
-    let output = ProcessCommand::new(&interpreter)
+    let output = ProcessCommand::new(interpreter)
         .args([
             "-c",
             "import json, site, sysconfig; typed_roots=[]; typed_roots.extend(filter(None, [sysconfig.get_path('purelib'), sysconfig.get_path('platlib')])); typed_roots.extend(site.getsitepackages()); usersite = site.getusersitepackages(); typed_roots.extend(usersite if isinstance(usersite, list) else [usersite]); payload=[{'path': root, 'allow_untyped_runtime': False} for root in sorted({r for r in typed_roots if r})]; print(json.dumps(payload))",
@@ -3132,11 +3130,8 @@ fn external_runtime_allowed(root: &ExternalSupportRoot, path: &Path) -> bool {
 
 fn external_logical_module_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
-    let Some(first) =
-        relative.components().next().and_then(|component| component.as_os_str().to_str())
-    else {
-        return None;
-    };
+    let first =
+        relative.components().next().and_then(|component| component.as_os_str().to_str())?;
     if first.ends_with("-stubs") {
         let stub_distribution_root = root.join(first);
         let Ok(relative_inside_distribution) = relative.strip_prefix(first) else {
@@ -3170,9 +3165,7 @@ fn sibling_stub_distribution_root(root: &Path, path: &Path) -> Option<PathBuf> {
         return None;
     };
     let mut components = relative.components();
-    let Some(first) = components.next().and_then(|component| component.as_os_str().to_str()) else {
-        return None;
-    };
+    let first = components.next().and_then(|component| component.as_os_str().to_str())?;
     if first.ends_with("-stubs") {
         return None;
     }
@@ -4984,11 +4977,11 @@ mod tests {
         assert_eq!(supplied.len(), 2);
         assert!(supplied.iter().any(|artifact| {
             matches!(artifact.kind, SuppliedArtifactKind::Wheel)
-                && artifact.path == PathBuf::from("dist/pkg.whl")
+                && artifact.path == Path::new("dist/pkg.whl")
         }));
         assert!(supplied.iter().any(|artifact| {
             matches!(artifact.kind, SuppliedArtifactKind::Sdist)
-                && artifact.path == PathBuf::from("dist/pkg.tar.gz")
+                && artifact.path == Path::new("dist/pkg.tar.gz")
         }));
     }
 

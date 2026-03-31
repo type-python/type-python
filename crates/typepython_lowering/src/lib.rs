@@ -1,6 +1,9 @@
 //! Lowering boundary for TypePython.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
@@ -515,15 +518,15 @@ fn line_span(line_number: usize, text: &str) -> SpanMapRange {
 }
 
 fn inserted_span_map_entry(
-    source_path: &PathBuf,
-    emitted_path: &PathBuf,
+    source_path: &Path,
+    emitted_path: &Path,
     emitted_line: usize,
     text: &str,
     kind: LoweringSegmentKind,
 ) -> SpanMapEntry {
     SpanMapEntry {
-        source_path: source_path.clone(),
-        emitted_path: emitted_path.clone(),
+        source_path: source_path.to_path_buf(),
+        emitted_path: emitted_path.to_path_buf(),
         original: SpanMapRange { line: 0, start_col: 0, end_col: 0 },
         emitted: line_span(emitted_line, text),
         kind,
@@ -780,14 +783,19 @@ fn rewrite_typealias_line(line: &str, statement: &typepython_syntax::TypeAliasSt
 
 fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
     let mut args = vec![format!("\"{name}\"")];
-    args.extend(type_param.constraints.iter().cloned());
+    args.extend(
+        type_param
+            .constraints
+            .iter()
+            .map(|constraint| format!("{constraint:?}")),
+    );
     if type_param.constraints.is_empty()
         && let Some(bound) = &type_param.bound
     {
-        args.push(format!("bound={bound}"));
+        args.push(format!("bound={bound:?}"));
     }
     if let Some(default) = &type_param.default {
-        args.push(format!("default={default}"));
+        args.push(format!("default={default:?}"));
     }
     match type_param.kind {
         typepython_syntax::TypeParamKind::TypeVar => {
@@ -2228,7 +2236,7 @@ mod tests {
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(
             lowered.module.python_source,
-            "from typing_extensions import TypeVar\nT = TypeVar(\"T\", str, bytes, default=str)\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
+            "from typing_extensions import TypeVar\nT = TypeVar(\"T\", \"str\", \"bytes\", default=\"str\")\nfrom typing import TypeAlias\nPair: TypeAlias = tuple[T, T]\n"
         );
         assert_eq!(
             lowered.module.required_imports,
@@ -2391,6 +2399,60 @@ mod tests {
         assert_eq!(
             lowered.module.python_source,
             "from typing import TypeVar\nfrom typing import ParamSpec\nP = ParamSpec(\"P\")\nR = TypeVar(\"R\")\ndef invoke(cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n    return cb(*args, **kwargs)\n"
+        );
+    }
+
+    #[test]
+    fn lower_quotes_hoisted_type_param_bounds_for_runtime_imports() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("bounded-generic.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "interface Serializable:\n    def to_json(self) -> str: ...\n\nclass Box[T: Serializable]:\n    pass\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::Interface(NamedBlockStatement {
+                    name: String::from("Serializable"),
+                    type_params: Vec::new(),
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: Vec::new(),
+                    line: 1,
+                }),
+                SyntaxStatement::ClassDef(NamedBlockStatement {
+                    name: String::from("Box"),
+                    type_params: vec![TypeParam {
+                        name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
+                        bound: Some(String::from("Serializable")),
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
+                    header_suffix: String::new(),
+                    bases: Vec::new(),
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_abstract_class: false,
+                    members: Vec::new(),
+                    line: 4,
+                }),
+            ],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVar\nfrom typing import Generic\nT = TypeVar(\"T\", bound=\"Serializable\")\nfrom typing import Protocol\nclass Serializable(Protocol):\n    def to_json(self) -> str: ...\n\nclass Box(Generic[T]):\n    pass\n"
         );
     }
 

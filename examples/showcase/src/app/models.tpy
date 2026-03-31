@@ -1,0 +1,47 @@
+# Data classes and TypedDict demonstrations.
+
+from typing import TypedDict
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
+
+data class User:
+    name: str
+    email: str
+    age: int = 0
+
+data class AdminUser:
+    name: str
+    email: str
+    age: int = 0
+    permissions: list[str]
+
+
+# ---------------------------------------------------------------------------
+# TypedDict
+# ---------------------------------------------------------------------------
+
+class ApiResponse(TypedDict):
+    status: int
+    body: str
+
+class PaginatedResponse(TypedDict, total=False):
+    status: int
+    body: str
+    next_cursor: str
+    total_count: int
+
+
+# ---------------------------------------------------------------------------
+# TypedDict utility transforms
+# ---------------------------------------------------------------------------
+
+class UserRecord(TypedDict):
+    name: str
+    email: str
+    age: int
+
+typealias PartialUserRecord = Partial[UserRecord]
+typealias UserSummary = Pick[UserRecord, "name", "email"]

@@ -1,0 +1,124 @@
+# Config Loader
+#
+# Demonstrates: unknown vs dynamic, type narrowing, unsafe blocks,
+#               assert narrowing, isinstance chains, strict null safety.
+#
+# Models a configuration loader that reads untrusted data and must
+# narrow it to known types before use -- showcasing TypePython's
+# safety-first approach to dynamic values.
+#
+# Run: typepython check --project examples/config-loader
+
+from typing import TypedDict
+
+
+# --- Configuration schema -----------------------------------------------------
+
+class DatabaseConfig(TypedDict):
+    host: str
+    port: int
+    name: str
+
+class AppConfig(TypedDict):
+    debug: bool
+    database: DatabaseConfig
+    allowed_origins: list[str]
+
+
+# --- unknown: the safe boundary type -----------------------------------------
+#
+# Values from external sources (files, env vars, network) enter as `unknown`.
+# Unlike `dynamic` (which skips all checks), `unknown` forces you to narrow
+# before doing anything -- the compiler will reject member access, calls,
+# and indexing on `unknown`.
+
+def load_raw_config(path: str) -> unknown:
+    """Simulate loading config from a file. Returns unknown."""
+    unsafe:
+        # Reading and parsing an external file is inherently unsafe.
+        # The unsafe block makes this explicit in the code.
+        return eval(open(path).read())
+
+
+# --- Narrowing unknown to known types ----------------------------------------
+
+def parse_string(value: unknown) -> str:
+    """Narrow an unknown value to str, or raise."""
+    if isinstance(value, str):
+        # value is narrowed to str here.
+        return value
+    raise TypeError(f"expected str, got {type(value)}")
+
+
+def parse_int(value: unknown) -> int:
+    if isinstance(value, int):
+        return value
+    raise TypeError(f"expected int, got {type(value)}")
+
+
+def parse_bool(value: unknown) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise TypeError(f"expected bool, got {type(value)}")
+
+
+def parse_string_list(value: unknown) -> list[str]:
+    """Narrow an unknown value to list[str]."""
+    if not isinstance(value, list):
+        raise TypeError(f"expected list, got {type(value)}")
+    # value is narrowed to list here.
+    result: list[str] = []
+    for item in value:
+        result.append(parse_string(item))
+    return result
+
+
+# --- Building typed config from raw data -------------------------------------
+
+def parse_database_config(raw: unknown) -> DatabaseConfig:
+    """Narrow a raw unknown dict into a typed DatabaseConfig."""
+    if not isinstance(raw, dict):
+        raise TypeError("database config must be a dict")
+
+    host = parse_string(raw.get("host", ""))
+    port = parse_int(raw.get("port", 0))
+    name = parse_string(raw.get("name", ""))
+
+    return {"host": host, "port": port, "name": name}
+
+
+def parse_app_config(raw: unknown) -> AppConfig:
+    """Parse the full application config with complete type safety."""
+    if not isinstance(raw, dict):
+        raise TypeError("config must be a dict")
+
+    debug = parse_bool(raw.get("debug", False))
+    database = parse_database_config(raw.get("database"))
+    origins = parse_string_list(raw.get("allowed_origins", []))
+
+    return {
+        "debug": debug,
+        "database": database,
+        "allowed_origins": origins,
+    }
+
+
+# --- Safe entry point ---------------------------------------------------------
+
+def load_config(path: str) -> AppConfig | None:
+    """Load and parse config. Returns None on failure."""
+    raw = load_raw_config(path)
+
+    # raw is unknown -- we cannot do anything with it until we narrow.
+    # parse_app_config handles all the narrowing internally.
+    if not isinstance(raw, dict):
+        return None
+
+    return parse_app_config(raw)
+
+
+def get_db_host(config: AppConfig | None) -> str:
+    """Extract the database host, demonstrating assert narrowing."""
+    assert config is not None
+    # config is narrowed to AppConfig after assert.
+    return config["database"]["host"]

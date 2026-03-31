@@ -1,58 +1,357 @@
-# TypePython Rust Workspace
+# Architecture
 
-This repository is initialized as a virtual Cargo workspace whose crate layout
-matches the normative compiler phase split in Appendix G of
-`TypePython_Spec.md`.
+TypePython is implemented as a virtual Cargo workspace containing 11 Rust crates. Each crate owns a single phase of the compilation pipeline, with clear boundaries enforced by crate-level dependencies.
 
-## Crate Map
+## Compilation Pipeline
 
-- `typepython_cli`: user-facing `typepython` binary and command wiring
-- `typepython_config`: project discovery and config loading for
-  `typepython.toml` and `[tool.typepython]`
-- `typepython_diagnostics`: shared diagnostic model and text/JSON rendering
-- `typepython_syntax`: source-kind detection and parser entrypoint boundary
-- `typepython_lowering`: lowered Python form and source-map boundary
-- `typepython_binding`: symbol creation boundary
-- `typepython_graph`: module graph and summary boundary
-- `typepython_checking`: type-checking boundary
-- `typepython_emit`: output planning boundary
-- `typepython_incremental`: cache fingerprint boundary
-- `typepython_lsp`: future language-server boundary
+```
+                    SOURCE FILES
+              (.tpy / .py / .pyi)
+                       |
+                       v
+              +------------------+
+              | typepython_syntax|     Parse source into SyntaxTree
+              |  (ruff-python)   |     using ruff_python_parser
+              +------------------+
+                       |
+                       v
+              +------------------+
+              |typepython_binding|     Extract declarations, calls,
+              |                  |     guards, returns, yields
+              +------------------+
+                       |
+                       v
+              +------------------+
+              | typepython_graph |     Build module dependency graph
+              |                  |     Inject typing/collections prelude
+              +------------------+
+                       |
+                       v
+              +------------------+
+              |typepython_checking|    Run multiple type checking rule sets
+              |                  |     Produce DiagnosticReport
+              +------------------+
+                       |
+                       v
+              +------------------+
+              |typepython_lowering|    Convert .tpy to valid Python
+              |                  |     Generate source maps
+              +------------------+
+                       |
+                       v
+              +------------------+
+              | typepython_emit  |     Plan output paths
+              |                  |     Generate .pyi stubs
+              +------------------+
+                       |
+                       v
+              +--------------------+
+              |typepython_incremental|  Compute module fingerprints
+              |                    |    Detect changed modules
+              +--------------------+
+                       |
+              +--------+--------+
+              |                 |
+              v                 v
+     +----------------+  +---------------+
+     | typepython_cli |  | typepython_lsp|
+     | (binary)       |  | (LSP server)  |
+     +----------------+  +---------------+
+```
 
-## Milestone Alignment
+## Crate Dependency Graph
 
-- Milestone 0: workspace, toolchain pin, config loader, command skeletons
-- Milestone 1: parser and lowering move into `typepython_syntax` and
-  `typepython_lowering`
-- Milestone 2: binder, graph, summaries, and checking grow in their dedicated
-  crates
-- Milestone 3+: emit, verify, watch, incremental, and LSP deepen without
-  collapsing crate boundaries
+```
+typepython_diagnostics          (no internal deps -- foundation crate)
+       ^
+       |
+       +--- typepython_config   (diagnostics)
+       |
+       +--- typepython_syntax   (diagnostics)
+       |         ^
+       |         |
+       |    typepython_binding  (diagnostics, syntax)
+       |         ^
+       |         |
+       |    typepython_graph    (diagnostics, binding)
+       |         ^
+       |         |
+       |    typepython_checking (diagnostics, syntax, binding, graph)
+       |
+       +--- typepython_lowering (diagnostics, syntax)
+       |
+       +--- typepython_emit     (diagnostics, config, lowering)
+       |
+       +--- typepython_incremental (diagnostics, graph)
+       |
+       +--- typepython_cli      (all crates)
+       |
+       +--- typepython_lsp      (all crates)
+```
 
-## Engineering Choices
+## Crate Details
 
-- The repository uses a virtual Cargo workspace so profiles, shared dependency
-  versions, and lint policy live at the workspace root.
-- The toolchain is pinned in `rust-toolchain.toml` to keep local development
-  and CI on the same Rust release and component set.
-- Formatting, linting, and tests are standardized through `Makefile` targets
-  and a GitHub Actions workflow.
-- The CLI implements Milestone 0 behavior: configuration discovery, command
-  routing, basic source enumeration, and pipeline placeholders.
+### typepython_diagnostics
 
-## Official References
+The foundation crate shared by every other crate. Defines the diagnostic model used across all compilation phases.
 
-- Cargo workspaces:
-  https://doc.rust-lang.org/cargo/reference/workspaces.html
-- Cargo profiles:
-  https://doc.rust-lang.org/cargo/reference/profiles.html
-- `cargo test`:
-  https://doc.rust-lang.org/cargo/commands/cargo-test.html
-- rustup toolchain pinning:
-  https://rust-lang.github.io/rustup/overrides.html
-- Clippy:
-  https://rust-lang.github.io/rust-clippy/
-- rustfmt:
-  https://rust-lang.github.io/rustfmt/
-- Rust API Guidelines:
-  https://rust-lang.github.io/api-guidelines/checklist.html
+**Key types:**
+
+| Type | Description |
+|---|---|
+| `Severity` | `Error` (build-blocking), `Warning`, `Note` |
+| `Span` | Source location: path, line, column, end_line, end_column (all 1-based) |
+| `Diagnostic` | Code, severity, message, notes, suggestions, span |
+| `DiagnosticSuggestion` | Machine-readable fix with replacement span and text |
+| `DiagnosticReport` | Collection with `has_errors()`, `as_text()`, JSON serialization |
+
+### typepython_config
+
+Project discovery and configuration loading.
+
+**Discovery order:**
+1. Walk up from the project directory looking for `typepython.toml`
+2. Fall back to `[tool.typepython]` in `pyproject.toml`
+
+**Configuration sections:**
+
+| Section | Key options |
+|---|---|
+| `[project]` | `src`, `include`, `exclude`, `out_dir`, `cache_dir`, `target_python` |
+| `[resolution]` | `base_url`, `type_roots`, `python_executable`, `paths` |
+| `[emit]` | `emit_pyi`, `emit_pyc`, `write_py_typed`, `no_emit_on_error`, `runtime_validators` |
+| `[typing]` | `profile`, `strict`, `strict_nulls`, `imports`, `warn_unsafe`, `enable_sealed_exhaustiveness` |
+| `[watch]` | `debounce_ms` |
+
+**Typing profiles:**
+
+| Profile | Description |
+|---|---|
+| `library` | Strict + `require_known_public_types` for published packages |
+| `application` | Strict, relaxed public API requirements |
+| `migration` | Lenient, `imports = "dynamic"`, no implicit dynamic warnings |
+
+### typepython_syntax
+
+Parser boundary that wraps `ruff_python_parser` to produce a `SyntaxTree`.
+
+**Source kinds:**
+- `TypePython` (`.tpy`) -- full TypePython syntax
+- `Python` (`.py`) -- standard Python, pass-through
+- `Stub` (`.pyi`) -- type stubs
+
+**Key output:** `SyntaxTree` containing:
+- Parsed statements (type aliases, classes, functions, imports, control flow, etc.)
+- Type-ignore directives
+- Rich metadata: `DirectExprMetadata`, `TypedDictLiteralSite`, `UnsafeOperationSite`
+
+**Unsafe operation tracking:**
+`EvalCall`, `ExecCall`, `GlobalsWrite`, `LocalsWrite`, `DictWrite`, `SetAttrNonLiteral`, `DelAttrNonLiteral`
+
+### typepython_binding
+
+Symbol extraction phase that transforms a `SyntaxTree` into a `BindingTable`.
+
+**BindingTable contents:**
+
+| Field | Description |
+|---|---|
+| `declarations` | Top-level and member symbols with kinds, types, modifiers |
+| `calls` | Function call sites with argument metadata |
+| `method_calls` | Method invocations on known receivers |
+| `member_accesses` | Attribute access tracking |
+| `returns` / `yields` | Return and yield value tracking |
+| `if_guards` / `asserts` | Type narrowing guard conditions |
+| `matches` | Match statement sites for exhaustiveness |
+| `for_loops` / `with_statements` | Iteration and context manager sites |
+| `assignments` | Annotated and destructuring assignments |
+
+**Declaration kinds:** `TypeAlias`, `Class`, `Function`, `Overload`, `Value`, `Import`
+
+**Guard conditions:** `IsNone`, `IsInstance`, `PredicateCall`, `TruthyName`, `Not`, `And`, `Or`
+
+### typepython_graph
+
+Builds the module dependency graph from all binding tables.
+
+**Key behaviors:**
+- Injects synthetic `__init__` modules for implicit namespace packages
+- Injects **prelude modules**: `typing`, `typing_extensions`, `collections.abc` with standard type declarations
+- Computes `summary_fingerprint` (u64) per module for incremental tracking
+
+**Prelude declarations include:** `Any`, `List`, `Dict`, `Tuple`, `Set`, `Callable`, `Literal`, `TypedDict`, `Protocol`, `Awaitable`, `AsyncIterable`, `Iterable`, `Iterator`, `Generator`, and more.
+
+### typepython_checking
+
+The core type-checking engine. Runs multiple diagnostic rule categories against the module graph. The table below is representative, not exhaustive.
+
+**Check rules:**
+
+| Rule | Validates |
+|---|---|
+| `ambiguous_overload_call` | Overload resolution is unambiguous |
+| `direct_unknown_operation` | No operations on `unknown` without narrowing |
+| `unresolved_import` | All imports resolve to known modules |
+| `direct_member_access` | Member access on known types |
+| `unsafe_boundary` | Unsafe operations confined to `unsafe:` blocks |
+| `deprecated_use` | Deprecated symbol usage |
+| `direct_method_call` | Method calls match receiver type |
+| `direct_return_type` | Return values match declared type |
+| `direct_yield_type` | Yield values match declared type |
+| `for_loop_target` | Iteration target is iterable |
+| `destructuring_assignment` | Unpacking matches structure |
+| `with_statement` | Context manager protocol compliance |
+| `direct_call_arity` | Correct number of arguments |
+| `direct_call_type` | Argument types match parameters |
+| `direct_call_keyword` | Keyword arguments are valid |
+| `annotated_assignment_type` | Annotation matches assigned value |
+| `typed_dict_literal` | TypedDict shape validation |
+| `typed_dict_readonly_mutation` | Read-only field immutability |
+| `frozen_dataclass_mutation` | Frozen field immutability |
+| `attribute_assignment_type` | Attribute assignment type correctness |
+| `duplicate` | No duplicate declarations |
+| `override` | `@override` validation and enforcement |
+| `final_decorator` | `@final` violation detection |
+| `abstract_member` | Abstract class instantiation prevention |
+
+**Built-in signature knowledge:** `len`, `str`, `int`, `float`, `bool`, `bytes`, `list`, `dict`, `tuple`, `set`, `frozenset`, `range`, `input`, `print`, `ord`, `chr`, `hash`, `id`, `cast`, `TypeVar`, `ParamSpec`, `TypeVarTuple`, `NewType`.
+
+### typepython_lowering
+
+Converts TypePython syntax to valid Python with full source maps.
+
+**Lowering transformations:**
+
+| Input | Output |
+|---|---|
+| `data class Foo:` | `@dataclass` + `class Foo:` |
+| `interface Bar:` | `class Bar(Protocol):` |
+| `sealed class Expr:` | `class Expr:  # tpy:sealed` |
+| `overload def f():` | `@overload def f():` |
+| `typealias X = T` | `X: TypeAlias = T` with helper `TypeVar` declarations when needed |
+| Inline `[T]` generics | `TypeVar` imports + `Generic[T]` bases |
+| Annotated lambda params | Normalized to Python-legal form |
+
+**Output:** `LoweredModule` with:
+- `python_source` -- valid Python text
+- `source_map` -- line-to-line mapping (original <-> lowered)
+- `span_map` -- column-level mapping with segment kinds: `Copied`, `Inserted`, `Rewritten`, `Synthetic`
+- `required_imports` -- synthesized import statements
+
+**Passthrough:** `.py` files are copied with 1:1 source mapping. `.pyi` files pass through as-is.
+
+### typepython_emit
+
+Plans output artifacts and generates type stubs.
+
+**Artifact planning:**
+
+| Source | Runtime output | Stub output |
+|---|---|---|
+| `.tpy` | `.py` (lowered) | `.pyi` (generated) |
+| `.py` | `.py` (copy) | -- |
+| `.pyi` | -- | `.pyi` (copy) |
+
+**Features:**
+- Stub generation with value/callable overrides and synthetic methods
+- Runtime validator injection for TypedDict classes (experimental)
+- `py.typed` marker file writing for PEP 561 compliance
+- Optional `.pyc` bytecode compilation
+
+### typepython_incremental
+
+Fingerprint-based incremental build tracking.
+
+**IncrementalState** contains:
+- `fingerprints` -- `BTreeMap<module_key, u64>` using FNV-1a hash
+- `summaries` -- public API summary per module (exports, imports, sealed roots)
+- `stdlib_snapshot` -- optional stdlib version tag
+
+**Rebuild rules:**
+- Implementation-only change (fingerprint same): dependents NOT rechecked
+- Public summary change (fingerprint differs): direct and transitive dependents rechecked
+
+**Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`.
+
+### typepython_cli
+
+User-facing binary implementing all commands.
+
+**Full pipeline steps:**
+1. `discover_sources()` -- glob-based source discovery
+2. `load_syntax_trees()` -- parse all files
+3. `apply_type_ignore_directives()` -- process `# type: ignore`
+4. `bind()` -- extract symbols
+5. `build()` -- assemble module graph
+6. `check_with_options()` -- run type checker
+7. `lower_with_options()` -- convert to Python
+8. `plan_emits()` -- plan output paths
+9. `snapshot()` -- capture fingerprints
+10. `write_runtime_outputs()` -- write files to disk
+
+**Embedded resources:** Project init templates from `templates/`.
+
+### typepython_lsp
+
+Language Server Protocol implementation using stdio-based JSON-RPC.
+
+**Supported methods:**
+
+| Method | Feature |
+|---|---|
+| `textDocument/didOpen` | Open document overlay |
+| `textDocument/didChange` | Update document (full-text sync) |
+| `textDocument/didClose` | Close document |
+| `textDocument/hover` | Type information at cursor |
+| `textDocument/definition` | Jump to definition |
+| `textDocument/references` | Find all usages |
+| `textDocument/rename` | Rename symbol across project |
+| `textDocument/codeAction` | Quick fixes from diagnostics |
+| `textDocument/completion` | Autocomplete (triggered on `.`) |
+
+**Internal architecture:**
+- In-memory document overlays for unsaved changes
+- Full workspace recompilation on changes
+- Symbol occurrence tables for cross-referencing
+- Diagnostics pushed to editor on each recompilation
+
+## Workspace Configuration
+
+**Rust edition:** 2024
+**Pinned development toolchain:** 1.94.0
+**Minimum supported Rust version:** 1.85
+**Resolver:** v3
+
+**Lint policy:**
+- `unsafe_code` -- forbidden
+- `unwrap_used`, `todo`, `dbg_macro` -- denied
+- All clippy lints -- warned
+
+**Release profile:**
+- Single codegen unit
+- Thin LTO
+
+## External Dependencies
+
+| Dependency | Purpose |
+|---|---|
+| `ruff-python` | Python AST parsing |
+| `clap` | CLI argument parsing with derive macros |
+| `serde` / `serde_json` / `toml` | Serialization for config, diagnostics, cache |
+| `notify` | Filesystem watching for `watch` command |
+| `tracing` | Structured logging |
+| `anyhow` / `thiserror` | Error handling |
+| `flate2` / `tar` / `zip` | Archive support for `verify` command |
+| `glob` | File pattern matching |
+| `url` | URL parsing for resolution config |
+
+## Design Decisions
+
+1. **Virtual workspace** -- profiles, shared dependency versions, and lint policy live at the root
+2. **Crate-per-phase** -- each compilation phase is isolated; phases can evolve independently
+3. **No unsafe code** -- `forbid(unsafe_code)` workspace-wide
+4. **Deterministic output** -- sorted keys, stable fingerprints, reproducible builds
+5. **Source maps everywhere** -- line-and-column mapping from `.tpy` to `.py` for accurate error reporting
+6. **Prelude injection** -- typing/collections.abc always available without explicit import
+7. **Guard combinators** -- type narrowing supports `And`/`Or`/`Not` for compound conditions
+8. **Profile-based defaults** -- library/application/migration presets for consistent configuration

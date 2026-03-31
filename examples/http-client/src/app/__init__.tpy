@@ -1,0 +1,141 @@
+# HTTP Client
+#
+# Demonstrates: interface, generic class, generic function with bound,
+#               typealias, data class, overload, strict null safety.
+#
+# Models a typed HTTP client where request/response types are generic
+# and serialization is enforced through an interface contract.
+#
+# Run: typepython check --project examples/http-client
+
+from typing import TypedDict
+
+
+# --- Interfaces ---------------------------------------------------------------
+
+interface Serializable:
+    def to_json(self) -> str: ...
+
+
+# --- Type aliases -------------------------------------------------------------
+
+typealias Headers = dict[str, str]
+typealias QueryParams = dict[str, str]
+
+
+# --- Request/response models --------------------------------------------------
+
+class HttpRequest(Serializable):
+    method: str
+    url: str
+    headers: Headers
+    body: str | None
+
+    def __init__(
+        self,
+        method: str,
+        url: str,
+        headers: Headers | None = None,
+        body: str | None = None,
+    ) -> None:
+        self.method = method
+        self.url = url
+        if headers is None:
+            self.headers = {}
+        else:
+            self.headers = headers
+        self.body = body
+
+    def to_json(self) -> str:
+        return self.url
+
+data class HttpResponse:
+    status: int
+    headers: Headers
+    body: str = ""
+
+data class ApiError:
+    status: int
+    message: str
+    details: str | None = None
+
+
+# --- TypedDict for configuration ----------------------------------------------
+
+class ClientConfig(TypedDict, total=False):
+    base_url: str
+    timeout: int
+    max_retries: int
+    default_headers: Headers
+
+
+# --- Generic API client -------------------------------------------------------
+
+class ApiClient[T: Serializable]:
+    _base_url: str
+    _headers: Headers
+
+    def __init__(self, base_url: str, headers: Headers | None = None) -> None:
+        self._base_url = base_url
+        if headers is None:
+            self._headers = {}
+        else:
+            self._headers = headers
+
+    def get(self, path: str) -> HttpResponse:
+        request = HttpRequest("GET", self._base_url + path, self._headers)
+        return self._send(request)
+
+    def post(self, path: str, payload: T) -> HttpResponse:
+        body = payload.to_json()
+        request = HttpRequest(
+            "POST",
+            self._base_url + path,
+            self._headers,
+            body,
+        )
+        return self._send(request)
+
+    def _send(self, request: HttpRequest) -> HttpResponse:
+        # Placeholder -- a real implementation would perform I/O.
+        return HttpResponse(200, {}, "{}")
+
+
+# --- Overloaded response parser -----------------------------------------------
+
+overload def parse_response(response: HttpResponse, strict: bool) -> str: ...
+overload def parse_response(response: HttpResponse) -> str | None: ...
+
+def parse_response(response: HttpResponse, strict: bool = False) -> str | None:
+    """Parse the response body, optionally raising on error status."""
+    if response.status >= 400:
+        if strict:
+            return f"error: {response.status}"
+        return None
+    return response.body
+
+
+# --- Null-safe chaining -------------------------------------------------------
+
+def fetch_user_name(client: ApiClient[HttpRequest], user_id: int) -> str:
+    """Fetch a user name, demonstrating null narrowing through the chain."""
+    response = client.get(f"/users/{user_id}")
+    body = parse_response(response)
+
+    # body is str | None here.
+    if body is None:
+        return "unknown"
+
+    # body is narrowed to str.
+    return body
+
+
+# --- Generic helper with interface bound --------------------------------------
+
+def send_batch[T: Serializable](client: ApiClient[T], items: list[T], path: str) -> list[int]:
+    """Send multiple items and collect status codes."""
+    statuses: list[int] = []
+    for item in items:
+        response = client.post(path, item)
+        statuses.append(response.status)
+    return statuses
