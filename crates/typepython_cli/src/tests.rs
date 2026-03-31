@@ -1,12 +1,13 @@
+use super::migration::{build_migration_report, emit_migration_stubs};
 use super::verification::{SuppliedArtifactKind, SuppliedVerifyArtifact};
 use super::{
-    Cli, ExternalSupportRoot, build_diagnostics, build_migration_report,
-    bundled_stdlib_snapshot_identity_for_root, bundled_stdlib_sources_for_root,
-    collect_source_paths, compile_runtime_bytecode, embedded_config_template, emit_migration_stubs,
-    exit_code_for_error, external_resolution_sources, format_watch_rebuild_note, init_project,
-    load_syntax_trees, python_type_roots_from_interpreter, run_pipeline, should_emit_build_outputs,
-    supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
-    verify_runtime_public_name_parity, watch_targets, write_incremental_snapshot,
+    Cli, ExternalSupportRoot, build_diagnostics, bundled_stdlib_snapshot_identity_for_root,
+    bundled_stdlib_sources_for_root, collect_source_paths, compile_runtime_bytecode,
+    embedded_config_template, exit_code_for_error, external_resolution_sources,
+    format_watch_rebuild_note, init_project, load_syntax_trees, python_type_roots_from_interpreter,
+    run_pipeline, should_emit_build_outputs, supplied_verify_artifacts, verify_build_artifacts,
+    verify_packaged_artifacts, verify_runtime_public_name_parity, watch_targets,
+    write_incremental_snapshot,
 };
 use clap::Parser;
 use flate2::{Compression, write::GzEncoder};
