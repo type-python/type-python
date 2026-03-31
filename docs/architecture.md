@@ -185,6 +185,18 @@ Builds the module dependency graph from all binding tables.
 
 The core type-checking engine. Runs multiple diagnostic rule categories against the module graph. The table below is representative, not exhaustive.
 
+**Checker naming conventions:**
+
+| Prefix / term | Meaning |
+|---|---|
+| `direct_*` | Operates on the directly bound module surface from `typepython_binding` (calls, returns, assignments, member accesses, declaration details) before secondary synthesis |
+| `contextual_*` | Re-types a local expression using an expected type from the surrounding assignment, call, yield, or return site |
+| `imported_*` | Consults imported-module information instead of only the current module's direct sites |
+| `instantiated_*` | Applies generic substitutions before validating a callable or signature |
+| `synthetic_*` | Uses checker-authored helper surfaces such as built-in signatures or synthesized stub methods |
+
+These prefixes are descriptive rather than exhaustive. A single diagnostic pass may combine direct sites with contextual or instantiated helper logic when resolving a final type judgment.
+
 **Check rules:**
 
 | Rule | Validates |

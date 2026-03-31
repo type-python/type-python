@@ -1,4 +1,18 @@
 //! Type-checking boundary for TypePython.
+//!
+//! Naming conventions used throughout this crate:
+//! - `direct_*` operates on the directly bound surface for a module: declaration
+//!   details, call sites, returns, assignments, and member accesses extracted by
+//!   `typepython_binding`, before any secondary import/runtime synthesis.
+//! - `contextual_*` refines a local expression using an expected type supplied by
+//!   the surrounding assignment, call, or return site.
+//! - `imported_*` handles behavior that depends on information loaded from an
+//!   imported module rather than the current module's direct sites.
+//! - `instantiated_*` indicates that generic substitutions have already been
+//!   applied to a callable or signature.
+//! - `synthetic_*` refers to checker-authored helper surfaces such as built-in
+//!   signatures or synthesized stub methods that do not come directly from user
+//!   source text.
 
 use std::{
     cell::RefCell,
