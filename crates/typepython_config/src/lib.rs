@@ -2,9 +2,10 @@
 
 use std::{
     collections::BTreeMap,
+    ffi::OsStr,
     fmt::{self, Display},
     fs, io,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Command,
 };
 
@@ -364,12 +365,20 @@ struct RawPyProjectTool {
 
 impl Config {
     fn validate(&self, config_path: &Path) -> Result<(), ConfigError> {
+        let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+
         validate_target_python(config_path, &self.project.target_python)?;
+        validate_project_paths(
+            config_path,
+            config_dir,
+            &self.project.out_dir,
+            &self.project.cache_dir,
+        )?;
 
         if let Some(python_executable) = &self.resolution.python_executable {
             validate_python_executable(
                 config_path,
-                config_path.parent().unwrap_or_else(|| Path::new(".")),
+                config_dir,
                 python_executable,
                 &self.project.target_python,
             )?;
@@ -615,6 +624,79 @@ fn normalize_spec_toml(content: &str) -> String {
     normalized
 }
 
+fn validate_project_paths(
+    config_path: &Path,
+    config_dir: &Path,
+    out_dir: &str,
+    cache_dir: &str,
+) -> Result<(), ConfigError> {
+    let normalized_out_dir = normalize_project_path(config_dir, out_dir);
+    let normalized_cache_dir = normalize_project_path(config_dir, cache_dir);
+
+    if normalized_out_dir == normalized_cache_dir {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "project.out_dir = `{out_dir}` and project.cache_dir = `{cache_dir}` resolve to the same path `{}`",
+                normalized_out_dir.display()
+            ),
+        });
+    }
+
+    if normalized_out_dir.starts_with(&normalized_cache_dir)
+        || normalized_cache_dir.starts_with(&normalized_out_dir)
+    {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "project.out_dir = `{out_dir}` and project.cache_dir = `{cache_dir}` must not overlap; resolved paths `{}` and `{}` are nested",
+                normalized_out_dir.display(),
+                normalized_cache_dir.display()
+            ),
+        });
+    }
+
+    Ok(())
+}
+
+fn normalize_project_path(config_dir: &Path, configured_path: &str) -> PathBuf {
+    let configured_path = Path::new(configured_path);
+    let resolved = if configured_path.is_absolute() {
+        configured_path.to_path_buf()
+    } else {
+        config_dir.join(configured_path)
+    };
+
+    normalize_lexical_path(&resolved)
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut has_root = false;
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                has_root = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let can_pop = normalized.file_name().is_some_and(|name| name != OsStr::new(".."));
+                if can_pop {
+                    normalized.pop();
+                } else if !has_root {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    normalized
+}
+
 fn validate_target_python(config_path: &Path, target_python: &str) -> Result<(), ConfigError> {
     match target_python {
         "3.10" | "3.11" | "3.12" => Ok(()),
@@ -731,6 +813,58 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("TPY1002"));
         assert!(message.contains("project.target_python = `3.9`"));
+    }
+
+    #[test]
+    fn rejects_equivalent_out_dir_and_cache_dir_after_normalization() {
+        let project_dir =
+            temp_project_dir("rejects_equivalent_out_dir_and_cache_dir_after_normalization");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "out_dir = \".typepython/build\"\n",
+                "cache_dir = \"./.typepython/build/../build\"\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected identical resolved output paths to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("project.out_dir = `.typepython/build`"));
+        assert!(message.contains("project.cache_dir = `./.typepython/build/../build`"));
+        assert!(message.contains("resolve to the same path"));
+    }
+
+    #[test]
+    fn rejects_nested_out_dir_and_cache_dir() {
+        let project_dir = temp_project_dir("rejects_nested_out_dir_and_cache_dir");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "out_dir = \".typepython/build\"\n",
+                "cache_dir = \".typepython/build/cache\"\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected nested output paths to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("project.out_dir = `.typepython/build`"));
+        assert!(message.contains("project.cache_dir = `.typepython/build/cache`"));
+        assert!(message.contains("must not overlap"));
+        assert!(message.contains("are nested"));
     }
 
     #[test]

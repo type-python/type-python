@@ -5463,23 +5463,19 @@ fn same_head_generic_assignable(
     }
 
     let variances = variances_for_generic_head(head, expected_args.len());
-    Some(
-        expected_args
-            .iter()
-            .zip(actual_args.iter())
-            .zip(variances)
-            .all(|((expected_arg, actual_arg), variance)| match variance {
-                GenericVariance::Invariant => {
-                    invariant_type_matches(node, nodes, expected_arg, actual_arg)
-                }
-                GenericVariance::Covariant => {
-                    direct_type_is_assignable(node, nodes, expected_arg, actual_arg)
-                }
-                GenericVariance::Contravariant => {
-                    direct_type_is_assignable(node, nodes, actual_arg, expected_arg)
-                }
-            }),
-    )
+    Some(expected_args.iter().zip(actual_args.iter()).zip(variances).all(
+        |((expected_arg, actual_arg), variance)| match variance {
+            GenericVariance::Invariant => {
+                invariant_type_matches(node, nodes, expected_arg, actual_arg)
+            }
+            GenericVariance::Covariant => {
+                direct_type_is_assignable(node, nodes, expected_arg, actual_arg)
+            }
+            GenericVariance::Contravariant => {
+                direct_type_is_assignable(node, nodes, actual_arg, expected_arg)
+            }
+        },
+    ))
 }
 
 fn callable_annotation_assignable(
@@ -5530,13 +5526,18 @@ fn recursive_type_alias_head(
     text: &str,
 ) -> Option<String> {
     let normalized = normalize_type_text(text);
-    let head = split_generic_type(&normalized)
-        .map(|(head, _)| head.to_owned())
-        .unwrap_or(normalized);
+    let head =
+        split_generic_type(&normalized).map(|(head, _)| head.to_owned()).unwrap_or(normalized);
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
     let mut visiting = BTreeSet::new();
-    type_alias_eventually_mentions(alias_node, nodes, alias_decl.name.as_str(), &head, &mut visiting)
-        .then_some(head)
+    type_alias_eventually_mentions(
+        alias_node,
+        nodes,
+        alias_decl.name.as_str(),
+        &head,
+        &mut visiting,
+    )
+    .then_some(head)
 }
 
 fn type_alias_eventually_mentions(
@@ -5580,12 +5581,11 @@ fn type_expr_mentions_alias(
     if let Some((head, args)) = split_generic_type(&normalized) {
         return head == target
             || type_alias_eventually_mentions(node, nodes, head, target, visiting)
-            || args
-                .iter()
-                .any(|arg| type_expr_mentions_alias(node, nodes, arg, target, visiting));
+            || args.iter().any(|arg| type_expr_mentions_alias(node, nodes, arg, target, visiting));
     }
 
-    normalized == target || type_alias_eventually_mentions(node, nodes, &normalized, target, visiting)
+    normalized == target
+        || type_alias_eventually_mentions(node, nodes, &normalized, target, visiting)
 }
 
 fn variances_for_generic_head(head: &str, arity: usize) -> Vec<GenericVariance> {
@@ -10436,10 +10436,7 @@ fn bind_generic_type_params(
     for (name, actual_type) in inferred {
         match substitutions.get(&name) {
             Some(existing) if existing != &actual_type => {
-                substitutions.insert(
-                    name,
-                    merge_generic_type_candidates(existing, &actual_type),
-                );
+                substitutions.insert(name, merge_generic_type_candidates(existing, &actual_type));
             }
             Some(_) => {}
             None => {
@@ -22278,9 +22275,8 @@ mod tests {
 
     #[test]
     fn check_rejects_generic_function_call_inference_from_result_context_only() {
-        let result = check_temp_typepython_source(
-            "def make[T]() -> T:\n    ...\n\nvalue: int = make()\n",
-        );
+        let result =
+            check_temp_typepython_source("def make[T]() -> T:\n    ...\n\nvalue: int = make()\n");
 
         let rendered = result.diagnostics.as_text();
         assert!(result.diagnostics.has_errors(), "{rendered}");
@@ -29292,12 +29288,7 @@ mod tests {
     fn check_accepts_sequence_covariance_assignment() {
         let node = type_relation_node_with_base_child();
 
-        assert!(crate::direct_type_is_assignable(
-            &node,
-            &[],
-            "Sequence[Base]",
-            "Sequence[Child]",
-        ));
+        assert!(crate::direct_type_is_assignable(&node, &[], "Sequence[Base]", "Sequence[Child]",));
     }
 
     #[test]

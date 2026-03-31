@@ -783,12 +783,7 @@ fn rewrite_typealias_line(line: &str, statement: &typepython_syntax::TypeAliasSt
 
 fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
     let mut args = vec![format!("\"{name}\"")];
-    args.extend(
-        type_param
-            .constraints
-            .iter()
-            .map(|constraint| format!("{constraint:?}")),
-    );
+    args.extend(type_param.constraints.iter().map(|constraint| format!("{constraint:?}")));
     if type_param.constraints.is_empty()
         && let Some(bound) = &type_param.bound
     {

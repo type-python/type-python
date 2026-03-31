@@ -41,6 +41,7 @@ root_dir = "src"
 out_dir = ".typepython/build"
 
 # Cache directory for incremental build state.
+# Must be distinct from out_dir; the two paths cannot be equal or nested.
 # Default: ".typepython/cache"
 cache_dir = ".typepython/cache"
 
