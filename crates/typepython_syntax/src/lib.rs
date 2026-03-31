@@ -44,6 +44,7 @@ pub struct SourceFile {
     pub path: PathBuf,
     /// Classified input kind.
     pub kind: SourceKind,
+    /// Logical module name used by later binding/graph phases.
     pub logical_module: String,
     /// Source text.
     pub text: String,
@@ -70,17 +71,22 @@ impl SourceFile {
 pub struct SyntaxTree {
     /// Original source file.
     pub source: SourceFile,
+    /// Parsed top-level statements in source order.
     pub statements: Vec<SyntaxStatement>,
+    /// `# type: ignore[...]` directives collected from the source.
     pub type_ignore_directives: Vec<TypeIgnoreDirective>,
+    /// Parse diagnostics produced while classifying the source.
     pub diagnostics: DiagnosticReport,
 }
 
+/// One parsed `type: ignore` directive with an optional code filter list.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeIgnoreDirective {
     pub line: usize,
     pub codes: Option<Vec<String>>,
 }
 
+/// Top-level statements recognized by the TypePython parser.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SyntaxStatement {
     TypeAlias(TypeAliasStatement),
@@ -107,6 +113,7 @@ pub enum SyntaxStatement {
     Unsafe(UnsafeStatement),
 }
 
+/// Source-authored `typealias` declaration.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeAliasStatement {
     pub name: String,
@@ -115,6 +122,7 @@ pub struct TypeAliasStatement {
     pub line: usize,
 }
 
+/// Named type block such as `class`, `interface`, `data class`, or `sealed class`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NamedBlockStatement {
     pub name: String,
@@ -129,6 +137,7 @@ pub struct NamedBlockStatement {
     pub line: usize,
 }
 
+/// Function or overload definition with parsed signature metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FunctionStatement {
     pub name: String,
@@ -142,6 +151,7 @@ pub struct FunctionStatement {
     pub line: usize,
 }
 
+/// One function parameter in parsed source order.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionParam {
     pub name: String,
@@ -153,18 +163,21 @@ pub struct FunctionParam {
     pub keyword_variadic: bool,
 }
 
+/// Parsed import statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ImportStatement {
     pub bindings: Vec<ImportBinding>,
     pub line: usize,
 }
 
+/// One local binding produced by an import statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ImportBinding {
     pub local_name: String,
     pub source_path: String,
 }
 
+/// Parsed value-producing statement, including assignment metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ValueStatement {
     pub names: Vec<String>,
@@ -204,6 +217,7 @@ pub struct ValueStatement {
     pub line: usize,
 }
 
+/// Direct function call that appears as a top-level parser statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CallStatement {
     pub callee: String,
@@ -220,6 +234,7 @@ pub struct CallStatement {
     pub line: usize,
 }
 
+/// Direct attribute access statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemberAccessStatement {
     pub current_owner_name: Option<String>,
@@ -230,6 +245,7 @@ pub struct MemberAccessStatement {
     pub line: usize,
 }
 
+/// Method call statement with receiver metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MethodCallStatement {
     pub owner_name: String,
@@ -248,6 +264,7 @@ pub struct MethodCallStatement {
     pub line: usize,
 }
 
+/// Return statement annotated with parsed expression metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ReturnStatement {
     pub owner_name: String,
@@ -280,6 +297,7 @@ pub struct ReturnStatement {
     pub line: usize,
 }
 
+/// Yield statement annotated with parsed expression metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct YieldStatement {
     pub owner_name: String,
@@ -312,6 +330,7 @@ pub struct YieldStatement {
     pub line: usize,
 }
 
+/// Parsed `if` statement guard range.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct IfStatement {
     pub owner_name: Option<String>,
@@ -324,6 +343,7 @@ pub struct IfStatement {
     pub false_end_line: Option<usize>,
 }
 
+/// Parsed `assert` guard.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AssertStatement {
     pub owner_name: Option<String>,
@@ -332,6 +352,7 @@ pub struct AssertStatement {
     pub line: usize,
 }
 
+/// Why a previously known name shape becomes invalid.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum InvalidationKind {
     RebindLike,
@@ -339,6 +360,7 @@ pub enum InvalidationKind {
     ScopeChange,
 }
 
+/// Parsed invalidation statement used by later flow-sensitive passes.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct InvalidationStatement {
     pub kind: InvalidationKind,
@@ -348,6 +370,7 @@ pub struct InvalidationStatement {
     pub line: usize,
 }
 
+/// Guard condition recognized directly from source.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum GuardCondition {
     IsNone { name: String, negated: bool },
@@ -359,6 +382,7 @@ pub enum GuardCondition {
     Or(Vec<GuardCondition>),
 }
 
+/// Parsed match statement and subject metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MatchStatement {
     pub owner_name: Option<String>,
@@ -377,6 +401,7 @@ pub struct MatchStatement {
     pub line: usize,
 }
 
+/// One `case` arm inside a parsed match statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MatchCaseStatement {
     pub patterns: Vec<MatchPattern>,
@@ -384,6 +409,7 @@ pub struct MatchCaseStatement {
     pub line: usize,
 }
 
+/// Pattern category captured from a parsed match arm.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MatchPattern {
     Wildcard,
@@ -392,6 +418,7 @@ pub enum MatchPattern {
     Unsupported,
 }
 
+/// Parsed `for` loop site and iterable metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ForStatement {
     pub target_name: String,
@@ -411,6 +438,7 @@ pub struct ForStatement {
     pub line: usize,
 }
 
+/// Parsed `with` statement and context-manager metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WithStatement {
     pub target_name: Option<String>,
@@ -429,6 +457,7 @@ pub struct WithStatement {
     pub line: usize,
 }
 
+/// Parsed exception handler block.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ExceptionHandlerStatement {
     pub exception_type: String,
@@ -439,6 +468,7 @@ pub struct ExceptionHandlerStatement {
     pub end_line: usize,
 }
 
+/// Member declared inside a parsed type block.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClassMember {
     pub name: String,
@@ -459,6 +489,7 @@ pub struct ClassMember {
     pub line: usize,
 }
 
+/// High-level class member categories.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ClassMemberKind {
     Field,
@@ -466,6 +497,7 @@ pub enum ClassMemberKind {
     Overload,
 }
 
+/// Method dispatch role extracted from decorators and syntax position.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum MethodKind {
     Instance,
@@ -475,17 +507,20 @@ pub enum MethodKind {
     PropertySetter,
 }
 
+/// Marker statement for an `unsafe:` block.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnsafeStatement {
     pub line: usize,
 }
 
+/// Generic parameter forms supported by TypePython source parsing.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TypeParamKind {
     TypeVar,
     ParamSpec,
 }
 
+/// Parsed generic parameter declaration.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeParam {
     pub kind: TypeParamKind,
@@ -500,6 +535,7 @@ struct ParsedTypeParams<'source> {
     remainder: &'source str,
 }
 
+/// Parsed lambda signature and body metadata.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct LambdaMetadata {
     pub params: Vec<FunctionParam>,
@@ -519,6 +555,7 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+/// One comprehension clause with target, iterable, and filter information.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ComprehensionClauseMetadata {
     pub target_name: String,
@@ -527,6 +564,7 @@ pub struct ComprehensionClauseMetadata {
     pub filters: Vec<GuardCondition>,
 }
 
+/// Parsed comprehension body shared by list/set/dict/generator forms.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ComprehensionMetadata {
     pub kind: ComprehensionKind,
@@ -535,6 +573,7 @@ pub struct ComprehensionMetadata {
     pub element: Box<DirectExprMetadata>,
 }
 
+/// Comprehension output category.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum ComprehensionKind {
     List,
@@ -543,6 +582,7 @@ pub enum ComprehensionKind {
     Generator,
 }
 
+/// Expression metadata retained for direct checks and contextual re-typing.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
     pub value_type: Option<String>,
@@ -574,6 +614,7 @@ pub struct DirectExprMetadata {
     pub value_dict_entries: Option<Vec<TypedDictLiteralEntry>>,
 }
 
+/// One key/value entry inside a parsed dict or TypedDict literal.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypedDictLiteralEntry {
     pub key: Option<String>,
@@ -594,6 +635,7 @@ fn direct_operator_text(operator: ruff_python_ast::Operator) -> String {
     }
 }
 
+/// TypedDict literal occurrence annotated with its target type.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictLiteralSite {
     pub annotation: String,
@@ -603,6 +645,7 @@ pub struct TypedDictLiteralSite {
     pub line: usize,
 }
 
+/// Call site where a TypedDict-shaped argument may need contextual validation.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectCallContextSite {
     pub callee: String,
@@ -611,6 +654,7 @@ pub struct DirectCallContextSite {
     pub line: usize,
 }
 
+/// Mutation forms tracked for TypedDict keys.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum TypedDictMutationKind {
     Assignment,
@@ -618,6 +662,7 @@ pub enum TypedDictMutationKind {
     Delete,
 }
 
+/// Parsed TypedDict mutation site.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictMutationSite {
     pub kind: TypedDictMutationKind,
@@ -631,11 +676,13 @@ pub struct TypedDictMutationSite {
     pub line: usize,
 }
 
+/// Parsed `extra_items` annotation attached to a TypedDict class.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictExtraItemsMetadata {
     pub annotation: String,
 }
 
+/// Parsed TypedDict class-level metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictClassMetadata {
     pub name: String,
@@ -645,6 +692,7 @@ pub struct TypedDictClassMetadata {
     pub line: usize,
 }
 
+/// Conditional-return rule site collected from source.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConditionalReturnSite {
     pub function_name: String,
@@ -654,6 +702,7 @@ pub struct ConditionalReturnSite {
     pub line: usize,
 }
 
+/// Parsed `@dataclass_transform` metadata for a provider.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct DataclassTransformMetadata {
     pub field_specifiers: Vec<String>,
@@ -663,6 +712,7 @@ pub struct DataclassTransformMetadata {
     pub order_default: bool,
 }
 
+/// One decorator provider annotated with dataclass-transform metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DataclassTransformProviderSite {
     pub name: String,
@@ -670,6 +720,7 @@ pub struct DataclassTransformProviderSite {
     pub line: usize,
 }
 
+/// Field metadata collected from a dataclass-transform target.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DataclassTransformFieldSite {
     pub name: String,
@@ -687,6 +738,7 @@ pub struct DataclassTransformFieldSite {
     pub line: usize,
 }
 
+/// Class site affected by dataclass-transform semantics.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DataclassTransformClassSite {
     pub name: String,
@@ -701,12 +753,14 @@ pub struct DataclassTransformClassSite {
     pub line: usize,
 }
 
+/// Dataclass-transform summary for one module.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct DataclassTransformModuleInfo {
     pub providers: Vec<DataclassTransformProviderSite>,
     pub classes: Vec<DataclassTransformClassSite>,
 }
 
+/// Decorated callable discovered while scanning a module.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DecoratedCallableSite {
     pub owner_type_name: Option<String>,
@@ -715,11 +769,13 @@ pub struct DecoratedCallableSite {
     pub line: usize,
 }
 
+/// Decorator-transform summary for one module.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct DecoratorTransformModuleInfo {
     pub callables: Vec<DecoratedCallableSite>,
 }
 
+/// One parameter in a direct callable signature surface.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectFunctionParamSite {
     pub name: String,
@@ -731,6 +787,7 @@ pub struct DirectFunctionParamSite {
     pub keyword_variadic: bool,
 }
 
+/// Function signature recovered directly from source text.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectFunctionSignatureSite {
     pub name: String,
@@ -738,6 +795,7 @@ pub struct DirectFunctionSignatureSite {
     pub line: usize,
 }
 
+/// Method signature recovered directly from source text.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DirectMethodSignatureSite {
     pub owner_type_name: String,
@@ -747,6 +805,7 @@ pub struct DirectMethodSignatureSite {
     pub line: usize,
 }
 
+/// Mutation forms tracked for frozen dataclass fields.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FrozenFieldMutationKind {
     Assignment,
@@ -754,6 +813,7 @@ pub enum FrozenFieldMutationKind {
     Delete,
 }
 
+/// Frozen dataclass field mutation site.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FrozenFieldMutationSite {
     pub kind: FrozenFieldMutationKind,
@@ -766,6 +826,7 @@ pub struct FrozenFieldMutationSite {
     pub line: usize,
 }
 
+/// Unsafe operation categories tracked by the parser.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum UnsafeOperationKind {
     EvalCall,
@@ -777,6 +838,7 @@ pub enum UnsafeOperationKind {
     DelAttrNonLiteral,
 }
 
+/// Unsafe operation occurrence and whether it is already guarded by `unsafe:`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnsafeOperationSite {
     pub kind: UnsafeOperationKind,
@@ -784,8 +846,10 @@ pub struct UnsafeOperationSite {
     pub in_unsafe_block: bool,
 }
 
+/// Feature flags that enable optional parser-side analyses.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct ParseOptions {
+    /// Enables collection of conditional-return rule sites.
     pub enable_conditional_returns: bool,
 }
 
@@ -795,6 +859,7 @@ pub fn parse(source: SourceFile) -> SyntaxTree {
     parse_with_options(source, ParseOptions::default())
 }
 
+/// Parses a source file with optional feature flags enabled.
 #[must_use]
 pub fn parse_with_options(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     match source.kind {

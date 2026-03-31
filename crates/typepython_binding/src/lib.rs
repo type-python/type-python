@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use typepython_syntax::{MethodKind, SourceKind, SyntaxStatement, SyntaxTree};
 
+/// Bound representation of one module's symbol and flow surface.
 #[derive(Debug, Clone)]
 pub struct BindingTable {
     pub module_path: PathBuf,
@@ -49,6 +50,7 @@ impl Default for BindingTable {
     }
 }
 
+/// Direct function call captured from a bound module.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CallSite {
     pub callee: String,
@@ -65,6 +67,7 @@ pub struct CallSite {
     pub line: usize,
 }
 
+/// Direct member access captured from a bound module.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MemberAccessSite {
     pub current_owner_name: Option<String>,
@@ -75,6 +78,7 @@ pub struct MemberAccessSite {
     pub line: usize,
 }
 
+/// Method call with a resolved receiver name and argument metadata.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MethodCallSite {
     pub owner_name: String,
@@ -93,6 +97,7 @@ pub struct MethodCallSite {
     pub line: usize,
 }
 
+/// Return expression metadata extracted from a function body.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ReturnSite {
     pub owner_name: String,
@@ -125,6 +130,7 @@ pub struct ReturnSite {
     pub line: usize,
 }
 
+/// Yield or `yield from` expression metadata extracted from a function body.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct YieldSite {
     pub owner_name: String,
@@ -157,6 +163,7 @@ pub struct YieldSite {
     pub line: usize,
 }
 
+/// Control-flow guard range introduced by an `if` statement.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct IfGuardSite {
     pub owner_name: Option<String>,
@@ -169,6 +176,7 @@ pub struct IfGuardSite {
     pub false_end_line: Option<usize>,
 }
 
+/// Guard introduced by an `assert` statement.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AssertGuardSite {
     pub owner_name: Option<String>,
@@ -177,6 +185,7 @@ pub struct AssertGuardSite {
     pub line: usize,
 }
 
+/// Reason why previously known name information must be invalidated.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum InvalidationKind {
     RebindLike,
@@ -184,6 +193,7 @@ pub enum InvalidationKind {
     ScopeChange,
 }
 
+/// Explicit invalidation of one or more tracked names.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct InvalidationSite {
     pub kind: InvalidationKind,
@@ -193,6 +203,7 @@ pub struct InvalidationSite {
     pub line: usize,
 }
 
+/// Bound guard condition used for narrowing and flow-sensitive checks.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum GuardConditionSite {
     IsNone { name: String, negated: bool },
@@ -204,6 +215,7 @@ pub enum GuardConditionSite {
     Or(Vec<GuardConditionSite>),
 }
 
+/// Match statement subject and case metadata.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MatchSite {
     pub owner_name: Option<String>,
@@ -222,6 +234,7 @@ pub struct MatchSite {
     pub line: usize,
 }
 
+/// One `case` arm inside a bound match statement.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MatchCaseSite {
     pub patterns: Vec<MatchPatternSite>,
@@ -229,6 +242,7 @@ pub struct MatchCaseSite {
     pub line: usize,
 }
 
+/// Pattern category extracted from a `match` case.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum MatchPatternSite {
     Wildcard,
@@ -237,6 +251,7 @@ pub enum MatchPatternSite {
     Unsupported,
 }
 
+/// Bound `for` loop target and iterable metadata.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ForSite {
     pub target_name: String,
@@ -256,6 +271,7 @@ pub struct ForSite {
     pub line: usize,
 }
 
+/// Bound `with` statement context-manager metadata.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct WithSite {
     pub target_name: Option<String>,
@@ -274,6 +290,7 @@ pub struct WithSite {
     pub line: usize,
 }
 
+/// Exception handler binding and covered source range.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ExceptHandlerSite {
     pub exception_type: String,
@@ -284,6 +301,7 @@ pub struct ExceptHandlerSite {
     pub end_line: usize,
 }
 
+/// Assignment target annotated with the expression shape on the right-hand side.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AssignmentSite {
     pub name: String,
@@ -322,6 +340,7 @@ pub struct AssignmentSite {
     pub line: usize,
 }
 
+/// Bound declaration exported by a module or owned by a type block.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Declaration {
     pub name: String,
@@ -343,12 +362,14 @@ pub struct Declaration {
     pub type_params: Vec<GenericTypeParam>,
 }
 
+/// Generic parameter category preserved by binding.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum GenericTypeParamKind {
     TypeVar,
     ParamSpec,
 }
 
+/// Bound generic parameter metadata for declarations and aliases.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct GenericTypeParam {
     pub kind: GenericTypeParamKind,
@@ -358,12 +379,14 @@ pub struct GenericTypeParam {
     pub default: Option<String>,
 }
 
+/// Owning type declaration for a bound member.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DeclarationOwner {
     pub name: String,
     pub kind: DeclarationOwnerKind,
 }
 
+/// Type block kinds that can own bound members.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum DeclarationOwnerKind {
     Class,
@@ -372,6 +395,7 @@ pub enum DeclarationOwnerKind {
     SealedClass,
 }
 
+/// Top-level declaration categories produced by binding.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum DeclarationKind {
     TypeAlias,
@@ -382,6 +406,7 @@ pub enum DeclarationKind {
     Import,
 }
 
+/// Transforms a parsed syntax tree into its bound module surface.
 #[must_use]
 pub fn bind(tree: &SyntaxTree) -> BindingTable {
     BindingTable {
