@@ -40,40 +40,14 @@ const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
 const INIT_SOURCE_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/src/app/__init__.tpy"));
-const RUNTIME_PUBLIC_NAMES_SCRIPT: &str = r#"import importlib, json, sys
-sys.path.insert(0, sys.argv[1])
-module_name = sys.argv[2]
-try:
-    module = importlib.import_module(module_name)
-except Exception:
-    print(json.dumps({"importable": False}))
-else:
-    exported = getattr(module, "__all__", None)
-    if isinstance(exported, (list, tuple)) and all(isinstance(name, str) for name in exported):
-        names = sorted(dict.fromkeys(exported))
-    else:
-        names = sorted(name for name in dir(module) if not name.startswith("_"))
-    print(json.dumps({"importable": True, "names": names}))
-"#;
-const STATIC_ALL_NAMES_SCRIPT: &str = r#"import ast, json, sys
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    tree = ast.parse(handle.read(), sys.argv[1])
-names = None
-for node in tree.body:
-    if isinstance(node, ast.Assign):
-        targets = node.targets
-        value = node.value
-    elif isinstance(node, ast.AnnAssign):
-        targets = [node.target]
-        value = node.value
-    else:
-        continue
-    if any(isinstance(target, ast.Name) and target.id == "__all__" for target in targets):
-        if isinstance(value, (ast.List, ast.Tuple)) and all(isinstance(element, ast.Constant) and isinstance(element.value, str) for element in value.elts):
-            names = [element.value for element in value.elts]
-        break
-print(json.dumps(names))
-"#;
+const RUNTIME_PUBLIC_NAMES_SCRIPT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/scripts/runtime_public_names.py"
+));
+const STATIC_ALL_NAMES_SCRIPT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/scripts/static_all_names.py"
+));
 
 #[derive(Debug, Parser)]
 #[command(name = "typepython", version, about = "Rust compiler and tooling for TypePython")]
