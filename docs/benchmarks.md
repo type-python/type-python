@@ -1,0 +1,78 @@
+# Benchmarks
+
+TypePython uses [Criterion.rs](https://github.com/bheisler/criterion.rs) for
+micro-benchmarks. Results are stored under `target/criterion/`.
+
+## Suites
+
+### parse (`typepython_syntax`)
+
+Measures end-to-end parsing of `.tpy` source text into the syntax tree.
+
+| Benchmark | Input |
+|---|---|
+| `parse_small_module` | A short module with one function and one class |
+| `parse_medium_module` | 50 functions and 10 classes |
+| `parse_typepython_extensions` | TypePython-specific syntax: interfaces, data/sealed classes, type aliases, overloads, unsafe blocks |
+
+### lower (`typepython_lowering`)
+
+Measures lowering of a parsed syntax tree into the intermediate representation.
+
+| Benchmark | Input |
+|---|---|
+| `lower_small_module` | Small module with a type alias and a function |
+| `lower_medium_module` | Interfaces, data classes, sealed classes, overloads, generics |
+| `lower_python_passthrough` | 30 plain-Python functions (no TypePython extensions) |
+
+### graph (`typepython_graph`)
+
+Measures construction of the module dependency graph from binding tables.
+
+| Benchmark | Input |
+|---|---|
+| `build_10_module_graph` | 10 modules in a single package |
+| `build_50_module_graph` | 50 modules in a single package |
+| `build_nested_package_graph` | 20 modules across nested sub-packages |
+
+## Running benchmarks
+
+Run all benchmark suites:
+
+```sh
+cargo bench --workspace --bench parse --bench lower --bench graph
+```
+
+Compile-check benchmarks without running them (used in CI):
+
+```sh
+cargo bench --workspace --no-run
+```
+
+## Baselines
+
+### Compare against the saved baseline
+
+```sh
+cargo bench --workspace --bench parse --bench lower --bench graph -- --baseline v0.1.0
+```
+
+Criterion will print a comparison showing whether each benchmark regressed,
+improved, or stayed within noise.
+
+### Save a new baseline
+
+After intentional performance changes, update the stored baseline:
+
+```sh
+cargo bench --workspace --bench parse --bench lower --bench graph -- --save-baseline v0.1.0
+```
+
+### Makefile targets
+
+| Target | Description |
+|---|---|
+| `make bench` | Run all benchmark suites |
+| `make bench-check` | Compile benchmarks without running |
+| `make bench-baseline` | Save the v0.1.0 baseline |
+| `make bench-compare` | Compare current performance against the v0.1.0 baseline |

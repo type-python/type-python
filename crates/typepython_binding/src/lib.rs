@@ -1058,9 +1058,9 @@ mod tests {
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        ClassMember, ClassMemberKind, FunctionStatement, ImportStatement, MethodKind,
-        NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-        TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
+        ClassMember, ClassMemberKind, DirectExprMetadata, FunctionParam, FunctionStatement,
+        ImportStatement, MethodKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
+        SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
     };
 
     #[test]
@@ -2888,5 +2888,1064 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn bind_collects_data_class_declarations_with_owner() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::DataClass(NamedBlockStatement {
+                name: String::from("Point"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: vec![
+                    ClassMember {
+                        name: String::from("x"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("float")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("y"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("float")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 3,
+                    },
+                    ClassMember {
+                        name: String::from("distance"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
+                        annotation: None,
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: Some(String::from("float")),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 4,
+                    },
+                ],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 4);
+        assert_eq!(table.declarations[0].name, "Point");
+        assert_eq!(table.declarations[0].class_kind, Some(DeclarationOwnerKind::DataClass));
+        assert_eq!(table.declarations[1].name, "x");
+        assert_eq!(
+            table.declarations[1].owner,
+            Some(DeclarationOwner {
+                name: String::from("Point"),
+                kind: DeclarationOwnerKind::DataClass,
+            })
+        );
+        assert_eq!(table.declarations[2].name, "y");
+        assert_eq!(
+            table.declarations[2].owner,
+            Some(DeclarationOwner {
+                name: String::from("Point"),
+                kind: DeclarationOwnerKind::DataClass,
+            })
+        );
+        assert_eq!(table.declarations[3].name, "distance");
+        assert_eq!(table.declarations[3].kind, DeclarationKind::Function);
+        assert_eq!(
+            table.declarations[3].owner,
+            Some(DeclarationOwner {
+                name: String::from("Point"),
+                kind: DeclarationOwnerKind::DataClass,
+            })
+        );
+    }
+
+    #[test]
+    fn bind_collects_sealed_class_declarations_with_owner() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::SealedClass(NamedBlockStatement {
+                name: String::from("Shape"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: vec![
+                    ClassMember {
+                        name: String::from("sides"),
+                        kind: ClassMemberKind::Field,
+                        method_kind: None,
+                        annotation: Some(String::from("int")),
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("area"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Instance),
+                        annotation: None,
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: Some(String::from("float")),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 3,
+                    },
+                ],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 3);
+        assert_eq!(table.declarations[0].name, "Shape");
+        assert_eq!(table.declarations[0].class_kind, Some(DeclarationOwnerKind::SealedClass));
+        assert_eq!(
+            table.declarations[1].owner,
+            Some(DeclarationOwner {
+                name: String::from("Shape"),
+                kind: DeclarationOwnerKind::SealedClass,
+            })
+        );
+    }
+
+    #[test]
+    fn bind_marks_abstract_methods() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Interface(NamedBlockStatement {
+                name: String::from("Readable"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: vec![ClassMember {
+                    name: String::from("read"),
+                    kind: ClassMemberKind::Method,
+                    method_kind: Some(MethodKind::Instance),
+                    annotation: None,
+                    value_type: None,
+                    params: Vec::new(),
+                    returns: Some(String::from("bytes")),
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: true,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    line: 2,
+                }],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 2);
+        assert!(table.declarations[1].is_abstract_method);
+        assert_eq!(table.declarations[1].name, "read");
+    }
+
+    #[test]
+    fn bind_marks_deprecated_declarations() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/deprecated.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("old_func"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: None,
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: true,
+                    deprecation_message: Some(String::from("use new_func")),
+                    line: 1,
+                }),
+                SyntaxStatement::OverloadDef(FunctionStatement {
+                    name: String::from("old_func"),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    returns: None,
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: true,
+                    deprecation_message: None,
+                    line: 2,
+                }),
+            ],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 2);
+        assert!(table.declarations[0].is_deprecated);
+        assert_eq!(table.declarations[0].deprecation_message, Some(String::from("use new_func")));
+        assert!(table.declarations[1].is_deprecated);
+        assert_eq!(table.declarations[1].deprecation_message, None);
+        assert_eq!(table.declarations[1].kind, DeclarationKind::Overload);
+    }
+
+    #[test]
+    fn bind_marks_final_decorator_on_class() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/finals.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("Singleton"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: true,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: Vec::new(),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert!(table.declarations[0].is_final_decorator);
+        assert_eq!(table.declarations[0].name, "Singleton");
+    }
+
+    #[test]
+    fn bind_collects_generic_type_params_with_bounds_and_constraints() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/__init__.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("Sorted"),
+                type_params: vec![
+                    TypeParam {
+                        name: String::from("T"),
+                        kind: TypeParamKind::TypeVar,
+                        bound: Some(String::from("Comparable")),
+                        constraints: Vec::new(),
+                        default: None,
+                    },
+                    TypeParam {
+                        name: String::from("U"),
+                        kind: TypeParamKind::TypeVar,
+                        bound: None,
+                        constraints: vec![String::from("int"), String::from("str")],
+                        default: None,
+                    },
+                    TypeParam {
+                        name: String::from("V"),
+                        kind: TypeParamKind::TypeVar,
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: Some(String::from("str")),
+                    },
+                ],
+                value: String::from("list[T]"),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(
+            table.declarations[0].type_params,
+            vec![
+                GenericTypeParam {
+                    name: String::from("T"),
+                    kind: GenericTypeParamKind::TypeVar,
+                    bound: Some(String::from("Comparable")),
+                    constraints: Vec::new(),
+                    default: None,
+                },
+                GenericTypeParam {
+                    name: String::from("U"),
+                    kind: GenericTypeParamKind::TypeVar,
+                    bound: None,
+                    constraints: vec![String::from("int"), String::from("str")],
+                    default: None,
+                },
+                GenericTypeParam {
+                    name: String::from("V"),
+                    kind: GenericTypeParamKind::TypeVar,
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: Some(String::from("str")),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_collects_paramspec_type_params() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/__init__.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("decorator"),
+                type_params: vec![TypeParam {
+                    name: String::from("P"),
+                    kind: TypeParamKind::ParamSpec,
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                }],
+                params: Vec::new(),
+                returns: None,
+                is_async: false,
+                is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(
+            table.declarations[0].type_params,
+            vec![GenericTypeParam {
+                name: String::from("P"),
+                kind: GenericTypeParamKind::ParamSpec,
+                bound: None,
+                constraints: Vec::new(),
+                default: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_formats_signature_with_positional_only_params() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/funcs.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("func"),
+                type_params: Vec::new(),
+                params: vec![
+                    FunctionParam {
+                        name: String::from("x"),
+                        annotation: Some(String::from("int")),
+                        has_default: false,
+                        positional_only: true,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                    FunctionParam {
+                        name: String::from("y"),
+                        annotation: Some(String::from("int")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                ],
+                returns: Some(String::from("int")),
+                is_async: false,
+                is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(table.declarations[0].detail, "(x:int,/,y:int)->int");
+    }
+
+    #[test]
+    fn bind_formats_signature_with_keyword_only_params() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/funcs.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("func"),
+                type_params: Vec::new(),
+                params: vec![
+                    FunctionParam {
+                        name: String::from("x"),
+                        annotation: Some(String::from("int")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                    FunctionParam {
+                        name: String::from("y"),
+                        annotation: Some(String::from("str")),
+                        has_default: true,
+                        positional_only: false,
+                        keyword_only: true,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                ],
+                returns: None,
+                is_async: false,
+                is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(table.declarations[0].detail, "(x:int,*,y:str=)->");
+    }
+
+    #[test]
+    fn bind_formats_signature_with_variadic_and_keyword_variadic() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/funcs.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::FunctionDef(FunctionStatement {
+                name: String::from("func"),
+                type_params: Vec::new(),
+                params: vec![
+                    FunctionParam {
+                        name: String::from("args"),
+                        annotation: Some(String::from("int")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: true,
+                        keyword_variadic: false,
+                    },
+                    FunctionParam {
+                        name: String::from("kwargs"),
+                        annotation: Some(String::from("str")),
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: true,
+                    },
+                ],
+                returns: Some(String::from("None")),
+                is_async: false,
+                is_override: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(table.declarations[0].detail, "(*args:int,**kwargs:str)->None");
+    }
+
+    #[test]
+    fn bind_collects_method_kinds_static_and_class() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("Util"),
+                type_params: Vec::new(),
+                header_suffix: String::new(),
+                bases: Vec::new(),
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: vec![
+                    ClassMember {
+                        name: String::from("create"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Static),
+                        annotation: None,
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 2,
+                    },
+                    ClassMember {
+                        name: String::from("from_json"),
+                        kind: ClassMemberKind::Method,
+                        method_kind: Some(MethodKind::Class),
+                        annotation: None,
+                        value_type: None,
+                        params: Vec::new(),
+                        returns: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        line: 3,
+                    },
+                ],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 3);
+        assert_eq!(table.declarations[1].name, "create");
+        assert_eq!(table.declarations[1].method_kind, Some(MethodKind::Static));
+        assert_eq!(table.declarations[2].name, "from_json");
+        assert_eq!(table.declarations[2].method_kind, Some(MethodKind::Class));
+    }
+
+    #[test]
+    fn bind_collects_isinstance_guard_with_multiple_types() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/guards.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::If(typepython_syntax::IfStatement {
+                owner_name: Some(String::from("check")),
+                owner_type_name: None,
+                guard: Some(typepython_syntax::GuardCondition::IsInstance {
+                    name: String::from("x"),
+                    types: vec![String::from("int"), String::from("str")],
+                }),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.if_guards,
+            vec![IfGuardSite {
+                owner_name: Some(String::from("check")),
+                owner_type_name: None,
+                guard: Some(GuardConditionSite::IsInstance {
+                    name: String::from("x"),
+                    types: vec![String::from("int"), String::from("str")],
+                }),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_predicate_call_guard() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/guards.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::If(typepython_syntax::IfStatement {
+                owner_name: Some(String::from("validate")),
+                owner_type_name: None,
+                guard: Some(typepython_syntax::GuardCondition::PredicateCall {
+                    name: String::from("x"),
+                    callee: String::from("is_valid"),
+                }),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.if_guards,
+            vec![IfGuardSite {
+                owner_name: Some(String::from("validate")),
+                owner_type_name: None,
+                guard: Some(GuardConditionSite::PredicateCall {
+                    name: String::from("x"),
+                    callee: String::from("is_valid"),
+                }),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_composite_and_or_guards() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/guards.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::If(typepython_syntax::IfStatement {
+                owner_name: Some(String::from("check")),
+                owner_type_name: None,
+                guard: Some(typepython_syntax::GuardCondition::And(vec![
+                    typepython_syntax::GuardCondition::IsNone {
+                        name: String::from("a"),
+                        negated: true,
+                    },
+                    typepython_syntax::GuardCondition::TruthyName { name: String::from("b") },
+                ])),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.if_guards,
+            vec![IfGuardSite {
+                owner_name: Some(String::from("check")),
+                owner_type_name: None,
+                guard: Some(GuardConditionSite::And(vec![
+                    GuardConditionSite::IsNone { name: String::from("a"), negated: true },
+                    GuardConditionSite::TruthyName { name: String::from("b") },
+                ])),
+                line: 1,
+                true_start_line: 2,
+                true_end_line: 2,
+                false_start_line: None,
+                false_end_line: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_invalidation_rebind_like() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/invalidate.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Invalidate(
+                typepython_syntax::InvalidationStatement {
+                    kind: typepython_syntax::InvalidationKind::RebindLike,
+                    owner_name: Some(String::from("update")),
+                    owner_type_name: None,
+                    names: vec![String::from("count")],
+                    line: 2,
+                },
+            )],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.invalidations,
+            vec![InvalidationSite {
+                kind: InvalidationKind::RebindLike,
+                owner_name: Some(String::from("update")),
+                owner_type_name: None,
+                names: vec![String::from("count")],
+                line: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_invalidation_scope_change() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/invalidate.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Invalidate(
+                typepython_syntax::InvalidationStatement {
+                    kind: typepython_syntax::InvalidationKind::ScopeChange,
+                    owner_name: Some(String::from("handler")),
+                    owner_type_name: None,
+                    names: vec![String::from("state"), String::from("flag")],
+                    line: 5,
+                },
+            )],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(
+            table.invalidations,
+            vec![InvalidationSite {
+                kind: InvalidationKind::ScopeChange,
+                owner_name: Some(String::from("handler")),
+                owner_type_name: None,
+                names: vec![String::from("state"), String::from("flag")],
+                line: 5,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_excludes_rebind_like_value_from_declarations() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/helpers.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Value(ValueStatement {
+                names: vec![String::from("count")],
+                destructuring_target_names: None,
+                annotation: None,
+                value_type: None,
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: Some(Box::new(DirectExprMetadata {
+                    value_type: None,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("count")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                })),
+                value_binop_right: None,
+                value_binop_operator: Some(String::from("+")),
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None,
+                owner_name: None,
+                owner_type_name: None,
+                is_final: false,
+                is_class_var: false,
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(
+            table.declarations.is_empty(),
+            "rebind-like update should not appear in declarations"
+        );
+        assert_eq!(table.assignments.len(), 1);
+        assert_eq!(table.assignments[0].name, "count");
+        assert_eq!(table.assignments[0].value_binop_operator, Some(String::from("+")));
+    }
+
+    #[test]
+    fn bind_collects_match_literal_and_unsupported_patterns() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/match.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
+                owner_name: Some(String::from("route")),
+                owner_type_name: None,
+                subject_type: None,
+                subject_is_awaited: false,
+                subject_callee: None,
+                subject_name: Some(String::from("code")),
+                subject_member_owner_name: None,
+                subject_member_name: None,
+                subject_member_through_instance: false,
+                subject_method_owner_name: None,
+                subject_method_name: None,
+                subject_method_through_instance: false,
+                cases: vec![
+                    typepython_syntax::MatchCaseStatement {
+                        patterns: vec![typepython_syntax::MatchPattern::Literal(String::from("1"))],
+                        has_guard: false,
+                        line: 2,
+                    },
+                    typepython_syntax::MatchCaseStatement {
+                        patterns: vec![typepython_syntax::MatchPattern::Unsupported],
+                        has_guard: false,
+                        line: 3,
+                    },
+                ],
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.matches.len(), 1);
+        assert_eq!(
+            table.matches[0].cases,
+            vec![
+                MatchCaseSite {
+                    patterns: vec![MatchPatternSite::Literal(String::from("1"))],
+                    has_guard: false,
+                    line: 2,
+                },
+                MatchCaseSite {
+                    patterns: vec![MatchPatternSite::Unsupported],
+                    has_guard: false,
+                    line: 3,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bind_collects_class_with_multiple_bases() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/models.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::ClassDef(NamedBlockStatement {
+                name: String::from("Widget"),
+                type_params: Vec::new(),
+                header_suffix: String::from("(Base1, Base2, Mixin)"),
+                bases: vec![String::from("Base1"), String::from("Base2"), String::from("Mixin")],
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_abstract_class: false,
+                members: Vec::new(),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(
+            table.declarations[0].bases,
+            vec![String::from("Base1"), String::from("Base2"), String::from("Mixin"),]
+        );
+        assert_eq!(table.declarations[0].detail, "Base1,Base2,Mixin");
+    }
+
+    #[test]
+    fn bind_collects_yield_from_sites() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/gen.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
+                owner_name: String::from("delegate"),
+                owner_type_name: None,
+                value_type: Some(String::from("list[int]")),
+                value_callee: None,
+                value_name: Some(String::from("items")),
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None,
+                is_yield_from: true,
+                line: 2,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.yields.len(), 1);
+        assert!(table.yields[0].is_yield_from);
+        assert_eq!(table.yields[0].owner_name, "delegate");
+        assert_eq!(table.yields[0].value_name, Some(String::from("items")));
     }
 }

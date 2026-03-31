@@ -29,3 +29,6 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Bench compile check
+        run: cargo bench --workspace --no-run

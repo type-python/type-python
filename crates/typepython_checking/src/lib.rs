@@ -36503,4 +36503,872 @@ mod tests {
         assert!(rendered.contains("mismatch at:"));
         assert!(rendered.contains("tuple[int]"));
     }
+
+    #[test]
+    fn check_reports_unsafe_setattr_outside_unsafe_block() {
+        let result = check_temp_typepython_source_with_check_options(
+            "class Obj:\n    pass\n\ndef run(attr: str) -> None:\n    obj = Obj()\n    setattr(obj, attr, 1)\n",
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            true,
+            true,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4019"));
+    }
+
+    #[test]
+    fn check_reports_unsafe_exec_outside_unsafe_block() {
+        let result = check_temp_typepython_source_with_check_options(
+            "def run() -> None:\n    exec(\"pass\")\n",
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            true,
+            true,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4019"));
+    }
+
+    #[test]
+    fn check_accepts_setattr_inside_unsafe_block() {
+        let result = check_temp_typepython_source_with_check_options(
+            "class Obj:\n    pass\n\ndef run(attr: str) -> None:\n    obj = Obj()\n    unsafe:\n        setattr(obj, attr, 1)\n",
+            ParseOptions::default(),
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            true,
+            true,
+        );
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_deprecated_function_call_as_error() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![
+                    ModuleNode {
+                        module_path: PathBuf::from("src/lib/legacy.py"),
+                        module_key: String::from("lib.legacy"),
+                        module_kind: SourceKind::Python,
+                        declarations: vec![Declaration {
+                            name: String::from("old_func"),
+                            kind: DeclarationKind::Function,
+                            detail: String::from("()->int"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: true,
+                            deprecation_message: Some(String::from("removed")),
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        }],
+                        calls: Vec::new(),
+                        method_calls: Vec::new(),
+                        member_accesses: Vec::new(),
+                        returns: Vec::new(),
+                        yields: Vec::new(),
+                        if_guards: Vec::new(),
+                        asserts: Vec::new(),
+                        invalidations: Vec::new(),
+                        matches: Vec::new(),
+                        for_loops: Vec::new(),
+                        with_statements: Vec::new(),
+                        except_handlers: Vec::new(),
+                        assignments: Vec::new(),
+                        summary_fingerprint: 1,
+                    },
+                    ModuleNode {
+                        module_path: PathBuf::from("src/app/module.tpy"),
+                        module_key: String::from("app.module"),
+                        module_kind: SourceKind::TypePython,
+                        declarations: vec![Declaration {
+                            name: String::from("old_func"),
+                            kind: DeclarationKind::Import,
+                            detail: String::from("lib.legacy.old_func"),
+                            value_type: None,
+                            method_kind: None,
+                            class_kind: None,
+                            owner: None,
+                            is_async: false,
+                            is_override: false,
+                            is_abstract_method: false,
+                            is_final_decorator: false,
+                            is_deprecated: false,
+                            deprecation_message: None,
+                            is_final: false,
+                            is_class_var: false,
+                            bases: Vec::new(),
+                            type_params: Vec::new(),
+                        }],
+                        calls: vec![typepython_binding::CallSite {
+                            callee: String::from("old_func"),
+                            arg_count: 0,
+                            arg_types: Vec::new(),
+                            arg_values: Vec::new(),
+                            starred_arg_types: Vec::new(),
+                            starred_arg_values: Vec::new(),
+                            keyword_names: Vec::new(),
+                            keyword_arg_types: Vec::new(),
+                            keyword_arg_values: Vec::new(),
+                            keyword_expansion_types: Vec::new(),
+                            keyword_expansion_values: Vec::new(),
+                            line: 3,
+                        }],
+                        method_calls: Vec::new(),
+                        member_accesses: Vec::new(),
+                        returns: Vec::new(),
+                        yields: Vec::new(),
+                        if_guards: Vec::new(),
+                        asserts: Vec::new(),
+                        invalidations: Vec::new(),
+                        matches: Vec::new(),
+                        for_loops: Vec::new(),
+                        with_statements: Vec::new(),
+                        except_handlers: Vec::new(),
+                        assignments: Vec::new(),
+                        summary_fingerprint: 2,
+                    },
+                ],
+            },
+            false,
+            true,
+            DiagnosticLevel::Error,
+            false,
+            false,
+            ImportFallback::Unknown,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4101"));
+        assert!(result.diagnostics.has_errors());
+    }
+
+    #[test]
+    fn check_reports_incompatible_attribute_augmented_assignment_type() {
+        let result = check_temp_typepython_source(
+            "class Counter:\n    count: int\n\ndef bump(c: Counter) -> None:\n    c.count += \"x\"\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("produces `str` where member `count` expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_classvar_outside_class_scope_typepython_module() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("LIMIT"),
+                    kind: DeclarationKind::Value,
+                    detail: String::new(),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: true,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("ClassVar binding `LIMIT`"));
+    }
+
+    #[test]
+    fn check_reports_getter_only_property_augmented_assignment_not_writable() {
+        let result = check_temp_typepython_source(
+            "class Gauge:\n    @property\n    def level(self) -> int:\n        return 0\n\ndef adjust(g: Gauge) -> None:\n    g.level += 1\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("property `level` on `Gauge`"));
+        assert!(rendered.contains("is not writable"));
+    }
+
+    #[test]
+    fn check_accepts_enum_exhaustive_match() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Enum"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("enum.Enum"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Status"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Enum")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("OPEN"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Status"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("CLOSED"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Status"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("PENDING"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Status"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("handle"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(s:Status)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: vec![typepython_binding::MatchSite {
+                    owner_name: Some(String::from("handle")),
+                    owner_type_name: None,
+                    subject_type: Some(String::new()),
+                    subject_is_awaited: false,
+                    subject_callee: None,
+                    subject_name: Some(String::from("s")),
+                    subject_member_owner_name: None,
+                    subject_member_name: None,
+                    subject_member_through_instance: false,
+                    subject_method_owner_name: None,
+                    subject_method_name: None,
+                    subject_method_through_instance: false,
+                    cases: vec![
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                                String::from("Status.OPEN"),
+                            )],
+                            has_guard: false,
+                            line: 3,
+                        },
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                                String::from("Status.CLOSED"),
+                            )],
+                            has_guard: false,
+                            line: 4,
+                        },
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                                String::from("Status.PENDING"),
+                            )],
+                            has_guard: false,
+                            line: 5,
+                        },
+                    ],
+                    line: 2,
+                }],
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+    }
+
+    #[test]
+    fn check_reports_non_exhaustive_enum_match_missing_member() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("Enum"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("enum.Enum"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("Priority"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: vec![String::from("Enum")],
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("LOW"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Priority"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("MEDIUM"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Priority"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("HIGH"),
+                        kind: DeclarationKind::Value,
+                        detail: String::new(),
+                        value_type: Some(String::from("int")),
+                        method_kind: None,
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("Priority"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("triage"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("(p:Priority)->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: vec![typepython_binding::MatchSite {
+                    owner_name: Some(String::from("triage")),
+                    owner_type_name: None,
+                    subject_type: Some(String::new()),
+                    subject_is_awaited: false,
+                    subject_callee: None,
+                    subject_name: Some(String::from("p")),
+                    subject_member_owner_name: None,
+                    subject_member_name: None,
+                    subject_member_through_instance: false,
+                    subject_method_owner_name: None,
+                    subject_method_name: None,
+                    subject_method_through_instance: false,
+                    cases: vec![
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                                String::from("Priority.LOW"),
+                            )],
+                            has_guard: false,
+                            line: 3,
+                        },
+                        typepython_binding::MatchCaseSite {
+                            patterns: vec![typepython_binding::MatchPatternSite::Literal(
+                                String::from("Priority.MEDIUM"),
+                            )],
+                            has_guard: false,
+                            line: 4,
+                        },
+                    ],
+                    line: 2,
+                }],
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4009"));
+        assert!(rendered.contains("missing members: HIGH"));
+    }
+
+    #[test]
+    fn check_reports_list_covariance_assignment_mismatch() {
+        let result = check_temp_typepython_source(
+            "class Animal:\n    pass\n\nclass Cat(Animal):\n    pass\n\ndef take(cats: list[Cat]) -> None:\n    xs: list[Animal] = cats\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+    }
+
+    #[test]
+    fn check_accepts_sequence_covariance_assignment_from_list_subtype() {
+        let node = type_relation_node_with_base_child();
+
+        assert!(crate::direct_type_is_assignable(&node, &[], "Sequence[Base]", "list[Child]",));
+    }
+
+    #[test]
+    fn check_reports_for_loop_tuple_target_arity_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.tpy"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("items"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("list[tuple[int, str, bool]]"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("process"),
+                        kind: DeclarationKind::Function,
+                        detail: String::from("()->None"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: vec![typepython_binding::ForSite {
+                    target_name: String::new(),
+                    target_names: vec![String::from("a"), String::from("b")],
+                    owner_name: Some(String::from("process")),
+                    owner_type_name: None,
+                    iter_type: Some(String::new()),
+                    iter_is_awaited: false,
+                    iter_callee: None,
+                    iter_name: Some(String::from("items")),
+                    iter_member_owner_name: None,
+                    iter_member_name: None,
+                    iter_member_through_instance: false,
+                    iter_method_owner_name: None,
+                    iter_method_name: None,
+                    iter_method_through_instance: false,
+                    line: 2,
+                }],
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("2 name(s)"));
+        assert!(rendered.contains("3 element(s)"));
+    }
+
+    #[test]
+    fn check_reports_except_handler_binding_return_type_mismatch() {
+        let result = check(&ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/app/module.py"),
+                module_key: String::from("app.module"),
+                module_kind: SourceKind::Python,
+                declarations: vec![Declaration {
+                    name: String::from("run"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("()->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                member_accesses: Vec::new(),
+                returns: vec![typepython_binding::ReturnSite {
+                    owner_name: String::from("run"),
+                    owner_type_name: None,
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("exc")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                    line: 4,
+                }],
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: vec![typepython_binding::ExceptHandlerSite {
+                    exception_type: String::from("ValueError"),
+                    binding_name: Some(String::from("exc")),
+                    owner_name: Some(String::from("run")),
+                    owner_type_name: None,
+                    line: 3,
+                    end_line: 5,
+                }],
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+            }],
+        });
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("ValueError"));
+    }
+
+    #[test]
+    fn check_reports_direct_constructor_keyword_type_mismatch() {
+        let result = check_temp_typepython_source(
+            "class User:\n    def __init__(self, name: str, age: int):\n        self.name = name\n        self.age = age\n\nUser(name=\"Ada\", age=\"oops\")\n",
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4001"));
+        assert!(rendered.contains("keyword `age`"));
+        assert!(rendered.contains("expects `int`"));
+    }
+
+    #[test]
+    fn check_reports_unresolved_import_with_fallback_unknown() {
+        let result = check_with_options(
+            &ModuleGraph {
+                nodes: vec![ModuleNode {
+                    module_path: PathBuf::from("src/app/module.tpy"),
+                    module_key: String::from("app.module"),
+                    module_kind: SourceKind::TypePython,
+                    declarations: vec![Declaration {
+                        name: String::from("remote"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.missing.remote"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    }],
+                    calls: vec![typepython_binding::CallSite {
+                        callee: String::from("remote.execute"),
+                        arg_count: 0,
+                        arg_types: Vec::new(),
+                        arg_values: Vec::new(),
+                        starred_arg_types: Vec::new(),
+                        starred_arg_values: Vec::new(),
+                        keyword_names: Vec::new(),
+                        keyword_arg_types: Vec::new(),
+                        keyword_arg_values: Vec::new(),
+                        keyword_expansion_types: Vec::new(),
+                        keyword_expansion_values: Vec::new(),
+                        line: 2,
+                    }],
+                    method_calls: Vec::new(),
+                    member_accesses: Vec::new(),
+                    returns: Vec::new(),
+                    yields: Vec::new(),
+                    if_guards: Vec::new(),
+                    asserts: Vec::new(),
+                    invalidations: Vec::new(),
+                    matches: Vec::new(),
+                    for_loops: Vec::new(),
+                    with_statements: Vec::new(),
+                    except_handlers: Vec::new(),
+                    assignments: Vec::new(),
+                    summary_fingerprint: 1,
+                }],
+            },
+            false,
+            true,
+            DiagnosticLevel::Warning,
+            false,
+            false,
+            ImportFallback::Unknown,
+        );
+
+        let rendered = result.diagnostics.as_text();
+        assert!(rendered.contains("TPY4003"));
+        assert!(rendered.contains("remote.execute"));
+    }
 }
