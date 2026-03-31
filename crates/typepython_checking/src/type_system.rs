@@ -2507,6 +2507,10 @@ pub(super) fn resolve_direct_name_reference_type(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
 pub(super) fn resolve_direct_name_reference_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
