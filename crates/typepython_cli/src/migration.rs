@@ -13,9 +13,11 @@ use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
 use crate::cli::{MigrateArgs, OutputFormat};
+use crate::discovery::{
+    DiscoveredSource, bundled_stdlib_sources, collect_source_paths, normalize_glob_path,
+};
 use crate::{
-    CommandSummary, DiscoveredSource, bundled_stdlib_sources, collect_parse_diagnostics,
-    collect_source_paths, exit_code, load_project, load_syntax_trees, normalize_glob_path,
+    CommandSummary, collect_parse_diagnostics, exit_code, load_project, load_syntax_trees,
     print_summary,
 };
 
