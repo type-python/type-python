@@ -482,20 +482,40 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             {
                 expanded
             } else {
-                vec![rewrite_typealias_line(line, statement)]
+                vec![typepython_syntax::normalize_source_variadic_type_syntax(
+                    &rewrite_typealias_line(line, statement),
+                )]
             }
         } else if let Some(statement) = interfaces.get(&line_number) {
-            vec![rewrite_interface_line(line, statement)]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(
+                &rewrite_interface_line(line, statement),
+            )]
         } else if let Some(statement) = data_classes.get(&line_number) {
-            rewrite_data_class_lines(line, statement).into_iter().collect()
+            rewrite_data_class_lines(line, statement)
+                .into_iter()
+                .map(|replacement| {
+                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
+                })
+                .collect()
         } else if overloads.contains_key(&line_number) {
-            rewrite_overload_lines(line).into_iter().collect()
+            rewrite_overload_lines(line)
+                .into_iter()
+                .map(|replacement| {
+                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
+                })
+                .collect()
         } else if let Some(statement) = sealed_classes.get(&line_number) {
-            vec![rewrite_sealed_class_line(line, statement)]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(
+                &rewrite_sealed_class_line(line, statement),
+            )]
         } else if let Some(statement) = class_defs.get(&line_number) {
-            vec![rewrite_class_def_line(line, statement)]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(
+                &rewrite_class_def_line(line, statement),
+            )]
         } else if function_defs.contains_key(&line_number) {
-            vec![rewrite_function_def_line(line)]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(
+                &rewrite_function_def_line(line),
+            )]
         } else if unsafe_lines.contains(&line_number) {
             vec![rewrite_unsafe_line(line)]
         } else {
@@ -673,7 +693,7 @@ fn normalize_import_from_line(
 }
 
 fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) -> String {
-    let mut normalized = typepython_syntax::normalize_source_variadic_type_syntax(text);
+    let mut normalized = text.to_owned();
     let target_python = options.target_python.trim();
 
     normalized = normalized.replace("warnings.deprecated", "typing_extensions.deprecated");
@@ -2604,6 +2624,37 @@ mod tests {
             lowered.module.python_source,
             "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\ndef collect(*args: Unpack[Ts]) -> tuple[Unpack[Ts]]:\n    return args\n"
         );
+    }
+
+    #[test]
+    fn lower_rewrites_source_authored_typevartuple_typealias() {
+        let lowered = lower(&parse(SourceFile {
+            path: PathBuf::from("source-typevartuple-alias.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("typealias Pack[*Ts] = tuple[*Ts]\n"),
+        }));
+
+        assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        );
+    }
+
+    #[test]
+    fn lower_preserves_runtime_star_unpack_expressions() {
+        let lowered = lower(&parse(SourceFile {
+            path: PathBuf::from("runtime-star-unpack.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "def build(items: list[int]) -> list[int]:\n    return [*items]\n",
+            ),
+        }));
+
+        assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+        assert!(lowered.module.python_source.contains("return [*items]"));
     }
 
     #[test]

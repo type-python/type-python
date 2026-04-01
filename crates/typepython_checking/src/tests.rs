@@ -8794,6 +8794,34 @@ fn check_reports_unresolved_source_authored_typevartuple_call() {
 }
 
 #[test]
+fn check_accepts_source_authored_typevartuple_alias_roundtrip() {
+    let result = check_temp_typepython_source(
+        "typealias Pack[*Ts] = tuple[*Ts]\n\nvalue: Pack[int, str] = (1, \"x\")\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_rejects_source_authored_typevartuple_alias_shape_mismatch() {
+    let result = check_temp_typepython_source(
+        "typealias Pack[*Ts] = tuple[*Ts]\n\nvalue: Pack[int, str] = (1, 2)\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_source_authored_typevartuple_alias_through_call() {
+    let result = check_temp_typepython_source(
+        "typealias Pack[*Ts] = tuple[*Ts]\n\ndef collect[*Ts](*args: *Ts) -> Pack[*Ts]:\n    return args\n\nvalue: Pack[int, str] = collect(1, \"x\")\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_rejects_generic_function_call_outside_constraint_list() {
     let result = check_temp_typepython_source(
         "def choose[T: (str, bytes)](value: T) -> T:\n    return value\n\nbad: int = choose(1)\n",
