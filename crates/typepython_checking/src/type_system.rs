@@ -471,54 +471,6 @@ pub(super) fn resolve_direct_member_callable_signature(
     Some((bound_params, actual_return))
 }
 
-pub(super) fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)> {
-    let (params, return_type) = parse_callable_annotation_parts(text)?;
-    if params == "..." {
-        return Some((None, return_type));
-    }
-    let params = params.strip_prefix('[').and_then(|inner| inner.strip_suffix(']'))?;
-    let param_types = if params.trim().is_empty() {
-        Vec::new()
-    } else {
-        split_top_level_type_args(params).into_iter().map(normalize_type_text).collect()
-    };
-    Some((Some(param_types), return_type))
-}
-
-pub(super) fn parse_callable_annotation_parts(text: &str) -> Option<(String, String)> {
-    let text = normalize_type_text(text);
-    let inner = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']'))?;
-    let parts = split_top_level_type_args(inner);
-    if parts.len() != 2 {
-        return None;
-    }
-    Some((normalize_callable_param_expr(parts[0]), normalize_type_text(parts[1])))
-}
-
-pub(super) fn normalize_callable_param_expr(params: &str) -> String {
-    let params = params.trim();
-    if params == "..." || params.is_empty() {
-        return params.to_owned();
-    }
-    if let Some(inner) = params.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')) {
-        let rendered = split_top_level_type_args(inner)
-            .into_iter()
-            .map(normalize_type_text)
-            .collect::<Vec<_>>();
-        return format!("[{}]", rendered.join(", "));
-    }
-    if let Some(inner) =
-        params.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        let rendered = split_top_level_type_args(inner)
-            .into_iter()
-            .map(normalize_type_text)
-            .collect::<Vec<_>>();
-        return format!("Concatenate[{}]", rendered.join(", "));
-    }
-    normalize_type_text(params)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_contextual_lambda_callable_signature(
     node: &typepython_graph::ModuleNode,
@@ -1187,25 +1139,6 @@ pub(super) fn normalized_assignment_annotation(annotation: &str) -> Option<&str>
         "Final" | "ClassVar" => None,
         _ => Some(annotation),
     }
-}
-
-pub(super) fn normalize_type_text(text: &str) -> String {
-    let text = text.trim();
-    let text = text.strip_prefix("typing.").unwrap_or(text);
-
-    if let Some(open_index) = text.find('[') {
-        if let Some(inner) = text.strip_suffix(']') {
-            let head = normalize_type_head(&inner[..open_index]);
-            let args = split_top_level_type_args(&inner[open_index + 1..])
-                .into_iter()
-                .map(normalize_type_text)
-                .collect::<Vec<_>>()
-                .join(", ");
-            return format!("{head}[{args}]");
-        }
-    }
-
-    normalize_type_head(text).to_owned()
 }
 
 pub(super) fn expand_type_alias_once(
@@ -1896,53 +1829,6 @@ pub(super) fn enum_member_owner_name(text: &str) -> Option<String> {
     Some(normalize_type_text(owner))
 }
 
-pub(super) fn union_branches(text: &str) -> Option<Vec<String>> {
-    let text = text.trim();
-    if let Some(inner) = annotated_inner(text) {
-        return union_branches(&inner).or(Some(vec![inner]));
-    }
-    if let Some(inner) = text.strip_prefix("Optional[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(vec![normalize_type_text(inner), String::from("None")]);
-    }
-    if let Some(inner) = text.strip_prefix("Union[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(
-            split_top_level_type_args(inner).into_iter().map(normalize_type_text).collect(),
-        );
-    }
-    let pipe_branches = split_top_level_union_branches(text);
-    if pipe_branches.len() > 1 {
-        return Some(pipe_branches.into_iter().map(normalize_type_text).collect());
-    }
-    None
-}
-
-pub(super) fn split_top_level_union_branches(text: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '[' | '(' | '{' => depth += 1,
-            ']' | ')' | '}' => depth = depth.saturating_sub(1),
-            '|' if depth == 0 => {
-                parts.push(text[start..index].trim());
-                start = index + character.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    parts.push(text[start..].trim());
-    parts
-}
-
-pub(super) fn annotated_inner(text: &str) -> Option<String> {
-    let text = text.trim();
-    let inner = text.strip_prefix("Annotated[").and_then(|inner| inner.strip_suffix(']'))?;
-    let mut args = split_top_level_type_args(inner).into_iter();
-    let first = args.next()?;
-    Some(normalize_type_text(first))
-}
-
 pub(super) fn split_generic_type(text: &str) -> Option<(&str, Vec<String>)> {
     let text = text.trim();
     let open_index = text.find('[')?;
@@ -1953,46 +1839,6 @@ pub(super) fn split_generic_type(text: &str) -> Option<(&str, Vec<String>)> {
         .map(normalize_type_text)
         .collect::<Vec<_>>();
     Some((head, args))
-}
-
-pub(super) fn normalize_type_head(head: &str) -> &str {
-    match head.trim() {
-        "List" => "list",
-        "Dict" => "dict",
-        "Tuple" => "tuple",
-        "Set" => "set",
-        "FrozenSet" => "frozenset",
-        "Type" => "type",
-        "Callable" => "Callable",
-        "Literal" => "Literal",
-        "NewType" => "NewType",
-        other => other,
-    }
-}
-
-pub(super) fn split_top_level_type_args(args: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-
-    for (index, ch) in args.char_indices() {
-        match ch {
-            '[' => depth += 1,
-            ']' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                parts.push(args[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-
-    let tail = args[start..].trim();
-    if !tail.is_empty() {
-        parts.push(tail);
-    }
-
-    parts
 }
 
 pub(super) fn resolve_builtin_return_type(callee: &str) -> Option<&'static str> {

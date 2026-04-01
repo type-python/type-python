@@ -30,6 +30,7 @@ mod calls;
 mod declarations;
 mod semantic;
 mod stubs;
+mod type_expr;
 mod type_system;
 
 pub(crate) use self::assignments::*;
@@ -37,6 +38,7 @@ pub(crate) use self::calls::*;
 pub(crate) use self::declarations::*;
 pub(crate) use self::semantic::*;
 pub use self::stubs::{collect_effective_callable_stub_overrides, collect_synthetic_method_stubs};
+pub(crate) use self::type_expr::*;
 pub(crate) use self::type_system::*;
 
 const BUILTIN_FUNCTION_RETURN_TYPES: &[(&str, &str)] = &[
