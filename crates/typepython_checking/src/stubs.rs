@@ -4,7 +4,7 @@ use super::*;
 pub fn collect_effective_callable_stub_overrides(
     graph: &ModuleGraph,
 ) -> Vec<EffectiveCallableStubOverride> {
-    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
     let mut overrides = graph
         .nodes
         .iter()
@@ -51,7 +51,7 @@ pub fn collect_effective_callable_stub_overrides(
 
 #[must_use]
 pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMethodStub> {
-    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
     let mut methods = graph
         .nodes
         .iter()

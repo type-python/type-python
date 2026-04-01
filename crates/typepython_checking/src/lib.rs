@@ -84,6 +84,22 @@ pub struct CheckResult {
     pub diagnostics: DiagnosticReport,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ModuleCheckResult {
+    pub diagnostics_by_module: BTreeMap<String, Vec<Diagnostic>>,
+}
+
+impl ModuleCheckResult {
+    #[must_use]
+    pub fn diagnostics(&self) -> DiagnosticReport {
+        let mut diagnostics = DiagnosticReport::default();
+        for module_diagnostics in self.diagnostics_by_module.values() {
+            diagnostics.diagnostics.extend(module_diagnostics.iter().cloned());
+        }
+        diagnostics
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EffectiveCallableStubOverride {
     pub module_key: String,
@@ -127,9 +143,17 @@ struct ModuleSourceFacts {
 }
 
 impl ModuleSourceFacts {
-    fn source_text<'a>(&'a mut self, node: &typepython_graph::ModuleNode) -> Option<&'a str> {
+    fn source_text<'a>(
+        &'a mut self,
+        node: &typepython_graph::ModuleNode,
+        source_overrides: Option<&BTreeMap<String, String>>,
+    ) -> Option<&'a str> {
         if !self.source_loaded {
-            self.source_text = fs::read_to_string(&node.module_path).ok();
+            self.source_text = source_overrides
+                .and_then(|overrides| {
+                    overrides.get(&node.module_path.display().to_string()).cloned()
+                })
+                .or_else(|| fs::read_to_string(&node.module_path).ok());
             self.source_loaded = true;
         }
 
@@ -138,11 +162,16 @@ impl ModuleSourceFacts {
 }
 
 #[derive(Debug, Default)]
-struct CheckerSourceFactsProvider {
+struct CheckerSourceFactsProvider<'a> {
     modules: RefCell<BTreeMap<String, ModuleSourceFacts>>,
+    source_overrides: Option<&'a BTreeMap<String, String>>,
 }
 
-impl CheckerSourceFactsProvider {
+impl<'a> CheckerSourceFactsProvider<'a> {
+    fn new(source_overrides: Option<&'a BTreeMap<String, String>>) -> Self {
+        Self { modules: RefCell::new(BTreeMap::new()), source_overrides }
+    }
+
     fn with_module_facts<T>(
         &self,
         node: &typepython_graph::ModuleNode,
@@ -167,7 +196,7 @@ impl CheckerSourceFactsProvider {
                 return metadata;
             }
 
-            let metadata = match facts.source_text(node) {
+            let metadata = match facts.source_text(node, self.source_overrides) {
                 Some(source) => typepython_syntax::collect_typed_dict_class_metadata(source)
                     .into_iter()
                     .map(|metadata| (metadata.name.clone(), metadata))
@@ -192,7 +221,7 @@ impl CheckerSourceFactsProvider {
                 return signatures;
             }
 
-            let signatures = match facts.source_text(node) {
+            let signatures = match facts.source_text(node, self.source_overrides) {
                 Some(source) => typepython_syntax::collect_direct_function_signature_sites(source)
                     .into_iter()
                     .map(|signature| (signature.name, signature.params))
@@ -217,7 +246,7 @@ impl CheckerSourceFactsProvider {
                 return signatures;
             }
 
-            let signatures = match facts.source_text(node) {
+            let signatures = match facts.source_text(node, self.source_overrides) {
                 Some(source) => typepython_syntax::collect_direct_method_signature_sites(source)
                     .into_iter()
                     .map(|signature| {
@@ -254,7 +283,7 @@ impl CheckerSourceFactsProvider {
             }
 
             let info = facts
-                .source_text(node)
+                .source_text(node, self.source_overrides)
                 .map(typepython_syntax::collect_decorator_transform_module_info);
             facts.decorator_transform_module_info = Some(info.clone());
             info
@@ -275,7 +304,7 @@ impl CheckerSourceFactsProvider {
             }
 
             let info = facts
-                .source_text(node)
+                .source_text(node, self.source_overrides)
                 .map(typepython_syntax::collect_dataclass_transform_module_info);
             facts.dataclass_transform_module_info = Some(info.clone());
             info
@@ -287,12 +316,20 @@ impl CheckerSourceFactsProvider {
 struct CheckerContext<'a> {
     nodes: &'a [typepython_graph::ModuleNode],
     import_fallback: ImportFallback,
-    source_facts: CheckerSourceFactsProvider,
+    source_facts: CheckerSourceFactsProvider<'a>,
 }
 
 impl<'a> CheckerContext<'a> {
-    fn new(nodes: &'a [typepython_graph::ModuleNode], import_fallback: ImportFallback) -> Self {
-        Self { nodes, import_fallback, source_facts: CheckerSourceFactsProvider::default() }
+    fn new(
+        nodes: &'a [typepython_graph::ModuleNode],
+        import_fallback: ImportFallback,
+        source_overrides: Option<&'a BTreeMap<String, String>>,
+    ) -> Self {
+        Self {
+            nodes,
+            import_fallback,
+            source_facts: CheckerSourceFactsProvider::new(source_overrides),
+        }
     }
 
     fn import_fallback_type(&self) -> &'static str {
@@ -362,8 +399,67 @@ pub fn check_with_options(
     warn_unsafe: bool,
     import_fallback: ImportFallback,
 ) -> CheckResult {
-    let context = CheckerContext::new(&graph.nodes, import_fallback);
-    let mut diagnostics = DiagnosticReport::default();
+    check_with_source_overrides(
+        graph,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        None,
+    )
+}
+
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the public checker option surface while adding LSP source overrides"
+)]
+pub fn check_with_source_overrides(
+    graph: &ModuleGraph,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> CheckResult {
+    let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
+    let diagnostics = check_modules_with_source_overrides(
+        graph,
+        &module_keys,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+    .diagnostics();
+    CheckResult { diagnostics }
+}
+
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the public checker option surface while adding subset recheck inputs"
+)]
+pub fn check_modules_with_source_overrides(
+    graph: &ModuleGraph,
+    module_keys: &BTreeSet<String>,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> ModuleCheckResult {
+    let context = CheckerContext::new(&graph.nodes, import_fallback, source_overrides);
+    let mut diagnostics_by_module = BTreeMap::new();
     let options = CheckerPassOptions {
         require_explicit_overrides,
         enable_sealed_exhaustiveness,
@@ -373,10 +469,15 @@ pub fn check_with_options(
     };
 
     for node in &graph.nodes {
+        if !module_keys.contains(&node.module_key) {
+            continue;
+        }
+        let mut diagnostics = DiagnosticReport::default();
         collect_node_diagnostics(&context, &mut diagnostics, node, options);
+        diagnostics_by_module.insert(node.module_key.clone(), diagnostics.diagnostics);
     }
 
-    CheckResult { diagnostics }
+    ModuleCheckResult { diagnostics_by_module }
 }
 
 #[derive(Clone, Copy)]

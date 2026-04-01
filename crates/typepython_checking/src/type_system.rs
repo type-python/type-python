@@ -60,7 +60,7 @@ pub(super) fn resolve_known_typed_dict_shape_from_type(
     nodes: &[typepython_graph::ModuleNode],
     type_name: &str,
 ) -> Option<TypedDictShape> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_known_typed_dict_shape_from_type_with_context(&context, node, nodes, type_name)
 }
 
@@ -566,7 +566,7 @@ pub(super) fn resolve_contextual_typed_dict_literal_type(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualTypedDictLiteralResult> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_contextual_typed_dict_literal_type_with_context(
         &context,
         node,
@@ -2339,7 +2339,7 @@ pub(super) fn resolve_subscript_type_from_target_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<String> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_subscript_type_from_target_type_with_context(
         &context,
         node,
@@ -2455,7 +2455,7 @@ pub(super) fn resolve_direct_name_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_direct_name_reference_type_with_context(
         &context,
         node,

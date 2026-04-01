@@ -652,7 +652,7 @@ pub(super) fn direct_source_function_arity_diagnostic(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Option<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     direct_source_function_arity_diagnostic_with_context(&context, node, nodes, call, signature)
 }
 
@@ -750,7 +750,7 @@ pub(super) fn direct_source_function_keyword_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     direct_source_function_keyword_diagnostics_with_context(&context, node, nodes, call, signature)
 }
 
@@ -978,7 +978,7 @@ pub(super) fn direct_source_function_type_diagnostics(
     call: &typepython_binding::CallSite,
     signature: &[typepython_syntax::DirectFunctionParamSite],
 ) -> Vec<Diagnostic> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     direct_source_function_type_diagnostics_with_context(&context, node, nodes, call, signature)
 }
 
@@ -1451,7 +1451,7 @@ pub(super) fn resolve_direct_callable_signature_sites(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_direct_callable_signature_sites_with_context(&context, node, nodes, callee)
 }
 
@@ -2013,7 +2013,7 @@ pub(super) fn apply_named_callable_decorator_transform(
     decorator_name: &str,
     current_callable: &str,
 ) -> Option<String> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     apply_named_callable_decorator_transform_with_context(
         &context,
         node,
@@ -2068,7 +2068,7 @@ pub(super) fn resolve_decorated_callable_annotation_for_declaration(
     nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
 ) -> Option<String> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_decorated_callable_annotation_for_declaration_with_context(
         &context,
         node,
@@ -2109,7 +2109,7 @@ pub(super) fn resolve_decorated_function_callable_annotation(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<String> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_decorated_function_callable_annotation_with_context(&context, node, nodes, callee)
 }
 

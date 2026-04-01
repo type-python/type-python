@@ -502,7 +502,7 @@ pub(super) fn resolved_keyword_expansions(
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
 ) -> Vec<KeywordExpansion> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown);
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolved_keyword_expansions_with_context(&context, node, nodes, call)
 }
 
