@@ -367,6 +367,7 @@ pub struct Declaration {
 pub enum GenericTypeParamKind {
     TypeVar,
     ParamSpec,
+    TypeVarTuple,
 }
 
 /// Bound generic parameter metadata for declarations and aliases.
@@ -1038,6 +1039,9 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
             kind: match param.kind {
                 typepython_syntax::TypeParamKind::TypeVar => GenericTypeParamKind::TypeVar,
                 typepython_syntax::TypeParamKind::ParamSpec => GenericTypeParamKind::ParamSpec,
+                typepython_syntax::TypeParamKind::TypeVarTuple => {
+                    GenericTypeParamKind::TypeVarTuple
+                }
             },
             name: param.name.clone(),
             bound: param.bound.clone(),
@@ -3302,6 +3306,44 @@ mod tests {
             vec![GenericTypeParam {
                 name: String::from("P"),
                 kind: GenericTypeParamKind::ParamSpec,
+                bound: None,
+                constraints: Vec::new(),
+                default: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn bind_collects_typevartuple_type_params() {
+        let table = bind(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("src/app/__init__.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::new(),
+            },
+            statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                name: String::from("Pack"),
+                type_params: vec![TypeParam {
+                    name: String::from("Ts"),
+                    kind: TypeParamKind::TypeVarTuple,
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                }],
+                value: String::from("tuple[Unpack[Ts]]"),
+                line: 1,
+            })],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert_eq!(table.declarations.len(), 1);
+        assert_eq!(
+            table.declarations[0].type_params,
+            vec![GenericTypeParam {
+                name: String::from("Ts"),
+                kind: GenericTypeParamKind::TypeVarTuple,
                 bound: None,
                 constraints: Vec::new(),
                 default: None,

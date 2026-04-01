@@ -518,6 +518,7 @@ pub struct UnsafeStatement {
 pub enum TypeParamKind {
     TypeVar,
     ParamSpec,
+    TypeVarTuple,
 }
 
 /// Parsed generic parameter declaration.
@@ -3696,6 +3697,7 @@ fn render_type_param(type_param: &TypeParam) -> String {
     let prefix = match type_param.kind {
         TypeParamKind::TypeVar => "",
         TypeParamKind::ParamSpec => "**",
+        TypeParamKind::TypeVarTuple => "*",
     };
     let mut rendered = if !type_param.constraints.is_empty() {
         format!("{}: ({})", type_param.name, type_param.constraints.join(", "))
@@ -9306,6 +9308,29 @@ mod tests {
         assert_eq!(function.type_params[1].kind, TypeParamKind::TypeVar);
         assert_eq!(function.params[1].annotation.as_deref(), Some("P.args"));
         assert_eq!(function.params[2].annotation.as_deref(), Some("P.kwargs"));
+    }
+
+    #[test]
+    fn render_type_params_supports_typevartuple_kind() {
+        assert_eq!(
+            super::render_type_params(&[
+                TypeParam {
+                    name: String::from("Ts"),
+                    kind: TypeParamKind::TypeVarTuple,
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                },
+                TypeParam {
+                    name: String::from("R"),
+                    kind: TypeParamKind::TypeVar,
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: None,
+                },
+            ]),
+            "[*Ts, R]"
+        );
     }
 
     #[test]

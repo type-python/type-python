@@ -799,6 +799,9 @@ fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
         typepython_syntax::TypeParamKind::ParamSpec => {
             format!("{name} = ParamSpec({})", args.join(", "))
         }
+        typepython_syntax::TypeParamKind::TypeVarTuple => {
+            unreachable!("TypeVarTuple lowering support is added in a later refactor step")
+        }
     }
 }
 

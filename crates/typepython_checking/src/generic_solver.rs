@@ -142,6 +142,7 @@ pub(crate) fn infer_generic_type_param_substitutions(
                     .param_lists
                     .insert(type_param.name.clone(), param_list_binding_from_default(default)?);
             }
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => continue,
         }
     }
 
