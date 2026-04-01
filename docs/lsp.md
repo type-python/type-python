@@ -180,19 +180,22 @@ Any editor with LSP support can use TypePython. Configure:
 The LSP server maintains:
 
 1. **Document overlays** -- in-memory copies of open files (unsaved changes)
-2. **Cached workspace** -- full compiled module graph
+2. **Incremental workspace cache** -- cached project/support syntax trees, bindings, module graph, and checker diagnostics
 3. **Symbol tables** -- occurrence maps for definition/reference lookup
 
 On each document change:
 1. The overlay is updated with the new document text
-2. The full workspace is recompiled (parse -> bind -> graph -> check)
+2. Only the changed project document is reparsed/rebound
+3. Support modules are refreshed from the cached support catalog if imports changed
+4. The module graph snapshot and reverse-import index are updated
+5. The checker reruns only for the changed modules plus dependents whose public summaries changed
+6. Symbol tables are rebuilt from the cached syntax trees
 3. Diagnostics are pushed to the editor
-4. Symbol tables are rebuilt for navigation
 
 ## Limitations
 
 - **Full-text sync**: the server receives the entire document on each change (no incremental text sync)
-- **Full recompilation**: the server recompiles the entire workspace on each change (incremental compilation is used for the CLI but not yet exposed in the LSP)
+- **Workspace-wide symbol indexing**: definition/reference/completion tables are still rebuilt from the cached syntax trees after each change
 - **No signature help**: `textDocument/signatureHelp` is not yet implemented
 - **No document symbols**: `textDocument/documentSymbol` is not yet implemented
 - **No workspace symbols**: `workspace/symbol` is not yet implemented

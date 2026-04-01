@@ -323,9 +323,11 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 
 **Internal architecture:**
 - In-memory document overlays for unsaved changes
-- Full workspace recompilation on changes
+- Persistent incremental workspace cache for project/support syntax trees and bindings
+- Snapshot-diff invalidation via `typepython_incremental`
+- Subset checker reruns for directly changed modules and dependent modules whose public summaries changed
 - Symbol occurrence tables for cross-referencing
-- Diagnostics pushed to editor on each recompilation
+- Diagnostics pushed to editor after each incremental update
 
 ## Workspace Configuration
 
