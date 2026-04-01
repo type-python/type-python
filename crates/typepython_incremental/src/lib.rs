@@ -1,6 +1,6 @@
 //! Incremental build state boundary for TypePython.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
@@ -99,6 +99,13 @@ pub struct SnapshotDiff {
     pub changed: Vec<Fingerprint>,
 }
 
+/// Import dependency index for one module graph.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct ModuleDependencyIndex {
+    pub imports_by_module: BTreeMap<String, BTreeSet<String>>,
+    pub reverse_imports: BTreeMap<String, BTreeSet<String>>,
+}
+
 /// Captures an incremental snapshot from the module graph.
 #[must_use]
 pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
@@ -141,6 +148,76 @@ pub fn diff(previous: &IncrementalState, current: &IncrementalState) -> Snapshot
     }
 
     snapshot_diff
+}
+
+/// Builds a module dependency index from bound import declarations.
+#[must_use]
+pub fn dependency_index(graph: &ModuleGraph) -> ModuleDependencyIndex {
+    let module_keys =
+        graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
+    let mut imports_by_module = graph
+        .nodes
+        .iter()
+        .map(|node| (node.module_key.clone(), BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    let mut reverse_imports = imports_by_module.clone();
+
+    for node in &graph.nodes {
+        let imports = node
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.owner.is_none())
+            .filter(|declaration| declaration.kind == DeclarationKind::Import)
+            .filter_map(|declaration| resolve_import_module_key(&declaration.detail, &module_keys))
+            .collect::<BTreeSet<_>>();
+        for imported in &imports {
+            reverse_imports.entry(imported.clone()).or_default().insert(node.module_key.clone());
+        }
+        imports_by_module.insert(node.module_key.clone(), imports);
+    }
+
+    ModuleDependencyIndex { imports_by_module, reverse_imports }
+}
+
+/// Collects the set of modules whose public summaries changed in a snapshot diff.
+#[must_use]
+pub fn snapshot_diff_modules(snapshot_diff: &SnapshotDiff) -> BTreeSet<String> {
+    snapshot_diff
+        .added
+        .iter()
+        .chain(snapshot_diff.removed.iter())
+        .chain(snapshot_diff.changed.iter())
+        .map(|fingerprint| fingerprint.module_key.clone())
+        .collect()
+}
+
+/// Plans the module subset that must be rechecked after an incremental update.
+#[must_use]
+pub fn affected_modules(
+    previous_index: Option<&ModuleDependencyIndex>,
+    current_index: &ModuleDependencyIndex,
+    direct_changes: &BTreeSet<String>,
+    summary_changed_modules: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut affected = direct_changes.clone();
+    for module_key in summary_changed_modules {
+        if current_index.imports_by_module.contains_key(module_key) {
+            affected.insert(module_key.clone());
+        }
+    }
+
+    let mut queue = summary_changed_modules.iter().cloned().collect::<VecDeque<_>>();
+    let mut visited = summary_changed_modules.clone();
+    while let Some(module_key) = queue.pop_front() {
+        for importer in reverse_importers(previous_index, current_index, &module_key) {
+            if visited.insert(importer.clone()) {
+                queue.push_back(importer.clone());
+            }
+            affected.insert(importer);
+        }
+    }
+
+    affected
 }
 
 pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::Error> {
@@ -264,6 +341,35 @@ fn summary_fingerprint(summary: &PublicSummary) -> u64 {
     hash
 }
 
+fn resolve_import_module_key(detail: &str, module_keys: &BTreeSet<String>) -> Option<String> {
+    if module_keys.contains(detail) {
+        return Some(detail.to_owned());
+    }
+
+    let mut current = detail;
+    while let Some((parent, _)) = current.rsplit_once('.') {
+        if module_keys.contains(parent) {
+            return Some(parent.to_owned());
+        }
+        current = parent;
+    }
+
+    None
+}
+
+fn reverse_importers(
+    previous_index: Option<&ModuleDependencyIndex>,
+    current_index: &ModuleDependencyIndex,
+    module_key: &str,
+) -> BTreeSet<String> {
+    let mut importers = current_index.reverse_imports.get(module_key).cloned().unwrap_or_default();
+    if let Some(previous_index) = previous_index {
+        importers
+            .extend(previous_index.reverse_imports.get(module_key).cloned().unwrap_or_default());
+    }
+    importers
+}
+
 fn is_package_entry_path(path: &std::path::Path) -> bool {
     path.file_name().is_some_and(|name| {
         name == "__init__.py" || name == "__init__.pyi" || name == "__init__.tpy"
@@ -274,10 +380,13 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         Fingerprint, IncrementalState, PublicSummary, SNAPSHOT_SCHEMA_VERSION, SealedRootSummary,
-        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam, decode_snapshot, diff,
-        encode_snapshot, snapshot,
+        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam, affected_modules,
+        decode_snapshot, dependency_index, diff, encode_snapshot, snapshot, snapshot_diff_modules,
     };
-    use std::{collections::BTreeMap, path::PathBuf};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        path::PathBuf,
+    };
     use typepython_binding::{
         Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam, GenericTypeParamKind,
     };
@@ -986,5 +1095,184 @@ mod tests {
                 SNAPSHOT_SCHEMA_VERSION
             )
         );
+    }
+
+    #[test]
+    fn dependency_index_tracks_symbol_import_edges() {
+        let graph = ModuleGraph {
+            nodes: vec![
+                module_node(
+                    "pkg.base",
+                    "src/pkg/base.tpy",
+                    vec![import_declaration("shared", "pkg.shared.Value")],
+                ),
+                module_node(
+                    "pkg.shared",
+                    "src/pkg/shared.tpy",
+                    vec![value_declaration("Value", "int")],
+                ),
+                module_node(
+                    "pkg.consumer",
+                    "src/pkg/consumer.tpy",
+                    vec![
+                        import_declaration("base", "pkg.base"),
+                        import_declaration("value", "pkg.shared.Value"),
+                    ],
+                ),
+            ],
+        };
+
+        let index = dependency_index(&graph);
+        assert_eq!(
+            index.imports_by_module.get("pkg.consumer"),
+            Some(&BTreeSet::from([String::from("pkg.base"), String::from("pkg.shared")]))
+        );
+        assert_eq!(
+            index.reverse_imports.get("pkg.shared"),
+            Some(&BTreeSet::from([String::from("pkg.base"), String::from("pkg.consumer")]))
+        );
+    }
+
+    #[test]
+    fn affected_modules_rechecks_transitive_dependents_of_summary_changes() {
+        let graph = ModuleGraph {
+            nodes: vec![
+                module_node("pkg.a", "src/pkg/a.tpy", vec![value_declaration("A", "int")]),
+                module_node(
+                    "pkg.b",
+                    "src/pkg/b.tpy",
+                    vec![import_declaration("a", "pkg.a"), value_declaration("B", "int")],
+                ),
+                module_node(
+                    "pkg.c",
+                    "src/pkg/c.tpy",
+                    vec![import_declaration("b", "pkg.b"), value_declaration("C", "int")],
+                ),
+            ],
+        };
+
+        let affected = affected_modules(
+            Some(&dependency_index(&graph)),
+            &dependency_index(&graph),
+            &BTreeSet::from([String::from("pkg.a")]),
+            &BTreeSet::from([String::from("pkg.a")]),
+        );
+
+        assert_eq!(
+            affected,
+            BTreeSet::from([String::from("pkg.a"), String::from("pkg.b"), String::from("pkg.c"),])
+        );
+    }
+
+    #[test]
+    fn affected_modules_keeps_rechecks_local_for_implementation_only_changes() {
+        let graph = ModuleGraph {
+            nodes: vec![
+                module_node("pkg.a", "src/pkg/a.tpy", vec![value_declaration("A", "int")]),
+                module_node(
+                    "pkg.b",
+                    "src/pkg/b.tpy",
+                    vec![import_declaration("a", "pkg.a"), value_declaration("B", "int")],
+                ),
+            ],
+        };
+
+        let affected = affected_modules(
+            Some(&dependency_index(&graph)),
+            &dependency_index(&graph),
+            &BTreeSet::from([String::from("pkg.a")]),
+            &BTreeSet::new(),
+        );
+
+        assert_eq!(affected, BTreeSet::from([String::from("pkg.a")]));
+    }
+
+    #[test]
+    fn snapshot_diff_modules_collects_all_changed_keys() {
+        let snapshot_diff = SnapshotDiff {
+            added: vec![Fingerprint { module_key: String::from("pkg.new"), fingerprint: 1 }],
+            removed: vec![Fingerprint { module_key: String::from("pkg.old"), fingerprint: 2 }],
+            changed: vec![Fingerprint { module_key: String::from("pkg.same"), fingerprint: 3 }],
+        };
+
+        assert_eq!(
+            snapshot_diff_modules(&snapshot_diff),
+            BTreeSet::from([
+                String::from("pkg.new"),
+                String::from("pkg.old"),
+                String::from("pkg.same"),
+            ])
+        );
+    }
+
+    fn module_node(
+        module_key: &str,
+        module_path: &str,
+        declarations: Vec<Declaration>,
+    ) -> ModuleNode {
+        ModuleNode {
+            module_path: PathBuf::from(module_path),
+            module_key: String::from(module_key),
+            module_kind: SourceKind::TypePython,
+            declarations,
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 0,
+        }
+    }
+
+    fn import_declaration(name: &str, detail: &str) -> Declaration {
+        Declaration {
+            name: String::from(name),
+            kind: DeclarationKind::Import,
+            detail: String::from(detail),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }
+    }
+
+    fn value_declaration(name: &str, value_type: &str) -> Declaration {
+        Declaration {
+            name: String::from(name),
+            kind: DeclarationKind::Value,
+            detail: String::from(value_type),
+            value_type: Some(String::from(value_type)),
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }
     }
 }
