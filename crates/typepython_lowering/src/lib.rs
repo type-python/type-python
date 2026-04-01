@@ -487,9 +487,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 )]
             }
         } else if let Some(statement) = interfaces.get(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(
-                &rewrite_interface_line(line, statement),
-            )]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(&rewrite_interface_line(
+                line, statement,
+            ))]
         } else if let Some(statement) = data_classes.get(&line_number) {
             rewrite_data_class_lines(line, statement)
                 .into_iter()
@@ -509,9 +509,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 &rewrite_sealed_class_line(line, statement),
             )]
         } else if let Some(statement) = class_defs.get(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(
-                &rewrite_class_def_line(line, statement),
-            )]
+            vec![typepython_syntax::normalize_source_variadic_type_syntax(&rewrite_class_def_line(
+                line, statement,
+            ))]
         } else if function_defs.contains_key(&line_number) {
             vec![typepython_syntax::normalize_source_variadic_type_syntax(
                 &rewrite_function_def_line(line),
@@ -2648,9 +2648,7 @@ mod tests {
             path: PathBuf::from("runtime-star-unpack.tpy"),
             kind: SourceKind::TypePython,
             logical_module: String::new(),
-            text: String::from(
-                "def build(items: list[int]) -> list[int]:\n    return [*items]\n",
-            ),
+            text: String::from("def build(items: list[int]) -> list[int]:\n    return [*items]\n"),
         }));
 
         assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
