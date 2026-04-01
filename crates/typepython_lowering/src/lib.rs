@@ -260,6 +260,13 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let has_runtime_paramspecs = runtime_type_params
         .values()
         .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::ParamSpec);
+    let has_runtime_typevartuples = runtime_type_params
+        .values()
+        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVarTuple);
+    let needs_unpack_import =
+        has_unqualified_symbol_usage(&tree.source.text, "Unpack") || has_runtime_typevartuples;
+    let uses_typing_extensions_variadic_generics =
+        !prefers_typing_variadic_generics(&options.target_python);
 
     let mut lowered_lines = Vec::new();
     let mut required_imports = Vec::new();
@@ -290,6 +297,40 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             &mut lowered_lines,
             &mut required_imports,
             rewrite_paramspec_import_line(needs_typing_extensions_runtime_type_params),
+        );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
+        lowered_line_number += 1;
+    }
+    if has_runtime_typevartuples
+        && !has_typevartuple_import(&tree.source.text, uses_typing_extensions_variadic_generics)
+    {
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            rewrite_typevartuple_import_line(uses_typing_extensions_variadic_generics),
+        );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
+        lowered_line_number += 1;
+    }
+    if needs_unpack_import
+        && !has_unpack_import(&tree.source.text, uses_typing_extensions_variadic_generics)
+    {
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            rewrite_unpack_import_line(uses_typing_extensions_variadic_generics),
         );
         span_map.push(inserted_span_map_entry(
             &source_path,
@@ -553,6 +594,10 @@ fn prefers_typing_override(target_python: &str) -> bool {
     matches!(target_python.trim(), "3.12")
 }
 
+fn prefers_typing_variadic_generics(target_python: &str) -> bool {
+    matches!(target_python.trim(), "3.11" | "3.12")
+}
+
 fn compat_module_for_symbol(symbol: &str, target_python: &str) -> Option<&'static str> {
     match symbol {
         "Self" => {
@@ -566,6 +611,11 @@ fn compat_module_for_symbol(symbol: &str, target_python: &str) -> Option<&'stati
             })
         }
         "override" => Some(if prefers_typing_override(target_python) {
+            "typing"
+        } else {
+            "typing_extensions"
+        }),
+        "TypeVarTuple" | "Unpack" => Some(if prefers_typing_variadic_generics(target_python) {
             "typing"
         } else {
             "typing_extensions"
@@ -652,6 +702,14 @@ fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) ->
         normalized = normalized.replace("typing_extensions.override", "typing.override");
     } else {
         normalized = normalized.replace("typing.override", "typing_extensions.override");
+    }
+
+    if prefers_typing_variadic_generics(target_python) {
+        normalized = normalized.replace("typing_extensions.TypeVarTuple", "typing.TypeVarTuple");
+        normalized = normalized.replace("typing_extensions.Unpack", "typing.Unpack");
+    } else {
+        normalized = normalized.replace("typing.TypeVarTuple", "typing_extensions.TypeVarTuple");
+        normalized = normalized.replace("typing.Unpack", "typing_extensions.Unpack");
     }
 
     normalized
@@ -800,7 +858,7 @@ fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
             format!("{name} = ParamSpec({})", args.join(", "))
         }
         typepython_syntax::TypeParamKind::TypeVarTuple => {
-            unreachable!("TypeVarTuple lowering support is added in a later refactor step")
+            format!("{name} = TypeVarTuple({name:?})")
         }
     }
 }
@@ -833,6 +891,26 @@ fn has_paramspec_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
+fn has_typevartuple_import(source: &str, from_typing_extensions: bool) -> bool {
+    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == format!("from {module} import TypeVarTuple")
+            || (trimmed.starts_with(&format!("from {module} import "))
+                && trimmed.contains("TypeVarTuple"))
+    })
+}
+
+fn has_unpack_import(source: &str, from_typing_extensions: bool) -> bool {
+    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == format!("from {module} import Unpack")
+            || (trimmed.starts_with(&format!("from {module} import "))
+                && trimmed.contains("Unpack"))
+    })
+}
+
 fn rewrite_typevar_import_line(from_typing_extensions: bool) -> String {
     if from_typing_extensions {
         String::from("from typing_extensions import TypeVar")
@@ -847,6 +925,32 @@ fn rewrite_paramspec_import_line(from_typing_extensions: bool) -> String {
     } else {
         String::from("from typing import ParamSpec")
     }
+}
+
+fn rewrite_typevartuple_import_line(from_typing_extensions: bool) -> String {
+    if from_typing_extensions {
+        String::from("from typing_extensions import TypeVarTuple")
+    } else {
+        String::from("from typing import TypeVarTuple")
+    }
+}
+
+fn rewrite_unpack_import_line(from_typing_extensions: bool) -> String {
+    if from_typing_extensions {
+        String::from("from typing_extensions import Unpack")
+    } else {
+        String::from("from typing import Unpack")
+    }
+}
+
+fn has_unqualified_symbol_usage(source: &str, symbol: &str) -> bool {
+    let needle = format!("{symbol}[");
+    source.match_indices(&needle).any(|(index, _)| {
+        source[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|prev| !(prev.is_ascii_alphanumeric() || prev == '_' || prev == '.'))
+    })
 }
 
 fn has_generic_import(source: &str) -> bool {
@@ -2401,6 +2505,92 @@ mod tests {
     }
 
     #[test]
+    fn lower_rewrites_typevartuple_helpers_for_target_python_310() {
+        let lowered = lower_with_options(
+            &SyntaxTree {
+                source: SourceFile {
+                    path: PathBuf::from("typevartuple-310.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: String::from("typealias Pack = tuple[Unpack[Ts]]\n"),
+                },
+                statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("Pack"),
+                    type_params: vec![TypeParam {
+                        name: String::from("Ts"),
+                        kind: TypeParamKind::TypeVarTuple,
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
+                    value: String::from("tuple[Unpack[Ts]]"),
+                    line: 1,
+                })],
+                type_ignore_directives: Vec::new(),
+                diagnostics: DiagnosticReport::default(),
+            },
+            &LoweringOptions { target_python: String::from("3.10") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        );
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![
+                String::from("from typing_extensions import TypeVarTuple"),
+                String::from("from typing_extensions import Unpack"),
+                String::from("from typing import TypeAlias"),
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_typevartuple_helpers_for_target_python_311() {
+        let lowered = lower_with_options(
+            &SyntaxTree {
+                source: SourceFile {
+                    path: PathBuf::from("typevartuple-311.tpy"),
+                    kind: SourceKind::TypePython,
+                    logical_module: String::new(),
+                    text: String::from("typealias Pack = tuple[Unpack[Ts]]\n"),
+                },
+                statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("Pack"),
+                    type_params: vec![TypeParam {
+                        name: String::from("Ts"),
+                        kind: TypeParamKind::TypeVarTuple,
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
+                    value: String::from("tuple[Unpack[Ts]]"),
+                    line: 1,
+                })],
+                type_ignore_directives: Vec::new(),
+                diagnostics: DiagnosticReport::default(),
+            },
+            &LoweringOptions { target_python: String::from("3.11") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing import TypeVarTuple\nfrom typing import Unpack\nTs = TypeVarTuple(\"Ts\")\nfrom typing import TypeAlias\nPack: TypeAlias = tuple[Unpack[Ts]]\n"
+        );
+        assert_eq!(
+            lowered.module.required_imports,
+            vec![
+                String::from("from typing import TypeVarTuple"),
+                String::from("from typing import Unpack"),
+                String::from("from typing import TypeAlias"),
+            ]
+        );
+    }
+
+    #[test]
     fn lower_quotes_hoisted_type_param_bounds_for_runtime_imports() {
         let lowered = lower(&SyntaxTree {
             source: SourceFile {
@@ -2680,6 +2870,30 @@ mod tests {
         );
         assert!(lowered.module.python_source.contains("from typing_extensions import deprecated"));
         assert!(!lowered.module.python_source.contains("from warnings import deprecated"));
+    }
+
+    #[test]
+    fn lower_rewrites_variadic_generic_compat_import_sources_for_target_python_310() {
+        let lowered = lower_with_options(
+            &parse(SourceFile {
+                path: PathBuf::from("compat-variadics.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "from typing import TypeVarTuple, Unpack\nTs = TypeVarTuple(\"Ts\")\nvalue: typing.Unpack[Ts]\n",
+                ),
+            }),
+            &LoweringOptions { target_python: String::from("3.10") },
+        );
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(
+            lowered
+                .module
+                .python_source
+                .contains("from typing_extensions import TypeVarTuple, Unpack")
+        );
+        assert!(lowered.module.python_source.contains("value: typing_extensions.Unpack[Ts]"));
     }
 
     #[test]
