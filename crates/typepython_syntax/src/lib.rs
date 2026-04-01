@@ -3715,6 +3715,103 @@ fn render_type_param(type_param: &TypeParam) -> String {
     rendered
 }
 
+pub fn normalize_source_variadic_type_syntax(text: &str) -> String {
+    let mut normalized = String::new();
+    let mut index = 0usize;
+
+    while index < text.len() {
+        let mut characters = text[index..].chars();
+        let Some(character) = characters.next() else {
+            break;
+        };
+        if character != '*' {
+            normalized.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        if text[index + character.len_utf8()..].starts_with('*') {
+            normalized.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+
+        let previous = previous_significant_char(text, index);
+        let Some((operand_start, operand_end, delimiter)) =
+            variadic_unpack_operand_bounds(text, index + character.len_utf8())
+        else {
+            normalized.push(character);
+            index += character.len_utf8();
+            continue;
+        };
+        let operand = text[operand_start..operand_end].trim();
+        if operand.is_empty()
+            || matches!(delimiter, Some(':')) && matches!(previous, None | Some('(') | Some(','))
+            || !matches!(previous, None | Some('[') | Some(',') | Some(':') | Some('>') | Some('='))
+        {
+            normalized.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+
+        normalized.push_str("Unpack[");
+        normalized.push_str(operand);
+        normalized.push(']');
+        index = operand_end;
+    }
+
+    normalized
+}
+
+fn previous_significant_char(text: &str, end: usize) -> Option<char> {
+    text[..end].chars().rev().find(|character| !character.is_whitespace())
+}
+
+fn variadic_unpack_operand_bounds(
+    text: &str,
+    start: usize,
+) -> Option<(usize, usize, Option<char>)> {
+    let mut operand_start = start;
+    while let Some(character) = text[operand_start..].chars().next() {
+        if !character.is_whitespace() {
+            break;
+        }
+        operand_start += character.len_utf8();
+    }
+    if operand_start >= text.len() {
+        return None;
+    }
+
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut operand_end = text.len();
+    let mut delimiter = None;
+
+    for (offset, character) in text[operand_start..].char_indices() {
+        if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 {
+            match character {
+                ',' | ']' | ')' | ':' | '=' => {
+                    operand_end = operand_start + offset;
+                    delimiter = Some(character);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        match character {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    Some((operand_start, operand_end, delimiter))
+}
+
 fn extract_ast_backed_statements(
     path: &Path,
     current_module_key: &str,
@@ -6947,21 +7044,18 @@ fn extract_ast_type_params(
                         .map(str::to_owned),
                 });
             }
-            AstTypeParam::TypeVarTuple(_) => {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "TPY4010",
-                        format!("{label} uses deferred-beyond-v1 type parameter syntax"),
-                    )
-                    .with_span(Span::new(
-                        path.display().to_string(),
-                        line,
-                        1,
-                        line,
-                        1,
-                    )),
-                );
-                return None;
+            AstTypeParam::TypeVarTuple(type_var_tuple) => {
+                parsed.push(TypeParam {
+                    kind: TypeParamKind::TypeVarTuple,
+                    name: type_var_tuple.name.as_str().to_owned(),
+                    bound: None,
+                    constraints: Vec::new(),
+                    default: type_var_tuple
+                        .default
+                        .as_ref()
+                        .and_then(|default| slice_range(source, default.range()))
+                        .map(str::to_owned),
+                });
             }
         }
     }
@@ -7708,13 +7802,8 @@ fn parse_type_param(
     };
     let (kind, item) = if let Some(item) = item.strip_prefix("**") {
         (TypeParamKind::ParamSpec, item.trim())
-    } else if item.starts_with('*') {
-        return Err(Box::new(parse_error(
-            path,
-            line_number,
-            line,
-            format!("{label} uses deferred-beyond-v1 type parameter syntax"),
-        )));
+    } else if let Some(item) = item.strip_prefix('*') {
+        (TypeParamKind::TypeVarTuple, item.trim())
     } else {
         (TypeParamKind::TypeVar, item)
     };
@@ -7737,6 +7826,14 @@ fn parse_type_param(
             line_number,
             line,
             format!("{label} ParamSpec `{name_part}` must not declare bounds or constraints"),
+        )));
+    }
+    if kind == TypeParamKind::TypeVarTuple && bound_or_constraints.is_some() {
+        return Err(Box::new(parse_error(
+            path,
+            line_number,
+            line,
+            format!("{label} TypeVarTuple `{name_part}` must not declare bounds or constraints"),
         )));
     }
 
@@ -9331,6 +9428,32 @@ mod tests {
             ]),
             "[*Ts, R]"
         );
+    }
+
+    #[test]
+    fn parse_accepts_source_authored_typevartuple_syntax() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("variadic.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "typealias Pack[*Ts] = tuple[*Ts]\n\ndef collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());
+        let SyntaxStatement::TypeAlias(alias) = &tree.statements[0] else {
+            panic!("expected type alias");
+        };
+        assert_eq!(alias.type_params[0].kind, TypeParamKind::TypeVarTuple);
+        assert_eq!(alias.value, "tuple[*Ts]");
+
+        let SyntaxStatement::FunctionDef(function) = &tree.statements[1] else {
+            panic!("expected function definition");
+        };
+        assert_eq!(function.type_params[0].kind, TypeParamKind::TypeVarTuple);
+        assert_eq!(function.params[0].annotation.as_deref(), Some("*Ts"));
+        assert_eq!(function.returns.as_deref(), Some("tuple[*Ts]"));
     }
 
     #[test]

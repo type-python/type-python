@@ -542,7 +542,11 @@ pub(super) fn direct_call_type_diagnostics(
             }
             if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
                 && function.type_params.iter().any(|type_param| {
-                    type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec
+                    matches!(
+                        type_param.kind,
+                        typepython_binding::GenericTypeParamKind::ParamSpec
+                            | typepython_binding::GenericTypeParamKind::TypeVarTuple
+                    )
                 })
             {
                 return vec![

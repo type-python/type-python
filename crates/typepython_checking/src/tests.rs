@@ -8774,6 +8774,26 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
 }
 
 #[test]
+fn check_accepts_source_authored_typevartuple_call_inference() {
+    let result = check_temp_typepython_source(
+        "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n\nvalue: tuple[int, str] = collect(1, \"x\")\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_unresolved_source_authored_typevartuple_call() {
+    let result = check_temp_typepython_source(
+        "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n\nitems: list[int] = [1, 2]\nvalue = collect(*items)\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4014"), "{rendered}");
+    assert!(rendered.contains("generic parameter list of `collect` could not be resolved"));
+}
+
+#[test]
 fn check_rejects_generic_function_call_outside_constraint_list() {
     let result = check_temp_typepython_source(
         "def choose[T: (str, bytes)](value: T) -> T:\n    return value\n\nbad: int = choose(1)\n",

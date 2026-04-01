@@ -673,7 +673,7 @@ fn normalize_import_from_line(
 }
 
 fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) -> String {
-    let mut normalized = text.to_owned();
+    let mut normalized = typepython_syntax::normalize_source_variadic_type_syntax(text);
     let target_python = options.target_python.trim();
 
     normalized = normalized.replace("warnings.deprecated", "typing_extensions.deprecated");
@@ -2587,6 +2587,22 @@ mod tests {
                 String::from("from typing import Unpack"),
                 String::from("from typing import TypeAlias"),
             ]
+        );
+    }
+
+    #[test]
+    fn lower_rewrites_source_authored_typevartuple_headers() {
+        let lowered = lower(&parse(SourceFile {
+            path: PathBuf::from("source-typevartuple.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from("def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n"),
+        }));
+
+        assert!(lowered.diagnostics.is_empty(), "{}", lowered.diagnostics.as_text());
+        assert_eq!(
+            lowered.module.python_source,
+            "from typing_extensions import TypeVarTuple\nfrom typing_extensions import Unpack\nTs = TypeVarTuple(\"Ts\")\ndef collect(*args: Unpack[Ts]) -> tuple[Unpack[Ts]]:\n    return args\n"
         );
     }
 

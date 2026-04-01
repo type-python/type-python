@@ -2416,10 +2416,28 @@ pub(super) fn resolve_nominal_getitem_return_type(
 }
 
 pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
-    let param_names = direct_param_names(signature)?;
-    let param_types = direct_param_types(signature)?;
-    param_names.iter().zip(param_types.iter()).find_map(|(param_name, param_type)| {
-        (param_name == value_name).then_some(normalize_type_text(param_type))
+    direct_signature_params(signature)?.into_iter().find_map(|param| {
+        if param.name != value_name {
+            return None;
+        }
+        let annotation = normalize_type_text(&param.annotation);
+        Some(if param.variadic {
+            if annotation.is_empty() {
+                String::from("tuple[dynamic, ...]")
+            } else if annotation.starts_with("Unpack[") {
+                format!("tuple[{annotation}]")
+            } else {
+                format!("tuple[{annotation}, ...]")
+            }
+        } else if param.keyword_variadic {
+            if annotation.is_empty() {
+                String::from("dict[str, dynamic]")
+            } else {
+                format!("dict[str, {annotation}]")
+            }
+        } else {
+            annotation
+        })
     })
 }
 

@@ -24,7 +24,8 @@ pub(crate) enum CallableParamExpr {
 
 impl TypeExpr {
     pub(crate) fn parse(text: &str) -> Option<Self> {
-        parse_type_expr(text)
+        let normalized = typepython_syntax::normalize_source_variadic_type_syntax(text);
+        parse_type_expr(&normalized)
     }
 
     pub(crate) fn render(&self) -> String {
@@ -104,7 +105,8 @@ pub(crate) fn normalize_callable_param_expr(params: &str) -> String {
 }
 
 pub(crate) fn normalize_type_text(text: &str) -> String {
-    let text = text.trim();
+    let normalized_source = typepython_syntax::normalize_source_variadic_type_syntax(text);
+    let text = normalized_source.trim();
     if text.is_empty() {
         return String::new();
     }
