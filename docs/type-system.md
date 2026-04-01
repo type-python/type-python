@@ -174,7 +174,22 @@ Once a default appears, all subsequent type parameters must also have defaults.
 def decorator[**P, R](fn: Callable[P, R]) -> Callable[P, R]: ...
 ```
 
-Source-authored `TypeVarTuple` (`*Ts`) syntax is currently deferred and rejected with `TPY4010`.
+### `TypeVarTuple`
+
+```python
+typealias Pack[*Ts] = tuple[*Ts]
+
+def collect[*Ts](*args: *Ts) -> tuple[*Ts]:
+    return args
+```
+
+TypePython supports source-authored `TypeVarTuple` (`*Ts`) syntax for inline variadic generics, tuple aliases, and variadic positional calls.
+
+Current limits:
+
+- Inference requires a fixed positional shape at the call site.
+- Calls that only expose an open-ended starred iterable such as `collect(*items)` with `items: list[int]` remain unresolved and report `TPY4014`.
+- Higher-order combinations beyond this minimum path, especially arbitrary `ParamSpec` + `TypeVarTuple` interactions, are still incomplete.
 
 ### `Self` type
 

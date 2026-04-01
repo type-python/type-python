@@ -344,7 +344,20 @@ def decorator[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
 
 ### TypeVarTuple
 
-Imported `TypeVarTuple` constructs can participate in typing, but source-authored `*Ts` syntax is currently rejected with `TPY4010`.
+TypePython supports source-authored `TypeVarTuple` syntax:
+
+```python
+typealias Pack[*Ts] = tuple[*Ts]
+
+def collect[*Ts](*args: *Ts) -> tuple[*Ts]:
+    return args
+```
+
+Current limits:
+
+- Variadic pack inference works when the call site exposes a fixed positional shape.
+- Open-ended starred iterables such as `collect(*items)` with `items: list[int]` still report `TPY4014`.
+- More advanced higher-order pack algebra is not complete yet.
 
 ## Async Support
 

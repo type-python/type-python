@@ -90,7 +90,7 @@ class Box[T]: ...
 typealias Pair[T] = tuple[T, T]
 ```
 
-Including upper bounds (`T: Base`), constraint lists (`T: (A, B, C)`), defaults (`T = int`), and `ParamSpec` (`**P`). Source-authored `TypeVarTuple` (`*Ts`) syntax is currently deferred.
+Including upper bounds (`T: Base`), constraint lists (`T: (A, B, C)`), defaults (`T = int`), `ParamSpec` (`**P`), and `TypeVarTuple` (`*Ts`) for variadic tuple-style generics. Open-ended starred iterables can still fall back to `TPY4014` when the pack shape cannot be inferred.
 
 ## Build and Tooling
 

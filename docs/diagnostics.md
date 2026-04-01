@@ -109,11 +109,11 @@ This is the largest category, covering all type checking rules.
 | `TPY4007` | error | Direct instantiation of abstract class |
 | `TPY4008` | error | Unimplemented abstract methods in concrete subclass |
 | `TPY4009` | error | Non-exhaustive `match` on sealed class or enum |
-| `TPY4010` | error | Deferred-beyond-v1 type parameter syntax in source |
+| `TPY4010` | error | Deferred-beyond-v1 syntax in source |
 | `TPY4011` | error | Invalid assignment or deletion target |
 | `TPY4012` | error | Ambiguous overload resolution (multiple overloads match) |
 | `TPY4013` | error | Invalid TypedDict literal or keyword expansion |
-| `TPY4014` | error | Generic parameter list could not be resolved from a call |
+| `TPY4014` | error | Generic parameter list could not be resolved from a call, including unresolved `ParamSpec` or `TypeVarTuple` packs |
 | `TPY4015` | warning | Incomplete exported type surface (`dynamic`/`unknown` in public API) |
 | `TPY4016` | error | Mutation of read-only TypedDict field |
 | `TPY4017` | error | Invalid TypedDict transform target or key selection |
