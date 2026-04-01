@@ -10,11 +10,15 @@ use glob::Pattern;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
-use typepython_binding::bind;
-use typepython_checking::check_with_options;
+use typepython_binding::{BindingTable, bind};
+use typepython_checking::check_modules_with_source_overrides;
 use typepython_config::ConfigHandle;
-use typepython_diagnostics::{DiagnosticReport, Severity};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
 use typepython_graph::{ModuleGraph, ModuleNode, build};
+use typepython_incremental::{
+    IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff, snapshot,
+    snapshot_diff_modules,
+};
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
     apply_type_ignore_directives, parse_with_options,
@@ -87,6 +91,35 @@ struct WorkspaceState {
     graph: ModuleGraph,
 }
 
+#[derive(Debug, Clone)]
+struct CachedDocument {
+    source: DiscoveredSource,
+    syntax: SyntaxTree,
+    binding: BindingTable,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SupportSourceCatalog {
+    sources_by_module: BTreeMap<String, Vec<DiscoveredSource>>,
+}
+
+#[derive(Debug)]
+struct IncrementalWorkspace {
+    config: ConfigHandle,
+    include_patterns: Vec<Pattern>,
+    exclude_patterns: Vec<Pattern>,
+    source_roots: Vec<PathBuf>,
+    support_catalog: SupportSourceCatalog,
+    project_documents: BTreeMap<PathBuf, CachedDocument>,
+    support_documents: BTreeMap<PathBuf, CachedDocument>,
+    active_support_paths: BTreeSet<PathBuf>,
+    check_diagnostics_by_module: BTreeMap<String, Vec<Diagnostic>>,
+    incremental: IncrementalState,
+    dependency_index: ModuleDependencyIndex,
+    parse_blocked: bool,
+    state: WorkspaceState,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 struct LspPosition {
     line: u32,
@@ -122,10 +155,431 @@ struct LspTextEdit {
     new_text: String,
 }
 
+impl SupportSourceCatalog {
+    fn new(config: &ConfigHandle) -> Result<Self, LspError> {
+        let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
+        support_sources.extend(external_resolution_sources(config)?);
+        let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
+        for source in support_sources {
+            sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
+        }
+        Ok(Self { sources_by_module })
+    }
+}
+
+impl IncrementalWorkspace {
+    fn new(
+        config: ConfigHandle,
+        overlays: &BTreeMap<PathBuf, OverlayDocument>,
+    ) -> Result<Self, LspError> {
+        let include_patterns = compile_patterns(&config, &config.config.project.include)?;
+        let exclude_patterns = compile_patterns(&config, &config.config.project.exclude)?;
+        let source_roots = config
+            .config
+            .project
+            .src
+            .iter()
+            .map(|root| config.resolve_relative_path(root))
+            .collect();
+        let support_catalog = SupportSourceCatalog::new(&config)?;
+
+        let mut project_documents = BTreeMap::new();
+        for source in collect_project_source_paths(&config, overlays)? {
+            let syntax = parse_discovered_source(
+                &source,
+                overlays.get(&source.path).map(|overlay| overlay.text.as_str()),
+                config.config.typing.conditional_returns,
+            )?;
+            project_documents.insert(
+                source.path.clone(),
+                CachedDocument { binding: bind(&syntax), source, syntax },
+            );
+        }
+
+        let mut workspace = Self {
+            config,
+            include_patterns,
+            exclude_patterns,
+            source_roots,
+            support_catalog,
+            project_documents,
+            support_documents: BTreeMap::new(),
+            active_support_paths: BTreeSet::new(),
+            check_diagnostics_by_module: BTreeMap::new(),
+            incremental: IncrementalState::default(),
+            dependency_index: ModuleDependencyIndex::default(),
+            parse_blocked: false,
+            state: empty_workspace_state(),
+        };
+        let direct_changes = workspace
+            .project_documents
+            .values()
+            .map(|document| document.source.logical_module.clone())
+            .collect();
+        workspace.sync_support_documents()?;
+        workspace.rebuild_state(direct_changes, true)?;
+        Ok(workspace)
+    }
+
+    fn workspace(&self) -> &WorkspaceState {
+        &self.state
+    }
+
+    fn apply_project_path_update(
+        &mut self,
+        path: &Path,
+        overlay: Option<&OverlayDocument>,
+    ) -> Result<(), LspError> {
+        let direct_changes = self.update_project_document(path, overlay)?;
+        self.sync_support_documents()?;
+        self.rebuild_state(direct_changes, false)
+    }
+
+    fn update_project_document(
+        &mut self,
+        path: &Path,
+        overlay: Option<&OverlayDocument>,
+    ) -> Result<BTreeSet<String>, LspError> {
+        let mut direct_changes = BTreeSet::new();
+        if let Some(existing) = self.project_documents.get(path) {
+            direct_changes.insert(existing.source.logical_module.clone());
+        }
+
+        let next_source = self.project_source_for_path(path)?;
+        match next_source {
+            Some(source) => {
+                let syntax = parse_discovered_source(
+                    &source,
+                    overlay.map(|document| document.text.as_str()),
+                    self.config.config.typing.conditional_returns,
+                )?;
+                direct_changes.insert(source.logical_module.clone());
+                self.project_documents.insert(
+                    source.path.clone(),
+                    CachedDocument { binding: bind(&syntax), source, syntax },
+                );
+            }
+            None => {
+                self.project_documents.remove(path);
+            }
+        }
+
+        Ok(direct_changes)
+    }
+
+    fn project_source_for_path(&self, path: &Path) -> Result<Option<DiscoveredSource>, LspError> {
+        let Some(kind) = SourceKind::from_path(path) else {
+            return Ok(None);
+        };
+        if !is_selected_source_path(
+            &self.config,
+            path,
+            &self.include_patterns,
+            &self.exclude_patterns,
+        )? {
+            return Ok(None);
+        }
+        let Some(root) = source_root_for_path_from_roots(&self.source_roots, path) else {
+            return Ok(None);
+        };
+        let Some(logical_module) = logical_module_path(&root, path) else {
+            return Ok(None);
+        };
+        Ok(Some(DiscoveredSource { path: path.to_path_buf(), kind, logical_module }))
+    }
+
+    fn sync_support_documents(&mut self) -> Result<(), LspError> {
+        let project_syntax_trees = self
+            .project_documents
+            .values()
+            .map(|document| document.syntax.clone())
+            .collect::<Vec<_>>();
+        let project_modules = project_syntax_trees
+            .iter()
+            .map(|tree| tree.source.logical_module.clone())
+            .collect::<BTreeSet<_>>();
+        let external_import_paths = collect_import_source_paths(&project_syntax_trees)
+            .into_iter()
+            .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
+            .collect::<Vec<_>>();
+
+        let mut queued_modules = BTreeSet::new();
+        let mut queue = VecDeque::new();
+        for import_path in external_import_paths {
+            for module_key in
+                matching_support_module_keys(&import_path, &self.support_catalog.sources_by_module)
+            {
+                if queued_modules.insert(module_key.clone()) {
+                    queue.push_back(module_key);
+                }
+            }
+        }
+
+        let mut active_support_paths = BTreeSet::new();
+        while let Some(module_key) = queue.pop_front() {
+            let Some(module_sources) =
+                self.support_catalog.sources_by_module.get(&module_key).cloned()
+            else {
+                continue;
+            };
+            for source in module_sources {
+                self.ensure_support_document(&source)?;
+                active_support_paths.insert(source.path.clone());
+                let document = self
+                    .support_documents
+                    .get(&source.path)
+                    .expect("support document should be loaded");
+                for import_path in
+                    collect_import_source_paths(std::slice::from_ref(&document.syntax))
+                {
+                    for nested_module_key in matching_support_module_keys(
+                        &import_path,
+                        &self.support_catalog.sources_by_module,
+                    ) {
+                        if queued_modules.insert(nested_module_key.clone()) {
+                            queue.push_back(nested_module_key);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.active_support_paths = active_support_paths;
+        Ok(())
+    }
+
+    fn ensure_support_document(&mut self, source: &DiscoveredSource) -> Result<(), LspError> {
+        if self.support_documents.contains_key(&source.path) {
+            return Ok(());
+        }
+
+        let syntax =
+            parse_discovered_source(source, None, self.config.config.typing.conditional_returns)?;
+        self.support_documents.insert(
+            source.path.clone(),
+            CachedDocument { binding: bind(&syntax), source: source.clone(), syntax },
+        );
+        Ok(())
+    }
+
+    fn active_cached_documents(&self) -> Vec<&CachedDocument> {
+        let mut documents = self.project_documents.values().collect::<Vec<_>>();
+        documents.extend(
+            self.support_documents
+                .iter()
+                .filter(|(path, _)| self.active_support_paths.contains(*path))
+                .map(|(_, document)| document),
+        );
+        documents.sort_by(|left, right| left.source.path.cmp(&right.source.path));
+        documents
+    }
+
+    fn active_syntax_trees(&self) -> Vec<SyntaxTree> {
+        self.active_cached_documents().into_iter().map(|document| document.syntax.clone()).collect()
+    }
+
+    fn active_bindings(&self) -> Vec<BindingTable> {
+        self.active_cached_documents()
+            .into_iter()
+            .map(|document| document.binding.clone())
+            .collect()
+    }
+
+    fn active_source_overrides(&self) -> BTreeMap<String, String> {
+        self.active_cached_documents()
+            .into_iter()
+            .map(|document| {
+                (document.source.path.display().to_string(), document.syntax.source.text.clone())
+            })
+            .collect()
+    }
+
+    fn rebuild_state(
+        &mut self,
+        direct_changes: BTreeSet<String>,
+        force_full_check: bool,
+    ) -> Result<(), LspError> {
+        let syntax_trees = self.active_syntax_trees();
+        let bindings = self.active_bindings();
+        let graph = build(&bindings);
+        let current_module_keys =
+            graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
+        let current_incremental = snapshot(&graph);
+        let current_dependency_index = dependency_index(&graph);
+        let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
+        apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
+        let has_parse_errors = parse_diagnostics.has_errors();
+        self.check_diagnostics_by_module
+            .retain(|module_key, _| current_module_keys.contains(module_key));
+
+        if !has_parse_errors {
+            let source_overrides = self.active_source_overrides();
+            if force_full_check || self.parse_blocked {
+                self.check_diagnostics_by_module = check_modules_with_source_overrides(
+                    &graph,
+                    &current_module_keys,
+                    self.config.config.typing.require_explicit_overrides,
+                    self.config.config.typing.enable_sealed_exhaustiveness,
+                    self.config.config.typing.report_deprecated,
+                    self.config.config.typing.strict,
+                    self.config.config.typing.warn_unsafe,
+                    self.config.config.typing.imports,
+                    Some(&source_overrides),
+                )
+                .diagnostics_by_module;
+            } else {
+                let snapshot_diff = diff(&self.incremental, &current_incremental);
+                let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
+                let affected = affected_modules(
+                    Some(&self.dependency_index),
+                    &current_dependency_index,
+                    &direct_changes,
+                    &summary_changed_modules,
+                );
+                let rechecked_modules = affected
+                    .into_iter()
+                    .filter(|module_key| current_module_keys.contains(module_key))
+                    .collect::<BTreeSet<_>>();
+                if !rechecked_modules.is_empty() {
+                    let module_result = check_modules_with_source_overrides(
+                        &graph,
+                        &rechecked_modules,
+                        self.config.config.typing.require_explicit_overrides,
+                        self.config.config.typing.enable_sealed_exhaustiveness,
+                        self.config.config.typing.report_deprecated,
+                        self.config.config.typing.strict,
+                        self.config.config.typing.warn_unsafe,
+                        self.config.config.typing.imports,
+                        Some(&source_overrides),
+                    );
+                    for (module_key, diagnostics) in module_result.diagnostics_by_module {
+                        self.check_diagnostics_by_module.insert(module_key, diagnostics);
+                    }
+                }
+                for removed in snapshot_diff.removed {
+                    self.check_diagnostics_by_module.remove(&removed.module_key);
+                }
+            }
+        }
+
+        let mut diagnostics = parse_diagnostics.clone();
+        if !has_parse_errors {
+            diagnostics.diagnostics.extend(
+                self.check_diagnostics_by_module
+                    .values()
+                    .flat_map(|module_diagnostics| module_diagnostics.iter().cloned()),
+            );
+            apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
+        }
+
+        self.state = build_workspace_state(syntax_trees, diagnostics, graph);
+        self.incremental = current_incremental;
+        self.dependency_index = current_dependency_index;
+        self.parse_blocked = has_parse_errors;
+        Ok(())
+    }
+}
+
+fn empty_workspace_state() -> WorkspaceState {
+    WorkspaceState {
+        documents: Vec::new(),
+        diagnostics_by_uri: BTreeMap::new(),
+        occurrences: Vec::new(),
+        declarations_by_canonical: BTreeMap::new(),
+        graph: ModuleGraph::default(),
+    }
+}
+
+fn parse_discovered_source(
+    source: &DiscoveredSource,
+    overlay_text: Option<&str>,
+    enable_conditional_returns: bool,
+) -> Result<SyntaxTree, LspError> {
+    let mut source_file = if let Some(text) = overlay_text {
+        SourceFile {
+            path: source.path.clone(),
+            kind: source.kind,
+            logical_module: source.logical_module.clone(),
+            text: text.to_owned(),
+        }
+    } else {
+        let mut source_file = SourceFile::from_path(&source.path)
+            .with_context(|| format!("unable to read {}", source.path.display()))?;
+        source_file.logical_module = source.logical_module.clone();
+        source_file
+    };
+    source_file.logical_module = source.logical_module.clone();
+    Ok(parse_with_options(source_file, ParseOptions { enable_conditional_returns }))
+}
+
+fn source_root_for_path_from_roots(source_roots: &[PathBuf], path: &Path) -> Option<PathBuf> {
+    source_roots.iter().find(|root| path.starts_with(root)).cloned()
+}
+
+fn build_workspace_state(
+    syntax_trees: Vec<SyntaxTree>,
+    diagnostics: DiagnosticReport,
+    graph: ModuleGraph,
+) -> WorkspaceState {
+    let mut documents = syntax_trees
+        .into_iter()
+        .map(|syntax| {
+            let text = syntax.source.text.clone();
+            let uri = path_to_uri(&syntax.source.path);
+            DocumentState {
+                uri,
+                path: syntax.source.path.clone(),
+                text,
+                syntax,
+                local_symbols: BTreeMap::new(),
+                local_value_types: BTreeMap::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut declarations = Vec::new();
+    let mut member_symbols = BTreeMap::<String, Vec<String>>::new();
+    for document in &mut documents {
+        let (local_symbols, declared) = collect_declarations(document);
+        let local_value_types = collect_local_value_types(document, &local_symbols);
+        for occurrence in &declared {
+            if occurrence.canonical.matches('.').count() >= 2 {
+                member_symbols
+                    .entry(occurrence.name.clone())
+                    .or_default()
+                    .push(occurrence.canonical.clone());
+            }
+        }
+        document.local_symbols = local_symbols;
+        document.local_value_types = local_value_types;
+        declarations.extend(declared);
+    }
+
+    let mut declarations_by_canonical = BTreeMap::new();
+    for occurrence in &declarations {
+        declarations_by_canonical
+            .entry(occurrence.canonical.clone())
+            .or_insert_with(|| occurrence.clone());
+    }
+
+    let mut occurrences = declarations.clone();
+    for document in &documents {
+        occurrences.extend(collect_reference_occurrences(
+            document,
+            &member_symbols,
+            &declarations_by_canonical,
+        ));
+    }
+    dedupe_occurrences(&mut occurrences);
+
+    let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
+    WorkspaceState { documents, diagnostics_by_uri, occurrences, declarations_by_canonical, graph }
+}
+
 struct Server {
     config: ConfigHandle,
     overlays: BTreeMap<PathBuf, OverlayDocument>,
-    cached_workspace: Option<WorkspaceState>,
+    cached_workspace: Option<IncrementalWorkspace>,
     shutdown_requested: bool,
     exited: bool,
 }
@@ -262,11 +716,16 @@ impl Server {
         let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
             LspError::Other(String::from("TPY6002: didOpen missing document version"))
         })?;
+        let path = uri_to_path(uri)?;
         self.overlays.insert(
-            uri_to_path(uri)?,
+            path.clone(),
             OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
         );
-        self.cached_workspace = None;
+        if let Some(workspace) = self.cached_workspace.as_mut() {
+            let overlay =
+                self.overlays.get(&path).expect("opened overlay should be available in cache");
+            workspace.apply_project_path_update(&path, Some(overlay))?;
+        }
         Ok(())
     }
 
@@ -313,9 +772,15 @@ impl Server {
             .get("text")
             .and_then(Value::as_str)
             .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
-        self.overlays
-            .insert(path, OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version });
-        self.cached_workspace = None;
+        self.overlays.insert(
+            path.clone(),
+            OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
+        );
+        if let Some(workspace) = self.cached_workspace.as_mut() {
+            let overlay =
+                self.overlays.get(&path).expect("changed overlay should be available in cache");
+            workspace.apply_project_path_update(&path, Some(overlay))?;
+        }
         Ok(())
     }
 
@@ -332,7 +797,9 @@ impl Server {
                 uri
             )));
         }
-        self.cached_workspace = None;
+        if let Some(workspace) = self.cached_workspace.as_mut() {
+            workspace.apply_project_path_update(&path, None)?;
+        }
         Ok(vec![publish_diagnostics_notification(uri, Vec::new())])
     }
 
@@ -482,102 +949,10 @@ impl Server {
 
     fn workspace(&mut self) -> Result<&WorkspaceState, LspError> {
         if self.cached_workspace.is_none() {
-            self.cached_workspace = Some(self.rebuild_workspace()?);
+            self.cached_workspace =
+                Some(IncrementalWorkspace::new(self.config.clone(), &self.overlays)?);
         }
-        Ok(self.cached_workspace.as_ref().expect("workspace cache should be populated"))
-    }
-
-    fn rebuild_workspace(&self) -> Result<WorkspaceState, LspError> {
-        let project_sources = collect_project_source_paths(&self.config, &self.overlays)?;
-        let mut syntax_trees = load_syntax_trees(
-            &project_sources,
-            &self.overlays,
-            self.config.config.typing.conditional_returns,
-        )?;
-        let support_syntax_trees = load_support_syntax_trees(&self.config, &syntax_trees)?;
-        syntax_trees.extend(support_syntax_trees);
-
-        let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
-        apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
-        let mut diagnostics = parse_diagnostics.clone();
-        let bindings = syntax_trees.iter().map(bind).collect::<Vec<_>>();
-        let graph = build(&bindings);
-        if !parse_diagnostics.has_errors() {
-            diagnostics.diagnostics.extend(
-                check_with_options(
-                    &graph,
-                    self.config.config.typing.require_explicit_overrides,
-                    self.config.config.typing.enable_sealed_exhaustiveness,
-                    self.config.config.typing.report_deprecated,
-                    self.config.config.typing.strict,
-                    self.config.config.typing.warn_unsafe,
-                    self.config.config.typing.imports,
-                )
-                .diagnostics
-                .diagnostics,
-            );
-            apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-        }
-
-        let mut documents = syntax_trees
-            .into_iter()
-            .map(|syntax| {
-                let text = syntax.source.text.clone();
-                let uri = path_to_uri(&syntax.source.path);
-                DocumentState {
-                    uri,
-                    path: syntax.source.path.clone(),
-                    text,
-                    syntax,
-                    local_symbols: BTreeMap::new(),
-                    local_value_types: BTreeMap::new(),
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let mut declarations = Vec::new();
-        let mut member_symbols = BTreeMap::<String, Vec<String>>::new();
-        for document in &mut documents {
-            let (local_symbols, declared) = collect_declarations(document);
-            let local_value_types = collect_local_value_types(document, &local_symbols);
-            for occurrence in &declared {
-                if occurrence.canonical.matches('.').count() >= 2 {
-                    member_symbols
-                        .entry(occurrence.name.clone())
-                        .or_default()
-                        .push(occurrence.canonical.clone());
-                }
-            }
-            document.local_symbols = local_symbols;
-            document.local_value_types = local_value_types;
-            declarations.extend(declared);
-        }
-
-        let mut declarations_by_canonical = BTreeMap::new();
-        for occurrence in &declarations {
-            declarations_by_canonical
-                .entry(occurrence.canonical.clone())
-                .or_insert_with(|| occurrence.clone());
-        }
-
-        let mut occurrences = declarations.clone();
-        for document in &documents {
-            occurrences.extend(collect_reference_occurrences(
-                document,
-                &member_symbols,
-                &declarations_by_canonical,
-            ));
-        }
-        dedupe_occurrences(&mut occurrences);
-
-        let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
-        Ok(WorkspaceState {
-            documents,
-            diagnostics_by_uri,
-            occurrences,
-            declarations_by_canonical,
-            graph,
-        })
+        Ok(self.cached_workspace.as_ref().expect("workspace cache should be populated").workspace())
     }
 }
 
@@ -2241,83 +2616,6 @@ fn collect_project_source_paths(
     Ok(local_sources)
 }
 
-fn load_support_syntax_trees(
-    config: &ConfigHandle,
-    surface_syntax_trees: &[SyntaxTree],
-) -> Result<Vec<SyntaxTree>> {
-    let project_modules = surface_syntax_trees
-        .iter()
-        .map(|tree| tree.source.logical_module.clone())
-        .collect::<BTreeSet<_>>();
-    let import_paths = collect_import_source_paths(surface_syntax_trees);
-    let external_import_paths = import_paths
-        .into_iter()
-        .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
-        .collect::<Vec<_>>();
-    if external_import_paths.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
-    support_sources.extend(external_resolution_sources(config)?);
-    let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
-    for source in support_sources {
-        sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
-    }
-
-    let mut queued_modules = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    for import_path in external_import_paths {
-        for module_key in matching_support_module_keys(&import_path, &sources_by_module) {
-            if queued_modules.insert(module_key.clone()) {
-                queue.push_back(module_key);
-            }
-        }
-    }
-
-    let mut loaded_modules = BTreeSet::new();
-    let mut loaded_paths = BTreeSet::new();
-    let mut support_syntax_trees = Vec::new();
-
-    while let Some(module_key) = queue.pop_front() {
-        if !loaded_modules.insert(module_key.clone()) {
-            continue;
-        }
-        let Some(module_sources) = sources_by_module.get(&module_key) else {
-            continue;
-        };
-
-        for source in module_sources {
-            if !loaded_paths.insert(source.path.clone()) {
-                continue;
-            }
-
-            let mut source_file = SourceFile::from_path(&source.path)
-                .with_context(|| format!("unable to read {}", source.path.display()))?;
-            source_file.logical_module = source.logical_module.clone();
-            let tree = parse_with_options(
-                source_file,
-                ParseOptions {
-                    enable_conditional_returns: config.config.typing.conditional_returns,
-                },
-            );
-            for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
-                for nested_module_key in
-                    matching_support_module_keys(&import_path, &sources_by_module)
-                {
-                    if queued_modules.insert(nested_module_key.clone()) {
-                        queue.push_back(nested_module_key);
-                    }
-                }
-            }
-            support_syntax_trees.push(tree);
-        }
-    }
-
-    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
-    Ok(support_syntax_trees)
-}
-
 fn collect_import_source_paths(syntax_trees: &[SyntaxTree]) -> Vec<String> {
     syntax_trees
         .iter()
@@ -2778,33 +3076,6 @@ fn package_components(relative_parent: &Path) -> Option<Vec<String>> {
         components.push(name);
     }
     Some(components)
-}
-
-fn load_syntax_trees(
-    sources: &[DiscoveredSource],
-    overlays: &BTreeMap<PathBuf, OverlayDocument>,
-    enable_conditional_returns: bool,
-) -> Result<Vec<SyntaxTree>> {
-    sources
-        .iter()
-        .map(|source| {
-            let mut source_file = if let Some(overlay) = overlays.get(&source.path) {
-                SourceFile {
-                    path: source.path.clone(),
-                    kind: source.kind,
-                    logical_module: source.logical_module.clone(),
-                    text: overlay.text.clone(),
-                }
-            } else {
-                let mut source_file = SourceFile::from_path(&source.path)
-                    .with_context(|| format!("unable to read {}", source.path.display()))?;
-                source_file.logical_module = source.logical_module.clone();
-                source_file
-            };
-            source_file.logical_module = source.logical_module.clone();
-            Ok(parse_with_options(source_file, ParseOptions { enable_conditional_returns }))
-        })
-        .collect()
 }
 
 fn collect_parse_diagnostics(syntax_trees: &[SyntaxTree]) -> DiagnosticReport {
@@ -3561,6 +3832,93 @@ foo.ping()
                 .iter()
                 .any(|response| response["method"] == json!("textDocument/publishDiagnostics"))
         );
+    }
+
+    #[test]
+    fn overlay_export_change_republishes_dependent_module_diagnostics() {
+        let config = temp_workspace(
+            "overlay_export_change_republishes_dependent_module_diagnostics",
+            &[
+                ("src/app/a.tpy", "class Producer:\n    pass\n"),
+                ("src/app/b.tpy", "from app.a import Producer\nvalue = Producer()\n"),
+            ],
+        );
+        let mut server = Server::new(config.clone());
+        let a_uri = path_to_uri(&config.config_dir.join("src/app/a.tpy"));
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": a_uri,
+                        "text": "class Replacement:\n    pass\n",
+                        "languageId": "typepython",
+                        "version": 1
+                    }
+                }
+            }))
+            .expect("didOpen should publish dependent diagnostics");
+
+        let workspace = server
+            .cached_workspace
+            .as_ref()
+            .expect("workspace should be materialized after diagnostics publish");
+        let diagnostics = workspace
+            .check_diagnostics_by_module
+            .get("app.b")
+            .expect("dependent module diagnostics should be tracked");
+        assert!(!diagnostics.is_empty());
+        assert!(
+            diagnostics[0].message.contains("Producer")
+                || diagnostics[0].message.contains("import")
+        );
+    }
+
+    #[test]
+    fn incremental_workspace_keeps_public_fingerprints_stable_for_implementation_only_changes() {
+        let config = temp_workspace(
+            "incremental_workspace_keeps_public_fingerprints_stable_for_implementation_only_changes",
+            &[
+                ("src/app/a.tpy", "def produce() -> int:\n    return 1\n"),
+                ("src/app/b.tpy", "from app.a import produce\nvalue: int = produce()\n"),
+            ],
+        );
+        let a_path = config.config_dir.join("src/app/a.tpy");
+        let a_uri = path_to_uri(&a_path);
+        let overlays = BTreeMap::new();
+        let mut workspace =
+            IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+        let before_fingerprint = workspace
+            .incremental
+            .fingerprints
+            .get("app.a")
+            .copied()
+            .expect("module fingerprint should exist");
+        let before_b_diagnostics =
+            workspace.check_diagnostics_by_module.get("app.b").cloned().unwrap_or_default();
+
+        let overlay = OverlayDocument {
+            uri: a_uri,
+            text: String::from("def produce() -> int:\n    value = 1\n    return value\n"),
+            version: 1,
+        };
+        workspace
+            .apply_project_path_update(&a_path, Some(&overlay))
+            .expect("overlay update should be applied incrementally");
+
+        let after_fingerprint = workspace
+            .incremental
+            .fingerprints
+            .get("app.a")
+            .copied()
+            .expect("module fingerprint should still exist");
+        let after_b_diagnostics =
+            workspace.check_diagnostics_by_module.get("app.b").cloned().unwrap_or_default();
+
+        assert_eq!(before_fingerprint, after_fingerprint);
+        assert_eq!(before_b_diagnostics, after_b_diagnostics);
     }
 
     #[test]

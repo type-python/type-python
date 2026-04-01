@@ -1897,6 +1897,7 @@ dependencies = [
  "typepython-config",
  "typepython-diagnostics",
  "typepython-graph",
+ "typepython-incremental",
  "typepython-syntax",
  "url",
 ]
