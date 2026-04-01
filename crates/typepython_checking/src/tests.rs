@@ -8543,6 +8543,237 @@ fn check_infers_generic_function_call_through_union_actual() {
 }
 
 #[test]
+fn check_infers_typevartuple_from_variadic_call_arguments() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-inference>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        name: String::from("collect"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
+            name: String::from("Ts"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let signature = super::direct_signature_sites_from_detail(&function.detail);
+    let call = typepython_binding::CallSite {
+        callee: String::from("collect"),
+        arg_count: 2,
+        arg_types: vec![String::from("int"), String::from("str")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let substitutions =
+        crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
+            .expect("variadic pack should be inferred from positional arguments");
+
+    assert_eq!(
+        substitutions.type_packs.get("Ts").map(|binding| binding.types.as_slice()),
+        Some(&[String::from("int"), String::from("str")][..]),
+    );
+}
+
+#[test]
+fn check_instantiates_variadic_typevartuple_signature_and_return() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-inference>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        name: String::from("collect"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
+            name: String::from("Ts"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let call = typepython_binding::CallSite {
+        callee: String::from("collect"),
+        arg_count: 2,
+        arg_types: vec![String::from("int"), String::from("str")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let instantiated_signature =
+        super::resolve_instantiated_direct_function_signature(&node, &[], &function, &call)
+            .expect("instantiated signature");
+    let instantiated_return = super::resolve_instantiated_callable_return_type_from_declaration(
+        &node,
+        &[],
+        &function,
+        &call,
+    )
+    .expect("instantiated return type");
+
+    assert_eq!(instantiated_signature.len(), 2);
+    assert!(instantiated_signature.iter().all(|param| param.positional_only));
+    assert_eq!(
+        instantiated_signature
+            .iter()
+            .map(|param| param.annotation.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["int", "str"],
+    );
+    assert_eq!(instantiated_return, "tuple[int, str]");
+}
+
+#[test]
+fn check_infers_typevartuple_inside_tuple_annotation() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-inference>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        name: String::from("collect"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:tuple[Unpack[Ts]])->tuple[Unpack[Ts]]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
+            name: String::from("Ts"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let signature = super::direct_signature_sites_from_detail(&function.detail);
+    let call = typepython_binding::CallSite {
+        callee: String::from("collect"),
+        arg_count: 1,
+        arg_types: vec![String::from("tuple[int, str]")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let substitutions =
+        crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
+            .expect("tuple unpack should bind type pack");
+
+    assert_eq!(
+        substitutions.type_packs.get("Ts").map(|binding| binding.types.as_slice()),
+        Some(&[String::from("int"), String::from("str")][..]),
+    );
+}
+
+#[test]
 fn check_rejects_generic_function_call_outside_constraint_list() {
     let result = check_temp_typepython_source(
         "def choose[T: (str, bytes)](value: T) -> T:\n    return value\n\nbad: int = choose(1)\n",
@@ -8569,7 +8800,9 @@ fn check_reports_conflicting_union_aware_generic_inference() {
     assert!(
         rendered.contains("returns `T` where `out` expects `int`")
             || rendered.contains("assigns `T` where `out` expects `int`")
-            || rendered.contains("call to `choose`")
+            || rendered.contains("assigns `Union[str, int]` where `out` expects `int`")
+            || rendered.contains("call to `choose`"),
+        "{rendered}"
     );
 }
 

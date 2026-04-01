@@ -46,15 +46,64 @@ pub(crate) fn infer_generic_type_param_substitutions(
         .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec)
         .map(|type_param| type_param.name.clone())
         .collect::<BTreeSet<_>>();
-    let mut substitutions = GenericTypeParamSubstitutions::default();
-
-    for (index, (param, actual)) in signature
+    let type_pack_names = function
+        .type_params
         .iter()
-        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
-        .zip(call.arg_types.iter())
-        .enumerate()
-    {
+        .filter(|type_param| {
+            type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple
+        })
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut substitutions = GenericTypeParamSubstitutions::default();
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
+    let (positional_types, variadic_starred_types) =
+        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+    let mut positional_index = 0;
+
+    for param in signature.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
         let Some(annotation) = param.annotation.as_deref() else {
+            if param.variadic {
+                positional_index = positional_types.len();
+            } else if positional_index < positional_types.len() {
+                positional_index += 1;
+            }
+            continue;
+        };
+        if param.variadic {
+            if extract_param_spec_args_name(annotation).is_some() {
+                positional_index = positional_types.len();
+                continue;
+            }
+            if let Some(type_pack_name) =
+                type_pack_name_from_unpack_annotation(annotation, &type_pack_names)
+            {
+                if !variadic_starred_types.is_empty() {
+                    return None;
+                }
+                insert_type_pack_binding(
+                    &mut substitutions,
+                    &type_pack_name,
+                    TypePackBinding { types: positional_types[positional_index..].to_vec() },
+                )?;
+                positional_index = positional_types.len();
+                continue;
+            }
+            for actual in positional_types.iter().skip(positional_index) {
+                bind_generic_type_params(
+                    node,
+                    nodes,
+                    annotation,
+                    actual,
+                    &type_names,
+                    &type_pack_names,
+                    &mut substitutions,
+                )?;
+            }
+            positional_index = positional_types.len();
+            continue;
+        }
+        let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
         let annotation_mentions_param_spec = parse_callable_annotation_parts(annotation)
@@ -66,12 +115,13 @@ pub(crate) fn infer_generic_type_param_substitutions(
             nodes,
             annotation,
             actual,
-            call.arg_values.get(index),
+            call.arg_values.get(positional_index),
             &type_names,
             &param_spec_names,
             &mut substitutions,
         )?;
         if annotation_mentions_param_spec {
+            positional_index += 1;
             continue;
         }
         bind_generic_type_params(
@@ -80,8 +130,10 @@ pub(crate) fn infer_generic_type_param_substitutions(
             annotation,
             actual,
             &type_names,
-            &mut substitutions.types,
+            &type_pack_names,
+            &mut substitutions,
         )?;
+        positional_index += 1;
     }
 
     for (index, (keyword, actual)) in
@@ -116,7 +168,8 @@ pub(crate) fn infer_generic_type_param_substitutions(
             annotation,
             actual,
             &type_names,
-            &mut substitutions.types,
+            &type_pack_names,
+            &mut substitutions,
         )?;
     }
 
@@ -148,7 +201,17 @@ pub(crate) fn infer_generic_type_param_substitutions(
                     .param_lists
                     .insert(type_param.name.clone(), param_list_binding_from_default(default)?);
             }
-            typepython_binding::GenericTypeParamKind::TypeVarTuple => continue,
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
+                if substitutions.type_packs.contains_key(&type_param.name) {
+                    continue;
+                }
+                let Some(default) = &type_param.default else {
+                    continue;
+                };
+                substitutions
+                    .type_packs
+                    .insert(type_param.name.clone(), type_pack_binding_from_default(default)?);
+            }
         }
     }
 
@@ -183,6 +246,24 @@ pub(crate) fn instantiate_direct_function_signature(
                         .map(|param| instantiate_direct_function_param(param, substitutions)),
                 );
             }
+            continue;
+        }
+        if param.variadic
+            && let Some(annotation) = param.annotation.as_deref()
+            && let Some(type_pack_name) = unpack_inner(annotation)
+            && let Some(binding) = substitutions.type_packs.get(type_pack_name.trim())
+        {
+            instantiated.extend(binding.types.iter().enumerate().map(|(index, element_type)| {
+                typepython_syntax::DirectFunctionParamSite {
+                    name: format!("{}{}", param.name, index),
+                    annotation: Some(substitute_generic_type_params(element_type, substitutions)),
+                    has_default: false,
+                    positional_only: true,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }
+            }));
             continue;
         }
         instantiated.push(instantiate_direct_function_param(param.clone(), substitutions));
@@ -242,7 +323,8 @@ pub(crate) fn bind_callable_param_spec_type_params(
         &expected_return,
         &actual_return,
         type_names,
-        &mut substitutions.types,
+        &BTreeSet::new(),
+        substitutions,
     )
 }
 
@@ -300,7 +382,8 @@ pub(crate) fn bind_callable_param_expr(
                 expected_prefix,
                 actual_annotation,
                 type_names,
-                &mut substitutions.types,
+                &BTreeSet::new(),
+                substitutions,
             )?;
         }
         return insert_param_spec_binding(
@@ -462,7 +545,8 @@ pub(crate) fn bind_generic_type_params(
     annotation: &str,
     actual: &str,
     generic_names: &BTreeSet<String>,
-    substitutions: &mut BTreeMap<String, String>,
+    type_pack_names: &BTreeSet<String>,
+    substitutions: &mut GenericTypeParamSubstitutions,
 ) -> Option<()> {
     let inferred = infer_generic_type_param_bindings(
         node,
@@ -471,17 +555,23 @@ pub(crate) fn bind_generic_type_params(
         actual,
         generic_names,
         substitutions,
+        type_pack_names,
     )?;
-    for (name, actual_type) in inferred {
-        match substitutions.get(&name) {
+    for (name, actual_type) in inferred.types {
+        match substitutions.types.get(&name) {
             Some(existing) if existing != &actual_type => {
-                substitutions.insert(name, merge_generic_type_candidates(existing, &actual_type));
+                substitutions
+                    .types
+                    .insert(name, merge_generic_type_candidates(existing, &actual_type));
             }
             Some(_) => {}
             None => {
-                substitutions.insert(name, actual_type);
+                substitutions.types.insert(name, actual_type);
             }
         }
+    }
+    for (name, binding) in inferred.type_packs {
+        insert_type_pack_binding(substitutions, &name, binding)?;
     }
     Some(())
 }
@@ -492,21 +582,23 @@ pub(crate) fn infer_generic_type_param_bindings(
     annotation: &str,
     actual: &str,
     generic_names: &BTreeSet<String>,
-    substitutions: &BTreeMap<String, String>,
-) -> Option<BTreeMap<String, String>> {
+    substitutions: &GenericTypeParamSubstitutions,
+    type_pack_names: &BTreeSet<String>,
+) -> Option<GenericTypeParamSubstitutions> {
     let annotation = normalize_type_text(annotation);
     let actual = normalize_type_text(actual);
     if actual.is_empty() {
-        return Some(BTreeMap::new());
+        return Some(GenericTypeParamSubstitutions::default());
     }
 
     if generic_names.contains(&annotation) {
         let candidate = substitutions
+            .types
             .get(&annotation)
             .map(|existing| merge_generic_type_candidates(existing, &actual))
             .unwrap_or(actual);
-        let mut inferred = BTreeMap::new();
-        inferred.insert(annotation, candidate);
+        let mut inferred = GenericTypeParamSubstitutions::default();
+        inferred.types.insert(annotation, candidate);
         return Some(inferred);
     }
 
@@ -522,9 +614,10 @@ pub(crate) fn infer_generic_type_param_bindings(
                 &branch,
                 generic_names,
                 substitutions,
+                type_pack_names,
             )?;
             let combined = combine_generic_substitutions(substitutions, &candidate);
-            let substituted_annotation = substitute_type_substitutions(&annotation, &combined);
+            let substituted_annotation = substitute_generic_type_params(&annotation, &combined);
             if !direct_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
                 return None;
             }
@@ -546,9 +639,10 @@ pub(crate) fn infer_generic_type_param_bindings(
                     &actual,
                     generic_names,
                     substitutions,
+                    type_pack_names,
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
-                let substituted_branch = substitute_type_substitutions(&branch, &combined);
+                let substituted_branch = substitute_generic_type_params(&branch, &combined);
                 direct_type_is_assignable(node, nodes, &substituted_branch, &actual)
                     .then_some(candidate)
             })
@@ -558,72 +652,64 @@ pub(crate) fn infer_generic_type_param_bindings(
 
     match (split_generic_type(&annotation), split_generic_type(&actual)) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
-            if expected_head == actual_head && expected_args.len() == actual_args.len() =>
+            if expected_head == actual_head =>
         {
-            let mut inferred: BTreeMap<String, String> = BTreeMap::new();
-            for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
-                let nested = infer_generic_type_param_bindings(
-                    node,
-                    nodes,
-                    expected_arg,
-                    actual_arg,
-                    generic_names,
-                    substitutions,
-                )?;
-                for (name, actual_type) in nested {
-                    match inferred.get(&name) {
-                        Some(existing) if existing != &actual_type => {
-                            let merged = merge_generic_type_candidates(existing, &actual_type);
-                            inferred.insert(name, merged);
-                        }
-                        Some(_) => {}
-                        None => {
-                            inferred.insert(name, actual_type);
-                        }
-                    }
-                }
-            }
-            Some(inferred)
+            infer_generic_type_arg_bindings(
+                node,
+                nodes,
+                &expected_args,
+                &actual_args,
+                generic_names,
+                substitutions,
+                type_pack_names,
+            )
         }
-        _ => {
-            direct_type_is_assignable(node, nodes, &annotation, &actual).then_some(BTreeMap::new())
-        }
+        _ => direct_type_is_assignable(node, nodes, &annotation, &actual)
+            .then_some(GenericTypeParamSubstitutions::default()),
     }
 }
 
 pub(crate) fn combine_generic_substitutions(
-    existing: &BTreeMap<String, String>,
-    inferred: &BTreeMap<String, String>,
-) -> BTreeMap<String, String> {
+    existing: &GenericTypeParamSubstitutions,
+    inferred: &GenericTypeParamSubstitutions,
+) -> GenericTypeParamSubstitutions {
     let mut combined = existing.clone();
-    combined.extend(inferred.clone());
+    combined.types.extend(inferred.types.clone());
+    combined.param_lists.extend(inferred.param_lists.clone());
+    combined.type_packs.extend(inferred.type_packs.clone());
     combined
 }
 
 pub(crate) fn select_best_union_branch_binding(
-    candidates: Vec<BTreeMap<String, String>>,
-) -> Option<BTreeMap<String, String>> {
-    let min_len = candidates.iter().map(BTreeMap::len).min()?;
-    let mut filtered = candidates.into_iter().filter(|candidate| candidate.len() == min_len);
+    candidates: Vec<GenericTypeParamSubstitutions>,
+) -> Option<GenericTypeParamSubstitutions> {
+    let min_len = candidates.iter().map(generic_binding_count).min()?;
+    let mut filtered =
+        candidates.into_iter().filter(|candidate| generic_binding_count(candidate) == min_len);
     let first = filtered.next()?;
     if filtered.all(|candidate| candidate == first) { Some(first) } else { None }
 }
 
 pub(crate) fn merge_union_branch_bindings(
-    candidates: Vec<BTreeMap<String, String>>,
-) -> Option<BTreeMap<String, String>> {
-    let mut merged: BTreeMap<String, String> = BTreeMap::new();
+    candidates: Vec<GenericTypeParamSubstitutions>,
+) -> Option<GenericTypeParamSubstitutions> {
+    let mut merged = GenericTypeParamSubstitutions::default();
     for candidate in candidates {
-        for (name, actual_type) in candidate {
-            match merged.get(&name) {
+        for (name, actual_type) in candidate.types {
+            match merged.types.get(&name) {
                 Some(existing) if existing == &actual_type => {}
                 Some(existing) => {
-                    merged.insert(name, join_type_candidates(vec![existing.clone(), actual_type]));
+                    merged
+                        .types
+                        .insert(name, join_type_candidates(vec![existing.clone(), actual_type]));
                 }
                 None => {
-                    merged.insert(name, actual_type);
+                    merged.types.insert(name, actual_type);
                 }
             }
+        }
+        for (name, binding) in candidate.type_packs {
+            insert_type_pack_binding(&mut merged, &name, binding)?;
         }
     }
     Some(merged)
@@ -791,4 +877,203 @@ pub(crate) fn unpacked_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {
         return None;
     }
     Some(args)
+}
+
+pub(crate) fn insert_type_pack_binding(
+    substitutions: &mut GenericTypeParamSubstitutions,
+    name: &str,
+    binding: TypePackBinding,
+) -> Option<()> {
+    match substitutions.type_packs.get(name) {
+        Some(existing) if existing == &binding => Some(()),
+        Some(existing) => {
+            let merged = merge_type_pack_candidates(existing, &binding)?;
+            substitutions.type_packs.insert(name.to_owned(), merged);
+            Some(())
+        }
+        None => {
+            substitutions.type_packs.insert(name.to_owned(), binding);
+            Some(())
+        }
+    }
+}
+
+pub(crate) fn merge_type_pack_candidates(
+    existing: &TypePackBinding,
+    actual: &TypePackBinding,
+) -> Option<TypePackBinding> {
+    if existing.types.len() != actual.types.len() {
+        return None;
+    }
+    Some(TypePackBinding {
+        types: existing
+            .types
+            .iter()
+            .zip(&actual.types)
+            .map(|(left, right)| merge_generic_type_candidates(left, right))
+            .collect(),
+    })
+}
+
+pub(crate) fn type_pack_name_from_unpack_annotation(
+    annotation: &str,
+    type_pack_names: &BTreeSet<String>,
+) -> Option<String> {
+    let inner = unpack_inner(&normalize_type_text(annotation))?;
+    let inner = inner.trim();
+    type_pack_names.contains(inner).then(|| inner.to_owned())
+}
+
+pub(crate) fn type_pack_binding_from_default(default: &str) -> Option<TypePackBinding> {
+    let normalized = normalize_type_text(default);
+    if normalized == "tuple[()]" {
+        return Some(TypePackBinding::default());
+    }
+    if let Some(elements) = unpacked_fixed_tuple_elements(&normalized) {
+        return Some(TypePackBinding { types: elements });
+    }
+    None
+}
+
+pub(crate) fn generic_binding_count(solution: &GenericTypeParamSubstitutions) -> usize {
+    solution.types.len() + solution.param_lists.len() + solution.type_packs.len()
+}
+
+pub(crate) fn infer_generic_type_arg_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected_args: &[String],
+    actual_args: &[String],
+    generic_names: &BTreeSet<String>,
+    substitutions: &GenericTypeParamSubstitutions,
+    type_pack_names: &BTreeSet<String>,
+) -> Option<GenericTypeParamSubstitutions> {
+    let expected_args = expand_inferred_generic_args(expected_args, type_pack_names);
+    let actual_args = expand_inferred_generic_args(actual_args, type_pack_names);
+    let mut inferred = GenericTypeParamSubstitutions::default();
+
+    if let Some((pack_index, pack_name)) = expected_type_pack_index(&expected_args, type_pack_names)
+    {
+        let suffix_len = expected_args.len().saturating_sub(pack_index + 1);
+        if actual_args.len() < pack_index + suffix_len {
+            return None;
+        }
+        for (expected_arg, actual_arg) in
+            expected_args[..pack_index].iter().zip(actual_args[..pack_index].iter())
+        {
+            merge_nested_generic_bindings(
+                &mut inferred,
+                infer_generic_type_param_bindings(
+                    node,
+                    nodes,
+                    expected_arg,
+                    actual_arg,
+                    generic_names,
+                    substitutions,
+                    type_pack_names,
+                )?,
+            )?;
+        }
+        let actual_pack_end = actual_args.len() - suffix_len;
+        insert_type_pack_binding(
+            &mut inferred,
+            &pack_name,
+            TypePackBinding { types: actual_args[pack_index..actual_pack_end].to_vec() },
+        )?;
+        for (expected_arg, actual_arg) in
+            expected_args[pack_index + 1..].iter().zip(actual_args[actual_pack_end..].iter())
+        {
+            merge_nested_generic_bindings(
+                &mut inferred,
+                infer_generic_type_param_bindings(
+                    node,
+                    nodes,
+                    expected_arg,
+                    actual_arg,
+                    generic_names,
+                    substitutions,
+                    type_pack_names,
+                )?,
+            )?;
+        }
+        return Some(inferred);
+    }
+
+    if expected_args.len() != actual_args.len() {
+        return None;
+    }
+    for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
+        merge_nested_generic_bindings(
+            &mut inferred,
+            infer_generic_type_param_bindings(
+                node,
+                nodes,
+                expected_arg,
+                actual_arg,
+                generic_names,
+                substitutions,
+                type_pack_names,
+            )?,
+        )?;
+    }
+    Some(inferred)
+}
+
+pub(crate) fn merge_nested_generic_bindings(
+    inferred: &mut GenericTypeParamSubstitutions,
+    nested: GenericTypeParamSubstitutions,
+) -> Option<()> {
+    for (name, actual_type) in nested.types {
+        match inferred.types.get(&name) {
+            Some(existing) if existing != &actual_type => {
+                let merged = merge_generic_type_candidates(existing, &actual_type);
+                inferred.types.insert(name, merged);
+            }
+            Some(_) => {}
+            None => {
+                inferred.types.insert(name, actual_type);
+            }
+        }
+    }
+    for (name, binding) in nested.type_packs {
+        insert_type_pack_binding(inferred, &name, binding)?;
+    }
+    Some(())
+}
+
+pub(crate) fn expand_inferred_generic_args(
+    args: &[String],
+    type_pack_names: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for arg in args {
+        if let Some(inner) = unpack_inner(arg) {
+            let inner = inner.trim();
+            if !type_pack_names.contains(inner)
+                && let Some(elements) = unpacked_fixed_tuple_elements(inner)
+            {
+                expanded.extend(elements);
+                continue;
+            }
+        }
+        expanded.push(arg.clone());
+    }
+    expanded
+}
+
+pub(crate) fn expected_type_pack_index(
+    args: &[String],
+    type_pack_names: &BTreeSet<String>,
+) -> Option<(usize, String)> {
+    let matches = args
+        .iter()
+        .enumerate()
+        .filter_map(|(index, arg)| {
+            type_pack_name_from_unpack_annotation(arg, type_pack_names).map(|name| (index, name))
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [(index, name)] => Some((*index, name.clone())),
+        _ => None,
+    }
 }
