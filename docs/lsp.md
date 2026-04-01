@@ -24,7 +24,7 @@ The server communicates via **stdio** using the JSON-RPC 2.0 protocol -- the sta
 
 ### Document Synchronization
 
-The server uses **full-text sync** (`textDocumentSync: 1`): the entire document content is sent on each change. This ensures consistency with the TypePython compilation model.
+The server uses **incremental text sync** (`textDocumentSync.change: 2`): clients can send either full-document replacements or ranged edits, and the server applies them to the in-memory overlay before incremental analysis reruns.
 
 ### Completion
 
@@ -189,13 +189,12 @@ On each document change:
 3. Support modules are refreshed from the cached support catalog if imports changed
 4. The module graph snapshot and reverse-import index are updated
 5. The checker reruns only for the changed modules plus dependents whose public summaries changed
-6. Symbol tables are rebuilt from the cached syntax trees
-3. Diagnostics are pushed to the editor
+6. Reference indexes are refreshed only for the affected modules using cached document indexes
+7. Diagnostics are pushed to the editor
 
 ## Limitations
 
-- **Full-text sync**: the server receives the entire document on each change (no incremental text sync)
-- **Workspace-wide symbol indexing**: definition/reference/completion tables are still rebuilt from the cached syntax trees after each change
+- **Active-set transitions still trigger a full query-state refresh**: when support imports enter or leave the active workspace set, the declaration/occurrence tables are rebuilt once to resynchronize the cache
 - **No signature help**: `textDocument/signatureHelp` is not yet implemented
 - **No document symbols**: `textDocument/documentSymbol` is not yet implemented
 - **No workspace symbols**: `workspace/symbol` is not yet implemented

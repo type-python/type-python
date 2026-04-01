@@ -312,7 +312,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 | Method | Feature |
 |---|---|
 | `textDocument/didOpen` | Open document overlay |
-| `textDocument/didChange` | Update document (full-text sync) |
+| `textDocument/didChange` | Update document overlay (incremental or full-text sync) |
 | `textDocument/didClose` | Close document |
 | `textDocument/hover` | Type information at cursor |
 | `textDocument/definition` | Jump to definition |
@@ -326,7 +326,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 - Persistent incremental workspace cache for project/support syntax trees and bindings
 - Snapshot-diff invalidation via `typepython_incremental`
 - Subset checker reruns for directly changed modules and dependent modules whose public summaries changed
-- Symbol occurrence tables for cross-referencing
+- Incrementally refreshed symbol occurrence tables for cross-referencing
 - Diagnostics pushed to editor after each incremental update
 
 ## Workspace Configuration

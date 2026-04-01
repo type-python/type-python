@@ -94,8 +94,10 @@ struct WorkspaceState {
 #[derive(Debug, Clone)]
 struct CachedDocument {
     source: DiscoveredSource,
-    syntax: SyntaxTree,
     binding: BindingTable,
+    document: DocumentState,
+    declarations: Vec<SymbolOccurrence>,
+    references: Vec<SymbolOccurrence>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -155,6 +157,16 @@ struct LspTextEdit {
     new_text: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspContentChangeEvent {
+    #[serde(default)]
+    range: Option<LspRange>,
+    #[serde(default)]
+    range_length: Option<u32>,
+    text: String,
+}
+
 impl SupportSourceCatalog {
     fn new(config: &ConfigHandle) -> Result<Self, LspError> {
         let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
@@ -190,9 +202,11 @@ impl IncrementalWorkspace {
                 overlays.get(&source.path).map(|overlay| overlay.text.as_str()),
                 config.config.typing.conditional_returns,
             )?;
+            let binding = bind(&syntax);
+            let (document, declarations) = index_document_state(syntax);
             project_documents.insert(
                 source.path.clone(),
-                CachedDocument { binding: bind(&syntax), source, syntax },
+                CachedDocument { source, binding, document, declarations, references: Vec::new() },
             );
         }
 
@@ -253,10 +267,18 @@ impl IncrementalWorkspace {
                     overlay.map(|document| document.text.as_str()),
                     self.config.config.typing.conditional_returns,
                 )?;
+                let binding = bind(&syntax);
+                let (document, declarations) = index_document_state(syntax);
                 direct_changes.insert(source.logical_module.clone());
                 self.project_documents.insert(
                     source.path.clone(),
-                    CachedDocument { binding: bind(&syntax), source, syntax },
+                    CachedDocument {
+                        source,
+                        binding,
+                        document,
+                        declarations,
+                        references: Vec::new(),
+                    },
                 );
             }
             None => {
@@ -292,7 +314,7 @@ impl IncrementalWorkspace {
         let project_syntax_trees = self
             .project_documents
             .values()
-            .map(|document| document.syntax.clone())
+            .map(|document| document.document.syntax.clone())
             .collect::<Vec<_>>();
         let project_modules = project_syntax_trees
             .iter()
@@ -330,7 +352,7 @@ impl IncrementalWorkspace {
                     .get(&source.path)
                     .expect("support document should be loaded");
                 for import_path in
-                    collect_import_source_paths(std::slice::from_ref(&document.syntax))
+                    collect_import_source_paths(std::slice::from_ref(&document.document.syntax))
                 {
                     for nested_module_key in matching_support_module_keys(
                         &import_path,
@@ -355,9 +377,17 @@ impl IncrementalWorkspace {
 
         let syntax =
             parse_discovered_source(source, None, self.config.config.typing.conditional_returns)?;
+        let binding = bind(&syntax);
+        let (document, declarations) = index_document_state(syntax);
         self.support_documents.insert(
             source.path.clone(),
-            CachedDocument { binding: bind(&syntax), source: source.clone(), syntax },
+            CachedDocument {
+                source: source.clone(),
+                binding,
+                document,
+                declarations,
+                references: Vec::new(),
+            },
         );
         Ok(())
     }
@@ -375,7 +405,10 @@ impl IncrementalWorkspace {
     }
 
     fn active_syntax_trees(&self) -> Vec<SyntaxTree> {
-        self.active_cached_documents().into_iter().map(|document| document.syntax.clone()).collect()
+        self.active_cached_documents()
+            .into_iter()
+            .map(|document| document.document.syntax.clone())
+            .collect()
     }
 
     fn active_bindings(&self) -> Vec<BindingTable> {
@@ -389,7 +422,10 @@ impl IncrementalWorkspace {
         self.active_cached_documents()
             .into_iter()
             .map(|document| {
-                (document.source.path.display().to_string(), document.syntax.source.text.clone())
+                (
+                    document.source.path.display().to_string(),
+                    document.document.syntax.source.text.clone(),
+                )
             })
             .collect()
     }
@@ -406,6 +442,8 @@ impl IncrementalWorkspace {
             graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
         let current_incremental = snapshot(&graph);
         let current_dependency_index = dependency_index(&graph);
+        let snapshot_diff = diff(&self.incremental, &current_incremental);
+        let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
         let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
         apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
         let has_parse_errors = parse_diagnostics.has_errors();
@@ -428,8 +466,6 @@ impl IncrementalWorkspace {
                 )
                 .diagnostics_by_module;
             } else {
-                let snapshot_diff = diff(&self.incremental, &current_incremental);
-                let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
                 let affected = affected_modules(
                     Some(&self.dependency_index),
                     &current_dependency_index,
@@ -456,7 +492,7 @@ impl IncrementalWorkspace {
                         self.check_diagnostics_by_module.insert(module_key, diagnostics);
                     }
                 }
-                for removed in snapshot_diff.removed {
+                for removed in &snapshot_diff.removed {
                     self.check_diagnostics_by_module.remove(&removed.module_key);
                 }
             }
@@ -472,11 +508,160 @@ impl IncrementalWorkspace {
             apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
         }
 
-        self.state = build_workspace_state(syntax_trees, diagnostics, graph);
+        let index_trigger_modules =
+            direct_changes.union(&summary_changed_modules).cloned().collect::<BTreeSet<_>>();
+        let reindexed_modules = if force_full_check || self.parse_blocked {
+            current_module_keys.clone()
+        } else {
+            affected_modules(
+                Some(&self.dependency_index),
+                &current_dependency_index,
+                &direct_changes,
+                &index_trigger_modules,
+            )
+            .into_iter()
+            .filter(|module_key| current_module_keys.contains(module_key))
+            .collect()
+        };
+        let force_full_state_refresh = force_full_check
+            || self.parse_blocked
+            || active_document_uris(&self.active_cached_documents())
+                != self
+                    .state
+                    .documents
+                    .iter()
+                    .map(|document| document.uri.clone())
+                    .collect::<BTreeSet<_>>();
+        self.rebuild_document_indexes(&reindexed_modules, force_full_check || self.parse_blocked);
+        self.update_workspace_state(
+            diagnostics,
+            graph,
+            &reindexed_modules,
+            force_full_state_refresh,
+        );
         self.incremental = current_incremental;
         self.dependency_index = current_dependency_index;
         self.parse_blocked = has_parse_errors;
         Ok(())
+    }
+
+    fn rebuild_document_indexes(&mut self, module_keys: &BTreeSet<String>, force_full: bool) {
+        let documents = self.active_cached_documents();
+        let declarations_by_canonical = declarations_by_canonical_from_documents(&documents);
+        let member_symbols = member_symbols_from_documents(&documents);
+
+        for document in self.project_documents.values_mut() {
+            if force_full || module_keys.contains(&document.source.logical_module) {
+                document.references = collect_reference_occurrences(
+                    &document.document,
+                    &member_symbols,
+                    &declarations_by_canonical,
+                );
+            }
+        }
+
+        let active_support_paths = self.active_support_paths.iter().cloned().collect::<Vec<_>>();
+        for path in active_support_paths {
+            if let Some(document) = self.support_documents.get_mut(&path)
+                && (force_full || module_keys.contains(&document.source.logical_module))
+            {
+                document.references = collect_reference_occurrences(
+                    &document.document,
+                    &member_symbols,
+                    &declarations_by_canonical,
+                );
+            }
+        }
+    }
+
+    fn update_workspace_state(
+        &mut self,
+        diagnostics: DiagnosticReport,
+        graph: ModuleGraph,
+        module_keys: &BTreeSet<String>,
+        force_full: bool,
+    ) {
+        if force_full {
+            self.state = self.assemble_workspace_state(diagnostics, graph);
+            return;
+        }
+
+        let changed_documents = self
+            .active_cached_documents()
+            .into_iter()
+            .filter(|document| module_keys.contains(&document.source.logical_module))
+            .map(|document| {
+                (
+                    document.document.uri.clone(),
+                    document.document.clone(),
+                    document.declarations.clone(),
+                    document.references.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if changed_documents.is_empty() {
+            self.state.diagnostics_by_uri = diagnostics_by_uri(&self.state.documents, &diagnostics);
+            self.state.graph = graph;
+            return;
+        }
+
+        for (uri, updated_document, declarations, references) in changed_documents {
+            if let Some(document) =
+                self.state.documents.iter_mut().find(|existing| existing.uri == uri)
+            {
+                *document = updated_document.clone();
+            }
+
+            self.state.declarations_by_canonical.retain(|_, occurrence| occurrence.uri != uri);
+            for occurrence in &declarations {
+                self.state
+                    .declarations_by_canonical
+                    .entry(occurrence.canonical.clone())
+                    .or_insert_with(|| occurrence.clone());
+            }
+
+            self.state.occurrences.retain(|occurrence| occurrence.uri != uri);
+            let mut occurrences =
+                declarations.iter().chain(references.iter()).cloned().collect::<Vec<_>>();
+            dedupe_occurrences(&mut occurrences);
+            self.state.occurrences.extend(occurrences);
+        }
+
+        self.state.documents.sort_by(|left, right| left.path.cmp(&right.path));
+        self.state.diagnostics_by_uri = diagnostics_by_uri(&self.state.documents, &diagnostics);
+        self.state.graph = graph;
+    }
+
+    fn assemble_workspace_state(
+        &self,
+        diagnostics: DiagnosticReport,
+        graph: ModuleGraph,
+    ) -> WorkspaceState {
+        let active_documents = self.active_cached_documents();
+        let documents =
+            active_documents.iter().map(|document| document.document.clone()).collect::<Vec<_>>();
+        let declarations_by_canonical = declarations_by_canonical_from_documents(&active_documents);
+        let mut occurrences = active_documents
+            .iter()
+            .flat_map(|document| {
+                document
+                    .declarations
+                    .iter()
+                    .chain(document.references.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        dedupe_occurrences(&mut occurrences);
+
+        let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
+        WorkspaceState {
+            documents,
+            diagnostics_by_uri,
+            occurrences,
+            declarations_by_canonical,
+            graph,
+        }
     }
 }
 
@@ -516,64 +701,51 @@ fn source_root_for_path_from_roots(source_roots: &[PathBuf], path: &Path) -> Opt
     source_roots.iter().find(|root| path.starts_with(root)).cloned()
 }
 
-fn build_workspace_state(
-    syntax_trees: Vec<SyntaxTree>,
-    diagnostics: DiagnosticReport,
-    graph: ModuleGraph,
-) -> WorkspaceState {
-    let mut documents = syntax_trees
-        .into_iter()
-        .map(|syntax| {
-            let text = syntax.source.text.clone();
-            let uri = path_to_uri(&syntax.source.path);
-            DocumentState {
-                uri,
-                path: syntax.source.path.clone(),
-                text,
-                syntax,
-                local_symbols: BTreeMap::new(),
-                local_value_types: BTreeMap::new(),
-            }
-        })
-        .collect::<Vec<_>>();
+fn active_document_uris(documents: &[&CachedDocument]) -> BTreeSet<String> {
+    documents.iter().map(|document| document.document.uri.clone()).collect()
+}
 
-    let mut declarations = Vec::new();
-    let mut member_symbols = BTreeMap::<String, Vec<String>>::new();
-    for document in &mut documents {
-        let (local_symbols, declared) = collect_declarations(document);
-        let local_value_types = collect_local_value_types(document, &local_symbols);
-        for occurrence in &declared {
-            if occurrence.canonical.matches('.').count() >= 2 {
-                member_symbols
-                    .entry(occurrence.name.clone())
-                    .or_default()
-                    .push(occurrence.canonical.clone());
-            }
-        }
-        document.local_symbols = local_symbols;
-        document.local_value_types = local_value_types;
-        declarations.extend(declared);
-    }
+fn index_document_state(syntax: SyntaxTree) -> (DocumentState, Vec<SymbolOccurrence>) {
+    let text = syntax.source.text.clone();
+    let uri = path_to_uri(&syntax.source.path);
+    let mut document = DocumentState {
+        uri,
+        path: syntax.source.path.clone(),
+        text,
+        syntax,
+        local_symbols: BTreeMap::new(),
+        local_value_types: BTreeMap::new(),
+    };
+    let (local_symbols, declarations) = collect_declarations(&document);
+    let local_value_types = collect_local_value_types(&document, &local_symbols);
+    document.local_symbols = local_symbols;
+    document.local_value_types = local_value_types;
+    (document, declarations)
+}
 
+fn declarations_by_canonical_from_documents(
+    documents: &[&CachedDocument],
+) -> BTreeMap<String, SymbolOccurrence> {
     let mut declarations_by_canonical = BTreeMap::new();
-    for occurrence in &declarations {
+    for occurrence in documents.iter().flat_map(|document| document.declarations.iter()) {
         declarations_by_canonical
             .entry(occurrence.canonical.clone())
             .or_insert_with(|| occurrence.clone());
     }
+    declarations_by_canonical
+}
 
-    let mut occurrences = declarations.clone();
-    for document in &documents {
-        occurrences.extend(collect_reference_occurrences(
-            document,
-            &member_symbols,
-            &declarations_by_canonical,
-        ));
+fn member_symbols_from_documents(documents: &[&CachedDocument]) -> BTreeMap<String, Vec<String>> {
+    let mut member_symbols = BTreeMap::<String, Vec<String>>::new();
+    for occurrence in documents.iter().flat_map(|document| document.declarations.iter()) {
+        if occurrence.canonical.matches('.').count() >= 2 {
+            member_symbols
+                .entry(occurrence.name.clone())
+                .or_default()
+                .push(occurrence.canonical.clone());
+        }
     }
-    dedupe_occurrences(&mut occurrences);
-
-    let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
-    WorkspaceState { documents, diagnostics_by_uri, occurrences, declarations_by_canonical, graph }
+    member_symbols
 }
 
 struct Server {
@@ -627,7 +799,10 @@ impl Server {
                 "id": id,
                 "result": {
                     "capabilities": {
-                        "textDocumentSync": 1,
+                        "textDocumentSync": {
+                            "openClose": true,
+                            "change": 2
+                        },
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
@@ -750,32 +925,18 @@ impl Server {
                 version, current.version, uri
             )));
         }
-        let content_changes = params
-            .get("contentChanges")
-            .and_then(Value::as_array)
-            .ok_or_else(|| LspError::Other(String::from("didChange missing contentChanges")))?;
-        if content_changes.len() != 1 {
+        let content_changes: Vec<LspContentChangeEvent> =
+            serde_json::from_value(params.get("contentChanges").cloned().ok_or_else(|| {
+                LspError::Other(String::from("didChange missing contentChanges"))
+            })?)?;
+        if content_changes.is_empty() {
             return Err(LspError::Other(format!(
-                "TPY6002: didChange received {} content changes for `{}` but the server only supports single full-text updates",
-                content_changes.len(),
+                "TPY6002: didChange received no content changes for `{}`",
                 uri
             )));
         }
-        let change = content_changes.first().expect("single change should exist");
-        if change.get("range").is_some() || change.get("rangeLength").is_some() {
-            return Err(LspError::Other(format!(
-                "TPY6002: didChange for `{}` uses ranged incremental edits but the server only supports single full-text updates",
-                uri
-            )));
-        }
-        let text = change
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("didChange missing full text")))?;
-        self.overlays.insert(
-            path.clone(),
-            OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
-        );
+        let text = apply_content_changes(&current.text, &content_changes, uri)?;
+        self.overlays.insert(path.clone(), OverlayDocument { uri: uri.to_owned(), text, version });
         if let Some(workspace) = self.cached_workspace.as_mut() {
             let overlay =
                 self.overlays.get(&path).expect("changed overlay should be available in cache");
@@ -1028,6 +1189,103 @@ fn text_document_range(params: &Value) -> Result<(String, LspRange), LspError> {
             LspError::Other(String::from("textDocument/range request missing range"))
         })?)?;
     Ok((uri.to_owned(), range))
+}
+
+fn apply_content_changes(
+    current_text: &str,
+    content_changes: &[LspContentChangeEvent],
+    uri: &str,
+) -> Result<String, LspError> {
+    let mut text = current_text.to_owned();
+    for change in content_changes {
+        match change.range {
+            Some(range) => apply_ranged_change(&mut text, range, &change.text, uri)?,
+            None => {
+                if change.range_length.is_some() {
+                    return Err(LspError::Other(format!(
+                        "TPY6002: didChange for `{}` provided rangeLength without range",
+                        uri
+                    )));
+                }
+                text = change.text.clone();
+            }
+        }
+    }
+    Ok(text)
+}
+
+fn apply_ranged_change(
+    text: &mut String,
+    range: LspRange,
+    replacement: &str,
+    uri: &str,
+) -> Result<(), LspError> {
+    let start = lsp_position_to_byte_offset(text, range.start, uri)?;
+    let end = lsp_position_to_byte_offset(text, range.end, uri)?;
+    if start > end {
+        return Err(LspError::Other(format!(
+            "TPY6002: didChange for `{}` uses an invalid range with start after end",
+            uri
+        )));
+    }
+    text.replace_range(start..end, replacement);
+    Ok(())
+}
+
+fn lsp_position_to_byte_offset(
+    text: &str,
+    position: LspPosition,
+    uri: &str,
+) -> Result<usize, LspError> {
+    let mut line_start = 0usize;
+    for (line_index, line) in text.split_inclusive('\n').enumerate() {
+        let line_number = line_index as u32;
+        let line_text = line.strip_suffix('\n').unwrap_or(line);
+        if line_number == position.line {
+            return utf16_column_to_byte_offset(line_text, line_start, position, uri);
+        }
+        line_start += line.len();
+    }
+
+    let total_lines = text.lines().count() as u32;
+    if position.line == total_lines {
+        return utf16_column_to_byte_offset(&text[line_start..], line_start, position, uri);
+    }
+
+    Err(LspError::Other(format!(
+        "TPY6002: didChange for `{}` references line {} beyond the current document",
+        uri, position.line
+    )))
+}
+
+fn utf16_column_to_byte_offset(
+    line_text: &str,
+    line_start: usize,
+    position: LspPosition,
+    uri: &str,
+) -> Result<usize, LspError> {
+    let mut utf16_offset = 0u32;
+    for (byte_offset, ch) in line_text.char_indices() {
+        if utf16_offset == position.character {
+            return Ok(line_start + byte_offset);
+        }
+        utf16_offset += ch.len_utf16() as u32;
+        if utf16_offset > position.character {
+            return Err(LspError::Other(format!(
+                "TPY6002: didChange for `{}` splits a UTF-16 code point at line {}, character {}",
+                uri, position.line, position.character
+            )));
+        }
+    }
+
+    if utf16_offset == position.character {
+        Ok(line_start + line_text.len())
+    } else {
+        Err(LspError::Other(format!(
+            "TPY6002: didChange for `{}` references character {} beyond line {}",
+            uri, position.character, position.line
+        )))
+    }
 }
 
 fn resolve_symbol<'a>(
@@ -3123,6 +3381,8 @@ mod tests {
             .handle_message(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}))
             .expect("initialize should succeed");
         let capabilities = &responses[0]["result"]["capabilities"];
+        assert_eq!(capabilities["textDocumentSync"]["openClose"], json!(true));
+        assert_eq!(capabilities["textDocumentSync"]["change"], json!(2));
         assert_eq!(capabilities["hoverProvider"], json!(true));
         assert_eq!(capabilities["definitionProvider"], json!(true));
         assert_eq!(capabilities["referencesProvider"], json!(true));
@@ -3718,9 +3978,9 @@ foo.ping()
     }
 
     #[test]
-    fn did_change_reports_overlay_sync_failure_for_multiple_content_changes() {
+    fn did_change_applies_multiple_incremental_content_changes() {
         let config = temp_config(
-            "did_change_reports_overlay_sync_failure_for_multiple_content_changes",
+            "did_change_applies_multiple_incremental_content_changes",
             "def ok() -> int:\n    return 1\n",
         );
         let mut server = Server::new(config.clone());
@@ -3733,30 +3993,95 @@ foo.ping()
             }))
             .expect("didOpen should succeed");
 
-        let error = server
+        let responses = server
             .handle_message(json!({
                 "jsonrpc":"2.0",
                 "method":"textDocument/didChange",
                 "params": {
                     "textDocument": {"uri": uri, "version": 2},
                     "contentChanges": [
-                        {"text": "def first() -> int:\n    return 1\n"},
-                        {"text": "def second() -> int:\n    return 2\n"}
+                        {
+                            "range": {
+                                "start": {"line": 0, "character": 4},
+                                "end": {"line": 0, "character": 6}
+                            },
+                            "text": "better"
+                        },
+                        {
+                            "range": {
+                                "start": {"line": 1, "character": 11},
+                                "end": {"line": 1, "character": 12}
+                            },
+                            "text": "2"
+                        }
                     ]
                 }
             }))
-            .expect_err(
-                "multi-change didChange should fail until incremental patching is supported",
-            );
+            .expect("multi-change didChange should succeed");
 
-        assert!(error.to_string().contains("TPY6002"));
-        assert!(error.to_string().contains("only supports single full-text updates"));
+        assert_eq!(
+            server
+                .overlays
+                .get(&config.config_dir.join("src/app/__init__.tpy"))
+                .expect("overlay should still be cached after multi-change update")
+                .text,
+            "def better() -> int:\n    return 2\n"
+        );
+        assert!(
+            responses.iter().all(|response| response.get("method")
+                == Some(&json!("textDocument/publishDiagnostics")))
+        );
     }
 
     #[test]
-    fn did_change_reports_overlay_sync_failure_for_ranged_content_change() {
+    fn did_change_applies_ranged_content_change() {
         let config = temp_config(
-            "did_change_reports_overlay_sync_failure_for_ranged_content_change",
+            "did_change_applies_ranged_content_change",
+            "def ok() -> int:\n    return 1\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": "def ok() -> int:\n    return 1\n", "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [
+                        {
+                            "range": {
+                                "start": {"line": 0, "character": 4},
+                                "end": {"line": 0, "character": 6}
+                            },
+                            "text": "name"
+                        }
+                    ]
+                }
+            }))
+            .expect("ranged didChange should succeed");
+
+        assert_eq!(
+            server
+                .overlays
+                .get(&config.config_dir.join("src/app/__init__.tpy"))
+                .expect("overlay should still be cached after ranged update")
+                .text,
+            "def name() -> int:\n    return 1\n"
+        );
+    }
+
+    #[test]
+    fn did_change_reports_overlay_sync_failure_for_out_of_bounds_range() {
+        let config = temp_config(
+            "did_change_reports_overlay_sync_failure_for_out_of_bounds_range",
             "def ok() -> int:\n    return 1\n",
         );
         let mut server = Server::new(config.clone());
@@ -3778,18 +4103,18 @@ foo.ping()
                     "contentChanges": [
                         {
                             "range": {
-                                "start": {"line": 0, "character": 4},
-                                "end": {"line": 0, "character": 6}
+                                "start": {"line": 9, "character": 0},
+                                "end": {"line": 9, "character": 1}
                             },
-                            "text": "name"
+                            "text": "boom"
                         }
                     ]
                 }
             }))
-            .expect_err("ranged didChange should fail until incremental patching is supported");
+            .expect_err("out-of-bounds ranged didChange should fail");
 
         assert!(error.to_string().contains("TPY6002"));
-        assert!(error.to_string().contains("ranged incremental edits"));
+        assert!(error.to_string().contains("references line 9 beyond the current document"));
     }
 
     #[test]
