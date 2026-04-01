@@ -1821,16 +1821,7 @@ pub(super) fn resolve_instantiated_direct_function_signature(
     instantiate_direct_function_signature(&signature, &substitutions)
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
-pub(super) struct GenericTypeParamSubstitutions {
-    pub(super) types: BTreeMap<String, String>,
-    pub(super) param_lists: BTreeMap<String, ParamListBinding>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct ParamListBinding {
-    pub(super) params: Vec<typepython_syntax::DirectFunctionParamSite>,
-}
+type GenericTypeParamSubstitutions = GenericSolution;
 
 pub(super) fn infer_generic_type_param_substitutions(
     node: &typepython_graph::ModuleNode,
