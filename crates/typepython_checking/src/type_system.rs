@@ -1156,7 +1156,7 @@ pub(super) fn expand_type_alias_once(
     let expanded = if substitutions.is_empty() {
         detail
     } else {
-        substitute_type_substitutions(&detail, &substitutions)
+        substitute_generic_type_params(&detail, &substitutions)
     };
     let expanded = normalize_type_text(&expanded);
     (expanded != normalized).then_some(expanded)
@@ -1165,18 +1165,67 @@ pub(super) fn expand_type_alias_once(
 pub(super) fn alias_type_param_substitutions(
     alias_decl: &Declaration,
     args: &[String],
-) -> Option<BTreeMap<String, String>> {
+) -> Option<GenericSolution> {
+    let type_pack_indexes = alias_decl
+        .type_params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, type_param)| {
+            (type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple)
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if type_pack_indexes.len() > 1 {
+        return None;
+    }
+
+    let mut substitutions = GenericSolution::default();
+    if let Some(type_pack_index) = type_pack_indexes.first().copied() {
+        let mut start = 0usize;
+        for type_param in &alias_decl.type_params[..type_pack_index] {
+            let argument = args.get(start).cloned().or_else(|| {
+                type_param.default.as_ref().map(|default| normalize_type_text(default))
+            })?;
+            if args.get(start).is_some() {
+                start += 1;
+            }
+            substitutions.types.insert(type_param.name.clone(), normalize_type_text(&argument));
+        }
+
+        let mut end = args.len();
+        let mut trailing = Vec::new();
+        for type_param in alias_decl.type_params[type_pack_index + 1..].iter().rev() {
+            let argument = if end > start {
+                end -= 1;
+                Some(args[end].clone())
+            } else {
+                None
+            }
+            .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
+            trailing.push((type_param.name.clone(), normalize_type_text(&argument)));
+        }
+        for (name, argument) in trailing.into_iter().rev() {
+            substitutions.types.insert(name, argument);
+        }
+        substitutions.type_packs.insert(
+            alias_decl.type_params[type_pack_index].name.clone(),
+            TypePackBinding {
+                types: args[start..end].iter().map(|arg| normalize_type_text(arg)).collect(),
+            },
+        );
+        return Some(substitutions);
+    }
+
     if args.len() > alias_decl.type_params.len() {
         return None;
     }
 
-    let mut substitutions = BTreeMap::new();
     for (index, type_param) in alias_decl.type_params.iter().enumerate() {
         let argument = args
             .get(index)
             .cloned()
             .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
-        substitutions.insert(type_param.name.clone(), argument);
+        substitutions.types.insert(type_param.name.clone(), normalize_type_text(&argument));
     }
     Some(substitutions)
 }
@@ -1266,11 +1315,31 @@ pub(super) fn direct_type_matches_normalized(
     } else {
         match (split_generic_type(expected), split_generic_type(actual)) {
             (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
-                if expected_head == actual_head && expected_args.len() == actual_args.len() =>
+                if expected_head == actual_head =>
             {
-                expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
-                    direct_type_matches_normalized(node, nodes, expected_arg, actual_arg, visiting)
-                })
+                let (expected_args, actual_args) = if expected_head == "tuple" {
+                    (
+                        expanded_tuple_shape_args(&expected_args),
+                        expanded_tuple_shape_args(&actual_args),
+                    )
+                } else {
+                    (expected_args, actual_args)
+                };
+                if expected_args.len() != actual_args.len() {
+                    false
+                } else {
+                    expected_args.iter().zip(actual_args.iter()).all(
+                        |(expected_arg, actual_arg)| {
+                            direct_type_matches_normalized(
+                                node,
+                                nodes,
+                                expected_arg,
+                                actual_arg,
+                                visiting,
+                            )
+                        },
+                    )
+                }
             }
             _ => false,
         }
@@ -1624,6 +1693,21 @@ pub(super) fn assignable_generic_bridge(
     let (expected_head, expected_args) = split_generic_type(expected)?;
     let (actual_head, actual_args) = split_generic_type(actual)?;
 
+    if expected_head == "tuple" && actual_head == "tuple" {
+        let expected_args = expanded_tuple_shape_args(&expected_args);
+        let actual_args = expanded_tuple_shape_args(&actual_args);
+        if expected_args.len() != actual_args.len() {
+            return Some(false);
+        }
+        return same_head_generic_assignable(
+            node,
+            nodes,
+            expected_head,
+            &expected_args,
+            &actual_args,
+        );
+    }
+
     if expected_head == actual_head && expected_args.len() == actual_args.len() {
         return same_head_generic_assignable(
             node,
@@ -1695,6 +1779,20 @@ pub(super) fn same_head_generic_assignable(
             }
         },
     ))
+}
+
+pub(crate) fn expanded_tuple_shape_args(args: &[String]) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for arg in args {
+        if let Some(inner) = unpack_inner(arg)
+            && let Some(elements) = unpacked_fixed_tuple_elements(&inner)
+        {
+            expanded.extend(elements);
+            continue;
+        }
+        expanded.push(normalize_type_text(arg));
+    }
+    expanded
 }
 
 pub(super) fn callable_annotation_assignable(
@@ -3264,11 +3362,13 @@ pub(super) fn resolve_for_loop_target_type(
 pub(super) fn unwrap_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {
     let text = normalize_type_text(text);
     let inner = text.strip_prefix("tuple[").and_then(|inner| inner.strip_suffix(']'))?;
-    let args = split_top_level_type_args(inner);
+    let args = expanded_tuple_shape_args(
+        &split_top_level_type_args(inner).into_iter().map(str::to_owned).collect::<Vec<_>>(),
+    );
     if args.len() == 2 && args[1] == "..." {
         return None;
     }
-    Some(args.into_iter().map(normalize_type_text).collect())
+    Some(args)
 }
 
 pub(super) fn resolve_with_target_name_type(

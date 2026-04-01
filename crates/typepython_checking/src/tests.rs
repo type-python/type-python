@@ -15610,6 +15610,70 @@ fn check_accepts_mapping_value_covariance_assignment() {
 }
 
 #[test]
+fn check_accepts_typevartuple_alias_expansion_assignment() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("src/app/module.tpy"),
+        module_key: String::from("app.module"),
+        module_kind: SourceKind::TypePython,
+        declarations: vec![Declaration {
+            name: String::from("Pack"),
+            kind: DeclarationKind::TypeAlias,
+            detail: String::from("tuple[Unpack[Ts]]"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: vec![typepython_binding::GenericTypeParam {
+                kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
+                name: String::from("Ts"),
+                bound: None,
+                constraints: Vec::new(),
+                default: None,
+            }],
+        }],
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 1,
+    };
+    let graph = vec![node.clone()];
+
+    assert!(super::direct_type_is_assignable(&node, &graph, "tuple[int, str]", "Pack[int, str]"));
+    assert!(super::direct_type_is_assignable(&node, &graph, "Pack[int, str]", "tuple[int, str]"));
+}
+
+#[test]
+fn check_accepts_explicit_unpacked_fixed_tuple_assignment() {
+    let node = type_relation_node_with_base_child();
+
+    assert!(crate::direct_type_is_assignable(
+        &node,
+        &[],
+        "tuple[int, str]",
+        "tuple[Unpack[tuple[int, str]]]",
+    ));
+}
+
+#[test]
 fn check_rejects_mapping_key_covariance_assignment() {
     let node = type_relation_node_with_base_child();
 

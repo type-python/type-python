@@ -2948,6 +2948,11 @@ pub(super) fn first_type_mismatch_detail(
     if let (Some((expected_head, expected_args)), Some((actual_head, actual_args))) =
         (split_generic_type(&expected), split_generic_type(&actual))
     {
+        let (expected_args, actual_args) = if expected_head == "tuple" && actual_head == "tuple" {
+            (expanded_tuple_shape_args(&expected_args), expanded_tuple_shape_args(&actual_args))
+        } else {
+            (expected_args, actual_args)
+        };
         if expected_head == "tuple"
             && actual_head == "tuple"
             && actual_args.len() == 2

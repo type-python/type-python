@@ -11,6 +11,12 @@ pub(crate) struct GenericSolution {
     pub(crate) type_packs: BTreeMap<String, TypePackBinding>,
 }
 
+impl GenericSolution {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.types.is_empty() && self.param_lists.is_empty() && self.type_packs.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ParamListBinding {
     pub(crate) params: Vec<typepython_syntax::DirectFunctionParamSite>,
@@ -664,6 +670,23 @@ pub(crate) fn substitute_generic_type_params(
         return format!("Callable[{substituted_params}, {substituted_return}]");
     }
 
+    let normalized = normalize_type_text(annotation);
+    if let Some(branches) = union_branches(&normalized) {
+        return join_union_branches(
+            branches
+                .into_iter()
+                .map(|branch| substitute_generic_type_params(&branch, substitutions))
+                .collect(),
+        );
+    }
+    if let Some((head, args)) = split_generic_type(&normalized) {
+        let rendered = expand_substituted_generic_args(&args, substitutions)
+            .into_iter()
+            .map(|arg| substitute_generic_type_params(&arg, substitutions))
+            .collect::<Vec<_>>();
+        return format!("{head}[{}]", rendered.join(", "));
+    }
+
     substitute_type_substitutions(annotation, &substitutions.types)
 }
 
@@ -703,10 +726,16 @@ pub(crate) fn substitute_callable_param_expr(
         let rendered = if inner.trim().is_empty() {
             Vec::new()
         } else {
-            split_top_level_type_args(inner)
-                .into_iter()
-                .map(|part| substitute_generic_type_params(part, substitutions))
-                .collect::<Vec<_>>()
+            expand_substituted_generic_args(
+                &split_top_level_type_args(inner)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>(),
+                substitutions,
+            )
+            .into_iter()
+            .map(|part| substitute_generic_type_params(&part, substitutions))
+            .collect::<Vec<_>>()
         };
         return format!("[{}]", rendered.join(", "));
     }
@@ -730,4 +759,36 @@ pub(crate) fn render_param_list_binding_for_callable(
         })
         .collect::<Vec<_>>();
     format!("[{}]", rendered.join(", "))
+}
+
+pub(crate) fn expand_substituted_generic_args(
+    args: &[String],
+    substitutions: &GenericTypeParamSubstitutions,
+) -> Vec<String> {
+    let mut rendered = Vec::new();
+    for arg in args {
+        if let Some(inner) = unpack_inner(arg) {
+            if let Some(binding) = substitutions.type_packs.get(inner.trim()) {
+                rendered.extend(binding.types.iter().cloned());
+                continue;
+            }
+            if let Some(elements) = unpacked_fixed_tuple_elements(&inner) {
+                rendered.extend(elements);
+                continue;
+            }
+        }
+        rendered.push(arg.clone());
+    }
+    rendered
+}
+
+pub(crate) fn unpacked_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {
+    let (head, args) = split_generic_type(text)?;
+    if head != "tuple" {
+        return None;
+    }
+    if args.len() == 2 && args[1] == "..." {
+        return None;
+    }
+    Some(args)
 }

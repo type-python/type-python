@@ -154,6 +154,13 @@ pub(crate) fn annotated_inner(text: &str) -> Option<String> {
     }
 }
 
+pub(crate) fn unpack_inner(text: &str) -> Option<String> {
+    match TypeExpr::parse(text)? {
+        TypeExpr::Unpack(inner) => Some(inner.render()),
+        _ => None,
+    }
+}
+
 pub(crate) fn normalize_type_head(head: &str) -> &str {
     match head.trim() {
         "List" => "list",
