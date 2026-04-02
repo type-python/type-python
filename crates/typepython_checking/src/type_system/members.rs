@@ -1,0 +1,341 @@
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member reference resolution needs source metadata and scope context"
+)]
+pub(super) fn resolve_direct_member_reference_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    member_name: &str,
+    through_instance: bool,
+) -> Option<String> {
+    if !through_instance
+        && let Some(reference_type) =
+            resolve_imported_module_member_reference_type(node, nodes, owner_name, member_name)
+    {
+        return Some(reference_type);
+    }
+
+    let owner_type_name = if through_instance {
+        resolve_direct_callable_return_type(node, nodes, owner_name)
+            .map(|return_type| normalize_type_text(&return_type))
+            .or_else(|| Some(owner_name.to_owned()))
+    } else {
+        resolve_direct_name_reference_type(
+            node,
+            nodes,
+            signature,
+            exclude_name,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            owner_name,
+        )
+        .or_else(|| Some(owner_name.to_owned()))
+    }?;
+
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+    let member =
+        find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
+    if is_enum_like_class(nodes, class_node, class_decl) {
+        return Some(format!("Literal[{}.{}]", class_decl.name, member_name));
+    }
+    resolve_readable_member_type(node, member, &owner_type_name)
+}
+
+pub(super) fn is_enum_like_class(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> bool {
+    declaration.bases.iter().any(|base| {
+        matches!(
+            base.as_str(),
+            "Enum"
+                | "IntEnum"
+                | "StrEnum"
+                | "Flag"
+                | "IntFlag"
+                | "enum.Enum"
+                | "enum.IntEnum"
+                | "enum.StrEnum"
+                | "enum.Flag"
+                | "enum.IntFlag"
+        ) || resolve_direct_base(nodes, node, base)
+            .is_some_and(|(base_node, base_decl)| is_enum_like_class(nodes, base_node, base_decl))
+    })
+}
+
+pub(super) fn is_flag_enum_like_class(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> bool {
+    declaration.bases.iter().any(|base| {
+        matches!(base.as_str(), "Flag" | "IntFlag" | "enum.Flag" | "enum.IntFlag")
+            || resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
+                is_flag_enum_like_class(nodes, base_node, base_decl)
+            })
+    })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "method return resolution needs source metadata and scope context"
+)]
+pub(super) fn resolve_direct_method_return_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    method_name: &str,
+    through_instance: bool,
+) -> Option<String> {
+    if !through_instance
+        && let Some(return_type) = resolve_imported_module_method_return_type(
+            node,
+            nodes,
+            current_line,
+            owner_name,
+            method_name,
+        )
+    {
+        return Some(return_type);
+    }
+
+    let owner_type_name = if through_instance {
+        resolve_direct_callable_return_type(node, nodes, owner_name)
+            .map(|return_type| normalize_type_text(&return_type))
+            .or_else(|| Some(owner_name.to_owned()))
+    } else {
+        resolve_direct_name_reference_type(
+            node,
+            nodes,
+            signature,
+            exclude_name,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            owner_name,
+        )
+        .or_else(|| Some(owner_name.to_owned()))
+    }?;
+
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+    let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
+    let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
+    {
+        let call = node.method_calls.iter().find(|call| {
+            call.owner_name == owner_name
+                && call.method == method_name
+                && call.through_instance == through_instance
+                && call.line == current_line
+        })?;
+        let call = typepython_binding::CallSite {
+            callee: format!("{}.{}", class_decl.name, method_name),
+            arg_count: call.arg_count,
+            arg_types: call.arg_types.clone(),
+            arg_values: call.arg_values.clone(),
+            starred_arg_types: call.starred_arg_types.clone(),
+            starred_arg_values: call.starred_arg_values.clone(),
+            keyword_names: call.keyword_names.clone(),
+            keyword_arg_types: call.keyword_arg_types.clone(),
+            keyword_arg_values: call.keyword_arg_values.clone(),
+            keyword_expansion_types: call.keyword_expansion_types.clone(),
+            keyword_expansion_values: call.keyword_expansion_values.clone(),
+            line: 1,
+        };
+        let applicable = methods
+            .iter()
+            .copied()
+            .filter(|declaration| {
+                method_overload_is_applicable(node, nodes, &call, declaration, &owner_type_name)
+            })
+            .collect::<Vec<_>>();
+        if applicable.len() == 1 {
+            applicable[0]
+        } else {
+            return None;
+        }
+    } else {
+        *methods.first()?
+    };
+    let return_text = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(
+            method.detail.split_once("->")?.1.trim(),
+            Some(&owner_type_name),
+        ),
+    );
+    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+}
+
+pub(super) fn unwrap_awaitable_type(text: &str) -> Option<String> {
+    let text = normalize_type_text(text);
+    if let Some(inner) = text.strip_prefix("Awaitable[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some(normalize_type_text(inner));
+    }
+    if let Some(inner) = text.strip_prefix("Coroutine[").and_then(|inner| inner.strip_suffix(']')) {
+        let args = split_top_level_type_args(inner);
+        if args.len() == 3 {
+            return Some(normalize_type_text(args[2]));
+        }
+    }
+    None
+}
+
+pub(super) fn unwrap_generator_yield_type(text: &str) -> Option<String> {
+    let text = normalize_type_text(text);
+    let inner = text.strip_prefix("Generator[").and_then(|inner| inner.strip_suffix(']'))?;
+    let args = split_top_level_type_args(inner);
+    args.first().map(|arg| normalize_type_text(arg))
+}
+
+pub(super) fn unwrap_yield_from_type(text: &str) -> Option<String> {
+    let text = normalize_type_text(text);
+
+    if let Some(inner) = text.strip_prefix("Generator[").and_then(|inner| inner.strip_suffix(']')) {
+        let args = split_top_level_type_args(inner);
+        return args.first().map(|arg| normalize_type_text(arg));
+    }
+
+    if let Some(inner) = text.strip_prefix("Iterator[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some(normalize_type_text(inner));
+    }
+
+    if let Some(inner) = text.strip_prefix("Iterable[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some(normalize_type_text(inner));
+    }
+
+    if let Some(inner) = text.strip_prefix("Sequence[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some(normalize_type_text(inner));
+    }
+
+    for head in ["list", "tuple", "set", "frozenset"] {
+        if let Some(inner) =
+            text.strip_prefix(&format!("{head}[")).and_then(|inner| inner.strip_suffix(']'))
+        {
+            let args = split_top_level_type_args(inner);
+            return args.first().map(|arg| normalize_type_text(arg));
+        }
+    }
+
+    None
+}
+
+pub(super) fn unwrap_for_iterable_type(text: &str) -> Option<String> {
+    let text = normalize_type_text(text);
+
+    if text == "range" {
+        return Some(String::from("int"));
+    }
+
+    unwrap_yield_from_type(&text)
+}
+
+pub(super) fn find_method_line(
+    source: &str,
+    owner_type_name: &str,
+    method_name: &str,
+) -> Option<usize> {
+    typepython_syntax::collect_direct_method_signature_sites(source)
+        .into_iter()
+        .find(|site| site.owner_type_name == owner_type_name && site.name == method_name)
+        .map(|site| site.line)
+}
+
+pub(super) fn find_function_line(source: &str, function_name: &str) -> Option<usize> {
+    typepython_syntax::collect_direct_function_signature_sites(source)
+        .into_iter()
+        .find(|site| site.name == function_name)
+        .map(|site| site.line)
+}
+
+pub(super) fn single_line_return_annotation_span(
+    source: &str,
+    owner_type_name: Option<&str>,
+    function_name: &str,
+) -> Option<Span> {
+    let line = match owner_type_name {
+        Some(owner_type_name) => find_method_line(source, owner_type_name, function_name)?,
+        None => find_function_line(source, function_name)?,
+    };
+    let line_text = source.lines().nth(line.saturating_sub(1))?;
+    let arrow = line_text.find("->")?;
+    let colon = line_text[arrow + 2..].find(':')? + arrow + 2;
+    let start_column = arrow
+        + 3
+        + line_text[arrow + 2..].chars().take_while(|character| character.is_whitespace()).count();
+    let end_trimmed = line_text[..colon].trim_end();
+    Some(Span::new(String::new(), line, start_column, line, end_trimmed.chars().count() + 1))
+}
+
+pub(super) fn override_insertion_span(
+    source: &str,
+    owner_type_name: &str,
+    method_name: &str,
+    path: &std::path::Path,
+) -> Option<Span> {
+    let line = find_method_line(source, owner_type_name, method_name)?;
+    let line_text = source.lines().nth(line.saturating_sub(1))?;
+    let indent = line_text.chars().take_while(|character| character.is_whitespace()).count() + 1;
+    Some(Span::new(path.display().to_string(), line, indent, line, indent))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn attach_missing_none_return_suggestion(
+    diagnostic: Diagnostic,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+    expected_text: &str,
+    expected: &str,
+    actual: &str,
+    signature: &str,
+) -> Diagnostic {
+    let inferred_actual =
+        inferred_return_type_for_owner(node, nodes, return_site, expected, signature)
+            .unwrap_or_else(|| normalize_type_text(actual));
+    if union_branches(expected)
+        .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
+        || !union_branches(&inferred_actual)
+            .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
+    {
+        return diagnostic;
+    }
+    let Some(without_none) = remove_none_branch(&inferred_actual) else {
+        return diagnostic;
+    };
+    if !direct_type_is_assignable(node, nodes, expected, &without_none) {
+        return diagnostic;
+    }
+    if node.module_path.to_string_lossy().starts_with('<') {
+        return diagnostic;
+    }
+    let Ok(source) = fs::read_to_string(&node.module_path) else {
+        return diagnostic;
+    };
+    let Some(mut span) = single_line_return_annotation_span(
+        &source,
+        return_site.owner_type_name.as_deref(),
+        &return_site.owner_name,
+    ) else {
+        return diagnostic;
+    };
+    span.path = node.module_path.display().to_string();
+    diagnostic.with_suggestion(
+        "Add `| None` to the declared return type",
+        span,
+        format!("{} | None", expected_text.trim()),
+        SuggestionApplicability::MachineApplicable,
+    )
+}

@@ -1,0 +1,931 @@
+#[expect(
+    clippy::too_many_arguments,
+    reason = "direct expression resolution is driven by parsed expression metadata fields"
+)]
+pub(super) fn resolve_direct_expression_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_type: Option<&str>,
+    is_awaited: bool,
+    value_callee: Option<&str>,
+    value_name: Option<&str>,
+    value_member_owner_name: Option<&str>,
+    value_member_name: Option<&str>,
+    value_member_through_instance: bool,
+    value_method_owner_name: Option<&str>,
+    value_method_name: Option<&str>,
+    value_method_through_instance: bool,
+    value_subscript_target: Option<&typepython_syntax::DirectExprMetadata>,
+    value_subscript_string_key: Option<&str>,
+    value_subscript_index: Option<&str>,
+    value_if_true: Option<&typepython_syntax::DirectExprMetadata>,
+    value_if_false: Option<&typepython_syntax::DirectExprMetadata>,
+    value_if_guard: Option<&typepython_binding::GuardConditionSite>,
+    value_bool_left: Option<&typepython_syntax::DirectExprMetadata>,
+    value_bool_right: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_left: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_right: Option<&typepython_syntax::DirectExprMetadata>,
+    value_binop_operator: Option<&str>,
+) -> Option<String> {
+    let resolved = value_type
+        .filter(|value_type| !value_type.is_empty())
+        .map(str::trim)
+        .map(normalize_type_text)
+        .or_else(|| {
+            value_callee
+                .and_then(|callee| {
+                    resolve_direct_callable_return_type_for_line(node, nodes, callee, current_line)
+                        .or_else(|| resolve_direct_callable_return_type(node, nodes, callee))
+                })
+                .map(|return_type| normalize_type_text(&return_type))
+        })
+        .or_else(|| {
+            value_name.and_then(|value_name| {
+                resolve_direct_name_reference_type(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    value_name,
+                )
+            })
+        })
+        .or_else(|| {
+            value_method_owner_name.and_then(|owner_name| {
+                value_method_name.and_then(|method_name| {
+                    resolve_direct_method_return_type(
+                        node,
+                        nodes,
+                        signature,
+                        exclude_name,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        method_name,
+                        value_method_through_instance,
+                    )
+                })
+            })
+        })
+        .or_else(|| {
+            value_member_owner_name.and_then(|owner_name| {
+                value_member_name.and_then(|member_name| {
+                    resolve_direct_member_reference_type(
+                        node,
+                        nodes,
+                        signature,
+                        exclude_name,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        member_name,
+                        value_member_through_instance,
+                    )
+                })
+            })
+        })
+        .or_else(|| {
+            value_subscript_target.and_then(|target| {
+                resolve_direct_subscript_reference_type(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    target,
+                    value_subscript_string_key,
+                    value_subscript_index,
+                )
+            })
+        })
+        .or_else(|| {
+            let true_branch = value_if_true?;
+            let false_branch = value_if_false?;
+            if let Some(guard) = value_if_guard {
+                let base_bindings = resolve_guard_scope_bindings(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    guard,
+                );
+                let true_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, true);
+                let false_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, false);
+                return Some(join_branch_types(vec![
+                    resolve_direct_expression_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        true_branch,
+                        &true_bindings,
+                    )?,
+                    resolve_direct_expression_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        false_branch,
+                        &false_bindings,
+                    )?,
+                ]));
+            }
+            Some(join_branch_types(vec![
+                resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    true_branch,
+                )?,
+                resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    false_branch,
+                )?,
+            ]))
+        })
+        .or_else(|| {
+            resolve_direct_boolop_type(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_bool_left,
+                value_bool_right,
+                value_if_guard,
+                value_binop_operator,
+            )
+        })
+        .or_else(|| {
+            resolve_direct_binop_type(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_binop_left,
+                value_binop_right,
+                value_binop_operator,
+            )
+        });
+
+    resolved.and_then(
+        |resolved| {
+            if is_awaited { unwrap_awaitable_type(&resolved) } else { Some(resolved) }
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_boolop_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    left: Option<&typepython_syntax::DirectExprMetadata>,
+    right: Option<&typepython_syntax::DirectExprMetadata>,
+    guard: Option<&typepython_binding::GuardConditionSite>,
+    operator: Option<&str>,
+) -> Option<String> {
+    let operator = operator?;
+    if operator != "and" && operator != "or" {
+        return None;
+    }
+    let left_type = resolve_direct_expression_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        left?,
+    )?;
+    let right_type = if let Some(guard) = guard {
+        let base_bindings = resolve_guard_scope_bindings(
+            node,
+            nodes,
+            signature,
+            None,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            guard,
+        );
+        let narrowed_bindings =
+            apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, operator == "and");
+        resolve_direct_expression_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right?,
+            &narrowed_bindings,
+        )?
+    } else {
+        resolve_direct_expression_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right?,
+        )?
+    };
+    Some(join_branch_types(vec![left_type, right_type]))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_binop_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    left: Option<&typepython_syntax::DirectExprMetadata>,
+    right: Option<&typepython_syntax::DirectExprMetadata>,
+    operator: Option<&str>,
+) -> Option<String> {
+    let operator = operator?;
+    let left_type = resolve_direct_expression_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        left?,
+    )?;
+    let right_type = resolve_direct_expression_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        right?,
+    )?;
+    match operator.trim() {
+        "+" => resolve_plus_result_type(&left_type, &right_type),
+        "-" | "*" | "/" | "//" | "%"
+            if is_numeric_type(&left_type) && is_numeric_type(&right_type) =>
+        {
+            Some(join_numeric_result_type(&left_type, &right_type))
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn resolve_plus_result_type(left: &str, right: &str) -> Option<String> {
+    if left == "str" && right == "str" {
+        return Some(String::from("str"));
+    }
+    if is_numeric_type(left) && is_numeric_type(right) {
+        return Some(join_numeric_result_type(left, right));
+    }
+    let (left_head, left_args) = split_generic_type(left)?;
+    let (right_head, right_args) = split_generic_type(right)?;
+    match (left_head, right_head) {
+        ("list", "list") if left_args.len() == 1 && right_args.len() == 1 => Some(format!(
+            "list[{}]",
+            join_type_candidates(vec![left_args[0].clone(), right_args[0].clone()])
+        )),
+        ("tuple", "tuple") => {
+            let mut args = left_args;
+            args.extend(right_args);
+            Some(format!("tuple[{}]", args.join(", ")))
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn is_numeric_type(text: &str) -> bool {
+    matches!(normalize_type_text(text).as_str(), "int" | "float" | "complex")
+}
+
+pub(super) fn join_numeric_result_type(left: &str, right: &str) -> String {
+    let left = normalize_type_text(left);
+    let right = normalize_type_text(right);
+    if left == "complex" || right == "complex" {
+        String::from("complex")
+    } else if left == "float" || right == "float" || left == "/" || right == "/" {
+        String::from("float")
+    } else {
+        String::from("int")
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "subscript resolution needs the same expression context as other direct expression forms"
+)]
+pub(super) fn resolve_direct_subscript_reference_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    _exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    target: &typepython_syntax::DirectExprMetadata,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<String> {
+    let target_type = resolve_direct_expression_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        target,
+    )?;
+    resolve_subscript_type_from_target_type(node, nodes, &target_type, string_key, index_text)
+}
+
+pub(super) fn resolve_subscript_type_from_target_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &str,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_subscript_type_from_target_type_with_context(
+        &context,
+        node,
+        nodes,
+        target_type,
+        string_key,
+        index_text,
+    )
+}
+
+pub(super) fn resolve_subscript_type_from_target_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &str,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<String> {
+    if let Some(key) = string_key
+        && let Some(shape) =
+            resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, target_type)
+    {
+        return typed_dict_known_or_extra_field(&shape, key)
+            .map(|field| field.value_type().to_owned());
+    }
+
+    let normalized_target = normalize_type_text(target_type);
+    if let Some((head, args)) = split_generic_type(&normalized_target) {
+        return match head {
+            "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
+                if args.len() == 2 =>
+            {
+                Some(args[1].clone())
+            }
+            "list" | "Sequence" | "typing.Sequence" | "collections.abc.Sequence"
+                if !args.is_empty() =>
+            {
+                Some(args[0].clone())
+            }
+            "tuple" if !args.is_empty() => {
+                if args.len() == 2 && args[1] == "..." {
+                    return Some(args[0].clone());
+                }
+                index_text
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| args.get(index).cloned())
+                    .or_else(|| Some(join_type_candidates(args)))
+            }
+            _ => resolve_nominal_getitem_return_type(node, nodes, &normalized_target),
+        };
+    }
+
+    resolve_nominal_getitem_return_type(node, nodes, &normalized_target)
+}
+
+pub(super) fn resolve_nominal_getitem_return_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type_name: &str,
+) -> Option<String> {
+    let nominal_owner_name = split_generic_type(owner_type_name)
+        .map(|(head, _)| head.to_owned())
+        .unwrap_or_else(|| owner_type_name.to_owned());
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
+    let getitem = find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")?;
+    let return_text = rewrite_imported_typing_aliases(
+        node,
+        &substitute_self_annotation(
+            getitem.detail.split_once("->")?.1.trim(),
+            Some(owner_type_name),
+        ),
+    );
+    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+}
+
+pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
+    direct_signature_params(signature)?.into_iter().find_map(|param| {
+        if param.name != value_name {
+            return None;
+        }
+        let annotation = normalize_type_text(&param.annotation);
+        Some(if param.variadic {
+            if annotation.is_empty() {
+                String::from("tuple[dynamic, ...]")
+            } else if annotation.starts_with("Unpack[") {
+                format!("tuple[{annotation}]")
+            } else {
+                format!("tuple[{annotation}, ...]")
+            }
+        } else if param.keyword_variadic {
+            if annotation.is_empty() {
+                String::from("dict[str, dynamic]")
+            } else {
+                format!("dict[str, {annotation}]")
+            }
+        } else {
+            annotation
+        })
+    })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_direct_name_reference_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_direct_name_reference_type_with_context(
+        &context,
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_direct_name_reference_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    if let Some(receiver_type) =
+        resolve_receiver_name_type(node, current_owner_name, current_owner_type_name, value_name)
+    {
+        return Some(receiver_type);
+    }
+
+    let signature =
+        signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
+    let base_type = resolve_unnarrowed_name_reference_type_with_context(
+        context,
+        node,
+        nodes,
+        signature.as_deref(),
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )?;
+
+    Some(apply_guard_narrowing(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+        &base_type,
+    ))
+}
+
+pub(super) fn resolve_receiver_name_type(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+) -> Option<String> {
+    let owner_type_name = current_owner_type_name?;
+    let owner_name = current_owner_name?;
+    let declaration = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Function
+            && declaration.name == owner_name
+            && declaration.owner.as_ref().is_some_and(|owner| owner.name == owner_type_name)
+    })?;
+
+    match (declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance), value_name) {
+        (typepython_syntax::MethodKind::Instance, "self")
+        | (typepython_syntax::MethodKind::Property, "self")
+        | (typepython_syntax::MethodKind::PropertySetter, "self") => {
+            Some(String::from(owner_type_name))
+        }
+        (typepython_syntax::MethodKind::Class, "cls") => Some(format!("type[{owner_type_name}]")),
+        _ => None,
+    }
+}
+
+pub(super) fn find_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+) -> Option<&'a Declaration> {
+    let mut visited = BTreeSet::new();
+    find_member_declaration_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        predicate,
+        &mut visited,
+    )
+}
+
+pub(super) fn find_member_declaration_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    predicate: impl Fn(&Declaration) -> bool + Copy,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Option<&'a Declaration> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return None;
+    }
+
+    if let Some(member) = class_node.declarations.iter().find(|declaration| {
+        declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+            && declaration.name == member_name
+            && predicate(declaration)
+    }) {
+        return Some(member);
+    }
+
+    for base in &class_decl.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+            if let Some(member) = find_member_declaration_with_visited(
+                nodes,
+                base_node,
+                base_decl,
+                member_name,
+                predicate,
+                visited,
+            ) {
+                return Some(member);
+            }
+        }
+    }
+
+    None
+}
+
+pub(super) fn find_owned_value_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+    })
+}
+
+pub(super) fn find_owned_readable_member_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        declaration.kind == DeclarationKind::Value
+            || (declaration.kind == DeclarationKind::Function
+                && declaration.method_kind == Some(typepython_syntax::MethodKind::Property))
+    })
+}
+
+pub(super) fn resolve_readable_member_type(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    owner_type_name: &str,
+) -> Option<String> {
+    match declaration.kind {
+        DeclarationKind::Value => {
+            let detail = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(&declaration.detail, Some(owner_type_name)),
+            );
+            normalized_direct_return_annotation(&detail).map(normalize_type_text).or_else(|| {
+                declaration.value_type.as_deref().map(|value| {
+                    normalize_type_text(&rewrite_imported_typing_aliases(
+                        node,
+                        &substitute_self_annotation(value, Some(owner_type_name)),
+                    ))
+                })
+            })
+        }
+        DeclarationKind::Function
+            if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
+        {
+            let return_text = rewrite_imported_typing_aliases(
+                node,
+                &substitute_self_annotation(
+                    declaration.detail.split_once("->")?.1.trim(),
+                    Some(owner_type_name),
+                ),
+            );
+            normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn resolve_member_access_owner_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    access: &typepython_binding::MemberAccessSite,
+) -> Option<String> {
+    if access.through_instance {
+        resolve_direct_callable_return_type(node, nodes, &access.owner_name)
+            .map(|return_type| normalize_type_text(&return_type))
+            .or_else(|| Some(access.owner_name.clone()))
+    } else {
+        resolve_direct_name_reference_type(
+            node,
+            nodes,
+            None,
+            None,
+            access.current_owner_name.as_deref(),
+            access.current_owner_type_name.as_deref(),
+            access.line,
+            &access.owner_name,
+        )
+        .or_else(|| Some(access.owner_name.clone()))
+    }
+}
+
+pub(super) fn find_owned_callable_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Option<&'a Declaration> {
+    find_member_declaration(nodes, class_node, class_decl, member_name, |declaration| {
+        matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+    })
+}
+
+pub(super) fn find_owned_callable_declarations<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+) -> Vec<&'a Declaration> {
+    let mut visited = BTreeSet::new();
+    find_owned_callable_declarations_with_visited(
+        nodes,
+        class_node,
+        class_decl,
+        member_name,
+        &mut visited,
+    )
+}
+
+pub(super) fn find_owned_callable_declarations_with_visited<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    class_node: &'a typepython_graph::ModuleNode,
+    class_decl: &'a Declaration,
+    member_name: &str,
+    visited: &mut BTreeSet<(String, String)>,
+) -> Vec<&'a Declaration> {
+    let key = (class_node.module_key.clone(), class_decl.name.clone());
+    if !visited.insert(key) {
+        return Vec::new();
+    }
+
+    let local = class_node
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+                && declaration.name == member_name
+                && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
+        })
+        .collect::<Vec<_>>();
+    if !local.is_empty() {
+        return local;
+    }
+
+    for base in &class_decl.bases {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+            let inherited = find_owned_callable_declarations_with_visited(
+                nodes,
+                base_node,
+                base_decl,
+                member_name,
+                visited,
+            );
+            if !inherited.is_empty() {
+                return inherited;
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "unnarrowed name resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<String> {
+    if let Some(signature) = signature {
+        let signature = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(signature, current_owner_type_name),
+        );
+        if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
+            return Some(param_type);
+        }
+    }
+
+    if exclude_name.is_some_and(|name| name == value_name) {
+        return None;
+    }
+
+    if let Some(exception_type) = resolve_exception_binding_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    ) {
+        return Some(exception_type);
+    }
+
+    if let Some(loop_type) = resolve_for_loop_target_type(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    ) {
+        return Some(loop_type);
+    }
+
+    if let Some(with_type) = resolve_with_target_name_type(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    ) {
+        return Some(with_type);
+    }
+
+    if let Some(local_type) = resolve_local_assignment_reference_type(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    ) {
+        return Some(local_type);
+    }
+
+    if current_owner_name.is_none() {
+        if let Some(module_type) = resolve_module_level_assignment_reference_type(
+            node,
+            nodes,
+            signature,
+            current_line,
+            value_name,
+        ) {
+            return Some(module_type);
+        }
+    }
+
+    if let Some(local_value) = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Value
+            && declaration.owner.is_none()
+            && declaration.name == value_name
+            && !declaration.detail.is_empty()
+    }) {
+        let detail = rewrite_imported_typing_aliases(
+            node,
+            &substitute_self_annotation(&local_value.detail, current_owner_type_name),
+        );
+        return normalized_direct_return_annotation(&detail).map(normalize_type_text);
+    }
+
+    if let Some(function) = resolve_direct_function(node, nodes, value_name) {
+        if let Some(callable_annotation) =
+            resolve_decorated_function_callable_annotation_with_context(
+                context, node, nodes, value_name,
+            )
+        {
+            return Some(callable_annotation);
+        }
+        let param_types = direct_signature_sites_from_detail(&function.detail)
+            .into_iter()
+            .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+            .collect::<Vec<_>>();
+        let return_text = resolve_direct_callable_return_type(node, nodes, value_name)?;
+        return Some(format_callable_annotation(&param_types, &return_text));
+    }
+
+    if let Some(boundary_type) =
+        unresolved_import_boundary_type_with_context(context, node, nodes, value_name)
+    {
+        return Some(String::from(boundary_type));
+    }
+
+    if let Some((head, _)) = value_name.split_once('.')
+        && let Some(boundary_type) =
+            unresolved_import_boundary_type_with_context(context, node, nodes, head)
+    {
+        return Some(String::from(boundary_type));
+    }
+
+    None
+}
