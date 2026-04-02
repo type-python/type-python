@@ -186,7 +186,7 @@ The LSP server maintains:
 On each document change:
 1. The overlay is updated with the new document text
 2. Only the changed project document is reparsed/rebound
-3. Support modules are refreshed from the cached support catalog if imports changed
+3. Support modules are added to or removed from the active workspace set incrementally if imports changed
 4. The module graph snapshot and reverse-import index are updated
 5. The checker reruns only for the changed modules plus dependents whose public summaries changed
 6. Reference indexes are refreshed only for the affected modules using cached document indexes
@@ -194,7 +194,6 @@ On each document change:
 
 ## Limitations
 
-- **Active-set transitions still trigger a full query-state refresh**: when support imports enter or leave the active workspace set, the declaration/occurrence tables are rebuilt once to resynchronize the cache
 - **No signature help**: `textDocument/signatureHelp` is not yet implemented
 - **No document symbols**: `textDocument/documentSymbol` is not yet implemented
 - **No workspace symbols**: `workspace/symbol` is not yet implemented

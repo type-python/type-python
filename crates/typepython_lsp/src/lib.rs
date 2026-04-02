@@ -120,6 +120,7 @@ struct IncrementalWorkspace {
     dependency_index: ModuleDependencyIndex,
     parse_blocked: bool,
     state: WorkspaceState,
+    last_state_refresh_was_full: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -224,6 +225,7 @@ impl IncrementalWorkspace {
             dependency_index: ModuleDependencyIndex::default(),
             parse_blocked: false,
             state: empty_workspace_state(),
+            last_state_refresh_was_full: false,
         };
         let direct_changes = workspace
             .project_documents
@@ -523,15 +525,7 @@ impl IncrementalWorkspace {
             .filter(|module_key| current_module_keys.contains(module_key))
             .collect()
         };
-        let force_full_state_refresh = force_full_check
-            || self.parse_blocked
-            || active_document_uris(&self.active_cached_documents())
-                != self
-                    .state
-                    .documents
-                    .iter()
-                    .map(|document| document.uri.clone())
-                    .collect::<BTreeSet<_>>();
+        let force_full_state_refresh = force_full_check || self.parse_blocked;
         self.rebuild_document_indexes(&reindexed_modules, force_full_check || self.parse_blocked);
         self.update_workspace_state(
             diagnostics,
@@ -581,15 +575,15 @@ impl IncrementalWorkspace {
         module_keys: &BTreeSet<String>,
         force_full: bool,
     ) {
+        self.last_state_refresh_was_full = force_full;
         if force_full {
             self.state = self.assemble_workspace_state(diagnostics, graph);
             return;
         }
 
-        let changed_documents = self
+        let active_documents = self
             .active_cached_documents()
             .into_iter()
-            .filter(|document| module_keys.contains(&document.source.logical_module))
             .map(|document| {
                 (
                     document.document.uri.clone(),
@@ -597,6 +591,36 @@ impl IncrementalWorkspace {
                     document.declarations.clone(),
                     document.references.clone(),
                 )
+            })
+            .collect::<Vec<_>>();
+        let active_uris =
+            active_documents.iter().map(|(uri, _, _, _)| uri.clone()).collect::<BTreeSet<_>>();
+        let removed_uris = self
+            .state
+            .documents
+            .iter()
+            .map(|document| document.uri.clone())
+            .filter(|uri| !active_uris.contains(uri))
+            .collect::<Vec<_>>();
+        if !removed_uris.is_empty() {
+            self.state.documents.retain(|document| !removed_uris.contains(&document.uri));
+            self.state
+                .declarations_by_canonical
+                .retain(|_, occurrence| !removed_uris.contains(&occurrence.uri));
+            self.state.occurrences.retain(|occurrence| !removed_uris.contains(&occurrence.uri));
+        }
+
+        let known_uris = self
+            .state
+            .documents
+            .iter()
+            .map(|document| document.uri.clone())
+            .collect::<BTreeSet<_>>();
+        let changed_documents = active_documents
+            .into_iter()
+            .filter(|(uri, document, _, _)| {
+                !known_uris.contains(uri)
+                    || module_keys.contains(&document.syntax.source.logical_module)
             })
             .collect::<Vec<_>>();
         if changed_documents.is_empty() {
@@ -610,6 +634,8 @@ impl IncrementalWorkspace {
                 self.state.documents.iter_mut().find(|existing| existing.uri == uri)
             {
                 *document = updated_document.clone();
+            } else {
+                self.state.documents.push(updated_document.clone());
             }
 
             self.state.declarations_by_canonical.retain(|_, occurrence| occurrence.uri != uri);
@@ -699,10 +725,6 @@ fn parse_discovered_source(
 
 fn source_root_for_path_from_roots(source_roots: &[PathBuf], path: &Path) -> Option<PathBuf> {
     source_roots.iter().find(|root| path.starts_with(root)).cloned()
-}
-
-fn active_document_uris(documents: &[&CachedDocument]) -> BTreeSet<String> {
-    documents.iter().map(|document| document.document.uri.clone()).collect()
 }
 
 fn index_document_state(syntax: SyntaxTree) -> (DocumentState, Vec<SymbolOccurrence>) {
@@ -4244,6 +4266,89 @@ foo.ping()
 
         assert_eq!(before_fingerprint, after_fingerprint);
         assert_eq!(before_b_diagnostics, after_b_diagnostics);
+    }
+
+    #[test]
+    fn active_support_set_changes_stay_incremental() {
+        let config = temp_config(
+            "active_support_set_changes_stay_incremental",
+            "def run() -> None:\n    pass\n",
+        );
+        let path = config.config_dir.join("src/app/__init__.tpy");
+        let uri = path_to_uri(&path);
+        let mut server = Server::new(config.clone());
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": uri,
+                        "text": "def run() -> None:\n    pass\n",
+                        "languageId": "typepython",
+                        "version": 1
+                    }
+                }
+            }))
+            .expect("didOpen should initialize the workspace");
+        let workspace =
+            server.cached_workspace.as_ref().expect("workspace should be cached after didOpen");
+        assert!(workspace.active_support_paths.is_empty());
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 2},
+                    "contentChanges": [{
+                        "text": "from typing import Final\n\nVALUE: Final[int] = 1\n"
+                    }]
+                }
+            }))
+            .expect("didChange should add support modules incrementally");
+        let workspace = server
+            .cached_workspace
+            .as_ref()
+            .expect("workspace should remain cached after support activation");
+        assert!(!workspace.last_state_refresh_was_full);
+        assert!(!workspace.active_support_paths.is_empty());
+        assert!(workspace.state.documents.len() > 1);
+        assert!(
+            workspace
+                .state
+                .documents
+                .iter()
+                .any(|document| document.syntax.source.kind == SourceKind::Stub)
+        );
+
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didChange",
+                "params": {
+                    "textDocument": {"uri": uri, "version": 3},
+                    "contentChanges": [{
+                        "text": "def run() -> None:\n    pass\n"
+                    }]
+                }
+            }))
+            .expect("didChange should remove support modules incrementally");
+        let workspace = server
+            .cached_workspace
+            .as_ref()
+            .expect("workspace should remain cached after support removal");
+        assert!(!workspace.last_state_refresh_was_full);
+        assert!(workspace.active_support_paths.is_empty());
+        assert_eq!(workspace.state.documents.len(), 1);
+        assert!(
+            workspace
+                .state
+                .documents
+                .iter()
+                .all(|document| document.syntax.source.kind != SourceKind::Stub)
+        );
     }
 
     #[test]
