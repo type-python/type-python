@@ -177,6 +177,19 @@ struct LspSignatureHelp {
     active_parameter: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspDocumentSymbol {
+    name: String,
+    kind: u32,
+    range: LspRange,
+    selection_range: LspRange,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    children: Vec<LspDocumentSymbol>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LspContentChangeEvent {
@@ -850,6 +863,7 @@ impl Server {
                         "signatureHelpProvider": {
                             "triggerCharacters": ["(", ","]
                         },
+                        "documentSymbolProvider": true,
                         "renameProvider": true,
                         "codeActionProvider": true,
                         "completionProvider": {
@@ -900,6 +914,11 @@ impl Server {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_signature_help(params)?
+            })]),
+            "textDocument/documentSymbol" => Ok(vec![json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": self.handle_document_symbol(params)?
             })]),
             "textDocument/rename" => Ok(vec![json!({
                 "jsonrpc": "2.0",
@@ -1110,6 +1129,21 @@ impl Server {
             .saturating_sub(1)
             .min(active_call.active_parameter);
         Ok(json!(LspSignatureHelp { signatures, active_signature, active_parameter }))
+    }
+
+    fn handle_document_symbol(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
+        let uri = params
+            .get("textDocument")
+            .and_then(|document| document.get("uri"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                LspError::Other(String::from("textDocument/documentSymbol request missing uri"))
+            })?;
+        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+            return Ok(json!([]));
+        };
+        Ok(json!(collect_document_symbols(document)))
     }
 
     fn handle_rename(&mut self, params: Value) -> Result<Value, LspError> {
@@ -1532,6 +1566,191 @@ fn render_parameter_label(param: &typepython_syntax::FunctionParam) -> String {
         label.push_str(" = ...");
     }
     label
+}
+
+fn collect_document_symbols(document: &DocumentState) -> Vec<LspDocumentSymbol> {
+    document
+        .syntax
+        .statements
+        .iter()
+        .flat_map(|statement| match statement {
+            SyntaxStatement::TypeAlias(statement) => {
+                find_name_range(&document.text, statement.line, &statement.name)
+                    .map(|selection_range| {
+                        vec![LspDocumentSymbol {
+                            name: statement.name.clone(),
+                            kind: 13,
+                            range: single_line_range(&document.text, statement.line),
+                            selection_range,
+                            detail: Some(statement.value.clone()),
+                            children: Vec::new(),
+                        }]
+                    })
+                    .unwrap_or_default()
+            }
+            SyntaxStatement::Interface(statement) => {
+                collect_type_block_symbols(document, statement, 11)
+            }
+            SyntaxStatement::DataClass(statement)
+            | SyntaxStatement::SealedClass(statement)
+            | SyntaxStatement::ClassDef(statement) => {
+                collect_type_block_symbols(document, statement, 5)
+            }
+            SyntaxStatement::OverloadDef(statement) | SyntaxStatement::FunctionDef(statement) => {
+                find_name_range(&document.text, statement.line, &statement.name)
+                    .map(|selection_range| {
+                        vec![LspDocumentSymbol {
+                            name: statement.name.clone(),
+                            kind: 12,
+                            range: block_range(&document.text, statement.line),
+                            selection_range,
+                            detail: Some(format_signature(
+                                &statement.params,
+                                statement.returns.as_deref(),
+                            )),
+                            children: Vec::new(),
+                        }]
+                    })
+                    .unwrap_or_default()
+            }
+            SyntaxStatement::Value(statement) => statement
+                .names
+                .iter()
+                .filter_map(|name| {
+                    find_name_range(&document.text, statement.line, name).map(|selection_range| {
+                        LspDocumentSymbol {
+                            name: name.clone(),
+                            kind: value_symbol_kind(name, statement.is_final),
+                            range: single_line_range(&document.text, statement.line),
+                            selection_range,
+                            detail: statement
+                                .annotation
+                                .clone()
+                                .or_else(|| statement.value_type.clone()),
+                            children: Vec::new(),
+                        }
+                    })
+                })
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+fn collect_type_block_symbols(
+    document: &DocumentState,
+    statement: &NamedBlockStatement,
+    kind: u32,
+) -> Vec<LspDocumentSymbol> {
+    find_name_range(&document.text, statement.line, &statement.name)
+        .map(|selection_range| {
+            vec![LspDocumentSymbol {
+                name: statement.name.clone(),
+                kind,
+                range: block_range(&document.text, statement.line),
+                selection_range,
+                detail: (!statement.bases.is_empty()).then(|| statement.bases.join(", ")),
+                children: collect_class_member_symbols(document, statement),
+            }]
+        })
+        .unwrap_or_default()
+}
+
+fn collect_class_member_symbols(
+    document: &DocumentState,
+    class_like: &NamedBlockStatement,
+) -> Vec<LspDocumentSymbol> {
+    class_like
+        .members
+        .iter()
+        .filter_map(|member| {
+            find_name_range(&document.text, member.line, &member.name).map(|selection_range| {
+                let kind = match member.kind {
+                    typepython_syntax::ClassMemberKind::Field => {
+                        value_symbol_kind(&member.name, member.is_final)
+                    }
+                    typepython_syntax::ClassMemberKind::Method
+                    | typepython_syntax::ClassMemberKind::Overload => match member.method_kind {
+                        Some(typepython_syntax::MethodKind::Property)
+                        | Some(typepython_syntax::MethodKind::PropertySetter) => 7,
+                        _ => 6,
+                    },
+                };
+                let detail = match member.kind {
+                    typepython_syntax::ClassMemberKind::Field => {
+                        member.annotation.clone().or_else(|| member.value_type.clone())
+                    }
+                    typepython_syntax::ClassMemberKind::Method
+                    | typepython_syntax::ClassMemberKind::Overload => {
+                        Some(format_signature(&member.params, member.returns.as_deref()))
+                    }
+                };
+                LspDocumentSymbol {
+                    name: member.name.clone(),
+                    kind,
+                    range: match member.kind {
+                        typepython_syntax::ClassMemberKind::Field => {
+                            single_line_range(&document.text, member.line)
+                        }
+                        typepython_syntax::ClassMemberKind::Method
+                        | typepython_syntax::ClassMemberKind::Overload => {
+                            block_range(&document.text, member.line)
+                        }
+                    },
+                    selection_range,
+                    detail,
+                    children: Vec::new(),
+                }
+            })
+        })
+        .collect()
+}
+
+fn value_symbol_kind(name: &str, is_final: bool) -> u32 {
+    if is_final || name.chars().all(|ch| !ch.is_ascii_lowercase()) { 14 } else { 13 }
+}
+
+fn single_line_range(text: &str, line: usize) -> LspRange {
+    let line_text = text.lines().nth(line.saturating_sub(1)).unwrap_or_default();
+    LspRange {
+        start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+        end: LspPosition {
+            line: line.saturating_sub(1) as u32,
+            character: line_text.chars().count() as u32,
+        },
+    }
+}
+
+fn block_range(text: &str, line: usize) -> LspRange {
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.is_empty() {
+        return LspRange {
+            start: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+            end: LspPosition { line: line.saturating_sub(1) as u32, character: 0 },
+        };
+    }
+
+    let start_index = line.saturating_sub(1).min(lines.len().saturating_sub(1));
+    let start_indent = line_indentation(lines[start_index]);
+    let mut end_index = start_index;
+    for (index, candidate) in lines.iter().enumerate().skip(start_index + 1) {
+        if candidate.trim().is_empty() {
+            end_index = index;
+            continue;
+        }
+        if line_indentation(candidate) <= start_indent {
+            break;
+        }
+        end_index = index;
+    }
+
+    LspRange {
+        start: LspPosition { line: start_index as u32, character: 0 },
+        end: LspPosition {
+            line: end_index as u32,
+            character: lines[end_index].chars().count() as u32,
+        },
+    }
 }
 
 fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, LspError> {
@@ -3804,6 +4023,7 @@ mod tests {
         assert_eq!(capabilities["definitionProvider"], json!(true));
         assert_eq!(capabilities["referencesProvider"], json!(true));
         assert_eq!(capabilities["signatureHelpProvider"]["triggerCharacters"], json!(["(", ","]));
+        assert_eq!(capabilities["documentSymbolProvider"], json!(true));
         assert_eq!(capabilities["renameProvider"], json!(true));
         assert_eq!(capabilities["codeActionProvider"], json!(true));
     }
@@ -3957,6 +4177,39 @@ mod tests {
             signature_help["signatures"][0]["label"],
             json!("Box.put(value: int, label: str) -> None")
         );
+    }
+
+    #[test]
+    fn document_symbol_returns_hierarchical_symbols() {
+        let config = temp_config(
+            "document_symbol_returns_hierarchical_symbols",
+            "typealias UserId = int\n\nclass Box:\n    value: int\n    def get(self) -> int:\n        return self.value\n\ndef build() -> Box:\n    return Box()\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let symbols = server
+            .handle_document_symbol(json!({
+                "textDocument": {"uri": uri}
+            }))
+            .expect("documentSymbol should succeed");
+        let symbols = symbols.as_array().expect("document symbols should be an array");
+        assert_eq!(symbols.len(), 3);
+        assert_eq!(symbols[0]["name"], json!("UserId"));
+        assert_eq!(symbols[1]["name"], json!("Box"));
+        assert_eq!(symbols[1]["kind"], json!(5));
+        assert_eq!(symbols[1]["children"][0]["name"], json!("value"));
+        assert_eq!(symbols[1]["children"][1]["name"], json!("get"));
+        assert_eq!(symbols[2]["name"], json!("build"));
     }
 
     #[test]

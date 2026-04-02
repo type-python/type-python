@@ -318,6 +318,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 | `textDocument/definition` | Jump to definition |
 | `textDocument/references` | Find all usages |
 | `textDocument/signatureHelp` | Show active call signature |
+| `textDocument/documentSymbol` | List symbols in current document |
 | `textDocument/rename` | Rename symbol across project |
 | `textDocument/codeAction` | Quick fixes from diagnostics |
 | `textDocument/completion` | Autocomplete (triggered on `.`) |
