@@ -45,7 +45,7 @@ pub fn serve(config: &ConfigHandle) -> Result<(), LspError> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut server = Server::new(config.clone());
-    server.serve(stdin.lock(), stdout.lock())
+    server.serve(io::BufReader::new(stdin), stdout.lock())
 }
 
 #[derive(Debug, Clone)]
@@ -232,6 +232,7 @@ struct LspContentChangeEvent {
 
 struct Server {
     analysis: AnalysisHost,
+    scheduler: LspScheduler,
     shutdown_requested: bool,
     exited: bool,
 }
@@ -239,12 +240,14 @@ struct Server {
 mod analysis;
 mod formatting;
 mod requests;
+mod scheduler;
 mod server;
 mod workspace;
 
 use analysis::*;
 use formatting::*;
 use requests::*;
+use scheduler::*;
 use workspace::*;
 
 #[cfg(test)]

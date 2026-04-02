@@ -2,25 +2,79 @@ use super::*;
 
 impl Server {
     pub(super) fn new(config: ConfigHandle) -> Self {
-        Self { analysis: AnalysisHost::new(config), shutdown_requested: false, exited: false }
+        Self {
+            analysis: AnalysisHost::new(config),
+            scheduler: LspScheduler::default(),
+            shutdown_requested: false,
+            exited: false,
+        }
     }
 
-    pub(super) fn serve<R: BufRead, W: Write>(
+    pub(super) fn serve<R: BufRead + Send + 'static, W: Write>(
         &mut self,
-        mut reader: R,
+        reader: R,
         mut writer: W,
     ) -> Result<(), LspError> {
-        while let Some(message) = read_message(&mut reader)? {
-            let responses = self.handle_message(message)?;
-            for response in responses {
-                write_message(&mut writer, &response)?;
+        let (sender, receiver) = std::sync::mpsc::channel::<Result<Option<Value>, LspError>>();
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            loop {
+                let next = read_message(&mut reader);
+                let terminal = !matches!(next, Ok(Some(_)));
+                if sender.send(next).is_err() {
+                    break;
+                }
+                if terminal {
+                    break;
+                }
             }
-            writer.flush()?;
+        });
+
+        self.scheduler.enable_background_mode();
+
+        loop {
+            let incoming = match self.scheduler.next_wait_duration() {
+                Some(timeout) => match receiver.recv_timeout(timeout) {
+                    Ok(next) => Some(next),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(Ok(None)),
+                },
+                None => Some(receiver.recv().unwrap_or(Ok(None))),
+            };
+
+            match incoming {
+                Some(Ok(Some(message))) => {
+                    for response in self.handle_message(message)? {
+                        write_message(&mut writer, &response)?;
+                    }
+                    writer.flush()?;
+                }
+                Some(Ok(None)) => {
+                    for response in self.scheduler.flush_all() {
+                        write_message(&mut writer, &response)?;
+                    }
+                    writer.flush()?;
+                    break;
+                }
+                Some(Err(error)) => return Err(error),
+                None => {
+                    for response in self.scheduler.flush_due_timeout() {
+                        write_message(&mut writer, &response)?;
+                    }
+                    writer.flush()?;
+                }
+            }
+
             if self.exited {
+                for response in self.scheduler.flush_all() {
+                    write_message(&mut writer, &response)?;
+                }
+                writer.flush()?;
                 break;
             }
         }
 
+        self.scheduler.disable_background_mode();
         Ok(())
     }
 
@@ -31,8 +85,12 @@ impl Server {
         let id = message.get("id").cloned();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
 
-        match method {
-            "initialize" => Ok(vec![json!({
+        if self.scheduler.take_cancellation(id.as_ref()) {
+            return Ok(Vec::new());
+        }
+
+        let mut responses = match method {
+            "initialize" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
@@ -62,82 +120,103 @@ impl Server {
                         "version": env!("CARGO_PKG_VERSION")
                     }
                 }
-            })]),
-            "initialized" => Ok(Vec::new()),
+            })],
+            "initialized" => Vec::new(),
+            "$/cancelRequest" => {
+                if let Some(request_id) = params.get("id") {
+                    self.scheduler.cancel_request(request_id);
+                }
+                Vec::new()
+            }
             "shutdown" => {
                 self.shutdown_requested = true;
-                Ok(vec![json!({"jsonrpc": "2.0", "id": id, "result": Value::Null})])
+                vec![json!({"jsonrpc": "2.0", "id": id, "result": Value::Null})]
             }
             "exit" => {
                 self.exited = true;
-                Ok(Vec::new())
+                Vec::new()
             }
             "textDocument/didOpen" => {
                 self.apply_did_open(params)?;
-                self.publish_diagnostics()
+                self.schedule_diagnostics_batch(Vec::new())?
             }
             "textDocument/didChange" => {
                 self.apply_did_change(params)?;
-                self.publish_diagnostics()
+                self.schedule_diagnostics_batch(Vec::new())?
             }
-            "textDocument/didClose" => self.apply_did_close(params),
-            "textDocument/hover" => Ok(vec![json!({
+            "textDocument/didClose" => {
+                let cleared = self.apply_did_close(params)?;
+                self.schedule_diagnostics_batch(cleared)?
+            }
+            "textDocument/hover" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_hover(params)?
-            })]),
-            "textDocument/definition" => Ok(vec![json!({
+            })],
+            "textDocument/definition" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_definition(params)?
-            })]),
-            "textDocument/references" => Ok(vec![json!({
+            })],
+            "textDocument/references" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_references(params)?
-            })]),
-            "textDocument/formatting" => Ok(vec![json!({
+            })],
+            "textDocument/formatting" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_formatting(params)?
-            })]),
-            "textDocument/signatureHelp" => Ok(vec![json!({
+            })],
+            "textDocument/signatureHelp" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_signature_help(params)?
-            })]),
-            "textDocument/documentSymbol" => Ok(vec![json!({
+            })],
+            "textDocument/documentSymbol" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_document_symbol(params)?
-            })]),
-            "workspace/symbol" => Ok(vec![json!({
+            })],
+            "workspace/symbol" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_workspace_symbol(params)?
-            })]),
-            "textDocument/rename" => Ok(vec![json!({
+            })],
+            "textDocument/rename" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_rename(params)?
-            })]),
-            "textDocument/codeAction" => Ok(vec![json!({
+            })],
+            "textDocument/codeAction" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_code_action(params)?
-            })]),
-            "textDocument/completion" => Ok(vec![json!({
+            })],
+            "textDocument/completion" => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_completion(params)?
-            })]),
-            _ if id.is_some() => Ok(vec![json!({
+            })],
+            _ if id.is_some() => vec![json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": Value::Null
-            })]),
-            _ => Ok(Vec::new()),
-        }
+            })],
+            _ => Vec::new(),
+        };
+
+        responses.extend(self.scheduler.flush_due_after(method));
+        Ok(responses)
+    }
+
+    fn schedule_diagnostics_batch(
+        &mut self,
+        mut notifications: Vec<Value>,
+    ) -> Result<Vec<Value>, LspError> {
+        notifications.extend(self.publish_diagnostics()?);
+        self.scheduler.schedule_diagnostics(notifications);
+        Ok(self.scheduler.immediate_or_deferred_notifications())
     }
 
     pub(super) fn apply_did_open(&mut self, params: Value) -> Result<(), LspError> {

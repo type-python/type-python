@@ -1,7 +1,7 @@
 use super::*;
 use std::{
     env, fs,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(unix)]
@@ -954,6 +954,168 @@ fn did_change_reports_overlay_sync_failure_for_out_of_bounds_range() {
 
     assert!(error.to_string().contains("TPY6002"));
     assert!(error.to_string().contains("references line 9 beyond the current document"));
+}
+
+#[test]
+fn background_scheduler_debounces_and_discards_stale_diagnostics() {
+    let config = temp_config(
+        "background_scheduler_debounces_and_discards_stale_diagnostics",
+        "def ok() -> int:\n    return 1\n",
+    );
+    let mut server = Server::new(config.clone());
+    server.scheduler.enable_background_mode();
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    let open_responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "text": "def broken(:\n",
+                    "languageId": "typepython",
+                    "version": 1
+                }
+            }
+        }))
+        .expect("didOpen should schedule diagnostics");
+    assert!(open_responses.is_empty());
+
+    let change_responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didChange",
+            "params": {
+                "textDocument": {"uri": uri, "version": 2},
+                "contentChanges": [{"text": "def fixed() -> int:\n    return 1\n"}]
+            }
+        }))
+        .expect("didChange should coalesce diagnostics");
+    assert!(change_responses.is_empty());
+
+    std::thread::sleep(Duration::from_millis(60));
+    let notifications = server.scheduler.flush_due_timeout();
+    assert_eq!(notifications.len(), 1);
+    let payload = notifications
+        .iter()
+        .find(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+        .expect("publishDiagnostics notification should be present");
+    let diagnostics = payload["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics payload should be an array");
+    assert!(diagnostics.is_empty(), "stale diagnostics should have been discarded");
+}
+
+#[test]
+fn background_scheduler_defers_diagnostics_for_hover_requests() {
+    let config = temp_config(
+        "background_scheduler_defers_diagnostics_for_hover_requests",
+        "def ok() -> int:\n    return 1\n",
+    );
+    let mut server = Server::new(config.clone());
+    server.scheduler.enable_background_mode();
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "text": "def ok() -> int:\n    return 1\n",
+                    "languageId": "typepython",
+                    "version": 1
+                }
+            }
+        }))
+        .expect("didOpen should schedule diagnostics");
+
+    std::thread::sleep(Duration::from_millis(60));
+    for request_id in 1..=3 {
+        let responses = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "id": request_id,
+                "method":"textDocument/hover",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 0, "character": 5}
+                }
+            }))
+            .expect("hover should stay responsive");
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["id"], json!(request_id));
+        assert!(
+            responses
+                .iter()
+                .all(|response| response["method"] != json!("textDocument/publishDiagnostics"))
+        );
+    }
+
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "id": 4,
+            "method":"textDocument/hover",
+            "params": {
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 5}
+            }
+        }))
+        .expect("eventual hover should also flush deferred diagnostics");
+    assert_eq!(responses[0]["id"], json!(4));
+    assert!(
+        responses
+            .iter()
+            .any(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+    );
+}
+
+#[test]
+fn cancel_request_drops_response_before_execution() {
+    let config = temp_config(
+        "cancel_request_drops_response_before_execution",
+        "def ok() -> int:\n    return 1\n",
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "text": "def ok() -> int:\n    return 1\n",
+                    "languageId": "typepython",
+                    "version": 1
+                }
+            }
+        }))
+        .expect("didOpen should succeed");
+
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"$/cancelRequest",
+            "params": {"id": 17}
+        }))
+        .expect("cancelRequest should succeed");
+
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "id": 17,
+            "method":"textDocument/hover",
+            "params": {
+                "textDocument": {"uri": uri},
+                "position": {"line": 0, "character": 5}
+            }
+        }))
+        .expect("canceled hover should be dropped");
+    assert!(responses.is_empty());
 }
 
 #[test]
