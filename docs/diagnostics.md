@@ -322,6 +322,7 @@ TPY5002  error  emit blocked by `emit.no_emit_on_error` for /path/to/project
 |---|---|---|
 | `TPY6001` | error | Incremental snapshot is incompatible or corrupt |
 | `TPY6002` | error | LSP document protocol error (invalid request, malformed JSON-RPC) |
+| `TPY6003` | error | LSP formatter backend startup or execution failure |
 
 ---
 

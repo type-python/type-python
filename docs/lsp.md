@@ -18,6 +18,7 @@ The server communicates via **stdio** using the JSON-RPC 2.0 protocol -- the sta
 | Hover | `textDocument/hover` | Type information at cursor position |
 | Go to Definition | `textDocument/definition` | Jump to symbol definition |
 | Find References | `textDocument/references` | Find all usages of a symbol |
+| Formatting | `textDocument/formatting` | Format the current document |
 | Signature Help | `textDocument/signatureHelp` | Active call signature and parameter index |
 | Document Symbols | `textDocument/documentSymbol` | Outline symbols in the current file |
 | Workspace Symbols | `workspace/symbol` | Search declarations across the workspace |
@@ -43,6 +44,23 @@ Code actions are generated from diagnostic suggestions. For example:
 - Add `@override` decorator
 - Add missing `match` cases
 - Fix TypedDict key typos
+
+### Formatting
+
+Document formatting is exposed via `textDocument/formatting`.
+
+- `.tpy` files are normalized to formatter-friendly Python, run through the backend, then restored back to TypePython syntax
+- `.py` and `.pyi` files are formatted directly
+- The server auto-detects `ruff format` and `black`
+- You can override the backend with `[format].command` in configuration
+
+Example configuration:
+
+```toml
+[format]
+command = ["python3", "{workspace_root}/tools/format_stdin.py", "{file}"]
+line_length = 1000
+```
 
 ### Hover
 
@@ -195,10 +213,6 @@ On each document change:
 6. Query indexes are refreshed only for the affected modules using cached document indexes
 7. Diagnostics are pushed to the editor
 
-## Limitations
-
-- **No formatting**: use an external formatter (e.g., ruff, black) for code formatting
-
 ## Troubleshooting
 
 ### Server doesn't start
@@ -218,3 +232,9 @@ On each document change:
 - Large projects may benefit from narrower `include` patterns
 - Exclude generated directories (`.typepython/`, `dist/`, `node_modules/`)
 - The `watch.debounce_ms` setting can reduce recompilation frequency
+
+### Formatting returns an error
+
+- Ensure either `ruff` or `black` is installed, or configure `[format].command`
+- If you use a relative path inside `[format].command`, it is resolved from the workspace root
+- `TPY6003` indicates formatter startup, availability, or execution failure

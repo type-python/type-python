@@ -3762,6 +3762,241 @@ pub fn normalize_source_variadic_type_syntax(text: &str) -> String {
     normalized
 }
 
+const FORMAT_MARKER_PREFIX: &str = "__typepython_format__:";
+
+/// Prepared source text that can be sent to an external Python formatter.
+#[derive(Debug, Clone)]
+pub struct ExternalFormattingSource {
+    formatter_input: String,
+    restore_custom_syntax: bool,
+}
+
+impl ExternalFormattingSource {
+    /// Returns the formatter-ready source text.
+    #[must_use]
+    pub fn formatter_input(&self) -> &str {
+        &self.formatter_input
+    }
+
+    /// Restores TypePython-only syntax after the external formatter has run.
+    #[must_use]
+    pub fn restore(&self, formatted: &str) -> String {
+        if self.restore_custom_syntax {
+            restore_typepython_formatting_markers(formatted)
+        } else {
+            formatted.to_owned()
+        }
+    }
+}
+
+/// Converts a source file into Python-compatible text for external formatters.
+pub fn prepare_source_for_external_formatter(
+    source: &SourceFile,
+) -> Result<ExternalFormattingSource, DiagnosticReport> {
+    if source.kind != SourceKind::TypePython {
+        return Ok(ExternalFormattingSource {
+            formatter_input: source.text.clone(),
+            restore_custom_syntax: false,
+        });
+    }
+
+    let syntax = parse_with_options(source.clone(), ParseOptions::default());
+    prepare_syntax_tree_for_external_formatter(&syntax)
+}
+
+/// Converts an already-parsed syntax tree into Python-compatible text for external formatters.
+pub fn prepare_syntax_tree_for_external_formatter(
+    syntax: &SyntaxTree,
+) -> Result<ExternalFormattingSource, DiagnosticReport> {
+    if syntax.source.kind != SourceKind::TypePython {
+        return Ok(ExternalFormattingSource {
+            formatter_input: syntax.source.text.clone(),
+            restore_custom_syntax: false,
+        });
+    }
+    if syntax.diagnostics.has_errors() {
+        return Err(syntax.diagnostics.clone());
+    }
+
+    Ok(ExternalFormattingSource {
+        formatter_input: prepare_typepython_source_for_external_formatter(
+            &syntax.source.text,
+            &syntax.statements,
+        ),
+        restore_custom_syntax: true,
+    })
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormattingSyntaxKind {
+    TypeAlias,
+    Interface,
+    DataClass,
+    SealedClass,
+    OverloadDef,
+    Unsafe,
+}
+
+impl FormattingSyntaxKind {
+    fn marker(self) -> &'static str {
+        match self {
+            Self::TypeAlias => "typealias",
+            Self::Interface => "interface",
+            Self::DataClass => "data_class",
+            Self::SealedClass => "sealed_class",
+            Self::OverloadDef => "overload_def",
+            Self::Unsafe => "unsafe",
+        }
+    }
+
+    fn from_marker(marker: &str) -> Option<Self> {
+        Some(match marker {
+            "typealias" => Self::TypeAlias,
+            "interface" => Self::Interface,
+            "data_class" => Self::DataClass,
+            "sealed_class" => Self::SealedClass,
+            "overload_def" => Self::OverloadDef,
+            "unsafe" => Self::Unsafe,
+            _ => return None,
+        })
+    }
+}
+
+fn prepare_typepython_source_for_external_formatter(
+    source: &str,
+    statements: &[SyntaxStatement],
+) -> String {
+    let mut custom_lines = BTreeMap::new();
+    for statement in statements {
+        if let Some(kind) = formatting_syntax_kind(statement) {
+            custom_lines.insert(statement_line(statement), kind);
+        }
+    }
+
+    let mut prepared_lines = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        if let Some(kind) = custom_lines.get(&line_number).copied() {
+            let indentation = leading_indent(line);
+            prepared_lines.push(format!("{indentation}# {FORMAT_MARKER_PREFIX}{}", kind.marker()));
+            prepared_lines.push(normalize_typepython_formatting_line(line, kind));
+        } else {
+            prepared_lines.push(line.to_owned());
+        }
+    }
+
+    let mut prepared = prepared_lines.join("\n");
+    if source.ends_with('\n') {
+        prepared.push('\n');
+    }
+    prepared
+}
+
+fn formatting_syntax_kind(statement: &SyntaxStatement) -> Option<FormattingSyntaxKind> {
+    Some(match statement {
+        SyntaxStatement::TypeAlias(_) => FormattingSyntaxKind::TypeAlias,
+        SyntaxStatement::Interface(_) => FormattingSyntaxKind::Interface,
+        SyntaxStatement::DataClass(_) => FormattingSyntaxKind::DataClass,
+        SyntaxStatement::SealedClass(_) => FormattingSyntaxKind::SealedClass,
+        SyntaxStatement::OverloadDef(_) => FormattingSyntaxKind::OverloadDef,
+        SyntaxStatement::Unsafe(_) => FormattingSyntaxKind::Unsafe,
+        _ => return None,
+    })
+}
+
+fn normalize_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
+    let indentation = leading_indent(line);
+    let trimmed = line.trim_start();
+    match kind {
+        FormattingSyntaxKind::TypeAlias => strip_soft_keyword(trimmed, "typealias")
+            .map(|rest| format!("{indentation}{}", rest.trim_start()))
+            .unwrap_or_else(|| line.to_owned()),
+        FormattingSyntaxKind::Interface => strip_soft_keyword(trimmed, "interface")
+            .map(|rest| format!("{indentation}class{rest}"))
+            .unwrap_or_else(|| line.to_owned()),
+        FormattingSyntaxKind::DataClass => trimmed
+            .strip_prefix("data class ")
+            .map(|rest| format!("{indentation}class {rest}"))
+            .unwrap_or_else(|| line.to_owned()),
+        FormattingSyntaxKind::SealedClass => trimmed
+            .strip_prefix("sealed class ")
+            .map(|rest| format!("{indentation}class {rest}"))
+            .unwrap_or_else(|| line.to_owned()),
+        FormattingSyntaxKind::OverloadDef => trimmed
+            .strip_prefix("overload def ")
+            .map(|rest| format!("{indentation}def {rest}"))
+            .unwrap_or_else(|| line.to_owned()),
+        FormattingSyntaxKind::Unsafe => trimmed
+            .strip_prefix("unsafe:")
+            .map(|rest| format!("{indentation}if True:{rest}"))
+            .unwrap_or_else(|| line.to_owned()),
+    }
+}
+
+fn restore_typepython_formatting_markers(formatted: &str) -> String {
+    let mut restored_lines = Vec::new();
+    let mut pending_kind = None;
+
+    for line in formatted.lines() {
+        let trimmed = line.trim_start();
+        if let Some(marker) = trimmed.strip_prefix('#').map(str::trim_start)
+            && let Some(marker) = marker.strip_prefix(FORMAT_MARKER_PREFIX)
+            && let Some(kind) = FormattingSyntaxKind::from_marker(marker.trim())
+        {
+            pending_kind = Some(kind);
+            continue;
+        }
+
+        if pending_kind.is_some() && trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(kind) = pending_kind.take() {
+            restored_lines.push(restore_typepython_formatting_line(line, kind));
+        } else {
+            restored_lines.push(line.to_owned());
+        }
+    }
+
+    let mut restored = restored_lines.join("\n");
+    if formatted.ends_with('\n') {
+        restored.push('\n');
+    }
+    restored
+}
+
+fn restore_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
+    let indentation = leading_indent(line);
+    let trimmed = line.trim_start();
+    match kind {
+        FormattingSyntaxKind::TypeAlias => split_top_level_once(trimmed, '=')
+            .map(|(head, tail)| {
+                format!("{indentation}typealias {} = {}", head.trim_end(), tail.trim_start())
+            })
+            .unwrap_or_else(|| format!("{indentation}typealias {trimmed}")),
+        FormattingSyntaxKind::Interface => trimmed
+            .strip_prefix("class ")
+            .map(|rest| format!("{indentation}interface {rest}"))
+            .unwrap_or_else(|| format!("{indentation}interface {trimmed}")),
+        FormattingSyntaxKind::DataClass => trimmed
+            .strip_prefix("class ")
+            .map(|rest| format!("{indentation}data class {rest}"))
+            .unwrap_or_else(|| format!("{indentation}data class {trimmed}")),
+        FormattingSyntaxKind::SealedClass => trimmed
+            .strip_prefix("class ")
+            .map(|rest| format!("{indentation}sealed class {rest}"))
+            .unwrap_or_else(|| format!("{indentation}sealed class {trimmed}")),
+        FormattingSyntaxKind::OverloadDef => trimmed
+            .strip_prefix("def ")
+            .map(|rest| format!("{indentation}overload def {rest}"))
+            .unwrap_or_else(|| format!("{indentation}overload def {trimmed}")),
+        FormattingSyntaxKind::Unsafe => trimmed
+            .strip_prefix("if True:")
+            .map(|rest| format!("{indentation}unsafe:{rest}"))
+            .unwrap_or_else(|| format!("{indentation}unsafe:")),
+    }
+}
+
 fn previous_significant_char(text: &str, end: usize) -> Option<char> {
     text[..end].chars().rev().find(|character| !character.is_whitespace())
 }
@@ -13299,6 +13534,50 @@ mod tests {
                 line: 1,
             }]
         );
+    }
+
+    #[test]
+    fn prepare_source_for_external_formatter_normalizes_and_restores_typepython_lines() {
+        let source = SourceFile {
+            path: PathBuf::from("formatting.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: String::from(
+                "typealias  Pair[T]=tuple[T,T]\ninterface Box[T]:\n    pass\ndata class User:\n    name:str\noverload def parse( value : str = \"x\") -> int:\n    ...\nunsafe:\n    run()\n",
+            ),
+        };
+
+        let prepared = crate::prepare_source_for_external_formatter(&source)
+            .expect("valid TypePython source should prepare for external formatting");
+        assert!(prepared.formatter_input().contains("# __typepython_format__:typealias"));
+        assert!(prepared.formatter_input().contains("Pair[T]=tuple[T,T]"));
+        assert!(prepared.formatter_input().contains("class Box[T]:"));
+        assert!(prepared.formatter_input().contains("class User:"));
+        assert!(prepared.formatter_input().contains("def parse( value : str = \"x\") -> int:"));
+        assert!(prepared.formatter_input().contains("if True:"));
+
+        let restored = prepared.restore(
+            "# __typepython_format__:typealias\nPair[T] = tuple[T, T]\n# __typepython_format__:interface\nclass Box[T]:\n    pass\n# __typepython_format__:data_class\nclass User:\n    name: str\n# __typepython_format__:overload_def\ndef parse(value: str = \"x\") -> int:\n    ...\n# __typepython_format__:unsafe\nif True:\n    run()\n",
+        );
+        assert!(restored.contains("typealias Pair[T] = tuple[T, T]"));
+        assert!(restored.contains("interface Box[T]:"));
+        assert!(restored.contains("data class User:"));
+        assert!(restored.contains("overload def parse(value: str = \"x\") -> int:"));
+        assert!(restored.contains("unsafe:"));
+    }
+
+    #[test]
+    fn prepare_source_for_external_formatter_reports_parse_errors() {
+        let source = SourceFile {
+            path: PathBuf::from("broken.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: String::from("interface Broken\n    pass\n"),
+        };
+
+        let diagnostics = crate::prepare_source_for_external_formatter(&source)
+            .expect_err("invalid TypePython syntax should not prepare for formatting");
+        assert!(diagnostics.has_errors());
     }
 
     // ─── Property-based / fuzz tests ────────────────────────────────────────

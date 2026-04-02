@@ -79,6 +79,24 @@ python_executable = null
 
 
 # ============================================================================
+# [format] -- LSP document formatting backend
+# ============================================================================
+[format]
+
+# Explicit formatter command to execute over stdin.
+# `{file}` expands to the current document path.
+# `{workspace_root}` expands to the project root.
+# Default: null (auto-detect `ruff format` or `black`)
+# command = ["python3", "{workspace_root}/tools/format_stdin.py", "{file}"]
+
+# Preferred line length passed to auto-detected formatter backends.
+# TypePython uses a high default to keep extension headers on one line during
+# normalize -> format -> restore round-trips.
+# Default: 1000
+line_length = 1000
+
+
+# ============================================================================
 # [emit] -- Output generation
 # ============================================================================
 [emit]

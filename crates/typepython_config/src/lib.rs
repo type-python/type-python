@@ -89,6 +89,8 @@ pub struct Config {
     pub project: ProjectConfig,
     /// Import resolution settings.
     pub resolution: ResolutionConfig,
+    /// Formatting settings.
+    pub format: FormatConfig,
     /// Emit settings.
     pub emit: EmitConfig,
     /// Typing settings.
@@ -160,6 +162,22 @@ impl Default for ResolutionConfig {
             python_executable: None,
             paths: BTreeMap::new(),
         }
+    }
+}
+
+/// Formatting settings.
+#[derive(Debug, Clone)]
+pub struct FormatConfig {
+    /// Explicit formatter command to execute over stdin. The `{file}` placeholder expands to the
+    /// current document path and `{workspace_root}` expands to the project root.
+    pub command: Option<Vec<String>>,
+    /// Preferred line length for auto-detected formatter backends.
+    pub line_length: u16,
+}
+
+impl Default for FormatConfig {
+    fn default() -> Self {
+        Self { command: None, line_length: 1000 }
     }
 }
 
@@ -292,6 +310,7 @@ impl Default for WatchConfig {
 struct RawConfig {
     project: Option<RawProjectConfig>,
     resolution: Option<RawResolutionConfig>,
+    format: Option<RawFormatConfig>,
     emit: Option<RawEmitConfig>,
     typing: Option<RawTypingConfig>,
     watch: Option<RawWatchConfig>,
@@ -328,6 +347,13 @@ struct RawEmitConfig {
     preserve_comments: Option<bool>,
     no_emit_on_error: Option<bool>,
     runtime_validators: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFormatConfig {
+    command: Option<Vec<String>>,
+    line_length: Option<u16>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -384,6 +410,8 @@ impl Config {
             )?;
         }
 
+        validate_formatter_config(config_path, &self.format)?;
+
         Ok(())
     }
 
@@ -427,6 +455,15 @@ impl Config {
             }
             if !resolution.paths.is_empty() {
                 config.resolution.paths = resolution.paths;
+            }
+        }
+
+        if let Some(format) = raw.format {
+            if let Some(command) = format.command {
+                config.format.command = Some(command);
+            }
+            if let Some(line_length) = format.line_length {
+                config.format.line_length = line_length;
             }
         }
 
@@ -795,6 +832,32 @@ fn validate_python_executable(
                 "resolution.python_executable = `{python_executable}` resolved to Python {resolved_version}, which is incompatible with project.target_python = `{target_python}`"
             ),
         });
+    }
+
+    Ok(())
+}
+
+fn validate_formatter_config(config_path: &Path, format: &FormatConfig) -> Result<(), ConfigError> {
+    if format.line_length == 0 {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: String::from("format.line_length must be greater than 0"),
+        });
+    }
+
+    if let Some(command) = &format.command {
+        if command.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: String::from("format.command must contain at least one argument"),
+            });
+        }
+        if command.iter().any(|part| part.trim().is_empty()) {
+            return Err(ConfigError::InvalidValue {
+                path: config_path.to_path_buf(),
+                message: String::from("format.command entries must not be empty"),
+            });
+        }
     }
 
     Ok(())

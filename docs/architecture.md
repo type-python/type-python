@@ -119,6 +119,7 @@ Project discovery and configuration loading.
 |---|---|
 | `[project]` | `src`, `include`, `exclude`, `out_dir`, `cache_dir`, `target_python` |
 | `[resolution]` | `base_url`, `type_roots`, `python_executable`, `paths` |
+| `[format]` | `command`, `line_length` |
 | `[emit]` | `emit_pyi`, `emit_pyc`, `write_py_typed`, `no_emit_on_error`, `runtime_validators` |
 | `[typing]` | `profile`, `strict`, `strict_nulls`, `imports`, `warn_unsafe`, `enable_sealed_exhaustiveness` |
 | `[watch]` | `debounce_ms` |
@@ -317,6 +318,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 | `textDocument/hover` | Type information at cursor |
 | `textDocument/definition` | Jump to definition |
 | `textDocument/references` | Find all usages |
+| `textDocument/formatting` | Format current document |
 | `textDocument/signatureHelp` | Show active call signature |
 | `textDocument/documentSymbol` | List symbols in current document |
 | `workspace/symbol` | Search declarations across workspace |

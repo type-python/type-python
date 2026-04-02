@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
+    process::{Command as ProcessCommand, Stdio},
 };
 
 use anyhow::{Context, Result};
@@ -21,7 +21,7 @@ use typepython_incremental::{
 };
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-    apply_type_ignore_directives, parse_with_options,
+    apply_type_ignore_directives, parse_with_options, prepare_syntax_tree_for_external_formatter,
 };
 use url::Url;
 
@@ -210,6 +210,14 @@ struct LspWorkspaceSymbol {
     location: LspLocation,
     #[serde(skip_serializing_if = "Option::is_none")]
     container_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct FormatterCommand {
+    label: String,
+    program: PathBuf,
+    args: Vec<String>,
+    explicit: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -997,6 +1005,7 @@ impl Server {
                         "hoverProvider": true,
                         "definitionProvider": true,
                         "referencesProvider": true,
+                        "documentFormattingProvider": true,
                         "signatureHelpProvider": {
                             "triggerCharacters": ["(", ","]
                         },
@@ -1047,6 +1056,11 @@ impl Server {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_references(params)?
+            })]),
+            "textDocument/formatting" => Ok(vec![json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": self.handle_formatting(params)?
             })]),
             "textDocument/signatureHelp" => Ok(vec![json!({
                 "jsonrpc": "2.0",
@@ -1251,6 +1265,40 @@ impl Server {
             .map(|occurrence| LspLocation { uri: occurrence.uri.clone(), range: occurrence.range })
             .collect::<Vec<_>>();
         Ok(json!(references))
+    }
+
+    fn handle_formatting(&mut self, params: Value) -> Result<Value, LspError> {
+        let config = self.config.clone();
+        let workspace = self.workspace()?;
+        let uri = params
+            .get("textDocument")
+            .and_then(|document| document.get("uri"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                LspError::Other(String::from("textDocument/formatting request missing uri"))
+            })?;
+        let Some(document) = workspace.queries.documents_by_uri.get(uri) else {
+            return Ok(json!([]));
+        };
+
+        let prepared =
+            prepare_syntax_tree_for_external_formatter(&document.syntax).map_err(|report| {
+                LspError::Other(format!(
+                    "TPY6003: unable to prepare `{}` for formatting: {}",
+                    document.path.display(),
+                    report.as_text().trim()
+                ))
+            })?;
+        let formatter_output = run_formatter(
+            &resolve_formatter_commands(&config, &document.path),
+            prepared.formatter_input(),
+        )?;
+        let restored = prepared.restore(&formatter_output);
+        if restored == document.text {
+            return Ok(json!([]));
+        }
+
+        Ok(json!([LspTextEdit { range: full_document_range(&document.text), new_text: restored }]))
     }
 
     fn handle_signature_help(&mut self, params: Value) -> Result<Value, LspError> {
@@ -3545,6 +3593,23 @@ fn import_insertion_range(document: &DocumentState) -> LspRange {
     }
 }
 
+fn full_document_range(text: &str) -> LspRange {
+    let mut last_line = 0u32;
+    let mut last_character = 0u32;
+    for (index, line) in text.lines().enumerate() {
+        last_line = index as u32;
+        last_character = line.chars().count() as u32;
+    }
+    if text.ends_with('\n') {
+        last_line = text.lines().count() as u32;
+        last_character = 0;
+    }
+    LspRange {
+        start: LspPosition { line: 0, character: 0 },
+        end: LspPosition { line: last_line, character: last_character },
+    }
+}
+
 fn token_at_position(text: &str, position: LspPosition) -> Option<TokenOccurrence> {
     tokenize_identifiers(text).into_iter().find(|token| range_contains(token.range, position))
 }
@@ -3971,6 +4036,197 @@ fn parse_supported_python_version(version: &str) -> Option<(u8, u8)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
+fn resolve_formatter_commands(config: &ConfigHandle, path: &Path) -> Vec<FormatterCommand> {
+    let file = path.to_string_lossy().into_owned();
+    let workspace_root = config.config_dir.to_string_lossy().into_owned();
+
+    if let Some(command) = &config.config.format.command {
+        let expanded = command
+            .iter()
+            .map(|part| expand_formatter_argument(config, part, &file, &workspace_root))
+            .collect::<Vec<_>>();
+        let program = resolve_formatter_program(config, &expanded[0]);
+        return vec![FormatterCommand {
+            label: expanded.join(" "),
+            program,
+            args: expanded[1..].to_vec(),
+            explicit: true,
+        }];
+    }
+
+    let line_length = config.config.format.line_length.to_string();
+    let python = resolve_python_executable(config);
+    vec![
+        FormatterCommand {
+            label: format!("{} -m ruff format", python.display()),
+            program: python.clone(),
+            args: vec![
+                String::from("-m"),
+                String::from("ruff"),
+                String::from("format"),
+                String::from("--line-length"),
+                line_length.clone(),
+                String::from("--stdin-filename"),
+                file.clone(),
+                String::from("-"),
+            ],
+            explicit: false,
+        },
+        FormatterCommand {
+            label: format!("{} -m black", python.display()),
+            program: python,
+            args: vec![
+                String::from("-m"),
+                String::from("black"),
+                String::from("--quiet"),
+                String::from("--line-length"),
+                line_length.clone(),
+                String::from("--stdin-filename"),
+                file.clone(),
+                String::from("-"),
+            ],
+            explicit: false,
+        },
+        FormatterCommand {
+            label: String::from("ruff format"),
+            program: PathBuf::from("ruff"),
+            args: vec![
+                String::from("format"),
+                String::from("--line-length"),
+                line_length.clone(),
+                String::from("--stdin-filename"),
+                file.clone(),
+                String::from("-"),
+            ],
+            explicit: false,
+        },
+        FormatterCommand {
+            label: String::from("black"),
+            program: PathBuf::from("black"),
+            args: vec![
+                String::from("--quiet"),
+                String::from("--line-length"),
+                line_length,
+                String::from("--stdin-filename"),
+                file,
+                String::from("-"),
+            ],
+            explicit: false,
+        },
+    ]
+}
+
+fn expand_formatter_argument(
+    config: &ConfigHandle,
+    argument: &str,
+    file: &str,
+    workspace_root: &str,
+) -> String {
+    let expanded = argument.replace("{file}", file).replace("{workspace_root}", workspace_root);
+    if expanded.starts_with('-') {
+        return expanded;
+    }
+    let path = Path::new(&expanded);
+    if path.is_absolute()
+        || !expanded.contains(std::path::MAIN_SEPARATOR)
+        || expanded == file
+        || expanded == workspace_root
+    {
+        return expanded;
+    }
+    config.config_dir.join(path).to_string_lossy().into_owned()
+}
+
+fn resolve_formatter_program(config: &ConfigHandle, program: &str) -> PathBuf {
+    let path = Path::new(program);
+    if path.is_absolute() || !program.contains(std::path::MAIN_SEPARATOR) {
+        return path.to_path_buf();
+    }
+    config.config_dir.join(path)
+}
+
+fn run_formatter(commands: &[FormatterCommand], input: &str) -> Result<String, LspError> {
+    let mut attempted = Vec::new();
+    for command in commands {
+        attempted.push(command.label.clone());
+        match run_formatter_command(command, input)? {
+            Some(output) => return Ok(output),
+            None => continue,
+        }
+    }
+
+    Err(LspError::Other(format!(
+        "TPY6003: no formatter backend is available; tried {}",
+        attempted.join(", ")
+    )))
+}
+
+fn run_formatter_command(
+    command: &FormatterCommand,
+    input: &str,
+) -> Result<Option<String>, LspError> {
+    let mut child = match ProcessCommand::new(&command.program)
+        .args(&command.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if !command.explicit && error.kind() == io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        Err(error) => {
+            return Err(LspError::Other(format!(
+                "TPY6003: unable to start formatter `{}`: {}",
+                command.label, error
+            )));
+        }
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).map_err(|error| {
+            LspError::Other(format!(
+                "TPY6003: unable to write formatter input for `{}`: {}",
+                command.label, error
+            ))
+        })?;
+    }
+
+    let output = child.wait_with_output().map_err(|error| {
+        LspError::Other(format!(
+            "TPY6003: formatter `{}` did not complete successfully: {}",
+            command.label, error
+        ))
+    })?;
+    if output.status.success() {
+        return Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !command.explicit && formatter_backend_unavailable(&stderr) {
+        return Ok(None);
+    }
+
+    Err(LspError::Other(format!(
+        "TPY6003: formatter `{}` exited with status {}{}",
+        command.label,
+        output.status,
+        formatter_stderr_suffix(stderr.trim())
+    )))
+}
+
+fn formatter_backend_unavailable(stderr: &str) -> bool {
+    stderr.contains("No module named ruff")
+        || stderr.contains("No module named black")
+        || stderr.contains("No module named 'ruff'")
+        || stderr.contains("No module named 'black'")
+}
+
+fn formatter_stderr_suffix(stderr: &str) -> String {
+    if stderr.is_empty() { String::new() } else { format!(": {stderr}") }
+}
+
 fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
     match config.config.resolution.python_executable.as_deref() {
         Some(executable) => {
@@ -4261,6 +4517,9 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     #[test]
     fn handle_initialize_returns_required_capabilities() {
         let config = temp_config("handle_initialize_returns_required_capabilities", "pass\n");
@@ -4274,6 +4533,7 @@ mod tests {
         assert_eq!(capabilities["hoverProvider"], json!(true));
         assert_eq!(capabilities["definitionProvider"], json!(true));
         assert_eq!(capabilities["referencesProvider"], json!(true));
+        assert_eq!(capabilities["documentFormattingProvider"], json!(true));
         assert_eq!(capabilities["signatureHelpProvider"]["triggerCharacters"], json!(["(", ","]));
         assert_eq!(capabilities["documentSymbolProvider"], json!(true));
         assert_eq!(capabilities["workspaceSymbolProvider"], json!(true));
@@ -4492,6 +4752,89 @@ mod tests {
         assert!(symbols.iter().any(|symbol| symbol["name"] == json!("User")));
         assert!(symbols.iter().any(|symbol| symbol["name"] == json!("create_user")));
         assert!(symbols.iter().any(|symbol| symbol["name"] == json!("handle_user")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn formatting_returns_restored_typepython_source_edits() {
+        let config = temp_workspace_with_config(
+            "formatting_returns_restored_typepython_source_edits",
+            "[project]\nsrc = [\"src\"]\n\n[format]\ncommand = [\"python3\", \"bin/fake_formatter.py\", \"{file}\"]\n",
+            &[(
+                "src/app/__init__.tpy",
+                "typealias  Pair[T]=tuple[T,T]\ninterface Box[T]:\n    value:int\n\ndef build( )->Box[T]:\n    return Box()\n",
+            )],
+        );
+        write_fake_formatter(
+            &config.config_dir.join("bin/fake_formatter.py"),
+            "import sys\n_ = sys.argv[1]\ntext = sys.stdin.read()\ntext = text.replace(\"Pair[T]=tuple[T,T]\", \"Pair[T] = tuple[T, T]\")\ntext = text.replace(\"value:int\", \"value: int\")\ntext = text.replace(\"def build( )->Box[T]:\", \"def build() -> Box[T]:\")\nsys.stdout.write(text)\n",
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let responses = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "id": 1,
+                "method":"textDocument/formatting",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "options": {"tabSize": 4, "insertSpaces": true}
+                }
+            }))
+            .expect("formatting should succeed");
+        let edits =
+            responses[0]["result"].as_array().expect("formatting result should be an array");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(
+            edits[0]["newText"],
+            json!(
+                "typealias Pair[T] = tuple[T, T]\ninterface Box[T]:\n    value: int\n\ndef build() -> Box[T]:\n    return Box()\n"
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn formatting_reports_missing_explicit_formatter() {
+        let config = temp_workspace_with_config(
+            "formatting_reports_missing_explicit_formatter",
+            "[project]\nsrc = [\"src\"]\n\n[format]\ncommand = [\"bin/missing-formatter.sh\"]\n",
+            &[("src/app/__init__.tpy", "pass\n")],
+        );
+        let mut server = Server::new(config.clone());
+        let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+        let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+            .expect("source file should be readable");
+        server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "method":"textDocument/didOpen",
+                "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+            }))
+            .expect("didOpen should succeed");
+
+        let error = server
+            .handle_message(json!({
+                "jsonrpc":"2.0",
+                "id": 1,
+                "method":"textDocument/formatting",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "options": {"tabSize": 4, "insertSpaces": true}
+                }
+            }))
+            .expect_err("missing formatter should surface an error");
+        assert!(error.to_string().contains("TPY6003"));
     }
 
     #[test]
@@ -5627,13 +5970,21 @@ foo.ping()
     }
 
     fn temp_workspace(test_name: &str, files: &[(&str, &str)]) -> ConfigHandle {
+        temp_workspace_with_config(test_name, "[project]\nsrc = [\"src\"]\n", files)
+    }
+
+    fn temp_workspace_with_config(
+        test_name: &str,
+        config_text: &str,
+        files: &[(&str, &str)],
+    ) -> ConfigHandle {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
         let root = env::temp_dir().join(format!("typepython-lsp-{test_name}-{unique}"));
         fs::create_dir_all(&root).expect("workspace root should be created");
-        fs::write(root.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+        fs::write(root.join("typepython.toml"), config_text)
             .expect("typepython.toml should be written");
         for (path, content) in files {
             let file_path = root.join(path);
@@ -5653,5 +6004,17 @@ foo.ping()
             fs::write(file_path, content).expect("workspace file should be written");
         }
         typepython_config::load(&root).expect("workspace config should load")
+    }
+
+    #[cfg(unix)]
+    fn write_fake_formatter(path: &Path, script: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("formatter parent directory should be created");
+        }
+        fs::write(path, script).expect("formatter script should be written");
+        let mut permissions =
+            fs::metadata(path).expect("formatter metadata should be readable").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("formatter should be executable");
     }
 }
