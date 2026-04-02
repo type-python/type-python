@@ -858,6 +858,7 @@ fn did_change_applies_multiple_incremental_content_changes() {
 
     assert_eq!(
         server
+            .analysis
             .overlays
             .get(&config.config_dir.join("src/app/__init__.tpy"))
             .expect("overlay should still be cached after multi-change update")
@@ -907,6 +908,7 @@ fn did_change_applies_ranged_content_change() {
 
     assert_eq!(
         server
+            .analysis
             .overlays
             .get(&config.config_dir.join("src/app/__init__.tpy"))
             .expect("overlay should still be cached after ranged update")
@@ -1024,6 +1026,7 @@ fn overlay_export_change_republishes_dependent_module_diagnostics() {
         .expect("didOpen should publish dependent diagnostics");
 
     let workspace = server
+        .analysis
         .cached_workspace
         .as_ref()
         .expect("workspace should be materialized after diagnostics publish");
@@ -1106,8 +1109,11 @@ fn active_support_set_changes_stay_incremental() {
             }
         }))
         .expect("didOpen should initialize the workspace");
-    let workspace =
-        server.cached_workspace.as_ref().expect("workspace should be cached after didOpen");
+    let workspace = server
+        .analysis
+        .cached_workspace
+        .as_ref()
+        .expect("workspace should be cached after didOpen");
     assert!(workspace.active_support_paths.is_empty());
 
     server
@@ -1123,6 +1129,7 @@ fn active_support_set_changes_stay_incremental() {
         }))
         .expect("didChange should add support modules incrementally");
     let workspace = server
+        .analysis
         .cached_workspace
         .as_ref()
         .expect("workspace should remain cached after support activation");
@@ -1150,6 +1157,7 @@ fn active_support_set_changes_stay_incremental() {
         }))
         .expect("didChange should remove support modules incrementally");
     let workspace = server
+        .analysis
         .cached_workspace
         .as_ref()
         .expect("workspace should remain cached after support removal");

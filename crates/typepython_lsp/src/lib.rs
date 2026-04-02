@@ -231,18 +231,18 @@ struct LspContentChangeEvent {
 }
 
 struct Server {
-    config: ConfigHandle,
-    overlays: BTreeMap<PathBuf, OverlayDocument>,
-    cached_workspace: Option<IncrementalWorkspace>,
+    analysis: AnalysisHost,
     shutdown_requested: bool,
     exited: bool,
 }
 
+mod analysis;
 mod formatting;
 mod requests;
 mod server;
 mod workspace;
 
+use analysis::*;
 use formatting::*;
 use requests::*;
 use workspace::*;
