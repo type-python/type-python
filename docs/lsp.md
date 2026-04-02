@@ -184,7 +184,7 @@ The LSP server maintains:
 
 1. **Document overlays** -- in-memory copies of open files (unsaved changes)
 2. **Incremental workspace cache** -- cached project/support syntax trees, bindings, module graph, and checker diagnostics
-3. **Symbol tables** -- occurrence maps for definition/reference lookup
+3. **Query indexes** -- incrementally maintained document, occurrence, and module-node maps for editor lookups
 
 On each document change:
 1. The overlay is updated with the new document text
@@ -192,7 +192,7 @@ On each document change:
 3. Support modules are added to or removed from the active workspace set incrementally if imports changed
 4. The module graph snapshot and reverse-import index are updated
 5. The checker reruns only for the changed modules plus dependents whose public summaries changed
-6. Reference indexes are refreshed only for the affected modules using cached document indexes
+6. Query indexes are refreshed only for the affected modules using cached document indexes
 7. Diagnostics are pushed to the editor
 
 ## Limitations

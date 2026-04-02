@@ -329,7 +329,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 - Persistent incremental workspace cache for project/support syntax trees and bindings
 - Snapshot-diff invalidation via `typepython_incremental`
 - Subset checker reruns for directly changed modules and dependent modules whose public summaries changed
-- Incrementally refreshed symbol occurrence tables for cross-referencing
+- Incrementally refreshed query indexes for document, occurrence, and module-node lookups
 - Diagnostics pushed to editor after each incremental update
 
 ## Workspace Configuration

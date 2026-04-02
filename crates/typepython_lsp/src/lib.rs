@@ -89,7 +89,19 @@ struct WorkspaceState {
     occurrences: Vec<SymbolOccurrence>,
     declarations_by_canonical: BTreeMap<String, SymbolOccurrence>,
     graph: ModuleGraph,
+    queries: WorkspaceQueries,
 }
+
+#[derive(Debug, Clone, Default)]
+struct WorkspaceQueries {
+    documents_by_uri: BTreeMap<String, DocumentState>,
+    documents_by_module_key: BTreeMap<String, DocumentState>,
+    occurrences_by_uri: BTreeMap<String, Vec<SymbolOccurrence>>,
+    occurrences_by_canonical: BTreeMap<String, Vec<SymbolOccurrence>>,
+    nodes_by_module_key: BTreeMap<String, ModuleNode>,
+}
+
+type QueryDocumentState = (String, DocumentState, Vec<SymbolOccurrence>, Vec<SymbolOccurrence>);
 
 #[derive(Debug, Clone)]
 struct CachedDocument {
@@ -634,17 +646,21 @@ impl IncrementalWorkspace {
                     document.references.clone(),
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<QueryDocumentState>>();
         let active_uris =
             active_documents.iter().map(|(uri, _, _, _)| uri.clone()).collect::<BTreeSet<_>>();
-        let removed_uris = self
+        let removed_documents = self
             .state
             .documents
             .iter()
-            .map(|document| document.uri.clone())
-            .filter(|uri| !active_uris.contains(uri))
+            .filter(|document| !active_uris.contains(&document.uri))
+            .cloned()
             .collect::<Vec<_>>();
-        if !removed_uris.is_empty() {
+        if !removed_documents.is_empty() {
+            let removed_uris = removed_documents
+                .iter()
+                .map(|document| document.uri.clone())
+                .collect::<BTreeSet<_>>();
             self.state.documents.retain(|document| !removed_uris.contains(&document.uri));
             self.state
                 .declarations_by_canonical
@@ -667,28 +683,35 @@ impl IncrementalWorkspace {
             .collect::<Vec<_>>();
         if changed_documents.is_empty() {
             self.state.diagnostics_by_uri = diagnostics_by_uri(&self.state.documents, &diagnostics);
+            refresh_workspace_queries(
+                &mut self.state.queries,
+                &removed_documents,
+                &changed_documents,
+                &graph,
+                module_keys,
+            );
             self.state.graph = graph;
             return;
         }
 
-        for (uri, updated_document, declarations, references) in changed_documents {
+        for (uri, updated_document, declarations, references) in &changed_documents {
             if let Some(document) =
-                self.state.documents.iter_mut().find(|existing| existing.uri == uri)
+                self.state.documents.iter_mut().find(|existing| existing.uri == *uri)
             {
                 *document = updated_document.clone();
             } else {
                 self.state.documents.push(updated_document.clone());
             }
 
-            self.state.declarations_by_canonical.retain(|_, occurrence| occurrence.uri != uri);
-            for occurrence in &declarations {
+            self.state.declarations_by_canonical.retain(|_, occurrence| occurrence.uri != *uri);
+            for occurrence in declarations {
                 self.state
                     .declarations_by_canonical
                     .entry(occurrence.canonical.clone())
                     .or_insert_with(|| occurrence.clone());
             }
 
-            self.state.occurrences.retain(|occurrence| occurrence.uri != uri);
+            self.state.occurrences.retain(|occurrence| occurrence.uri != *uri);
             let mut occurrences =
                 declarations.iter().chain(references.iter()).cloned().collect::<Vec<_>>();
             dedupe_occurrences(&mut occurrences);
@@ -697,6 +720,13 @@ impl IncrementalWorkspace {
 
         self.state.documents.sort_by(|left, right| left.path.cmp(&right.path));
         self.state.diagnostics_by_uri = diagnostics_by_uri(&self.state.documents, &diagnostics);
+        refresh_workspace_queries(
+            &mut self.state.queries,
+            &removed_documents,
+            &changed_documents,
+            &graph,
+            module_keys,
+        );
         self.state.graph = graph;
     }
 
@@ -723,12 +753,14 @@ impl IncrementalWorkspace {
         dedupe_occurrences(&mut occurrences);
 
         let diagnostics_by_uri = diagnostics_by_uri(&documents, &diagnostics);
+        let queries = build_workspace_queries(&documents, &occurrences, &graph);
         WorkspaceState {
             documents,
             diagnostics_by_uri,
             occurrences,
             declarations_by_canonical,
             graph,
+            queries,
         }
     }
 }
@@ -740,6 +772,7 @@ fn empty_workspace_state() -> WorkspaceState {
         occurrences: Vec::new(),
         declarations_by_canonical: BTreeMap::new(),
         graph: ModuleGraph::default(),
+        queries: WorkspaceQueries::default(),
     }
 }
 
@@ -810,6 +843,100 @@ fn member_symbols_from_documents(documents: &[&CachedDocument]) -> BTreeMap<Stri
         }
     }
     member_symbols
+}
+
+fn build_workspace_queries(
+    documents: &[DocumentState],
+    occurrences: &[SymbolOccurrence],
+    graph: &ModuleGraph,
+) -> WorkspaceQueries {
+    let mut queries = WorkspaceQueries::default();
+    for document in documents {
+        insert_workspace_query_document(&mut queries, document);
+    }
+    insert_workspace_query_occurrences(&mut queries, occurrences);
+    for node in &graph.nodes {
+        queries.nodes_by_module_key.insert(node.module_key.clone(), node.clone());
+    }
+    queries
+}
+
+fn refresh_workspace_queries(
+    queries: &mut WorkspaceQueries,
+    removed_documents: &[DocumentState],
+    changed_documents: &[QueryDocumentState],
+    graph: &ModuleGraph,
+    module_keys: &BTreeSet<String>,
+) {
+    for document in removed_documents {
+        queries.documents_by_uri.remove(&document.uri);
+        queries.documents_by_module_key.remove(&document.syntax.source.logical_module);
+        remove_workspace_query_occurrences_for_uri(queries, &document.uri);
+    }
+
+    for (_, document, declarations, references) in changed_documents {
+        insert_workspace_query_document(queries, document);
+        remove_workspace_query_occurrences_for_uri(queries, &document.uri);
+        let mut occurrences =
+            declarations.iter().chain(references.iter()).cloned().collect::<Vec<_>>();
+        dedupe_occurrences(&mut occurrences);
+        insert_workspace_query_occurrences(queries, &occurrences);
+    }
+
+    let current_module_keys =
+        graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
+    queries.nodes_by_module_key.retain(|module_key, _| current_module_keys.contains(module_key));
+    for node in &graph.nodes {
+        if module_keys.contains(&node.module_key)
+            || !queries.nodes_by_module_key.contains_key(&node.module_key)
+        {
+            queries.nodes_by_module_key.insert(node.module_key.clone(), node.clone());
+        }
+    }
+}
+
+fn insert_workspace_query_document(queries: &mut WorkspaceQueries, document: &DocumentState) {
+    queries.documents_by_uri.insert(document.uri.clone(), document.clone());
+    queries
+        .documents_by_module_key
+        .insert(document.syntax.source.logical_module.clone(), document.clone());
+}
+
+fn insert_workspace_query_occurrences(
+    queries: &mut WorkspaceQueries,
+    occurrences: &[SymbolOccurrence],
+) {
+    for occurrence in occurrences {
+        queries
+            .occurrences_by_uri
+            .entry(occurrence.uri.clone())
+            .or_default()
+            .push(occurrence.clone());
+        queries
+            .occurrences_by_canonical
+            .entry(occurrence.canonical.clone())
+            .or_default()
+            .push(occurrence.clone());
+    }
+}
+
+fn remove_workspace_query_occurrences_for_uri(queries: &mut WorkspaceQueries, uri: &str) {
+    let Some(previous) = queries.occurrences_by_uri.remove(uri) else {
+        return;
+    };
+    let mut emptied = Vec::new();
+    for occurrence in previous {
+        if let Some(entries) = queries.occurrences_by_canonical.get_mut(&occurrence.canonical) {
+            entries
+                .retain(|entry| !(entry.uri == occurrence.uri && entry.range == occurrence.range));
+            if entries.is_empty() {
+                emptied.push(occurrence.canonical.clone());
+            }
+        }
+    }
+    for canonical in emptied {
+        queries.occurrences_by_canonical.remove(&canonical);
+    }
 }
 
 struct Server {
@@ -1115,9 +1242,11 @@ impl Server {
             return Ok(json!([]));
         };
         let references = workspace
-            .occurrences
-            .iter()
-            .filter(|occurrence| occurrence.canonical == symbol.canonical)
+            .queries
+            .occurrences_by_canonical
+            .get(&symbol.canonical)
+            .into_iter()
+            .flatten()
             .filter(|occurrence| include_declaration || !occurrence.declaration)
             .map(|occurrence| LspLocation { uri: occurrence.uri.clone(), range: occurrence.range })
             .collect::<Vec<_>>();
@@ -1127,7 +1256,7 @@ impl Server {
     fn handle_signature_help(&mut self, params: Value) -> Result<Value, LspError> {
         let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
-        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+        let Some(document) = workspace.queries.documents_by_uri.get(&uri) else {
             return Ok(Value::Null);
         };
         let Some(active_call) = active_call(document, position, &uri)? else {
@@ -1156,7 +1285,7 @@ impl Server {
             .ok_or_else(|| {
                 LspError::Other(String::from("textDocument/documentSymbol request missing uri"))
             })?;
-        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+        let Some(document) = workspace.queries.documents_by_uri.get(uri) else {
             return Ok(json!([]));
         };
         Ok(json!(collect_document_symbols(document)))
@@ -1208,10 +1337,8 @@ impl Server {
             return Ok(Value::Null);
         };
         let mut changes = BTreeMap::<String, Vec<LspTextEdit>>::new();
-        for occurrence in workspace
-            .occurrences
-            .iter()
-            .filter(|occurrence| occurrence.canonical == symbol.canonical)
+        for occurrence in
+            workspace.queries.occurrences_by_canonical.get(&symbol.canonical).into_iter().flatten()
         {
             changes
                 .entry(occurrence.uri.clone())
@@ -1224,7 +1351,7 @@ impl Server {
     fn handle_code_action(&mut self, params: Value) -> Result<Value, LspError> {
         let workspace = self.workspace()?;
         let (uri, range) = text_document_range(&params)?;
-        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+        let Some(document) = workspace.queries.documents_by_uri.get(&uri) else {
             return Ok(json!([]));
         };
 
@@ -1239,7 +1366,7 @@ impl Server {
     fn handle_completion(&mut self, params: Value) -> Result<Value, LspError> {
         let workspace = self.workspace()?;
         let (uri, position) = text_document_position(&params)?;
-        let Some(document) = workspace.documents.iter().find(|document| document.uri == uri) else {
+        let Some(document) = workspace.queries.documents_by_uri.get(&uri) else {
             return Ok(json!([]));
         };
         let is_member_access = line_prefix(&document.text, position).trim_end().ends_with('.');
@@ -1434,9 +1561,7 @@ fn signature_information_for_canonical(
     let Some(declaration) = workspace.declarations_by_canonical.get(canonical) else {
         return Vec::new();
     };
-    let Some(document) =
-        workspace.documents.iter().find(|document| document.uri == declaration.uri)
-    else {
+    let Some(document) = workspace.queries.documents_by_uri.get(&declaration.uri) else {
         return Vec::new();
     };
     let Some((owner_canonical, member_name)) = canonical.rsplit_once('.') else {
@@ -1850,11 +1975,11 @@ fn binding_declaration_for_canonical<'a>(
     workspace: &'a WorkspaceState,
     canonical: &str,
 ) -> Option<(&'a ModuleNode, &'a typepython_binding::Declaration)> {
-    workspace.graph.nodes.iter().find_map(|node| {
-        node.declarations.iter().find_map(|declaration| {
-            let declaration_canonical = declaration_canonical(node, declaration);
-            (declaration_canonical == canonical).then_some((node, declaration))
-        })
+    let module_key = canonical_module_key(workspace, canonical)?;
+    let node = workspace.queries.nodes_by_module_key.get(&module_key)?;
+    node.declarations.iter().find_map(|declaration| {
+        let declaration_canonical = declaration_canonical(node, declaration);
+        (declaration_canonical == canonical).then_some((node, declaration))
     })
 }
 
@@ -1865,6 +1990,17 @@ fn declaration_canonical(
     match &declaration.owner {
         Some(owner) => format!("{}.{}.{}", node.module_key, owner.name, declaration.name),
         None => format!("{}.{}", node.module_key, declaration.name),
+    }
+}
+
+fn canonical_module_key(workspace: &WorkspaceState, canonical: &str) -> Option<String> {
+    let mut current = canonical.to_owned();
+    loop {
+        if workspace.queries.nodes_by_module_key.contains_key(&current) {
+            return Some(current);
+        }
+        let (prefix, _) = current.rsplit_once('.')?;
+        current = prefix.to_owned();
     }
 }
 
@@ -2045,9 +2181,11 @@ fn resolve_symbol<'a>(
     position: LspPosition,
 ) -> Option<&'a SymbolOccurrence> {
     workspace
-        .occurrences
+        .queries
+        .occurrences_by_uri
+        .get(uri)?
         .iter()
-        .find(|occurrence| occurrence.uri == uri && range_contains(occurrence.range, position))
+        .find(|occurrence| range_contains(occurrence.range, position))
 }
 
 fn range_contains(range: LspRange, position: LspPosition) -> bool {
@@ -2470,7 +2608,7 @@ fn resolve_top_level_declaration<'a>(
     canonical: &str,
 ) -> Option<(&'a ModuleNode, &'a typepython_binding::Declaration)> {
     let (module_key, name) = canonical.rsplit_once('.')?;
-    let node = workspace.graph.nodes.iter().find(|node| node.module_key == module_key)?;
+    let node = workspace.queries.nodes_by_module_key.get(module_key)?;
     let declaration = node
         .declarations
         .iter()
@@ -2482,7 +2620,7 @@ fn document_for_module_key<'a>(
     workspace: &'a WorkspaceState,
     module_key: &str,
 ) -> Option<&'a DocumentState> {
-    workspace.documents.iter().find(|document| document.syntax.source.logical_module == module_key)
+    workspace.queries.documents_by_module_key.get(module_key)
 }
 
 fn render_member_detail(member: &typepython_binding::Declaration) -> String {
@@ -2711,12 +2849,10 @@ fn resolve_type_canonicals(
             continue;
         }
         if let Some((module_key, name)) = head.rsplit_once('.') {
-            if workspace.graph.nodes.iter().any(|node| {
-                node.module_key == module_key
-                    && node
-                        .declarations
-                        .iter()
-                        .any(|declaration| declaration.owner.is_none() && declaration.name == name)
+            if workspace.queries.nodes_by_module_key.get(module_key).is_some_and(|node| {
+                node.declarations
+                    .iter()
+                    .any(|declaration| declaration.owner.is_none() && declaration.name == name)
             }) {
                 push_unique(&mut resolved, head.to_owned());
             }
@@ -2734,7 +2870,8 @@ fn apply_guard_narrowing(
     value_name: &str,
     base_type: &str,
 ) -> String {
-    let Some(node) = workspace.graph.nodes.iter().find(|node| node.module_path == document.path)
+    let Some(node) =
+        workspace.queries.nodes_by_module_key.get(&document.syntax.source.logical_module)
     else {
         return base_type.to_owned();
     };
@@ -5206,6 +5343,48 @@ foo.ping()
                 .iter()
                 .all(|document| document.syntax.source.kind != SourceKind::Stub)
         );
+    }
+
+    #[test]
+    fn incremental_workspace_refreshes_query_indexes() {
+        let config = temp_config(
+            "incremental_workspace_refreshes_query_indexes",
+            "def produce() -> int:\n    return 1\n",
+        );
+        let path = config.config_dir.join("src/app/__init__.tpy");
+        let uri = path_to_uri(&path);
+        let overlays = BTreeMap::new();
+        let mut workspace =
+            IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+        assert!(workspace.state.queries.occurrences_by_uri.get(&uri).is_some_and(|occurrences| {
+            occurrences.iter().any(|occurrence| occurrence.canonical == "app.produce")
+        }));
+
+        let overlay = OverlayDocument {
+            uri: uri.clone(),
+            text: String::from("def build() -> int:\n    return 1\n"),
+            version: 1,
+        };
+        workspace
+            .apply_project_path_update(&path, Some(&overlay))
+            .expect("overlay update should refresh query indexes");
+
+        let queried_document = workspace
+            .state
+            .queries
+            .documents_by_uri
+            .get(&uri)
+            .expect("query document cache should contain the updated document");
+        assert!(queried_document.text.contains("def build()"));
+        assert!(!workspace.last_state_refresh_was_full);
+        assert!(workspace.state.queries.occurrences_by_uri.get(&uri).is_some_and(|occurrences| {
+            occurrences.iter().any(|occurrence| occurrence.canonical == "app.build")
+                && occurrences.iter().all(|occurrence| occurrence.canonical != "app.produce")
+        }));
+        assert!(workspace.state.queries.nodes_by_module_key.get("app").is_some_and(|node| {
+            node.declarations.iter().any(|declaration| declaration.name == "build")
+                && node.declarations.iter().all(|declaration| declaration.name != "produce")
+        }));
     }
 
     #[test]
