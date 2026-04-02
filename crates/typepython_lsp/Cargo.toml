@@ -23,5 +23,12 @@ typepython-incremental = { path = "../typepython_incremental" }
 typepython-syntax = { path = "../typepython_syntax" }
 url.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "incremental"
+harness = false
+
 [lints]
 workspace = true

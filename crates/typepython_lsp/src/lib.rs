@@ -44,8 +44,17 @@ impl From<anyhow::Error> for LspError {
 pub fn serve(config: &ConfigHandle) -> Result<(), LspError> {
     let stdin = io::stdin();
     let stdout = io::stdout();
+    serve_with_io(config, io::BufReader::new(stdin), stdout.lock())
+}
+
+#[doc(hidden)]
+pub fn serve_with_io<R: BufRead + Send + 'static, W: Write>(
+    config: &ConfigHandle,
+    reader: R,
+    writer: W,
+) -> Result<(), LspError> {
     let mut server = Server::new(config.clone());
-    server.serve(io::BufReader::new(stdin), stdout.lock())
+    server.serve(reader, writer)
 }
 
 #[derive(Debug, Clone)]

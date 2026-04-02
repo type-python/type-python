@@ -1888,6 +1888,7 @@ name = "typepython-lsp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "criterion",
  "glob",
  "serde",
  "serde_json",

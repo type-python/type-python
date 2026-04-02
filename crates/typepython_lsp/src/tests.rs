@@ -1378,6 +1378,83 @@ fn incremental_workspace_refreshes_query_indexes() {
 }
 
 #[test]
+fn large_workspace_implementation_change_keeps_affected_set_local() {
+    let config =
+        temp_chain_workspace("large_workspace_implementation_change_keeps_affected_set_local", 24);
+    let path = config.config_dir.join("src/app/mod_00.tpy");
+    let uri = path_to_uri(&path);
+    let overlays = BTreeMap::new();
+    let mut workspace =
+        IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+    let before_incremental = workspace.incremental.clone();
+    let before_dependency_index = workspace.dependency_index.clone();
+
+    let overlay = OverlayDocument {
+        uri,
+        text: String::from("def produce() -> int:\n    value = 1\n    return value\n"),
+        version: 1,
+    };
+    workspace
+        .apply_project_path_update(&path, Some(&overlay))
+        .expect("implementation-only overlay should update incrementally");
+
+    let snapshot_diff = diff(&before_incremental, &workspace.incremental);
+    let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
+    let direct_changes = BTreeSet::from([String::from("app.mod_00")]);
+    let affected = affected_modules(
+        Some(&before_dependency_index),
+        &workspace.dependency_index,
+        &direct_changes,
+        &summary_changed_modules,
+    );
+
+    assert!(summary_changed_modules.is_empty());
+    assert_eq!(affected, direct_changes);
+    assert!(!workspace.last_state_refresh_was_full);
+}
+
+#[test]
+fn large_workspace_public_change_rechecks_transitive_dependents() {
+    let module_count = 24usize;
+    let config = temp_chain_workspace(
+        "large_workspace_public_change_rechecks_transitive_dependents",
+        module_count,
+    );
+    let path = config.config_dir.join("src/app/mod_00.tpy");
+    let uri = path_to_uri(&path);
+    let overlays = BTreeMap::new();
+    let mut workspace =
+        IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+    let before_incremental = workspace.incremental.clone();
+    let before_dependency_index = workspace.dependency_index.clone();
+
+    let overlay = OverlayDocument {
+        uri,
+        text: String::from("def produce() -> str:\n    return \"value\"\n"),
+        version: 1,
+    };
+    workspace
+        .apply_project_path_update(&path, Some(&overlay))
+        .expect("public overlay should update incrementally");
+
+    let snapshot_diff = diff(&before_incremental, &workspace.incremental);
+    let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
+    let direct_changes = BTreeSet::from([String::from("app.mod_00")]);
+    let affected = affected_modules(
+        Some(&before_dependency_index),
+        &workspace.dependency_index,
+        &direct_changes,
+        &summary_changed_modules,
+    );
+
+    assert_eq!(summary_changed_modules, direct_changes);
+    assert_eq!(affected.len(), module_count + 1);
+    assert!(affected.contains("app"));
+    assert!(affected.contains("app.mod_23"));
+    assert!(!workspace.last_state_refresh_was_full);
+}
+
+#[test]
 fn did_close_clears_overlay() {
     let config = temp_config("did_close_clears_overlay", "def ok() -> int:\n    return 1\n");
     let mut server = Server::new(config.clone());
@@ -1647,6 +1724,35 @@ fn temp_workspace_with_config(
         }
         fs::write(file_path, content).expect("workspace file should be written");
     }
+    typepython_config::load(&root).expect("workspace config should load")
+}
+
+fn temp_chain_workspace(test_name: &str, module_count: usize) -> ConfigHandle {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after epoch")
+        .as_nanos();
+    let root = env::temp_dir().join(format!("typepython-lsp-{test_name}-{unique}"));
+    fs::create_dir_all(root.join("src/app")).expect("workspace app package should be created");
+    fs::write(root.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+        .expect("typepython.toml should be written");
+    fs::write(root.join("src/app/__init__.tpy"), "pass\n").expect("package marker should exist");
+
+    for index in 0..module_count {
+        let name = format!("mod_{index:02}");
+        let contents = if index == 0 {
+            String::from("def produce() -> int:\n    return 1\n")
+        } else {
+            let previous = format!("mod_{:02}", index - 1);
+            format!(
+                "from app.{previous} import produce\n\n\
+                 def run_{index:02}() -> int:\n    return produce()\n"
+            )
+        };
+        fs::write(root.join(format!("src/app/{name}.tpy")), contents)
+            .expect("chain module should be written");
+    }
+
     typepython_config::load(&root).expect("workspace config should load")
 }
 
