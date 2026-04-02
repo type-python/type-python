@@ -20,6 +20,7 @@ The server communicates via **stdio** using the JSON-RPC 2.0 protocol -- the sta
 | Find References | `textDocument/references` | Find all usages of a symbol |
 | Signature Help | `textDocument/signatureHelp` | Active call signature and parameter index |
 | Document Symbols | `textDocument/documentSymbol` | Outline symbols in the current file |
+| Workspace Symbols | `workspace/symbol` | Search declarations across the workspace |
 | Rename | `textDocument/rename` | Rename symbol across entire project |
 | Code Actions | `textDocument/codeAction` | Quick fixes from diagnostic suggestions |
 | Completion | `textDocument/completion` | Autocomplete (triggered on `.`) |
@@ -196,7 +197,6 @@ On each document change:
 
 ## Limitations
 
-- **No workspace symbols**: `workspace/symbol` is not yet implemented
 - **No formatting**: use an external formatter (e.g., ruff, black) for code formatting
 
 ## Troubleshooting

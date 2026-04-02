@@ -190,6 +190,16 @@ struct LspDocumentSymbol {
     children: Vec<LspDocumentSymbol>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspWorkspaceSymbol {
+    name: String,
+    kind: u32,
+    location: LspLocation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LspContentChangeEvent {
@@ -864,6 +874,7 @@ impl Server {
                             "triggerCharacters": ["(", ","]
                         },
                         "documentSymbolProvider": true,
+                        "workspaceSymbolProvider": true,
                         "renameProvider": true,
                         "codeActionProvider": true,
                         "completionProvider": {
@@ -919,6 +930,11 @@ impl Server {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": self.handle_document_symbol(params)?
+            })]),
+            "workspace/symbol" => Ok(vec![json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": self.handle_workspace_symbol(params)?
             })]),
             "textDocument/rename" => Ok(vec![json!({
                 "jsonrpc": "2.0",
@@ -1144,6 +1160,41 @@ impl Server {
             return Ok(json!([]));
         };
         Ok(json!(collect_document_symbols(document)))
+    }
+
+    fn handle_workspace_symbol(&mut self, params: Value) -> Result<Value, LspError> {
+        let workspace = self.workspace()?;
+        let query = params.get("query").and_then(Value::as_str).unwrap_or_default().to_lowercase();
+        let mut symbols = workspace
+            .declarations_by_canonical
+            .iter()
+            .filter_map(|(canonical, declaration)| {
+                if !query.is_empty() {
+                    let name = declaration.name.to_lowercase();
+                    let canonical_name = canonical.to_lowercase();
+                    if !name.contains(&query) && !canonical_name.contains(&query) {
+                        return None;
+                    }
+                }
+                let (kind, container_name) = workspace_symbol_metadata(workspace, canonical)?;
+                Some(LspWorkspaceSymbol {
+                    name: declaration.name.clone(),
+                    kind,
+                    location: LspLocation {
+                        uri: declaration.uri.clone(),
+                        range: declaration.range,
+                    },
+                    container_name,
+                })
+            })
+            .collect::<Vec<_>>();
+        symbols.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.container_name.cmp(&right.container_name))
+                .then_with(|| left.location.uri.cmp(&right.location.uri))
+        });
+        Ok(json!(symbols))
     }
 
     fn handle_rename(&mut self, params: Value) -> Result<Value, LspError> {
@@ -1750,6 +1801,70 @@ fn block_range(text: &str, line: usize) -> LspRange {
             line: end_index as u32,
             character: lines[end_index].chars().count() as u32,
         },
+    }
+}
+
+fn workspace_symbol_metadata(
+    workspace: &WorkspaceState,
+    canonical: &str,
+) -> Option<(u32, Option<String>)> {
+    let (node, declaration) = binding_declaration_for_canonical(workspace, canonical)?;
+    let kind = match declaration.kind {
+        typepython_binding::DeclarationKind::TypeAlias => 13,
+        typepython_binding::DeclarationKind::Class => match declaration.class_kind {
+            Some(typepython_binding::DeclarationOwnerKind::Interface) => 11,
+            _ => 5,
+        },
+        typepython_binding::DeclarationKind::Function
+        | typepython_binding::DeclarationKind::Overload => {
+            if declaration.owner.is_some() {
+                match declaration.method_kind {
+                    Some(typepython_syntax::MethodKind::Property)
+                    | Some(typepython_syntax::MethodKind::PropertySetter) => 7,
+                    _ => 6,
+                }
+            } else {
+                12
+            }
+        }
+        typepython_binding::DeclarationKind::Value => {
+            if declaration.owner.is_some() {
+                if declaration.is_final { 14 } else { 8 }
+            } else if declaration.is_final {
+                14
+            } else {
+                13
+            }
+        }
+        typepython_binding::DeclarationKind::Import => 2,
+    };
+    let container_name = declaration
+        .owner
+        .as_ref()
+        .map(|owner| owner.name.clone())
+        .or_else(|| (!node.module_key.is_empty()).then(|| node.module_key.clone()));
+    Some((kind, container_name))
+}
+
+fn binding_declaration_for_canonical<'a>(
+    workspace: &'a WorkspaceState,
+    canonical: &str,
+) -> Option<(&'a ModuleNode, &'a typepython_binding::Declaration)> {
+    workspace.graph.nodes.iter().find_map(|node| {
+        node.declarations.iter().find_map(|declaration| {
+            let declaration_canonical = declaration_canonical(node, declaration);
+            (declaration_canonical == canonical).then_some((node, declaration))
+        })
+    })
+}
+
+fn declaration_canonical(
+    node: &ModuleNode,
+    declaration: &typepython_binding::Declaration,
+) -> String {
+    match &declaration.owner {
+        Some(owner) => format!("{}.{}.{}", node.module_key, owner.name, declaration.name),
+        None => format!("{}.{}", node.module_key, declaration.name),
     }
 }
 
@@ -4024,6 +4139,7 @@ mod tests {
         assert_eq!(capabilities["referencesProvider"], json!(true));
         assert_eq!(capabilities["signatureHelpProvider"]["triggerCharacters"], json!(["(", ","]));
         assert_eq!(capabilities["documentSymbolProvider"], json!(true));
+        assert_eq!(capabilities["workspaceSymbolProvider"], json!(true));
         assert_eq!(capabilities["renameProvider"], json!(true));
         assert_eq!(capabilities["codeActionProvider"], json!(true));
     }
@@ -4210,6 +4326,35 @@ mod tests {
         assert_eq!(symbols[1]["children"][0]["name"], json!("value"));
         assert_eq!(symbols[1]["children"][1]["name"], json!("get"));
         assert_eq!(symbols[2]["name"], json!("build"));
+    }
+
+    #[test]
+    fn workspace_symbol_returns_matching_declarations() {
+        let config = temp_workspace(
+            "workspace_symbol_returns_matching_declarations",
+            &[
+                ("src/app/models.tpy", "class User:\n    name: str\n"),
+                (
+                    "src/app/services.tpy",
+                    "from app.models import User\n\ndef create_user() -> User:\n    return User()\n",
+                ),
+                (
+                    "src/app/handlers.tpy",
+                    "from app.services import create_user\n\ndef handle_user() -> User:\n    return create_user()\n",
+                ),
+            ],
+        );
+        let mut server = Server::new(config);
+
+        let symbols = server
+            .handle_workspace_symbol(json!({
+                "query": "user"
+            }))
+            .expect("workspace/symbol should succeed");
+        let symbols = symbols.as_array().expect("workspace symbols should be an array");
+        assert!(symbols.iter().any(|symbol| symbol["name"] == json!("User")));
+        assert!(symbols.iter().any(|symbol| symbol["name"] == json!("create_user")));
+        assert!(symbols.iter().any(|symbol| symbol["name"] == json!("handle_user")));
     }
 
     #[test]
