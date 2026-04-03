@@ -634,8 +634,18 @@ pub(super) struct ContextualTypedDictLiteralResult {
     pub(super) diagnostics: Vec<Diagnostic>,
 }
 
+pub(super) struct ContextualTypedDictLiteralSemanticResult {
+    pub(super) actual_type: SemanticType,
+    pub(super) diagnostics: Vec<Diagnostic>,
+}
+
 pub(super) struct ContextualCallArgResult {
     pub(super) actual_type: String,
+    pub(super) diagnostics: Vec<Diagnostic>,
+}
+
+pub(super) struct ContextualCallArgSemanticResult {
+    pub(super) actual_type: SemanticType,
     pub(super) diagnostics: Vec<Diagnostic>,
 }
 
@@ -668,7 +678,7 @@ pub(super) fn resolve_contextual_typed_dict_literal_type(
     expected: Option<&str>,
 ) -> Option<ContextualTypedDictLiteralResult> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_contextual_typed_dict_literal_type_with_context(
+    resolve_contextual_typed_dict_literal_semantic_type_with_context(
         &context,
         node,
         nodes,
@@ -676,6 +686,10 @@ pub(super) fn resolve_contextual_typed_dict_literal_type(
         metadata,
         expected,
     )
+    .map(|result| ContextualTypedDictLiteralResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
 }
 
 pub(super) fn resolve_contextual_typed_dict_literal_type_with_context(
@@ -686,11 +700,37 @@ pub(super) fn resolve_contextual_typed_dict_literal_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualTypedDictLiteralResult> {
+    resolve_contextual_typed_dict_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
+    .map(|result| ContextualTypedDictLiteralResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
+}
+
+pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualTypedDictLiteralSemanticResult> {
     let entries = metadata.value_dict_entries.as_ref()?;
-    let expected = expected?;
-    let actual_type = normalize_type_text(expected);
+    let actual_type = lower_type_text_or_name(expected?);
     let target_shape =
-        resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &actual_type)?;
+        resolve_known_typed_dict_shape_from_type_with_context(
+            context,
+            node,
+            nodes,
+            &render_semantic_type(&actual_type),
+        )?;
     let diagnostics = typed_dict_literal_entry_diagnostics(
         context,
         node,
@@ -702,7 +742,7 @@ pub(super) fn resolve_contextual_typed_dict_literal_type_with_context(
         None,
         None,
     );
-    Some(ContextualTypedDictLiteralResult { actual_type, diagnostics })
+    Some(ContextualTypedDictLiteralSemanticResult { actual_type, diagnostics })
 }
 
 pub(super) fn resolve_contextual_collection_literal_type(
@@ -713,7 +753,7 @@ pub(super) fn resolve_contextual_collection_literal_type(
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_contextual_collection_literal_type_with_context(
+    resolve_contextual_collection_literal_semantic_type_with_context(
         &context,
         node,
         nodes,
@@ -721,6 +761,10 @@ pub(super) fn resolve_contextual_collection_literal_type(
         metadata,
         expected,
     )
+    .map(|result| ContextualCallArgResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
 }
 
 pub(super) fn resolve_contextual_collection_literal_type_with_context(
@@ -731,21 +775,43 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
-    let expected = normalize_type_text(expected?);
-    let (head, args) = split_generic_type(&expected)?;
+    resolve_contextual_collection_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
+    .map(|result| ContextualCallArgResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
+}
+
+pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgSemanticResult> {
+    let expected = lower_type_text_or_name(expected?);
+    let (head, args) = expected.generic_parts()?;
     match head {
         "list" if args.len() == 1 => {
             let elements = metadata.value_list_elements.as_ref()?;
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type_with_context(
+                    resolve_contextual_call_arg_semantic_type_with_context(
                         context,
                         node,
                         nodes,
                         current_line,
                         element,
-                        Some(&args[0]),
+                        Some(&render_semantic_type(&args[0])),
                     )
                     .into_iter()
                     .flat_map(|result| result.diagnostics)
@@ -757,32 +823,29 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_with_context(
                             context,
                             node,
                             nodes,
                             current_line,
                             element,
-                            Some(&args[0]),
+                            Some(&render_semantic_type(&args[0])),
                         )
                         .map(|result| result.actual_type)
                         .or_else(|| {
-                            resolve_direct_expression_type_from_metadata(
-                                node,
-                                nodes,
-                                None,
-                                None,
-                                None,
-                                current_line,
-                                element,
+                            resolve_direct_expression_semantic_type_from_metadata(
+                                node, nodes, None, None, None, current_line, element,
                             )
                         })
-                        .unwrap_or_else(|| String::from("Any"))
+                        .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
             };
-            Some(ContextualCallArgResult {
-                actual_type: format!("list[{}]", join_type_candidates(actual_element_types)),
+            Some(ContextualCallArgSemanticResult {
+                actual_type: SemanticType::Generic {
+                    head: String::from("list"),
+                    args: vec![join_semantic_type_candidates(actual_element_types)],
+                },
                 diagnostics,
             })
         }
@@ -791,13 +854,13 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type_with_context(
+                    resolve_contextual_call_arg_semantic_type_with_context(
                         context,
                         node,
                         nodes,
                         current_line,
                         element,
-                        Some(&args[0]),
+                        Some(&render_semantic_type(&args[0])),
                     )
                     .into_iter()
                     .flat_map(|result| result.diagnostics)
@@ -809,32 +872,29 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_with_context(
                             context,
                             node,
                             nodes,
                             current_line,
                             element,
-                            Some(&args[0]),
+                            Some(&render_semantic_type(&args[0])),
                         )
                         .map(|result| result.actual_type)
                         .or_else(|| {
-                            resolve_direct_expression_type_from_metadata(
-                                node,
-                                nodes,
-                                None,
-                                None,
-                                None,
-                                current_line,
-                                element,
+                            resolve_direct_expression_semantic_type_from_metadata(
+                                node, nodes, None, None, None, current_line, element,
                             )
                         })
-                        .unwrap_or_else(|| String::from("Any"))
+                        .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
             };
-            Some(ContextualCallArgResult {
-                actual_type: format!("set[{}]", join_type_candidates(actual_element_types)),
+            Some(ContextualCallArgSemanticResult {
+                actual_type: SemanticType::Generic {
+                    head: String::from("set"),
+                    args: vec![join_semantic_type_candidates(actual_element_types)],
+                },
                 diagnostics,
             })
         }
@@ -850,24 +910,24 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                         .key_value
                         .as_deref()
                         .and_then(|key| {
-                            resolve_contextual_call_arg_type_with_context(
+                            resolve_contextual_call_arg_semantic_type_with_context(
                                 context,
                                 node,
                                 nodes,
                                 current_line,
                                 key,
-                                Some(&args[0]),
+                                Some(&render_semantic_type(&args[0])),
                             )
                         })
                         .into_iter()
                         .flat_map(|result| result.diagnostics);
-                    let value_diagnostics = resolve_contextual_call_arg_type_with_context(
+                    let value_diagnostics = resolve_contextual_call_arg_semantic_type_with_context(
                         context,
                         node,
                         nodes,
                         current_line,
                         &entry.value,
-                        Some(&args[1]),
+                        Some(&render_semantic_type(&args[1])),
                     )
                     .into_iter()
                     .flat_map(|result| result.diagnostics);
@@ -884,30 +944,24 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                             .key_value
                             .as_deref()
                             .and_then(|key| {
-                                resolve_contextual_call_arg_type_with_context(
+                                resolve_contextual_call_arg_semantic_type_with_context(
                                     context,
                                     node,
                                     nodes,
                                     current_line,
                                     key,
-                                    Some(&args[0]),
+                                    Some(&render_semantic_type(&args[0])),
                                 )
                             })
                             .map(|result| result.actual_type)
                             .or_else(|| {
                                 entry.key_value.as_deref().and_then(|key| {
-                                    resolve_direct_expression_type_from_metadata(
-                                        node,
-                                        nodes,
-                                        None,
-                                        None,
-                                        None,
-                                        current_line,
-                                        key,
+                                    resolve_direct_expression_semantic_type_from_metadata(
+                                        node, nodes, None, None, None, current_line, key,
                                     )
                                 })
                             })
-                            .unwrap_or_else(|| String::from("Any"))
+                            .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
             };
@@ -917,17 +971,17 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                 entries
                     .iter()
                     .map(|entry| {
-                        resolve_contextual_call_arg_type_with_context(
+                        resolve_contextual_call_arg_semantic_type_with_context(
                             context,
                             node,
                             nodes,
                             current_line,
                             &entry.value,
-                            Some(&args[1]),
+                            Some(&render_semantic_type(&args[1])),
                         )
                         .map(|result| result.actual_type)
                         .or_else(|| {
-                            resolve_direct_expression_type_from_metadata(
+                            resolve_direct_expression_semantic_type_from_metadata(
                                 node,
                                 nodes,
                                 None,
@@ -937,16 +991,18 @@ pub(super) fn resolve_contextual_collection_literal_type_with_context(
                                 &entry.value,
                             )
                         })
-                        .unwrap_or_else(|| String::from("Any"))
+                        .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
             };
-            Some(ContextualCallArgResult {
-                actual_type: format!(
-                    "dict[{}, {}]",
-                    join_type_candidates(actual_key_types),
-                    join_type_candidates(actual_value_types)
-                ),
+            Some(ContextualCallArgSemanticResult {
+                actual_type: SemanticType::Generic {
+                    head: String::from("dict"),
+                    args: vec![
+                        join_semantic_type_candidates(actual_key_types),
+                        join_semantic_type_candidates(actual_value_types),
+                    ],
+                },
                 diagnostics,
             })
         }
@@ -962,7 +1018,7 @@ pub(super) fn resolve_contextual_call_arg_type(
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_contextual_call_arg_type_with_context(
+    resolve_contextual_call_arg_semantic_type_with_context(
         &context,
         node,
         nodes,
@@ -970,6 +1026,10 @@ pub(super) fn resolve_contextual_call_arg_type(
         metadata,
         expected,
     )
+    .map(|result| ContextualCallArgResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
 }
 
 pub(super) fn resolve_contextual_call_arg_type_with_context(
@@ -980,30 +1040,7 @@ pub(super) fn resolve_contextual_call_arg_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
-    if let Some(actual_type) =
-        resolve_contextual_lambda_callable_type(node, nodes, current_line, metadata, expected)
-    {
-        return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
-    }
-    if let Some(actual_type) =
-        resolve_contextual_named_callable_type(node, nodes, metadata, expected)
-    {
-        return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
-    }
-    if let Some(result) = resolve_contextual_typed_dict_literal_type_with_context(
-        context,
-        node,
-        nodes,
-        current_line,
-        metadata,
-        expected,
-    ) {
-        return Some(ContextualCallArgResult {
-            actual_type: result.actual_type,
-            diagnostics: result.diagnostics,
-        });
-    }
-    resolve_contextual_collection_literal_type_with_context(
+    resolve_contextual_call_arg_semantic_type_with_context(
         context,
         node,
         nodes,
@@ -1011,16 +1048,58 @@ pub(super) fn resolve_contextual_call_arg_type_with_context(
         metadata,
         expected,
     )
+    .map(|result| ContextualCallArgResult {
+        actual_type: render_semantic_type(&result.actual_type),
+        diagnostics: result.diagnostics,
+    })
 }
 
-pub(super) fn resolve_contextual_named_callable_type(
+pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
-) -> Option<String> {
-    resolve_contextual_named_callable_semantic_type(node, nodes, metadata, expected)
-        .map(|resolved| render_semantic_type(&resolved))
+) -> Option<ContextualCallArgSemanticResult> {
+    if let Some(lambda) = metadata.value_lambda.as_deref()
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+            node,
+            nodes,
+            None,
+            None,
+            current_line,
+            lambda,
+            expected,
+            None,
+        )
+    {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
+    if let Some(actual_type) = resolve_contextual_named_callable_semantic_type(node, nodes, metadata, expected) {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
+    if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    ) {
+        return Some(ContextualCallArgSemanticResult {
+            actual_type: result.actual_type,
+            diagnostics: result.diagnostics,
+        });
+    }
+    resolve_contextual_collection_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
 }
 
 pub(super) fn resolve_contextual_named_callable_semantic_type(
