@@ -980,7 +980,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
     }
     if let Some(comprehension) = assignment.value_list_comprehension.as_deref() {
         return match comprehension.kind {
-            typepython_syntax::ComprehensionKind::List => resolve_list_comprehension_type(
+            typepython_syntax::ComprehensionKind::List => resolve_list_comprehension_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -988,9 +988,8 @@ pub(super) fn resolve_assignment_site_semantic_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            )
-            .map(|resolved| lower_type_text_or_name(&resolved)),
-            typepython_syntax::ComprehensionKind::Set => resolve_set_comprehension_type(
+            ),
+            typepython_syntax::ComprehensionKind::Set => resolve_set_comprehension_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -998,9 +997,8 @@ pub(super) fn resolve_assignment_site_semantic_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            )
-            .map(|resolved| lower_type_text_or_name(&resolved)),
-            typepython_syntax::ComprehensionKind::Dict => resolve_dict_comprehension_type(
+            ),
+            typepython_syntax::ComprehensionKind::Dict => resolve_dict_comprehension_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1008,10 +1006,9 @@ pub(super) fn resolve_assignment_site_semantic_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            )
-            .map(|resolved| lower_type_text_or_name(&resolved)),
+            ),
             typepython_syntax::ComprehensionKind::Generator => {
-                resolve_generator_comprehension_type(
+                resolve_generator_comprehension_semantic_type(
                     node,
                     nodes,
                     signature,
@@ -1020,12 +1017,11 @@ pub(super) fn resolve_assignment_site_semantic_type(
                     assignment.line,
                     comprehension,
                 )
-                .map(|resolved| lower_type_text_or_name(&resolved))
             }
         };
     }
     if let Some(comprehension) = assignment.value_generator_comprehension.as_deref() {
-        return resolve_generator_comprehension_type(
+        return resolve_generator_comprehension_semantic_type(
             node,
             nodes,
             signature,
@@ -1033,8 +1029,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
             assignment.owner_type_name.as_deref(),
             assignment.line,
             comprehension,
-        )
-        .map(|resolved| lower_type_text_or_name(&resolved));
+        );
     }
 
     resolve_direct_expression_semantic_type(
@@ -1069,7 +1064,7 @@ pub(super) fn resolve_assignment_site_semantic_type(
     )
 }
 
-pub(super) fn resolve_comprehension_local_bindings(
+pub(super) fn resolve_comprehension_local_semantic_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1077,10 +1072,10 @@ pub(super) fn resolve_comprehension_local_bindings(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<BTreeMap<String, String>> {
+) -> Option<BTreeMap<String, SemanticType>> {
     let mut local_bindings = BTreeMap::new();
     for clause in &comprehension.clauses {
-        let iter_type = resolve_direct_expression_type_from_metadata(
+        let iter_type = resolve_direct_expression_semantic_type_from_metadata(
             node,
             nodes,
             signature,
@@ -1089,13 +1084,17 @@ pub(super) fn resolve_comprehension_local_bindings(
             current_line,
             clause.iter.as_ref(),
         )?;
-        let element_type = unwrap_for_iterable_type(&iter_type)?;
-        bind_list_comprehension_targets(&mut local_bindings, &clause.target_names, &element_type);
+        let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
+        bind_list_comprehension_semantic_targets(
+            &mut local_bindings,
+            &clause.target_names,
+            &element_type,
+        );
         for guard in &clause.filters {
             for (name, value_type) in local_bindings.clone() {
                 local_bindings.insert(
                     name.clone(),
-                    apply_guard_condition(
+                    apply_guard_condition_semantic(
                         node,
                         nodes,
                         &value_type,
@@ -1110,7 +1109,7 @@ pub(super) fn resolve_comprehension_local_bindings(
     Some(local_bindings)
 }
 
-pub(super) fn resolve_list_comprehension_type(
+pub(super) fn resolve_list_comprehension_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1118,8 +1117,8 @@ pub(super) fn resolve_list_comprehension_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<String> {
-    let local_bindings = resolve_comprehension_local_bindings(
+) -> Option<SemanticType> {
+    let local_bindings = resolve_comprehension_local_semantic_bindings(
         node,
         nodes,
         signature,
@@ -1129,7 +1128,7 @@ pub(super) fn resolve_list_comprehension_type(
         comprehension,
     )?;
 
-    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+    let element_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         signature,
@@ -1139,10 +1138,10 @@ pub(super) fn resolve_list_comprehension_type(
         comprehension.element.as_ref(),
         &local_bindings,
     )?;
-    Some(format!("list[{element_type}]"))
+    Some(SemanticType::Generic { head: String::from("list"), args: vec![element_type] })
 }
 
-pub(super) fn resolve_set_comprehension_type(
+pub(super) fn resolve_set_comprehension_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1150,8 +1149,8 @@ pub(super) fn resolve_set_comprehension_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<String> {
-    let local_bindings = resolve_comprehension_local_bindings(
+) -> Option<SemanticType> {
+    let local_bindings = resolve_comprehension_local_semantic_bindings(
         node,
         nodes,
         signature,
@@ -1161,7 +1160,7 @@ pub(super) fn resolve_set_comprehension_type(
         comprehension,
     )?;
 
-    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+    let element_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         signature,
@@ -1171,10 +1170,10 @@ pub(super) fn resolve_set_comprehension_type(
         comprehension.element.as_ref(),
         &local_bindings,
     )?;
-    Some(format!("set[{element_type}]"))
+    Some(SemanticType::Generic { head: String::from("set"), args: vec![element_type] })
 }
 
-pub(super) fn resolve_dict_comprehension_type(
+pub(super) fn resolve_dict_comprehension_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1182,8 +1181,8 @@ pub(super) fn resolve_dict_comprehension_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<String> {
-    let local_bindings = resolve_comprehension_local_bindings(
+) -> Option<SemanticType> {
+    let local_bindings = resolve_comprehension_local_semantic_bindings(
         node,
         nodes,
         signature,
@@ -1192,7 +1191,7 @@ pub(super) fn resolve_dict_comprehension_type(
         current_line,
         comprehension,
     )?;
-    let key_type = resolve_direct_expression_type_from_metadata_with_bindings(
+    let key_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         signature,
@@ -1202,7 +1201,7 @@ pub(super) fn resolve_dict_comprehension_type(
         comprehension.key.as_deref()?,
         &local_bindings,
     )?;
-    let value_type = resolve_direct_expression_type_from_metadata_with_bindings(
+    let value_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         signature,
@@ -1212,10 +1211,13 @@ pub(super) fn resolve_dict_comprehension_type(
         comprehension.element.as_ref(),
         &local_bindings,
     )?;
-    Some(format!("dict[{key_type}, {value_type}]"))
+    Some(SemanticType::Generic {
+        head: String::from("dict"),
+        args: vec![key_type, value_type],
+    })
 }
 
-pub(super) fn resolve_generator_comprehension_type(
+pub(super) fn resolve_generator_comprehension_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1223,8 +1225,8 @@ pub(super) fn resolve_generator_comprehension_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     comprehension: &typepython_syntax::ComprehensionMetadata,
-) -> Option<String> {
-    let local_bindings = resolve_comprehension_local_bindings(
+) -> Option<SemanticType> {
+    let local_bindings = resolve_comprehension_local_semantic_bindings(
         node,
         nodes,
         signature,
@@ -1234,7 +1236,7 @@ pub(super) fn resolve_generator_comprehension_type(
         comprehension,
     )?;
 
-    let element_type = resolve_direct_expression_type_from_metadata_with_bindings(
+    let element_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         signature,
@@ -1244,7 +1246,14 @@ pub(super) fn resolve_generator_comprehension_type(
         comprehension.element.as_ref(),
         &local_bindings,
     )?;
-    Some(format!("Generator[{element_type}, None, None]"))
+    Some(SemanticType::Generic {
+        head: String::from("Generator"),
+        args: vec![
+            element_type,
+            SemanticType::Name(String::from("None")),
+            SemanticType::Name(String::from("None")),
+        ],
+    })
 }
 
 pub(super) fn collect_guard_binding_names(
@@ -1790,19 +1799,19 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
     )
 }
 
-pub(super) fn bind_list_comprehension_targets(
-    local_bindings: &mut BTreeMap<String, String>,
+pub(super) fn bind_list_comprehension_semantic_targets(
+    local_bindings: &mut BTreeMap<String, SemanticType>,
     target_names: &[String],
-    element_type: &str,
+    element_type: &SemanticType,
 ) {
     if target_names.is_empty() {
         return;
     }
     if target_names.len() == 1 {
-        local_bindings.insert(target_names[0].clone(), normalize_type_text(element_type));
+        local_bindings.insert(target_names[0].clone(), element_type.clone());
         return;
     }
-    if let Some(tuple_elements) = unwrap_fixed_tuple_elements(element_type)
+    if let Some(tuple_elements) = unpacked_fixed_tuple_semantic_elements(element_type)
         && tuple_elements.len() == target_names.len()
     {
         for (name, value_type) in target_names.iter().zip(tuple_elements) {
@@ -1811,7 +1820,7 @@ pub(super) fn bind_list_comprehension_targets(
         return;
     }
     for name in target_names {
-        local_bindings.insert(name.clone(), normalize_type_text(element_type));
+        local_bindings.insert(name.clone(), element_type.clone());
     }
 }
 

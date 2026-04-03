@@ -329,6 +329,41 @@ pub(super) fn unwrap_for_iterable_type(text: &str) -> Option<String> {
     unwrap_yield_from_type(&text)
 }
 
+pub(super) fn unwrap_for_iterable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
+    match ty.strip_annotated() {
+        SemanticType::Name(name) if name == "range" => Some(SemanticType::Name(String::from("int"))),
+        SemanticType::Generic { head, args }
+            if matches!(
+                head.as_str(),
+                "Generator"
+                    | "typing.Generator"
+                    | "Iterator"
+                    | "typing.Iterator"
+                    | "Iterable"
+                    | "typing.Iterable"
+                    | "Sequence"
+                    | "typing.Sequence"
+                    | "list"
+                    | "set"
+                    | "frozenset"
+            ) && !args.is_empty() =>
+        {
+            Some(args[0].clone())
+        }
+        SemanticType::Generic { head, args } if head == "tuple" => {
+            let expanded = expanded_tuple_shape_semantic_args(args);
+            if expanded.len() == 2
+                && matches!(&expanded[1], SemanticType::Name(name) if name == "...")
+            {
+                return Some(expanded[0].clone());
+            }
+            expanded.first().cloned()
+        }
+        _ => unwrap_for_iterable_type(&render_semantic_type(ty))
+            .map(|inner| lower_type_text_or_name(&inner)),
+    }
+}
+
 pub(super) fn find_method_line(
     source: &str,
     owner_type_name: &str,
