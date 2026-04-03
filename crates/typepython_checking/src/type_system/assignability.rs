@@ -4,11 +4,16 @@ pub(super) fn direct_type_matches(
     expected: &str,
     actual: &str,
 ) -> bool {
-    let expected = normalize_type_text(expected);
-    let actual = normalize_type_text(actual);
-    let mut visiting = BTreeSet::new();
-
-    direct_type_matches_normalized(node, nodes, &expected, &actual, &mut visiting)
+    let mut types = TypeStore::default();
+    let expected = types.intern(lower_type_text_or_name(expected));
+    let actual = types.intern(lower_type_text_or_name(actual));
+    direct_semantic_type_matches(
+        node,
+        nodes,
+        types.get(expected).expect("interned semantic expected type"),
+        types.get(actual).expect("interned semantic actual type"),
+        &mut BTreeSet::new(),
+    )
 }
 
 pub(super) fn direct_type_is_assignable(
@@ -17,216 +22,232 @@ pub(super) fn direct_type_is_assignable(
     expected: &str,
     actual: &str,
 ) -> bool {
-    let expected = normalize_type_text(expected);
-    let actual = normalize_type_text(actual);
-    let mut visiting = BTreeSet::new();
-    direct_type_is_assignable_normalized(node, nodes, &expected, &actual, &mut visiting)
+    let mut types = TypeStore::default();
+    let expected = types.intern(lower_type_text_or_name(expected));
+    let actual = types.intern(lower_type_text_or_name(actual));
+    direct_semantic_type_is_assignable(
+        node,
+        nodes,
+        types.get(expected).expect("interned semantic expected type"),
+        types.get(actual).expect("interned semantic actual type"),
+        &mut BTreeSet::new(),
+    )
 }
 
-pub(super) fn direct_type_matches_normalized(
+pub(super) fn direct_type_matches_normalized_plain(expected: &str, actual: &str) -> bool {
+    let expected = lower_type_text_or_name(expected);
+    let actual = lower_type_text_or_name(actual);
+    direct_semantic_type_matches_plain(&expected, &actual)
+}
+
+fn direct_semantic_type_matches(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected: &str,
-    actual: &str,
-    visiting: &mut BTreeSet<(String, String)>,
+    expected: &SemanticType,
+    actual: &SemanticType,
+    visiting: &mut BTreeSet<(SemanticType, SemanticType)>,
 ) -> bool {
-    if let Some(inner) = annotated_inner(expected) {
-        return direct_type_matches_normalized(node, nodes, &inner, actual, visiting);
-    }
-    if let Some(inner) = annotated_inner(actual) {
-        return direct_type_matches_normalized(node, nodes, expected, &inner, visiting);
-    }
+    let expected = expected.strip_annotated().clone();
+    let actual = actual.strip_annotated().clone();
 
-    if expected == actual || expected == "Any" || actual == "Any" {
+    if expected == actual || is_any_semantic_type(&expected) || is_any_semantic_type(&actual) {
         return true;
     }
 
-    let key = (expected.to_owned(), actual.to_owned());
+    let key = (expected.clone(), actual.clone());
     if !visiting.insert(key.clone()) {
         return true;
     }
 
-    let result = if let Some(expanded_expected) = expand_type_alias_once(node, nodes, expected) {
-        direct_type_matches_normalized(node, nodes, &expanded_expected, actual, visiting)
-    } else if let Some(expanded_actual) = expand_type_alias_once(node, nodes, actual) {
-        direct_type_matches_normalized(node, nodes, expected, &expanded_actual, visiting)
-    } else if let Some(branches) = union_branches(expected) {
-        if let Some(actual_branches) = union_branches(actual) {
-            actual_branches.iter().all(|actual_branch| {
-                branches.iter().any(|expected_branch| {
-                    direct_type_matches_normalized(
-                        node,
-                        nodes,
-                        expected_branch,
-                        actual_branch,
-                        visiting,
-                    )
+    let result =
+        if let Some(expanded_expected) = expand_semantic_type_alias_once(node, nodes, &expected) {
+            direct_semantic_type_matches(node, nodes, &expanded_expected, &actual, visiting)
+        } else if let Some(expanded_actual) = expand_semantic_type_alias_once(node, nodes, &actual)
+        {
+            direct_semantic_type_matches(node, nodes, &expected, &expanded_actual, visiting)
+        } else if let Some(branches) = semantic_union_branches(&expected) {
+            if let Some(actual_branches) = semantic_union_branches(&actual) {
+                actual_branches.iter().all(|actual_branch| {
+                    branches.iter().any(|expected_branch| {
+                        direct_semantic_type_matches(
+                            node,
+                            nodes,
+                            expected_branch,
+                            actual_branch,
+                            visiting,
+                        )
+                    })
+                }) && branches.iter().all(|expected_branch| {
+                    actual_branches.iter().any(|actual_branch| {
+                        direct_semantic_type_matches(
+                            node,
+                            nodes,
+                            expected_branch,
+                            actual_branch,
+                            visiting,
+                        )
+                    })
                 })
-            }) && branches.iter().all(|expected_branch| {
-                actual_branches.iter().any(|actual_branch| {
-                    direct_type_matches_normalized(
-                        node,
-                        nodes,
-                        expected_branch,
-                        actual_branch,
-                        visiting,
-                    )
+            } else {
+                branches.into_iter().any(|branch| {
+                    direct_semantic_type_matches(node, nodes, &branch, &actual, visiting)
                 })
-            })
-        } else {
-            branches.into_iter().any(|branch| {
-                direct_type_matches_normalized(node, nodes, &branch, actual, visiting)
-            })
-        }
-    } else if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
-        true
-    } else {
-        match (split_generic_type(expected), split_generic_type(actual)) {
-            (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
-                if expected_head == actual_head =>
-            {
-                let (expected_args, actual_args) = if expected_head == "tuple" {
-                    (
-                        expanded_tuple_shape_args(&expected_args),
-                        expanded_tuple_shape_args(&actual_args),
-                    )
-                } else {
-                    (expected_args, actual_args)
-                };
-                if expected_args.len() != actual_args.len() {
-                    false
-                } else {
-                    expected_args.iter().zip(actual_args.iter()).all(
-                        |(expected_arg, actual_arg)| {
-                            direct_type_matches_normalized(
-                                node,
-                                nodes,
-                                expected_arg,
-                                actual_arg,
-                                visiting,
-                            )
-                        },
-                    )
-                }
             }
-            _ => false,
-        }
-    };
+        } else if semantic_enum_member_owner_name(&actual)
+            .is_some_and(|owner| owner == render_semantic_type(&expected))
+        {
+            true
+        } else {
+            match (expected.generic_parts(), actual.generic_parts()) {
+                (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
+                    if expected_head == actual_head =>
+                {
+                    let (expected_args, actual_args) = if expected_head == "tuple" {
+                        (
+                            expanded_tuple_shape_semantic_args(expected_args),
+                            expanded_tuple_shape_semantic_args(actual_args),
+                        )
+                    } else {
+                        (expected_args.to_vec(), actual_args.to_vec())
+                    };
+                    expected_args.len() == actual_args.len()
+                        && expected_args.iter().zip(actual_args.iter()).all(
+                            |(expected_arg, actual_arg)| {
+                                direct_semantic_type_matches(
+                                    node,
+                                    nodes,
+                                    expected_arg,
+                                    actual_arg,
+                                    visiting,
+                                )
+                            },
+                        )
+                }
+                _ => false,
+            }
+        };
 
     visiting.remove(&key);
     result
 }
 
-pub(super) fn direct_type_matches_normalized_plain(expected: &str, actual: &str) -> bool {
-    if let Some(inner) = annotated_inner(expected) {
-        return direct_type_matches_normalized_plain(&inner, actual);
-    }
-    if let Some(inner) = annotated_inner(actual) {
-        return direct_type_matches_normalized_plain(expected, &inner);
-    }
+fn direct_semantic_type_matches_plain(expected: &SemanticType, actual: &SemanticType) -> bool {
+    let expected = expected.strip_annotated();
+    let actual = actual.strip_annotated();
 
-    if expected == actual || expected == "Any" || actual == "Any" {
+    if expected == actual || is_any_semantic_type(expected) || is_any_semantic_type(actual) {
         return true;
     }
 
-    if let Some(branches) = union_branches(expected) {
-        if let Some(actual_branches) = union_branches(actual) {
+    if let Some(branches) = semantic_union_branches(expected) {
+        if let Some(actual_branches) = semantic_union_branches(actual) {
             return actual_branches.iter().all(|actual_branch| {
                 branches.iter().any(|expected_branch| {
-                    direct_type_matches_normalized_plain(expected_branch, actual_branch)
+                    direct_semantic_type_matches_plain(expected_branch, actual_branch)
                 })
             }) && branches.iter().all(|expected_branch| {
                 actual_branches.iter().any(|actual_branch| {
-                    direct_type_matches_normalized_plain(expected_branch, actual_branch)
+                    direct_semantic_type_matches_plain(expected_branch, actual_branch)
                 })
             });
         }
         return branches
             .into_iter()
-            .any(|branch| direct_type_matches_normalized_plain(&branch, actual));
+            .any(|branch| direct_semantic_type_matches_plain(&branch, actual));
     }
 
-    if enum_member_owner_name(actual).is_some_and(|owner| owner == expected) {
+    if semantic_enum_member_owner_name(actual)
+        .is_some_and(|owner| owner == render_semantic_type(expected))
+    {
         return true;
     }
 
-    match (split_generic_type(expected), split_generic_type(actual)) {
+    match (expected.generic_parts(), actual.generic_parts()) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
             if expected_head == actual_head && expected_args.len() == actual_args.len() =>
         {
             expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
-                direct_type_matches_normalized_plain(expected_arg, actual_arg)
+                direct_semantic_type_matches_plain(expected_arg, actual_arg)
             })
         }
         _ => false,
     }
 }
 
-pub(super) fn direct_type_is_assignable_normalized(
+fn direct_semantic_type_is_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected: &str,
-    actual: &str,
-    visiting: &mut BTreeSet<(String, String)>,
+    expected: &SemanticType,
+    actual: &SemanticType,
+    visiting: &mut BTreeSet<(SemanticType, SemanticType)>,
 ) -> bool {
-    if let Some(inner) = annotated_inner(expected) {
-        return direct_type_is_assignable_normalized(node, nodes, &inner, actual, visiting);
-    }
-    if let Some(inner) = annotated_inner(actual) {
-        return direct_type_is_assignable_normalized(node, nodes, expected, &inner, visiting);
-    }
+    let expected = expected.strip_annotated().clone();
+    let actual = actual.strip_annotated().clone();
 
     if expected == actual
-        || expected == "Any"
-        || expected == "unknown"
-        || expected == "dynamic"
-        || actual == "Any"
-        || actual == "unknown"
-        || actual == "dynamic"
+        || is_top_assignable_semantic_type(&expected)
+        || is_top_assignable_semantic_type(&actual)
     {
         return true;
     }
 
-    let key = (expected.to_owned(), actual.to_owned());
+    let key = (expected.clone(), actual.clone());
     if !visiting.insert(key.clone()) {
         return true;
     }
 
-    let result = if let Some(expanded_expected) = expand_type_alias_once(node, nodes, expected) {
-        direct_type_is_assignable_normalized(node, nodes, &expanded_expected, actual, visiting)
-    } else if let Some(expanded_actual) = expand_type_alias_once(node, nodes, actual) {
-        direct_type_is_assignable_normalized(node, nodes, expected, &expanded_actual, visiting)
-    } else if let Some(branches) = union_branches(expected) {
-        if let Some(actual_branches) = union_branches(actual) {
-            actual_branches.iter().all(|actual_branch| {
-                branches.iter().any(|expected_branch| {
-                    direct_type_is_assignable_normalized(
-                        node,
-                        nodes,
-                        expected_branch,
-                        actual_branch,
-                        visiting,
-                    )
+    let expected_rendered = render_semantic_type(&expected);
+    let actual_rendered = render_semantic_type(&actual);
+    let result =
+        if let Some(expanded_expected) = expand_semantic_type_alias_once(node, nodes, &expected) {
+            direct_semantic_type_is_assignable(node, nodes, &expanded_expected, &actual, visiting)
+        } else if let Some(expanded_actual) = expand_semantic_type_alias_once(node, nodes, &actual)
+        {
+            direct_semantic_type_is_assignable(node, nodes, &expected, &expanded_actual, visiting)
+        } else if let Some(branches) = semantic_union_branches(&expected) {
+            if let Some(actual_branches) = semantic_union_branches(&actual) {
+                actual_branches.iter().all(|actual_branch| {
+                    branches.iter().any(|expected_branch| {
+                        direct_semantic_type_is_assignable(
+                            node,
+                            nodes,
+                            expected_branch,
+                            actual_branch,
+                            visiting,
+                        )
+                    })
                 })
-            })
+            } else {
+                branches.into_iter().any(|branch| {
+                    direct_semantic_type_is_assignable(node, nodes, &branch, &actual, visiting)
+                })
+            }
         } else {
-            branches.into_iter().any(|branch| {
-                direct_type_is_assignable_normalized(node, nodes, &branch, actual, visiting)
-            })
-        }
-    } else if enum_member_owner_name(actual).is_some_and(|owner| owner == expected)
-        || protocol_assignable(node, nodes, expected, actual)
-        || nominal_subclass_assignable(node, nodes, expected, actual)
-    {
-        true
-    } else if let Some(result) = assignable_generic_bridge(node, nodes, expected, actual) {
-        result
-    } else {
-        direct_type_matches(node, nodes, expected, actual)
-    };
+            let enum_match =
+                semantic_enum_member_owner_name(&actual).is_some_and(|owner| owner == expected_rendered);
+            let protocol = protocol_assignable(node, nodes, &expected_rendered, &actual_rendered);
+            let nominal = nominal_subclass_assignable(node, nodes, &expected_rendered, &actual_rendered);
+            if enum_match || protocol || nominal {
+                true
+            } else if let Some(result) =
+                assignable_semantic_generic_bridge(node, nodes, &expected, &actual)
+            {
+                result
+            } else {
+                direct_semantic_type_matches(node, nodes, &expected, &actual, &mut BTreeSet::new())
+            }
+        };
 
     visiting.remove(&key);
     result
+}
+
+fn is_any_semantic_type(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if name == "Any")
+}
+
+fn is_top_assignable_semantic_type(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if matches!(name.as_str(), "Any" | "unknown" | "dynamic"))
 }
 
 pub(super) fn nominal_subclass_assignable(
@@ -452,22 +473,22 @@ pub(super) fn find_apparent_member_declaration_with_visited<'a>(
     None
 }
 
-pub(super) fn assignable_generic_bridge(
+fn assignable_semantic_generic_bridge(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected: &str,
-    actual: &str,
+    expected: &SemanticType,
+    actual: &SemanticType,
 ) -> Option<bool> {
-    let (expected_head, expected_args) = split_generic_type(expected)?;
-    let (actual_head, actual_args) = split_generic_type(actual)?;
+    let (expected_head, expected_args) = expected.generic_parts()?;
+    let (actual_head, actual_args) = actual.generic_parts()?;
 
     if expected_head == "tuple" && actual_head == "tuple" {
-        let expected_args = expanded_tuple_shape_args(&expected_args);
-        let actual_args = expanded_tuple_shape_args(&actual_args);
+        let expected_args = expanded_tuple_shape_semantic_args(expected_args);
+        let actual_args = expanded_tuple_shape_semantic_args(actual_args);
         if expected_args.len() != actual_args.len() {
             return Some(false);
         }
-        return same_head_generic_assignable(
+        return same_head_semantic_generic_assignable(
             node,
             nodes,
             expected_head,
@@ -477,36 +498,58 @@ pub(super) fn assignable_generic_bridge(
     }
 
     if expected_head == actual_head && expected_args.len() == actual_args.len() {
-        return same_head_generic_assignable(
+        return same_head_semantic_generic_assignable(
             node,
             nodes,
             expected_head,
-            &expected_args,
-            &actual_args,
+            expected_args,
+            actual_args,
         );
     }
 
     match (expected_head, actual_head) {
         ("Sequence", "list") | ("Sequence", "tuple") if !expected_args.is_empty() => {
-            if actual_head == "tuple" && actual_args.len() == 2 && actual_args[1] == "..." {
+            if actual_head == "tuple"
+                && actual_args.len() == 2
+                && matches!(&actual_args[1], SemanticType::Name(name) if name == "...")
+            {
                 return Some(direct_type_is_assignable(
                     node,
                     nodes,
-                    &expected_args[0],
-                    &actual_args[0],
+                    &render_semantic_type(&expected_args[0]),
+                    &render_semantic_type(&actual_args[0]),
                 ));
             }
             let element = if actual_head == "tuple" {
-                join_branch_types(actual_args)
+                lower_type_text_or_name(&join_branch_types(
+                    actual_args.iter().map(render_semantic_type).collect(),
+                ))
             } else {
-                actual_args.first().cloned().unwrap_or_default()
+                actual_args
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
             };
-            return Some(direct_type_is_assignable(node, nodes, &expected_args[0], &element));
+            return Some(direct_type_is_assignable(
+                node,
+                nodes,
+                &render_semantic_type(&expected_args[0]),
+                &render_semantic_type(&element),
+            ));
         }
         ("Mapping", "dict") if expected_args.len() == 2 && actual_args.len() == 2 => {
             return Some(
-                invariant_type_matches(node, nodes, &expected_args[0], &actual_args[0])
-                    && direct_type_is_assignable(node, nodes, &expected_args[1], &actual_args[1]),
+                invariant_type_matches(
+                    node,
+                    nodes,
+                    &render_semantic_type(&expected_args[0]),
+                    &render_semantic_type(&actual_args[0]),
+                ) && direct_type_is_assignable(
+                    node,
+                    nodes,
+                    &render_semantic_type(&expected_args[1]),
+                    &render_semantic_type(&actual_args[1]),
+                ),
             );
         }
         _ => {}
@@ -522,45 +565,51 @@ pub(super) enum GenericVariance {
     Contravariant,
 }
 
-pub(super) fn same_head_generic_assignable(
+fn same_head_semantic_generic_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     head: &str,
-    expected_args: &[String],
-    actual_args: &[String],
+    expected_args: &[SemanticType],
+    actual_args: &[SemanticType],
 ) -> Option<bool> {
     if head == "Callable" {
-        return callable_annotation_assignable(node, nodes, expected_args, actual_args);
+        let expected = expected_args.iter().map(render_semantic_type).collect::<Vec<_>>();
+        let actual = actual_args.iter().map(render_semantic_type).collect::<Vec<_>>();
+        return callable_annotation_assignable(node, nodes, &expected, &actual);
     }
 
     let variances = variances_for_generic_head(head, expected_args.len());
     Some(expected_args.iter().zip(actual_args.iter()).zip(variances).all(
         |((expected_arg, actual_arg), variance)| match variance {
-            GenericVariance::Invariant => {
-                invariant_type_matches(node, nodes, expected_arg, actual_arg)
-            }
-            GenericVariance::Covariant => {
-                direct_type_is_assignable(node, nodes, expected_arg, actual_arg)
-            }
-            GenericVariance::Contravariant => {
-                direct_type_is_assignable(node, nodes, actual_arg, expected_arg)
-            }
+            GenericVariance::Invariant => invariant_type_matches(
+                node,
+                nodes,
+                &render_semantic_type(expected_arg),
+                &render_semantic_type(actual_arg),
+            ),
+            GenericVariance::Covariant => direct_type_is_assignable(
+                node,
+                nodes,
+                &render_semantic_type(expected_arg),
+                &render_semantic_type(actual_arg),
+            ),
+            GenericVariance::Contravariant => direct_type_is_assignable(
+                node,
+                nodes,
+                &render_semantic_type(actual_arg),
+                &render_semantic_type(expected_arg),
+            ),
         },
     ))
 }
 
 pub(crate) fn expanded_tuple_shape_args(args: &[String]) -> Vec<String> {
-    let mut expanded = Vec::new();
-    for arg in args {
-        if let Some(inner) = unpack_inner(arg)
-            && let Some(elements) = unpacked_fixed_tuple_elements(&inner)
-        {
-            expanded.extend(elements);
-            continue;
-        }
-        expanded.push(normalize_type_text(arg));
-    }
-    expanded
+    expanded_tuple_shape_semantic_args(
+        &args.iter().map(|arg| lower_type_text_or_name(arg)).collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .map(|arg| render_semantic_type(&arg))
+    .collect()
 }
 
 pub(super) fn callable_annotation_assignable(
@@ -569,26 +618,83 @@ pub(super) fn callable_annotation_assignable(
     expected_args: &[String],
     actual_args: &[String],
 ) -> Option<bool> {
-    let expected = format!("Callable[{}]", expected_args.join(", "));
-    let actual = format!("Callable[{}]", actual_args.join(", "));
-    let (expected_params, expected_return) = parse_callable_annotation(&expected)?;
-    let (actual_params, actual_return) = parse_callable_annotation(&actual)?;
+    let expected = lower_type_text_or_name(&format!("Callable[{}]", expected_args.join(", ")));
+    let actual = lower_type_text_or_name(&format!("Callable[{}]", actual_args.join(", ")));
+    match (&expected, &actual) {
+        (
+            SemanticType::Callable { params: expected_params, return_type: expected_return },
+            SemanticType::Callable { params: actual_params, return_type: actual_return },
+        ) => callable_semantic_annotation_assignable(
+            node,
+            nodes,
+            expected_params,
+            expected_return,
+            actual_params,
+            actual_return,
+        ),
+        _ => None,
+    }
+}
 
-    if !direct_type_is_assignable(node, nodes, &expected_return, &actual_return) {
+fn callable_semantic_annotation_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected_params: &SemanticCallableParams,
+    expected_return: &SemanticType,
+    actual_params: &SemanticCallableParams,
+    actual_return: &SemanticType,
+) -> Option<bool> {
+    if !direct_type_is_assignable(
+        node,
+        nodes,
+        &render_semantic_type(expected_return),
+        &render_semantic_type(actual_return),
+    ) {
         return Some(false);
     }
 
     match (expected_params, actual_params) {
-        (None, _) | (_, None) => Some(true),
-        (Some(expected_params), Some(actual_params)) => {
-            if expected_params.len() != actual_params.len() {
+        (SemanticCallableParams::Ellipsis, _) | (_, SemanticCallableParams::Ellipsis) => Some(true),
+        (SemanticCallableParams::ParamList(expected), SemanticCallableParams::ParamList(actual)) => {
+            if expected.len() != actual.len() {
                 return Some(false);
             }
-            Some(expected_params.iter().zip(actual_params.iter()).all(
-                |(expected_param, actual_param)| {
-                    direct_type_is_assignable(node, nodes, actual_param, expected_param)
-                },
-            ))
+            Some(expected.iter().zip(actual.iter()).all(|(expected_param, actual_param)| {
+                direct_type_is_assignable(
+                    node,
+                    nodes,
+                    &render_semantic_type(actual_param),
+                    &render_semantic_type(expected_param),
+                )
+            }))
+        }
+        _ => {
+            let expected = render_semantic_callable_params(expected_params);
+            let actual = render_semantic_callable_params(actual_params);
+            let expected = normalize_callable_param_expr(&expected);
+            let actual = normalize_callable_param_expr(&actual);
+            if expected == "..." || actual == "..." {
+                return Some(true);
+            }
+            let expected = expected.strip_prefix('[')?.strip_suffix(']')?;
+            let actual = actual.strip_prefix('[')?.strip_suffix(']')?;
+            let expected = if expected.trim().is_empty() {
+                Vec::new()
+            } else {
+                split_top_level_type_args(expected)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            let actual = if actual.trim().is_empty() {
+                Vec::new()
+            } else {
+                split_top_level_type_args(actual)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            callable_annotation_assignable(node, nodes, &expected, &actual)
         }
     }
 }
@@ -610,9 +716,11 @@ pub(super) fn recursive_type_alias_head(
     nodes: &[typepython_graph::ModuleNode],
     text: &str,
 ) -> Option<String> {
-    let normalized = normalize_type_text(text);
-    let head =
-        split_generic_type(&normalized).map(|(head, _)| head.to_owned()).unwrap_or(normalized);
+    let normalized = lower_type_text_or_name(text);
+    let head = normalized
+        .generic_parts()
+        .map(|(head, _)| head.to_owned())
+        .unwrap_or_else(|| render_semantic_type(&normalized));
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
     let mut visiting = BTreeSet::new();
     type_alias_eventually_mentions(
@@ -623,6 +731,23 @@ pub(super) fn recursive_type_alias_head(
         &mut visiting,
     )
     .then_some(head)
+}
+
+fn expand_semantic_type_alias_once(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    ty: &SemanticType,
+) -> Option<SemanticType> {
+    let stripped = ty.strip_annotated();
+    let (head, args) = stripped
+        .generic_parts()
+        .map(|(head, args)| (head.to_owned(), args.iter().map(render_semantic_type).collect()))
+        .unwrap_or_else(|| (render_semantic_type(stripped), Vec::new()));
+    let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
+    let substitutions = alias_type_param_substitutions(alias_decl, &args)?;
+    let detail = rewrite_imported_typing_aliases(alias_node, &alias_decl.detail);
+    let expanded = substitute_semantic_type_params(&lower_type_text_or_name(&detail), &substitutions);
+    (expanded != *stripped).then_some(expanded)
 }
 
 pub(super) fn type_alias_eventually_mentions(
@@ -653,22 +778,34 @@ pub(super) fn type_expr_mentions_alias(
     target: &str,
     visiting: &mut BTreeSet<(String, String)>,
 ) -> bool {
-    let normalized = normalize_type_text(text);
+    let ty = lower_type_text_or_name(text);
+    semantic_type_mentions_alias(node, nodes, &ty, target, visiting)
+}
 
-    if let Some(inner) = annotated_inner(&normalized) {
-        return type_expr_mentions_alias(node, nodes, &inner, target, visiting);
-    }
-    if let Some(branches) = union_branches(&normalized) {
+fn semantic_type_mentions_alias(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    ty: &SemanticType,
+    target: &str,
+    visiting: &mut BTreeSet<(String, String)>,
+) -> bool {
+    let ty = ty.strip_annotated();
+
+    if let Some(branches) = semantic_union_branches(ty) {
         return branches
             .into_iter()
-            .any(|branch| type_expr_mentions_alias(node, nodes, &branch, target, visiting));
-    }
-    if let Some((head, args)) = split_generic_type(&normalized) {
-        return head == target
-            || type_alias_eventually_mentions(node, nodes, head, target, visiting)
-            || args.iter().any(|arg| type_expr_mentions_alias(node, nodes, arg, target, visiting));
+            .any(|branch| semantic_type_mentions_alias(node, nodes, &branch, target, visiting));
     }
 
+    if let Some((head, args)) = ty.generic_parts() {
+        return head == target
+            || type_alias_eventually_mentions(node, nodes, head, target, visiting)
+            || args
+                .iter()
+                .any(|arg| semantic_type_mentions_alias(node, nodes, arg, target, visiting));
+    }
+
+    let normalized = render_semantic_type(ty);
     normalized == target
         || type_alias_eventually_mentions(node, nodes, &normalized, target, visiting)
 }
@@ -690,8 +827,21 @@ pub(super) fn variances_for_generic_head(head: &str, arity: usize) -> Vec<Generi
 }
 
 pub(super) fn enum_member_owner_name(text: &str) -> Option<String> {
-    let inner = text.strip_prefix("Literal[")?.strip_suffix(']')?;
-    let (owner, _member) = inner.rsplit_once('.')?;
+    let ty = lower_type_text_or_name(text);
+    semantic_enum_member_owner_name(&ty)
+}
+
+fn semantic_enum_member_owner_name(ty: &SemanticType) -> Option<String> {
+    let SemanticType::Generic { head, args } = ty.strip_annotated() else {
+        return None;
+    };
+    if head != "Literal" || args.len() != 1 {
+        return None;
+    }
+    let SemanticType::Name(name) = &args[0] else {
+        return None;
+    };
+    let (owner, _member) = name.rsplit_once('.')?;
     Some(normalize_type_text(owner))
 }
 
