@@ -857,16 +857,16 @@ pub(super) fn resolve_direct_name_reference_semantic_type_with_context(
         current_line,
         value_name,
     )?;
-    let narrowed = apply_guard_narrowing(
+    let narrowed = apply_guard_narrowing_semantic(
         node,
         nodes,
         current_owner_name,
         current_owner_type_name,
         current_line,
         value_name,
-        &render_semantic_type(&base_type),
+        &base_type,
     );
-    Some(lower_type_text_or_name(&narrowed))
+    Some(narrowed)
 }
 
 #[allow(

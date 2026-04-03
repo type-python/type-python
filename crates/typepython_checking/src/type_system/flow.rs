@@ -1,13 +1,13 @@
-pub(super) fn apply_guard_narrowing(
+pub(super) fn apply_guard_narrowing_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-    base_type: &str,
-) -> String {
-    let mut narrowed = normalize_type_text(base_type);
+    base_type: &SemanticType,
+) -> SemanticType {
+    let mut narrowed = base_type.clone();
 
     let mut if_guards = node
         .if_guards
@@ -41,7 +41,8 @@ pub(super) fn apply_guard_narrowing(
         .collect::<Vec<_>>();
     if_guards.sort_by_key(|(line, _, _)| *line);
     for (_, branch_true, guard) in if_guards {
-        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, branch_true);
+        narrowed =
+            apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, branch_true);
     }
 
     let mut post_if_guards = node
@@ -84,7 +85,8 @@ pub(super) fn apply_guard_narrowing(
         .collect::<Vec<_>>();
     post_if_guards.sort_by_key(|(line, _, _)| *line);
     for (_, branch_true, guard) in post_if_guards {
-        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, branch_true);
+        narrowed =
+            apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, branch_true);
     }
 
     let mut asserts = node
@@ -107,7 +109,7 @@ pub(super) fn apply_guard_narrowing(
         .collect::<Vec<_>>();
     asserts.sort_by_key(|(line, _)| *line);
     for (_, guard) in asserts {
-        narrowed = apply_guard_condition(node, nodes, &narrowed, value_name, guard, true);
+        narrowed = apply_guard_condition_semantic(node, nodes, &narrowed, value_name, guard, true);
     }
 
     narrowed
@@ -258,6 +260,106 @@ pub(super) fn apply_guard_condition(
     }
 }
 
+pub(super) fn apply_guard_condition_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    value_name: &str,
+    guard: &typepython_binding::GuardConditionSite,
+    branch_true: bool,
+) -> SemanticType {
+    match guard {
+        typepython_binding::GuardConditionSite::IsNone { name, negated } if name == value_name => {
+            match (branch_true, negated) {
+                (true, false) | (false, true) => SemanticType::Name(String::from("None")),
+                (false, false) | (true, true) => {
+                    remove_none_semantic_branch(base_type).unwrap_or_else(|| base_type.clone())
+                }
+            }
+        }
+        typepython_binding::GuardConditionSite::IsInstance { name, types }
+            if name == value_name =>
+        {
+            let narrowed_types = types.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>();
+            if branch_true {
+                narrow_to_instance_semantic_types(node, nodes, base_type, &narrowed_types)
+            } else {
+                remove_instance_semantic_types(node, nodes, base_type, &narrowed_types)
+            }
+        }
+        typepython_binding::GuardConditionSite::PredicateCall { name, callee }
+            if name == value_name =>
+        {
+            apply_predicate_guard_semantic(node, nodes, base_type, callee, branch_true)
+        }
+        typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name => {
+            apply_truthy_semantic_narrowing(base_type, branch_true)
+        }
+        typepython_binding::GuardConditionSite::Not(inner) => {
+            apply_guard_condition_semantic(node, nodes, base_type, value_name, inner, !branch_true)
+        }
+        typepython_binding::GuardConditionSite::And(parts) => {
+            if branch_true {
+                parts.iter().fold(base_type.clone(), |current, part| {
+                    apply_guard_condition_semantic(node, nodes, &current, value_name, part, true)
+                })
+            } else {
+                let mut joined = Vec::new();
+                let mut current_true = base_type.clone();
+                for part in parts {
+                    joined.push(apply_guard_condition_semantic(
+                        node,
+                        nodes,
+                        &current_true,
+                        value_name,
+                        part,
+                        false,
+                    ));
+                    current_true = apply_guard_condition_semantic(
+                        node,
+                        nodes,
+                        &current_true,
+                        value_name,
+                        part,
+                        true,
+                    );
+                }
+                join_semantic_type_candidates(joined)
+            }
+        }
+        typepython_binding::GuardConditionSite::Or(parts) => {
+            if branch_true {
+                let mut joined = Vec::new();
+                let mut current_false = base_type.clone();
+                for part in parts {
+                    joined.push(apply_guard_condition_semantic(
+                        node,
+                        nodes,
+                        &current_false,
+                        value_name,
+                        part,
+                        true,
+                    ));
+                    current_false = apply_guard_condition_semantic(
+                        node,
+                        nodes,
+                        &current_false,
+                        value_name,
+                        part,
+                        false,
+                    );
+                }
+                join_semantic_type_candidates(joined)
+            } else {
+                parts.iter().fold(base_type.clone(), |current, part| {
+                    apply_guard_condition_semantic(node, nodes, &current, value_name, part, false)
+                })
+            }
+        }
+        _ => base_type.clone(),
+    }
+}
+
 pub(super) fn apply_predicate_guard(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -274,6 +376,25 @@ pub(super) fn apply_predicate_guard(
         }
         ("TypeIs", false) => remove_instance_types(base_type, &[guarded_type]),
         _ => normalize_type_text(base_type),
+    }
+}
+
+pub(super) fn apply_predicate_guard_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    callee: &str,
+    branch_true: bool,
+) -> SemanticType {
+    let Some((kind, guarded_type)) = parse_guard_return_kind_semantic(node, nodes, callee) else {
+        return base_type.clone();
+    };
+    match (kind.as_str(), branch_true) {
+        ("TypeGuard", true) | ("TypeIs", true) => {
+            narrow_to_instance_semantic_types(node, nodes, base_type, &[guarded_type])
+        }
+        ("TypeIs", false) => remove_instance_semantic_types(node, nodes, base_type, &[guarded_type]),
+        _ => base_type.clone(),
     }
 }
 
@@ -295,6 +416,24 @@ pub(super) fn parse_guard_return_kind(
     None
 }
 
+pub(super) fn parse_guard_return_kind_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(String, SemanticType)> {
+    let function = resolve_direct_function(node, nodes, callee)?;
+    let returns = normalized_direct_return_annotation(function.detail.split_once("->")?.1.trim())?;
+    if let Some(inner) =
+        returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        return Some((String::from("TypeGuard"), lower_type_text_or_name(inner)));
+    }
+    if let Some(inner) = returns.strip_prefix("TypeIs[").and_then(|inner| inner.strip_suffix(']')) {
+        return Some((String::from("TypeIs"), lower_type_text_or_name(inner)));
+    }
+    None
+}
+
 pub(super) fn narrow_to_instance_types(base_type: &str, types: &[String]) -> String {
     let normalized_types = types.iter().map(|ty| normalize_type_text(ty)).collect::<Vec<_>>();
     if let Some(branches) = union_branches(base_type) {
@@ -309,6 +448,28 @@ pub(super) fn narrow_to_instance_types(base_type: &str, types: &[String]) -> Str
         }
     }
     join_union_branches(normalized_types)
+}
+
+pub(super) fn narrow_to_instance_semantic_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    types: &[SemanticType],
+) -> SemanticType {
+    if let Some(branches) = semantic_union_branches(base_type) {
+        let kept = branches
+            .into_iter()
+            .filter(|branch| {
+                types
+                    .iter()
+                    .any(|ty| semantic_type_matches(node, nodes, ty, branch))
+            })
+            .collect::<Vec<_>>();
+        if !kept.is_empty() {
+            return join_semantic_type_candidates(kept);
+        }
+    }
+    join_semantic_type_candidates(types.to_vec())
 }
 
 pub(super) fn remove_instance_types(base_type: &str, types: &[String]) -> String {
@@ -326,11 +487,40 @@ pub(super) fn remove_instance_types(base_type: &str, types: &[String]) -> String
     if kept.is_empty() { normalized } else { join_union_branches(kept) }
 }
 
+pub(super) fn remove_instance_semantic_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    base_type: &SemanticType,
+    types: &[SemanticType],
+) -> SemanticType {
+    let Some(branches) = semantic_union_branches(base_type) else {
+        return base_type.clone();
+    };
+    let kept = branches
+        .into_iter()
+        .filter(|branch| {
+            !types
+                .iter()
+                .any(|ty| semantic_type_matches(node, nodes, ty, branch))
+        })
+        .collect::<Vec<_>>();
+    if kept.is_empty() { base_type.clone() } else { join_semantic_type_candidates(kept) }
+}
+
 pub(super) fn remove_none_branch(base_type: &str) -> Option<String> {
     let normalized = normalize_type_text(base_type);
     let branches = union_branches(&normalized)?;
     let kept = branches.into_iter().filter(|branch| branch != "None").collect::<Vec<_>>();
     (!kept.is_empty()).then(|| join_union_branches(kept))
+}
+
+pub(super) fn remove_none_semantic_branch(base_type: &SemanticType) -> Option<SemanticType> {
+    let branches = semantic_union_branches(base_type)?;
+    let kept = branches
+        .into_iter()
+        .filter(|branch| !matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None"))
+        .collect::<Vec<_>>();
+    (!kept.is_empty()).then(|| join_semantic_type_candidates(kept))
 }
 
 pub(super) fn join_union_branches(branches: Vec<String>) -> String {
@@ -383,6 +573,51 @@ pub(super) fn apply_truthy_narrowing(base_type: &str, branch_true: bool) -> Stri
     normalized
 }
 
+pub(super) fn apply_truthy_semantic_narrowing(
+    base_type: &SemanticType,
+    branch_true: bool,
+) -> SemanticType {
+    if let Some(value) = semantic_literal_bool_value(base_type) {
+        return if branch_true == value {
+            base_type.clone()
+        } else {
+            SemanticType::Generic {
+                head: String::from("Literal"),
+                args: vec![SemanticType::Name(
+                    if !value { "True" } else { "False" }.to_owned(),
+                )],
+            }
+        };
+    }
+    if matches!(base_type.strip_annotated(), SemanticType::Name(name) if name == "bool") {
+        return base_type.clone();
+    }
+
+    let Some(branches) = semantic_union_branches(base_type) else {
+        return base_type.clone();
+    };
+    let non_none = branches
+        .iter()
+        .filter(|branch| !matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None"))
+        .cloned()
+        .collect::<Vec<_>>();
+    if branches
+        .iter()
+        .any(|branch| matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None"))
+        && non_none
+            .iter()
+            .all(semantic_is_definitely_truthy_branch)
+    {
+        return if branch_true {
+            join_semantic_type_candidates(non_none)
+        } else {
+            SemanticType::Name(String::from("None"))
+        };
+    }
+
+    base_type.clone()
+}
+
 pub(super) fn is_definitely_truthy_branch(branch: &str) -> bool {
     let normalized = normalize_type_text(branch);
     if normalized == "Literal[True]" {
@@ -397,6 +632,37 @@ pub(super) fn is_definitely_truthy_branch(branch: &str) -> bool {
     )
     .then_some(false)
     .unwrap_or(true)
+}
+
+pub(super) fn semantic_is_definitely_truthy_branch(branch: &SemanticType) -> bool {
+    if semantic_literal_bool_value(branch) == Some(true) {
+        return true;
+    }
+    if semantic_literal_bool_value(branch) == Some(false)
+        || matches!(branch.strip_annotated(), SemanticType::Name(name) if name == "None" || name == "bool")
+    {
+        return false;
+    }
+    !matches!(
+        branch.strip_annotated(),
+        SemanticType::Name(name)
+            if matches!(
+                name.as_str(),
+                "bytes" | "str" | "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple"
+            )
+    )
+}
+
+fn semantic_literal_bool_value(ty: &SemanticType) -> Option<bool> {
+    let (head, args) = ty.generic_parts()?;
+    if head != "Literal" || args.len() != 1 {
+        return None;
+    }
+    match args.first()?.strip_annotated() {
+        SemanticType::Name(name) if name == "True" => Some(true),
+        SemanticType::Name(name) if name == "False" => Some(false),
+        _ => None,
+    }
 }
 
 pub(super) fn resolve_exception_binding_type(
@@ -1032,14 +1298,18 @@ pub(super) fn apply_guard_to_local_semantic_bindings(
     guard: &typepython_binding::GuardConditionSite,
     branch_true: bool,
 ) -> BTreeMap<String, SemanticType> {
-    let rendered = local_bindings
-        .iter()
-        .map(|(name, ty)| (name.clone(), render_semantic_type(ty)))
-        .collect::<BTreeMap<_, _>>();
-    apply_guard_to_local_bindings(node, nodes, &rendered, guard, branch_true)
-        .into_iter()
-        .map(|(name, ty)| (name, lower_type_text_or_name(&ty)))
-        .collect()
+    let mut narrowed = local_bindings.clone();
+    let mut names = BTreeSet::new();
+    collect_guard_binding_names(guard, &mut names);
+    for name in names {
+        if let Some(base_type) = local_bindings.get(&name) {
+            narrowed.insert(
+                name.clone(),
+                apply_guard_condition_semantic(node, nodes, base_type, &name, guard, branch_true),
+            );
+        }
+    }
+    narrowed
 }
 
 #[allow(clippy::too_many_arguments)]
