@@ -203,43 +203,43 @@ Profiles provide curated defaults for common use cases. When a profile is set, i
 
 For published packages that need strict type safety and complete public API typing.
 
-| Setting | Value |
-|---|---|
-| `strict` | `true` |
-| `strict_nulls` | `true` |
-| `imports` | `"unknown"` |
-| `no_implicit_dynamic` | `true` |
-| `require_known_public_types` | `true` |
+| Setting                      | Value       |
+| ---------------------------- | ----------- |
+| `strict`                     | `true`      |
+| `strict_nulls`               | `true`      |
+| `imports`                    | `"unknown"` |
+| `no_implicit_dynamic`        | `true`      |
+| `require_known_public_types` | `true`      |
 
 ### `application`
 
 For applications where strict typing is desired but public API completeness is not critical.
 
-| Setting | Value |
-|---|---|
-| `strict` | `true` |
-| `strict_nulls` | `true` |
-| `imports` | `"unknown"` |
-| `no_implicit_dynamic` | `true` |
-| `require_known_public_types` | `false` |
+| Setting                      | Value       |
+| ---------------------------- | ----------- |
+| `strict`                     | `true`      |
+| `strict_nulls`               | `true`      |
+| `imports`                    | `"unknown"` |
+| `no_implicit_dynamic`        | `true`      |
+| `require_known_public_types` | `false`     |
 
 ### `migration`
 
 For gradual adoption in existing Python projects. It relaxes strictness, but it does not disable every safety-oriented check.
 
-| Setting | Value |
-|---|---|
-| `strict` | `false` |
-| `strict_nulls` | `true` |
-| `imports` | `"dynamic"` |
-| `no_implicit_dynamic` | `false` |
-| `warn_unsafe` | `true` |
-| `enable_sealed_exhaustiveness` | `true` |
-| `report_deprecated` | `"ignore"` |
-| `require_explicit_overrides` | `false` |
-| `require_known_public_types` | `false` |
-| `infer_passthrough` | `false` |
-| `conditional_returns` | `false` |
+| Setting                        | Value       |
+| ------------------------------ | ----------- |
+| `strict`                       | `false`     |
+| `strict_nulls`                 | `true`      |
+| `imports`                      | `"dynamic"` |
+| `no_implicit_dynamic`          | `false`     |
+| `warn_unsafe`                  | `true`      |
+| `enable_sealed_exhaustiveness` | `true`      |
+| `report_deprecated`            | `"ignore"`  |
+| `require_explicit_overrides`   | `false`     |
+| `require_known_public_types`   | `false`     |
+| `infer_passthrough`            | `false`     |
+| `conditional_returns`          | `false`     |
 
 ## pyproject.toml Embedding
 
@@ -262,11 +262,11 @@ Use `typepython init --embed-pyproject` to append this layout to an existing `py
 
 ## File Kinds and Authority
 
-| Extension | Role | Treatment |
-|---|---|---|
-| `.tpy` | TypePython source | Parsed, type-checked, lowered to `.py`, stubs generated |
-| `.py` | Python runtime authority | Copied to output; included in module graph for imports |
-| `.pyi` | Type stub authority | Used for type checking; copied to output as-is |
+| Extension | Role                     | Treatment                                               |
+| --------- | ------------------------ | ------------------------------------------------------- |
+| `.tpy`    | TypePython source        | Parsed, type-checked, lowered to `.py`, stubs generated |
+| `.py`     | Python runtime authority | Copied to output; included in module graph for imports  |
+| `.pyi`    | Type stub authority      | Used for type checking; copied to output as-is          |
 
 ### Module Path Collisions
 
@@ -300,8 +300,8 @@ Given a project with `out_dir = ".typepython/build"` and `cache_dir = ".typepyth
 
 ## Environment Variables
 
-| Variable | Purpose |
-|---|---|
+| Variable         | Purpose                                        |
+| ---------------- | ---------------------------------------------- |
 | `TYPEPYTHON_BIN` | Override the path to the TypePython CLI binary |
 
 ## Minimal Configuration Examples

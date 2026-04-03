@@ -41,6 +41,7 @@ profile = "migration"
 ```
 
 This sets:
+
 - `strict = false`
 - `strict_nulls = true`
 - `imports = "dynamic"` (untyped imports are `dynamic`, not `unknown`)
@@ -68,6 +69,7 @@ typepython migrate --project . --report
 ```
 
 Output includes:
+
 - Count of known vs. unknown declarations
 - Dynamic and unknown boundary counts
 - Per-file typing coverage percentage
@@ -85,6 +87,7 @@ typepython migrate --project . --emit-stubs src/ --stub-out-dir stubs/
 ```
 
 Generated stubs include:
+
 - Inferred types from default values and return statements
 - `TODO` markers for types that could not be inferred
 - Standard typing imports
@@ -156,12 +159,12 @@ typepython check --project .
 
 Common issues during migration:
 
-| Diagnostic | Fix |
-|---|---|
-| `TPY3001` (unresolved import) | Add `.pyi` stubs for external packages, or set `imports = "dynamic"` |
-| `TPY4001` (type mismatch) | Add or correct type annotations |
-| `TPY4003` (operation on unknown) | Add `isinstance` checks or explicit type annotations |
-| `TPY4002` (missing member) | Ensure types are correctly annotated |
+| Diagnostic                       | Fix                                                                  |
+| -------------------------------- | -------------------------------------------------------------------- |
+| `TPY3001` (unresolved import)    | Add `.pyi` stubs for external packages, or set `imports = "dynamic"` |
+| `TPY4001` (type mismatch)        | Add or correct type annotations                                      |
+| `TPY4003` (operation on unknown) | Add `isinstance` checks or explicit type annotations                 |
+| `TPY4002` (missing member)       | Ensure types are correctly annotated                                 |
 
 ### Step 6: Tighten configuration
 

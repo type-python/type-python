@@ -10,14 +10,14 @@ TypePython source files use the `.tpy` extension. They support all standard Pyth
 
 TypePython introduces context-sensitive keywords that are only special in specific syntactic positions. They remain valid identifiers elsewhere.
 
-| Keyword | Position | Purpose |
-|---|---|---|
-| `typealias` | Statement start | Type alias declaration |
-| `interface` | Statement start | Structural protocol declaration |
-| `data` | Prefix to `class` | Dataclass declaration |
-| `sealed` | Prefix to `class` | Sealed class declaration |
-| `overload` | Prefix to `def` | Overloaded function |
-| `unsafe` | Block start | Unsafe operation block |
+| Keyword     | Position          | Purpose                         |
+| ----------- | ----------------- | ------------------------------- |
+| `typealias` | Statement start   | Type alias declaration          |
+| `interface` | Statement start   | Structural protocol declaration |
+| `data`      | Prefix to `class` | Dataclass declaration           |
+| `sealed`    | Prefix to `class` | Sealed class declaration        |
+| `overload`  | Prefix to `def`   | Overloaded function             |
+| `unsafe`    | Block start       | Unsafe operation block          |
 
 ## Type Aliases
 
@@ -38,9 +38,9 @@ typealias Result[T, E = Exception] = T | E
 
 **Lowering:**
 
-| TypePython | Emitted Python |
-|---|---|
-| `typealias X = int` | `X: TypeAlias = int` |
+| TypePython                 | Emitted Python                               |
+| -------------------------- | -------------------------------------------- |
+| `typealias X = int`        | `X: TypeAlias = int`                         |
 | `typealias P[T] = list[T]` | `T = TypeVar("T")`; `P: TypeAlias = list[T]` |
 
 Recursive type aliases are supported:
@@ -66,6 +66,7 @@ interface Comparable[T]:
 ```
 
 **Key properties:**
+
 - Interfaces are **structural**: any type with matching members satisfies the interface
 - No explicit inheritance required
 - Can have generic type parameters
@@ -185,6 +186,7 @@ class Neg(Expr):
 ```
 
 **Key properties:**
+
 - All direct subclasses must be in the **same module**
 - `match` statements on sealed types are checked for exhaustiveness
 - Compiler proves all cases are covered -- no `default` needed
@@ -235,6 +237,7 @@ def parse(value: str | bytes | float) -> int:
 ```
 
 **Rules:**
+
 - Each `overload def` signature specifies one accepted combination
 - The implementation signature must be compatible with all overloads
 - The compiler checks that calls match exactly one overload (reports ambiguity as `TPY4012`)
@@ -271,6 +274,7 @@ unsafe:
 ```
 
 **Tracked unsafe operations:**
+
 - `eval()` calls
 - `exec()` calls
 - `globals()` writes

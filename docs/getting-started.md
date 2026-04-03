@@ -319,11 +319,11 @@ typepython check --project . --format json
 
 TypePython handles mixed-language projects:
 
-| File type | Treatment |
-|---|---|
-| `.tpy` | Compiled: type-checked, lowered to `.py`, stubs generated |
-| `.py` | Pass-through: copied as-is to output, included in module graph |
-| `.pyi` | Stub authority: used for type checking, copied to output |
+| File type | Treatment                                                      |
+| --------- | -------------------------------------------------------------- |
+| `.tpy`    | Compiled: type-checked, lowered to `.py`, stubs generated      |
+| `.py`     | Pass-through: copied as-is to output, included in module graph |
+| `.pyi`    | Stub authority: used for type checking, copied to output       |
 
 ```
 src/

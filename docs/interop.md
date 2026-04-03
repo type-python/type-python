@@ -14,25 +14,25 @@ This means tools that understand the emitted standard typing constructs can cons
 
 Every TypePython-specific construct is lowered to an equivalent standard Python form before it appears in a `.pyi` file:
 
-| TypePython construct | Representation in `.pyi` | Standard basis |
-|---|---|---|
-| `unknown` | `object` | PEP 484 |
-| `dynamic` | `Any` | PEP 484 |
-| `interface Foo:` | `class Foo(Protocol):` | PEP 544 |
-| `data class Bar:` | `@dataclass class Bar:` | PEP 557 |
-| `sealed class Expr:` | `class Expr:` (plain class) | -- |
-| `overload def f():` | `@overload def f():` | PEP 484 |
-| `typealias X = T` | `X: TypeAlias = T` | PEP 613 |
-| Inline generics `def f[T]()` | `T = TypeVar("T")` + `def f():` | PEP 484 |
-| `ParamSpec` `**P` | `P = ParamSpec("P")` | PEP 612 |
-| `Partial[Config]` | Expanded `TypedDict` with all keys `NotRequired` | PEP 655 |
-| `Pick[Config, "a", "b"]` | Expanded `TypedDict` with selected keys only | PEP 589 |
-| `Omit[Config, "a"]` | Expanded `TypedDict` without excluded keys | PEP 589 |
-| `Readonly[Config]` | Expanded `TypedDict` with `ReadOnly` on each field | PEP 705 |
-| `Required_[Config]` | Expanded `TypedDict` with `NotRequired[...]` wrappers removed | PEP 655 |
-| `Mutable[Config]` | Expanded `TypedDict` without `ReadOnly` wrappers | PEP 705 |
-| `unsafe: ...` | Not represented (safety boundary is erased) | -- |
-| `sealed` marker | Not represented (comment only in `.py`) | -- |
+| TypePython construct         | Representation in `.pyi`                                      | Standard basis |
+| ---------------------------- | ------------------------------------------------------------- | -------------- |
+| `unknown`                    | `object`                                                      | PEP 484        |
+| `dynamic`                    | `Any`                                                         | PEP 484        |
+| `interface Foo:`             | `class Foo(Protocol):`                                        | PEP 544        |
+| `data class Bar:`            | `@dataclass class Bar:`                                       | PEP 557        |
+| `sealed class Expr:`         | `class Expr:` (plain class)                                   | --             |
+| `overload def f():`          | `@overload def f():`                                          | PEP 484        |
+| `typealias X = T`            | `X: TypeAlias = T`                                            | PEP 613        |
+| Inline generics `def f[T]()` | `T = TypeVar("T")` + `def f():`                               | PEP 484        |
+| `ParamSpec` `**P`            | `P = ParamSpec("P")`                                          | PEP 612        |
+| `Partial[Config]`            | Expanded `TypedDict` with all keys `NotRequired`              | PEP 655        |
+| `Pick[Config, "a", "b"]`     | Expanded `TypedDict` with selected keys only                  | PEP 589        |
+| `Omit[Config, "a"]`          | Expanded `TypedDict` without excluded keys                    | PEP 589        |
+| `Readonly[Config]`           | Expanded `TypedDict` with `ReadOnly` on each field            | PEP 705        |
+| `Required_[Config]`          | Expanded `TypedDict` with `NotRequired[...]` wrappers removed | PEP 655        |
+| `Mutable[Config]`            | Expanded `TypedDict` without `ReadOnly` wrappers              | PEP 705        |
+| `unsafe: ...`                | Not represented (safety boundary is erased)                   | --             |
+| `sealed` marker              | Not represented (comment only in `.py`)                       | --             |
 
 ### Conservative lowering strategy
 
@@ -49,12 +49,12 @@ from typing_extensions import Protocol   # same type
 
 When emitting `.pyi` stubs, the compiler selects the import source based on `target_python`:
 
-| Construct | Python 3.10 | Python 3.11 | Python 3.12 |
-|---|---|---|---|
-| `TypeGuard` | `typing_extensions` | `typing` | `typing` |
-| `TypeIs` | `typing_extensions` | `typing_extensions` | `typing` |
-| `ReadOnly` | `typing_extensions` | `typing_extensions` | `typing_extensions` |
-| `override` | `typing_extensions` | `typing_extensions` | `typing` |
+| Construct    | Python 3.10         | Python 3.11         | Python 3.12         |
+| ------------ | ------------------- | ------------------- | ------------------- |
+| `TypeGuard`  | `typing_extensions` | `typing`            | `typing`            |
+| `TypeIs`     | `typing_extensions` | `typing_extensions` | `typing`            |
+| `ReadOnly`   | `typing_extensions` | `typing_extensions` | `typing_extensions` |
+| `override`   | `typing_extensions` | `typing_extensions` | `typing`            |
 | `deprecated` | `typing_extensions` | `typing_extensions` | `typing_extensions` |
 
 This ensures that mypy and pyright can resolve all imports for the given target version without needing manual `typing_extensions` fallbacks.
@@ -78,13 +78,13 @@ When downstream consumers type-check the emitted `.py`/`.pyi` files, they use th
 
 The `typepython verify` command performs structural consistency checks that help maintain interoperability:
 
-| Check | What it catches |
-|---|---|
-| Public name matching | `.py` exports a name that `.pyi` does not declare (or vice versa) |
-| Stub syntax validity | `.pyi` contains runtime statements that stub consumers would reject |
-| Artifact completeness | Missing `.py`, `.pyi`, or `py.typed` in the build output |
-| Package consistency | Wheel/sdist contents diverge from the build tree |
-| Snapshot integrity | Incremental cache is corrupt or incompatible |
+| Check                 | What it catches                                                     |
+| --------------------- | ------------------------------------------------------------------- |
+| Public name matching  | `.py` exports a name that `.pyi` does not declare (or vice versa)   |
+| Stub syntax validity  | `.pyi` contains runtime statements that stub consumers would reject |
+| Artifact completeness | Missing `.py`, `.pyi`, or `py.typed` in the build output            |
+| Package consistency   | Wheel/sdist contents diverge from the build tree                    |
+| Snapshot integrity    | Incremental cache is corrupt or incompatible                        |
 
 These checks catch the class of bugs where `.pyi` declarations drift from the actual runtime code -- the same problem that plagues hand-maintained `.d.ts` files in the TypeScript ecosystem.
 
@@ -94,30 +94,30 @@ While the emitted `.pyi` files are syntactically and structurally compatible wit
 
 ### `unknown` → `object`
 
-| Behavior | In TypePython | In mypy/pyright (via `.pyi`) |
-|---|---|---|
-| Member access | Error -- must narrow first | Allowed (limited `object` methods like `__eq__`) |
-| Call | Error | Error |
-| Assign to `str` | Error -- must narrow first | Error |
-| `==` comparison | Error | Allowed |
+| Behavior        | In TypePython              | In mypy/pyright (via `.pyi`)                     |
+| --------------- | -------------------------- | ------------------------------------------------ |
+| Member access   | Error -- must narrow first | Allowed (limited `object` methods like `__eq__`) |
+| Call            | Error                      | Error                                            |
+| Assign to `str` | Error -- must narrow first | Error                                            |
+| `==` comparison | Error                      | Allowed                                          |
 
 TypePython's `unknown` is stricter than `object`: it forbids **all** operations until narrowed. When lowered to `object` in `.pyi`, downstream tools apply the standard `object` rules, which are slightly more permissive.
 
 ### `sealed class` → plain class
 
-| Behavior | In TypePython | In mypy/pyright (via `.pyi`) |
-|---|---|---|
-| `match` exhaustiveness | Enforced -- compiler proves all subclasses covered | Not enforced -- external tools see an open class hierarchy |
-| Subclassing restriction | Same-module only | No restriction |
+| Behavior                | In TypePython                                      | In mypy/pyright (via `.pyi`)                               |
+| ----------------------- | -------------------------------------------------- | ---------------------------------------------------------- |
+| `match` exhaustiveness  | Enforced -- compiler proves all subclasses covered | Not enforced -- external tools see an open class hierarchy |
+| Subclassing restriction | Same-module only                                   | No restriction                                             |
 
 The sealed constraint is enforced only within the TypePython checker. External consumers can subclass the emitted class freely, and their type checkers will not flag non-exhaustive matches.
 
 ### `unsafe:` boundary
 
-| Behavior | In TypePython | In mypy/pyright (via `.pyi`) |
-|---|---|---|
-| `eval()` outside `unsafe:` | Warning (`TPY4019`) | No diagnostic |
-| `exec()` outside `unsafe:` | Warning (`TPY4019`) | No diagnostic |
+| Behavior                   | In TypePython       | In mypy/pyright (via `.pyi`) |
+| -------------------------- | ------------------- | ---------------------------- |
+| `eval()` outside `unsafe:` | Warning (`TPY4019`) | No diagnostic                |
+| `exec()` outside `unsafe:` | Warning (`TPY4019`) | No diagnostic                |
 
 The `unsafe:` boundary is a TypePython-only safety annotation. It is erased during lowering and has no representation in `.pyi` stubs.
 
@@ -136,12 +136,12 @@ In the emitted `.pyi`, `PartialConfig` becomes a standalone `TypedDict` with all
 
 ## Summary
 
-| Aspect | Status |
-|---|---|
-| Syntactic compatibility | Full -- all `.pyi` output uses standard PEP 484/544/561/612/613/655/705 constructs |
-| Structural compatibility | Full -- `typepython verify` enforces `.py`/`.pyi` name consistency |
-| Semantic compatibility | Partial -- `sealed` exhaustiveness, `unknown` strictness, and `unsafe` boundaries do not transfer to external tools |
-| typeshed coexistence | No conflict -- bundled stdlib data is compile-time only |
-| PEP 561 | Compliant -- `py.typed` markers emitted by default |
+| Aspect                   | Status                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Syntactic compatibility  | Full -- all `.pyi` output uses standard PEP 484/544/561/612/613/655/705 constructs                                  |
+| Structural compatibility | Full -- `typepython verify` enforces `.py`/`.pyi` name consistency                                                  |
+| Semantic compatibility   | Partial -- `sealed` exhaustiveness, `unknown` strictness, and `unsafe` boundaries do not transfer to external tools |
+| typeshed coexistence     | No conflict -- bundled stdlib data is compile-time only                                                             |
+| PEP 561                  | Compliant -- `py.typed` markers emitted by default                                                                  |
 
 The design trade-off is intentional: **maximum interoperability at the cost of reduced guarantees when crossing the TypePython boundary.** The stronger safety properties (sealed exhaustiveness, unknown strictness, unsafe boundaries) are enforced at authoring time by the TypePython checker. External consumers get standard, well-typed Python artifacts.

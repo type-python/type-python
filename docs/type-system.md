@@ -60,6 +60,7 @@ def fail(msg: str) -> Never:
 Python's `None` value type.
 
 Under `strict_nulls = true` (default):
+
 - `None` is **excluded** from `T` unless you write `T | None`
 - Forces explicit null handling
 
@@ -267,14 +268,14 @@ class ReadonlyConfig(TypedDict):
 
 ### TypedDict utility transforms
 
-| Transform | Effect |
-|---|---|
-| `Partial[T]` | All keys become optional |
-| `Required_[T]` | All keys become required |
-| `Readonly[T]` | All values become read-only |
-| `Mutable[T]` | All values become writable |
-| `Pick[T, "key1", "key2"]` | Subset of keys |
-| `Omit[T, "key1"]` | Exclude specific keys |
+| Transform                 | Effect                      |
+| ------------------------- | --------------------------- |
+| `Partial[T]`              | All keys become optional    |
+| `Required_[T]`            | All keys become required    |
+| `Readonly[T]`             | All values become read-only |
+| `Mutable[T]`              | All values become writable  |
+| `Pick[T, "key1", "key2"]` | Subset of keys              |
+| `Omit[T, "key1"]`         | Exclude specific keys       |
 
 ```python
 typealias OptionalConfig = Partial[Config]
@@ -322,17 +323,17 @@ Concrete subclasses must implement all abstract methods.
 
 `S` is assignable to `T` when any of these hold:
 
-| Rule | Description |
-|---|---|
-| Identity | `S == T` |
-| Dynamic target | `T` is `dynamic` |
-| Dynamic source | `S` is `dynamic` |
-| Bottom | `S` is `Never` |
-| None | `S` is `None` and `T` includes `None` |
-| Subtype | `S` is a subtype of `T` (nominal or structural) |
-| Union target | `S` assignable to at least one member of `T` |
-| Union source | Every member of `S` assignable to `T` |
-| Literal | `Literal[X]` assignable to the base type of `X` |
+| Rule           | Description                                     |
+| -------------- | ----------------------------------------------- |
+| Identity       | `S == T`                                        |
+| Dynamic target | `T` is `dynamic`                                |
+| Dynamic source | `S` is `dynamic`                                |
+| Bottom         | `S` is `Never`                                  |
+| None           | `S` is `None` and `T` includes `None`           |
+| Subtype        | `S` is a subtype of `T` (nominal or structural) |
+| Union target   | `S` assignable to at least one member of `T`    |
+| Union source   | Every member of `S` assignable to `T`           |
+| Literal        | `Literal[X]` assignable to the base type of `X` |
 
 ## Subtyping Rules
 
@@ -372,6 +373,7 @@ u: HasName = User()  # OK: User has 'name: str'
 ### TypedDict subtyping
 
 Conservative mutation-aware rules:
+
 - Every target key must exist in source
 - Requiredness must match
 - **Writable** target keys: source value types must be mutually assignable (invariant)
@@ -380,6 +382,7 @@ Conservative mutation-aware rules:
 ## Type Equality
 
 Two types are equal when:
+
 - Same nominal type (same class/alias identity)
 - Same literal value and base type
 - Unions with identical members (order-independent)
@@ -452,11 +455,11 @@ For sealed classes and enums, the compiler performs exhaustiveness checking.
 
 Guard conditions compose with boolean operators:
 
-| Expression | True branch | False branch |
-|---|---|---|
-| `not G` | `EnvFalse(G)` | `EnvTrue(G)` |
-| `G1 and G2` | Both narrowings applied | `G1` false or `G2` false |
-| `G1 or G2` | `G1` true or `G2` true under `G1` false | Both false |
+| Expression  | True branch                             | False branch             |
+| ----------- | --------------------------------------- | ------------------------ |
+| `not G`     | `EnvFalse(G)`                           | `EnvTrue(G)`             |
+| `G1 and G2` | Both narrowings applied                 | `G1` false or `G2` false |
+| `G1 or G2`  | `G1` true or `G2` true under `G1` false | Both false               |
 
 ### Narrowing limitations
 
@@ -490,13 +493,13 @@ Sealed classes restrict subclassing to the same module. The compiler statically 
 
 ## Decorators
 
-| Decorator | Effect |
-|---|---|
-| `@property` | Property accessor |
-| `@classmethod` | Class method binding |
-| `@staticmethod` | Static method (no `self`/`cls`) |
-| `@final` | Prevents overriding in subclasses |
-| `@override` | Asserts method overrides a parent method |
-| `@deprecated("msg")` | Marks as deprecated; usage generates warnings |
-| `@abstractmethod` | Abstract method (must be implemented by subclasses) |
-| `@dataclass_transform` | Framework-level dataclass behavior |
+| Decorator              | Effect                                              |
+| ---------------------- | --------------------------------------------------- |
+| `@property`            | Property accessor                                   |
+| `@classmethod`         | Class method binding                                |
+| `@staticmethod`        | Static method (no `self`/`cls`)                     |
+| `@final`               | Prevents overriding in subclasses                   |
+| `@override`            | Asserts method overrides a parent method            |
+| `@deprecated("msg")`   | Marks as deprecated; usage generates warnings       |
+| `@abstractmethod`      | Abstract method (must be implemented by subclasses) |
+| `@dataclass_transform` | Framework-level dataclass behavior                  |

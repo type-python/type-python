@@ -10,10 +10,10 @@ typepython [COMMAND] [OPTIONS]
 
 All commands that operate on a project accept:
 
-| Flag | Description |
-|---|---|
+| Flag             | Description                                                |
+| ---------------- | ---------------------------------------------------------- | ------------------------------- |
 | `--project PATH` | Path to the project directory (default: current directory) |
-| `--format text|json` | Output format (default: `text`) |
+| `--format text   | json`                                                      | Output format (default: `text`) |
 
 ## Commands
 
@@ -25,10 +25,10 @@ Create a new TypePython project with starter configuration and source files.
 typepython init [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
-| `--dir PATH` | Target directory (default: current directory) |
-| `--force` | Overwrite existing files |
+| Flag                | Description                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `--dir PATH`        | Target directory (default: current directory)                                                   |
+| `--force`           | Overwrite existing files                                                                        |
 | `--embed-pyproject` | Append `[tool.typepython]` to an existing `pyproject.toml` instead of writing `typepython.toml` |
 
 **Generated files:**
@@ -59,10 +59,10 @@ Type-check the project without emitting output files. Use this for fast feedback
 typepython check [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
+| Flag             | Description       |
+| ---------------- | ----------------- | ------------- |
 | `--project PATH` | Project directory |
-| `--format text|json` | Output format |
+| `--format text   | json`             | Output format |
 
 **Pipeline steps:** discover sources -> parse -> bind -> build graph -> type check
 
@@ -116,14 +116,15 @@ Full compilation: type-check, lower to Python, emit `.py` and `.pyi` files, upda
 typepython build [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
+| Flag             | Description       |
+| ---------------- | ----------------- | ------------- |
 | `--project PATH` | Project directory |
-| `--format text|json` | Output format |
+| `--format text   | json`             | Output format |
 
 **Pipeline steps:** discover -> parse -> bind -> graph -> check -> lower -> plan emits -> snapshot -> write outputs
 
 **Output artifacts:**
+
 - `.py` files -- lowered Python in `out_dir`
 - `.pyi` files -- generated type stubs (if `emit.emit_pyi = true`)
 - `py.typed` -- PEP 561 marker files (if `emit.write_py_typed = true`)
@@ -161,12 +162,13 @@ File-watching mode: rebuild automatically when source files change.
 typepython watch [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
+| Flag             | Description       |
+| ---------------- | ----------------- | ------------- |
 | `--project PATH` | Project directory |
-| `--format text|json` | Output format |
+| `--format text   | json`             | Output format |
 
 **Behavior:**
+
 - Performs an initial full build
 - Watches all `src` directories for changes
 - Debounces filesystem events (configurable via `watch.debounce_ms`, default: 80ms)
@@ -191,11 +193,12 @@ Remove build output and cache directories.
 typepython clean [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
+| Flag             | Description       |
+| ---------------- | ----------------- |
 | `--project PATH` | Project directory |
 
 **Removes:**
+
 - `out_dir` (default: `.typepython/build/`)
 - `cache_dir` (default: `.typepython/cache/`)
 
@@ -215,13 +218,14 @@ Start the Language Server Protocol server for editor integration.
 typepython lsp [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
+| Flag             | Description       |
+| ---------------- | ----------------- |
 | `--project PATH` | Project directory |
 
 **Transport:** stdio-based JSON-RPC 2.0
 
 **Supported LSP methods:**
+
 - `textDocument/hover` -- type information at cursor
 - `textDocument/definition` -- jump to definition
 - `textDocument/references` -- find all usages
@@ -248,13 +252,14 @@ Validate build artifacts for publication. Checks consistency between runtime and
 typepython verify [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
-| `--project PATH` | Project directory |
-| `--wheel PATH` | Path to a `.whl` file to verify (repeatable) |
-| `--sdist PATH` | Path to a `.tar.gz` sdist to verify (repeatable) |
+| Flag             | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `--project PATH` | Project directory                                |
+| `--wheel PATH`   | Path to a `.whl` file to verify (repeatable)     |
+| `--sdist PATH`   | Path to a `.tar.gz` sdist to verify (repeatable) |
 
 **Checks performed:**
+
 - Public API completeness: all exported names have known types (when `typing.require_known_public_types = true`)
 - Runtime/type surface consistency: names in `.py` match names in `.pyi`
 - Wheel/sdist structure validation
@@ -280,19 +285,21 @@ Analyze an existing Python project for migration to TypePython.
 typepython migrate [OPTIONS]
 ```
 
-| Flag | Description |
-|---|---|
-| `--project PATH` | Project directory |
-| `--report` | Print a typing coverage summary |
-| `--emit-stubs PATH` | Generate `.pyi` stubs from inferred `.py` types |
-| `--stub-out-dir PATH` | Output directory for generated stubs |
+| Flag                  | Description                                     |
+| --------------------- | ----------------------------------------------- |
+| `--project PATH`      | Project directory                               |
+| `--report`            | Print a typing coverage summary                 |
+| `--emit-stubs PATH`   | Generate `.pyi` stubs from inferred `.py` types |
+| `--stub-out-dir PATH` | Output directory for generated stubs            |
 
 **Report mode** (`--report`):
+
 - Reports declaration coverage and dynamic/unknown boundary counts
 - Includes per-file and per-directory coverage entries
 - Identifies high-impact files with many untyped declarations
 
 **Stub emission** (`--emit-stubs`):
+
 - Generates `.pyi` files with inferred types from `.py` sources
 - Includes `TODO` markers for types that could not be inferred
 - Useful as a starting point for gradual typing
@@ -309,11 +316,11 @@ typepython migrate --project . --emit-stubs src/ --stub-out-dir stubs/
 
 ## Exit Codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Success (no errors) |
-| `1` | Diagnostic errors or configuration/setup failures |
-| `2` | Other tool/runtime failures |
+| Code | Meaning                                           |
+| ---- | ------------------------------------------------- |
+| `0`  | Success (no errors)                               |
+| `1`  | Diagnostic errors or configuration/setup failures |
+| `2`  | Other tool/runtime failures                       |
 
 ## Output Formats
 

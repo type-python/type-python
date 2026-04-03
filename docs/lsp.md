@@ -12,19 +12,19 @@ The server communicates via **stdio** using the JSON-RPC 2.0 protocol -- the sta
 
 ## Capabilities
 
-| Feature | LSP Method | Description |
-|---|---|---|
-| Diagnostics | `textDocument/publishDiagnostics` | Real-time type errors and warnings |
-| Hover | `textDocument/hover` | Type information at cursor position |
-| Go to Definition | `textDocument/definition` | Jump to symbol definition |
-| Find References | `textDocument/references` | Find all usages of a symbol |
-| Formatting | `textDocument/formatting` | Format the current document |
-| Signature Help | `textDocument/signatureHelp` | Active call signature and parameter index |
-| Document Symbols | `textDocument/documentSymbol` | Outline symbols in the current file |
-| Workspace Symbols | `workspace/symbol` | Search declarations across the workspace |
-| Rename | `textDocument/rename` | Rename symbol across entire project |
-| Code Actions | `textDocument/codeAction` | Quick fixes from diagnostic suggestions |
-| Completion | `textDocument/completion` | Autocomplete (triggered on `.`) |
+| Feature           | LSP Method                        | Description                               |
+| ----------------- | --------------------------------- | ----------------------------------------- |
+| Diagnostics       | `textDocument/publishDiagnostics` | Real-time type errors and warnings        |
+| Hover             | `textDocument/hover`              | Type information at cursor position       |
+| Go to Definition  | `textDocument/definition`         | Jump to symbol definition                 |
+| Find References   | `textDocument/references`         | Find all usages of a symbol               |
+| Formatting        | `textDocument/formatting`         | Format the current document               |
+| Signature Help    | `textDocument/signatureHelp`      | Active call signature and parameter index |
+| Document Symbols  | `textDocument/documentSymbol`     | Outline symbols in the current file       |
+| Workspace Symbols | `workspace/symbol`                | Search declarations across the workspace  |
+| Rename            | `textDocument/rename`             | Rename symbol across entire project       |
+| Code Actions      | `textDocument/codeAction`         | Quick fixes from diagnostic suggestions   |
+| Completion        | `textDocument/completion`         | Autocomplete (triggered on `.`)           |
 
 ### Document Synchronization
 
@@ -33,6 +33,7 @@ The server uses **incremental text sync** (`textDocumentSync.change: 2`): client
 ### Completion
 
 Completions are triggered by the `.` character and include:
+
 - Module member completions
 - Attribute completions based on inferred type
 - Method completions
@@ -40,6 +41,7 @@ Completions are triggered by the `.` character and include:
 ### Code Actions
 
 Code actions are generated from diagnostic suggestions. For example:
+
 - Add `| None` to return type
 - Add `@override` decorator
 - Add missing `match` cases
@@ -189,11 +191,11 @@ Add to `LSP.sublime-settings`:
 
 Any editor with LSP support can use TypePython. Configure:
 
-| Setting | Value |
-|---|---|
-| Command | `typepython lsp --project <path>` |
-| Transport | stdio |
-| File types | `.tpy` (and optionally `.py`, `.pyi`) |
+| Setting      | Value                                 |
+| ------------ | ------------------------------------- |
+| Command      | `typepython lsp --project <path>`     |
+| Transport    | stdio                                 |
+| File types   | `.tpy` (and optionally `.py`, `.pyi`) |
 | Root pattern | `typepython.toml` or `pyproject.toml` |
 
 ## Architecture
@@ -205,6 +207,7 @@ The LSP server maintains:
 3. **Query indexes** -- incrementally maintained document, occurrence, and module-node maps for editor lookups
 
 On each document change:
+
 1. The overlay is updated with the new document text
 2. Only the changed project document is reparsed/rebound
 3. Support modules are added to or removed from the active workspace set incrementally if imports changed

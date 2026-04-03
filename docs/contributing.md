@@ -156,20 +156,20 @@ Each crate owns a single compilation phase. Key rules:
 
 ### Test Distribution
 
-| Crate | Tests | Focus |
-|---|---|---|
-| `typepython_checking` | ~394 | Type checking rules, assignability, narrowing |
-| `typepython_syntax` | ~83 | Parsing, metadata extraction, error recovery |
-| `typepython_cli` | ~59 | End-to-end pipeline, init, verify, watch |
-| `typepython_lowering` | ~36 | TypePython-to-Python lowering, source maps |
-| `typepython_binding` | ~19 | Symbol extraction, declaration kinds |
-| `typepython_lsp` | ~17 | LSP methods, diagnostics publishing |
-| `typepython_config` | ~15 | Config discovery, validation, profiles |
-| `typepython_emit` | ~12 | Artifact planning, stub generation |
-| `typepython_incremental` | ~6 | Fingerprinting, snapshot diff |
-| `typepython_graph` | ~5 | Module graph, prelude injection |
-| `typepython_diagnostics` | 0 | Data-only crate (no logic to test) |
-| **Total** | **~646** | |
+| Crate                    | Tests    | Focus                                         |
+| ------------------------ | -------- | --------------------------------------------- |
+| `typepython_checking`    | ~394     | Type checking rules, assignability, narrowing |
+| `typepython_syntax`      | ~83      | Parsing, metadata extraction, error recovery  |
+| `typepython_cli`         | ~59      | End-to-end pipeline, init, verify, watch      |
+| `typepython_lowering`    | ~36      | TypePython-to-Python lowering, source maps    |
+| `typepython_binding`     | ~19      | Symbol extraction, declaration kinds          |
+| `typepython_lsp`         | ~17      | LSP methods, diagnostics publishing           |
+| `typepython_config`      | ~15      | Config discovery, validation, profiles        |
+| `typepython_emit`        | ~12      | Artifact planning, stub generation            |
+| `typepython_incremental` | ~6       | Fingerprinting, snapshot diff                 |
+| `typepython_graph`       | ~5       | Module graph, prelude injection               |
+| `typepython_diagnostics` | 0        | Data-only crate (no logic to test)            |
+| **Total**                | **~646** |                                               |
 
 ### Running Tests
 
@@ -258,6 +258,7 @@ interface Closeable:
 ```
 
 **Key patterns:**
+
 - Construct a `SourceFile` with inline `.tpy` source text
 - Run through the pipeline stages needed for the test
 - Assert on diagnostic codes (`TPY4001`), output text, or structural properties
@@ -270,16 +271,16 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 
 ## Makefile Targets
 
-| Target | Command | Description |
-|---|---|---|
-| `make bootstrap` | `./scripts/bootstrap-rust.sh` | Install Rust toolchain |
-| `make fmt` | `cargo fmt --all` | Format all code |
-| `make fmt-check` | `cargo fmt --all --check` | Check formatting (CI) |
-| `make check` | `cargo check --workspace` | Check compilation |
-| `make lint` | `cargo clippy --workspace --all-targets -- -D warnings` | Lint with clippy |
-| `make test` | `cargo test --workspace` | Run all tests |
-| `make docs` | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Generate rustdoc |
-| `make ci` | `fmt-check` + `lint` + `test` | Full CI pipeline |
+| Target           | Command                                                      | Description            |
+| ---------------- | ------------------------------------------------------------ | ---------------------- |
+| `make bootstrap` | `./scripts/bootstrap-rust.sh`                                | Install Rust toolchain |
+| `make fmt`       | `cargo fmt --all`                                            | Format all code        |
+| `make fmt-check` | `cargo fmt --all --check`                                    | Check formatting (CI)  |
+| `make check`     | `cargo check --workspace`                                    | Check compilation      |
+| `make lint`      | `cargo clippy --workspace --all-targets -- -D warnings`      | Lint with clippy       |
+| `make test`      | `cargo test --workspace`                                     | Run all tests          |
+| `make docs`      | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Generate rustdoc       |
+| `make ci`        | `fmt-check` + `lint` + `test`                                | Full CI pipeline       |
 
 ## Python Packaging
 
@@ -367,6 +368,7 @@ Diagnostic::error("TPY4XXX", "Description of the issue")
 Type checking rules live in `typepython_checking/src/lib.rs`. Each rule is a function that takes the `ModuleGraph` and produces diagnostics.
 
 1. Define the check function:
+
 ```rust
 fn my_new_check_diagnostics(graph: &ModuleGraph, /* options */) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
