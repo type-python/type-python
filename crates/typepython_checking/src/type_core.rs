@@ -86,6 +86,14 @@ pub(crate) fn lower_type_text_or_name(text: &str) -> SemanticType {
     lower_type_text(text).unwrap_or_else(|| SemanticType::Name(text.trim().to_owned()))
 }
 
+pub(crate) fn semantic_nominal_owner_name(ty: &SemanticType) -> Option<String> {
+    match ty.strip_annotated() {
+        SemanticType::Name(name) => Some(name.clone()),
+        SemanticType::Generic { head, .. } => Some(head.clone()),
+        _ => None,
+    }
+}
+
 pub(crate) fn lower_type_expr(expr: TypeExpr) -> SemanticType {
     match expr {
         TypeExpr::Name(name) => SemanticType::Name(name),
