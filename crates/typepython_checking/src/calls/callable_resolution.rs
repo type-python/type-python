@@ -4,7 +4,13 @@ pub(super) fn resolve_direct_callable_param_types(
     callee: &str,
 ) -> Option<Vec<String>> {
     if let Some(local) = resolve_direct_function(node, nodes, callee) {
-        return Some(declaration_signature_param_types(local).unwrap_or_default());
+        return Some(
+            declaration_semantic_signature_params(local)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|param| param.annotation_text.unwrap_or_default())
+                .collect(),
+        );
     }
 
     if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, callee)
@@ -45,8 +51,58 @@ pub(super) struct ResolvedDirectCallCandidate<'a> {
     #[allow(dead_code)]
     pub(super) substitutions: GenericTypeParamSubstitutions,
     pub(super) signature_sites: Vec<typepython_syntax::DirectFunctionParamSite>,
-    pub(super) signature_params: Vec<DirectSignatureParam>,
+    pub(super) signature_params: Vec<SemanticCallableParam>,
+    pub(super) semantic_param_types: Vec<SemanticType>,
     pub(super) return_type: Option<SemanticType>,
+}
+
+fn instantiate_semantic_callable_param(
+    param: &SemanticCallableParam,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> SemanticCallableParam {
+    let annotation = param
+        .annotation
+        .as_ref()
+        .map(|annotation| substitute_semantic_type_params(annotation, substitutions));
+    SemanticCallableParam {
+        name: param.name.clone(),
+        annotation_text: annotation.as_ref().map(diagnostic_type_text),
+        annotation,
+        has_default: param.has_default,
+        positional_only: param.positional_only,
+        keyword_only: param.keyword_only,
+        variadic: param.variadic,
+        keyword_variadic: param.keyword_variadic,
+    }
+}
+
+fn instantiate_semantic_callable_params(
+    params: &[SemanticCallableParam],
+    substitutions: &GenericTypeParamSubstitutions,
+) -> Vec<SemanticCallableParam> {
+    params
+        .iter()
+        .map(|param| instantiate_semantic_callable_param(param, substitutions))
+        .collect()
+}
+
+fn rewrite_semantic_callable_params(
+    node: &typepython_graph::ModuleNode,
+    params: Vec<SemanticCallableParam>,
+) -> Vec<SemanticCallableParam> {
+    params
+        .into_iter()
+        .map(|param| SemanticCallableParam {
+            annotation: param
+                .annotation
+                .as_ref()
+                .map(|annotation| rewrite_imported_typing_semantic_type(node, annotation)),
+            annotation_text: param.annotation.as_ref().map(|annotation| {
+                diagnostic_type_text(&rewrite_imported_typing_semantic_type(node, annotation))
+            }),
+            ..param
+        })
+        .collect()
 }
 
 fn unresolved_generic_instantiation_params(
@@ -74,6 +130,7 @@ fn unresolved_generic_instantiation_params(
 pub(super) enum DirectCallResolutionFailure {
     GenericSolve(GenericSolveFailure),
     SignatureInstantiationFailed { declaration_name: String, unresolved: Vec<String> },
+    UnresolvedCallableParamList { callable: SemanticType },
 }
 
 impl DirectCallResolutionFailure {
@@ -94,6 +151,10 @@ impl DirectCallResolutionFailure {
                     )
                 }
             }
+            Self::UnresolvedCallableParamList { callable } => format!(
+                "reason: callable type `{}` still contains an unresolved ParamSpec or Concatenate tail",
+                diagnostic_type_text(callable)
+            ),
         }
     }
 }
@@ -104,38 +165,54 @@ fn resolve_callable_candidate_from_semantics<'a>(
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
     signature: Vec<typepython_syntax::DirectFunctionParamSite>,
-    return_annotation_text: Option<String>,
+    semantic_params: Vec<SemanticCallableParam>,
+    return_type: Option<SemanticType>,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
     let substitutions = if declaration.type_params.is_empty() {
         GenericTypeParamSubstitutions::default()
     } else {
-        infer_generic_type_param_substitutions_detailed(node, nodes, declaration, &signature, call)
-            .map_err(DirectCallResolutionFailure::GenericSolve)?
+        infer_generic_type_param_substitutions_from_semantic_params_detailed(
+            node,
+            nodes,
+            declaration,
+            &semantic_params,
+            call,
+        )
+        .map_err(DirectCallResolutionFailure::GenericSolve)?
     };
-    let signature_sites = if declaration.type_params.is_empty() {
-        signature
+    let (signature_sites, signature_params) = if declaration.type_params.is_empty() {
+        (signature, semantic_params)
     } else {
-        instantiate_direct_function_signature(&signature, &substitutions).ok_or_else(|| {
-            DirectCallResolutionFailure::SignatureInstantiationFailed {
-                declaration_name: declaration.name.clone(),
-                unresolved: unresolved_generic_instantiation_params(declaration, &substitutions),
-            }
-        })?
+        (
+            instantiate_direct_function_signature(&signature, &substitutions).ok_or_else(|| {
+                DirectCallResolutionFailure::SignatureInstantiationFailed {
+                    declaration_name: declaration.name.clone(),
+                    unresolved: unresolved_generic_instantiation_params(declaration, &substitutions),
+                }
+            })?,
+            instantiate_semantic_callable_params(&semantic_params, &substitutions),
+        )
     };
-    let return_type = return_annotation_text.map(|annotation| {
-        if declaration.type_params.is_empty() {
-            lower_type_text_or_name(&annotation)
+    let return_type = return_type.map(|return_type| {
+        let return_type = if declaration.type_params.is_empty() {
+            return_type
         } else {
-            instantiate_semantic_annotation(&annotation, &substitutions)
-        }
+            substitute_semantic_type_params(&return_type, &substitutions)
+        };
+        rewrite_imported_typing_semantic_type(node, &return_type)
     });
-    let signature_params = direct_signature_params_from_sites(&signature_sites);
+    let signature_params = rewrite_semantic_callable_params(node, signature_params);
+    let semantic_param_types = signature_params
+        .iter()
+        .map(SemanticCallableParam::annotation_or_dynamic)
+        .collect();
 
     Ok(ResolvedDirectCallCandidate {
         declaration,
         substitutions,
         signature_sites,
         signature_params,
+        semantic_param_types,
         return_type,
     })
 }
@@ -146,13 +223,17 @@ pub(super) fn resolve_direct_call_candidate_detailed<'a>(
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
+    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
+        .map(|(provider_node, _)| provider_node)
+        .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
-        node,
+        provider_node,
         nodes,
         declaration,
         call,
         declaration_signature_sites(declaration),
-        declaration_signature_return_annotation_text(declaration),
+        declaration_semantic_signature_params(declaration).unwrap_or_default(),
+        declaration_signature_return_semantic_type(declaration),
     )
 }
 
@@ -178,30 +259,31 @@ pub(super) fn resolve_direct_call_candidate_with_context_detailed<'a>(
             unresolved: Vec::new(),
         }
     })?;
+    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
+        .map(|(provider_node, _)| provider_node)
+        .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
-        node,
+        provider_node,
         nodes,
         declaration,
         call,
         callable_signature_sites_from_semantics(&callable),
-        callable_return_annotation_text_from_semantics(&callable),
+        callable_semantic_params_from_semantics(&callable),
+        callable.return_type,
     )
 }
 
-pub(super) fn resolve_applicable_direct_overload_candidates<'a>(
+pub(super) fn resolve_direct_overload_selection<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     overloads: &[&'a Declaration],
-) -> Vec<ResolvedDirectCallCandidate<'a>> {
-    overloads
+) -> ResolvedOverloadSelection<'a> {
+    let attempts = overloads
         .iter()
-        .copied()
-        .filter_map(|declaration| resolve_direct_call_candidate(node, nodes, declaration, call))
-        .filter(|candidate| {
-            call_signature_params_are_applicable(node, nodes, call, &candidate.signature_params)
-        })
-        .collect()
+        .map(|declaration| (*declaration, resolve_direct_call_candidate_detailed(node, nodes, declaration, call)))
+        .collect::<Vec<_>>();
+    resolve_overload_selection_from_attempts(node, nodes, call, attempts)
 }
 
 pub(super) fn resolve_method_call_candidate_detailed<'a>(
@@ -221,40 +303,44 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
             }
         })?,
     };
+    let provider_node = resolve_function_provider_with_node(nodes, node, &call.callee)
+        .map(|(provider_node, _)| provider_node)
+        .unwrap_or(node);
     resolve_callable_candidate_from_semantics(
-        node,
+        provider_node,
         nodes,
         declaration,
         call,
         method_signature_sites_from_semantics(declaration, &callable, owner_type_name),
-        callable_return_annotation_text_with_self_from_semantics(&callable, owner_type_name),
+        method_semantic_params_from_semantics(declaration, &callable, owner_type_name),
+        callable_return_semantic_type_with_self_from_semantics(&callable, owner_type_name),
     )
 }
 
-pub(super) fn resolve_applicable_method_overload_candidates<'a>(
+pub(super) fn resolve_method_overload_selection<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     owner_type_name: &str,
     overloads: &[(&'a Declaration, Option<SemanticCallableDeclaration>)],
-) -> Vec<ResolvedDirectCallCandidate<'a>> {
-    overloads
+) -> ResolvedOverloadSelection<'a> {
+    let attempts = overloads
         .iter()
-        .filter_map(|(declaration, callable)| {
-            resolve_method_call_candidate_detailed(
-                node,
-                nodes,
-                declaration,
-                call,
-                owner_type_name,
-                callable.as_ref(),
+        .map(|(declaration, callable)| {
+            (
+                *declaration,
+                resolve_method_call_candidate_detailed(
+                    node,
+                    nodes,
+                    declaration,
+                    call,
+                    owner_type_name,
+                    callable.as_ref(),
+                ),
             )
-            .ok()
         })
-        .filter(|candidate| {
-            call_signature_params_are_applicable(node, nodes, call, &candidate.signature_params)
-        })
-        .collect()
+        .collect::<Vec<_>>();
+    resolve_overload_selection_from_attempts(node, nodes, call, attempts)
 }
 
 #[allow(dead_code)]
@@ -437,9 +523,21 @@ pub(super) fn direct_function_signature_sites_from_semantic_callable(
     let SemanticCallableParams::ParamList(param_types) = params else {
         return None;
     };
-    Some(synthesize_param_list_binding(
-        param_types.iter().map(diagnostic_type_text).collect(),
-    ))
+    Some(
+        param_types
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| typepython_syntax::DirectFunctionParamSite {
+                name: format!("arg{index}"),
+                annotation: Some(diagnostic_type_text(ty)),
+                has_default: false,
+                positional_only: false,
+                keyword_only: false,
+                variadic: false,
+                keyword_variadic: false,
+            })
+            .collect(),
+    )
 }
 
 pub(super) fn decorated_function_return_semantic_type_from_semantic_callable(
@@ -448,6 +546,7 @@ pub(super) fn decorated_function_return_semantic_type_from_semantic_callable(
     Some(callable.callable_parts()?.1.clone())
 }
 
+#[cfg(test)]
 pub(super) fn synthetic_direct_expr_metadata(
     value_type: &str,
 ) -> typepython_syntax::DirectExprMetadata {
@@ -482,6 +581,7 @@ pub(super) fn synthetic_direct_expr_metadata(
     }
 }
 
+#[cfg(test)]
 pub(super) fn synthetic_decorator_application_call(
     decorator_name: &str,
     callable_annotation: &str,
@@ -502,31 +602,363 @@ pub(super) fn synthetic_decorator_application_call(
     }
 }
 
-pub(super) fn synthetic_decorator_application_call_from_semantic(
-    decorator_name: &str,
-    callable: &SemanticType,
-) -> typepython_binding::CallSite {
-    let callable_annotation = diagnostic_type_text(callable);
-    synthetic_decorator_application_call(decorator_name, &callable_annotation)
+fn synthetic_single_positional_call(callee: &str) -> typepython_binding::CallSite {
+    typepython_binding::CallSite {
+        callee: callee.to_owned(),
+        arg_count: 1,
+        arg_types: vec![String::new()],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    }
 }
 
-pub(super) fn decorator_transform_accepts_callable_annotation_with_context(
-    context: &CheckerContext<'_>,
+fn infer_direct_single_semantic_argument_substitutions_detailed(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    signature: &[typepython_syntax::DirectFunctionParamSite],
+    declaration: &Declaration,
+    signature: &[SemanticCallableParam],
+    actual: &SemanticType,
+) -> Result<GenericTypeParamSubstitutions, DirectCallResolutionFailure> {
+    if declaration.type_params.is_empty() {
+        return Ok(GenericTypeParamSubstitutions::default());
+    }
+
+    let type_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVar)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let param_spec_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let type_pack_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+
+    let param = signature.iter().find(|param| !param.keyword_variadic).ok_or_else(|| {
+        DirectCallResolutionFailure::SignatureInstantiationFailed {
+            declaration_name: declaration.name.clone(),
+            unresolved: Vec::new(),
+        }
+    })?;
+    let annotation = param.annotation_or_dynamic();
+    let mut substitutions = GenericTypeParamSubstitutions::default();
+    let annotation_mentions_param_spec = annotation.callable_parts().is_some_and(|(params, _)| {
+        callable_param_expr_mentions_param_spec_semantic(params, &param_spec_names)
+    });
+    if annotation_mentions_param_spec {
+        let (expected_params_expr, expected_return) = annotation.callable_parts().ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::ParamSpecInferenceFailed {
+                annotation: annotation.clone(),
+                actual: actual.clone(),
+            })
+        })?;
+        let (actual_params, actual_return) = actual.callable_parts().ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::ParamSpecInferenceFailed {
+                annotation: annotation.clone(),
+                actual: actual.clone(),
+            })
+        })?;
+        let SemanticCallableParams::ParamList(actual_param_types) = actual_params else {
+            return Err(DirectCallResolutionFailure::GenericSolve(
+                GenericSolveFailure::ParamSpecInferenceFailed {
+                    annotation: annotation.clone(),
+                    actual: actual.clone(),
+                },
+            ));
+        };
+        let actual_binding =
+            ParamListBinding { params: synthesize_semantic_param_list_binding(actual_param_types.clone()) };
+        let param_spec_bindings = match expected_params_expr {
+            SemanticCallableParams::Single(expr)
+                if matches!(expr.as_ref(), SemanticType::Name(name) if param_spec_names.contains(name.trim())) =>
+            {
+                let mut bindings = GenericTypeParamSubstitutions::default();
+                let SemanticType::Name(name) = expr.as_ref() else {
+                    unreachable!("matched semantic callable paramspec name")
+                };
+                insert_param_spec_binding(&mut bindings, name.trim(), actual_binding).ok_or_else(|| {
+                    DirectCallResolutionFailure::GenericSolve(
+                        GenericSolveFailure::ParamSpecBindingConflict {
+                            param_name: name.trim().to_owned(),
+                        },
+                    )
+                })?;
+                bindings
+            }
+            _ => infer_callable_param_expr_bindings(
+                node,
+                nodes,
+                expected_params_expr,
+                &actual_binding,
+                &type_names,
+                &param_spec_names,
+                &substitutions,
+            )
+            .ok_or_else(|| {
+                DirectCallResolutionFailure::GenericSolve(
+                    GenericSolveFailure::ParamSpecInferenceFailed {
+                        annotation: annotation.clone(),
+                        actual: actual.clone(),
+                    },
+                )
+            })?,
+        };
+        merge_nested_generic_bindings(&mut substitutions, param_spec_bindings).ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(
+                GenericSolveFailure::ParamSpecBindingConflict {
+                    param_name: declaration.name.clone(),
+                },
+            )
+        })?;
+        let return_bindings = infer_generic_type_param_bindings(
+            node,
+            nodes,
+            expected_return,
+            actual_return,
+            &type_names,
+            &substitutions,
+            &type_pack_names,
+        )
+        .ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
+                annotation: expected_return.clone(),
+                actual: actual_return.clone(),
+            })
+        })?;
+        merge_nested_generic_bindings(&mut substitutions, return_bindings).ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(
+                GenericSolveFailure::ParamSpecBindingConflict {
+                    param_name: declaration.name.clone(),
+                },
+            )
+        })?;
+    }
+    if !annotation_mentions_param_spec {
+        let generic_bindings = infer_generic_type_param_bindings(
+            node,
+            nodes,
+            &annotation,
+            actual,
+            &type_names,
+            &substitutions,
+            &type_pack_names,
+        )
+        .ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeBindingInferenceFailed {
+                annotation: annotation.clone(),
+                actual: actual.clone(),
+            })
+        })?;
+        merge_nested_generic_bindings(&mut substitutions, generic_bindings)
+        .ok_or_else(|| {
+            DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeVarTupleBindingConflict {
+                param_name: declaration.name.clone(),
+            })
+        })?;
+    }
+    finalize_generic_type_param_substitutions_detailed(node, nodes, declaration, substitutions)
+        .map_err(DirectCallResolutionFailure::GenericSolve)
+}
+
+fn generic_param_name_sets(
+    declaration: &Declaration,
+) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
+    let type_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVar)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let param_spec_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let type_pack_names = declaration
+        .type_params
+        .iter()
+        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple)
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    (type_names, param_spec_names, type_pack_names)
+}
+
+fn augment_semantic_callable_paramlist_substitutions(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+    signature: &[SemanticCallableParam],
+    actual: &SemanticType,
+    mut substitutions: GenericTypeParamSubstitutions,
+) -> GenericTypeParamSubstitutions {
+    let (_type_names, param_spec_names, _type_pack_names) = generic_param_name_sets(declaration);
+    if param_spec_names.is_empty() || !substitutions.param_lists.is_empty() {
+        return substitutions;
+    }
+
+    let Some(param) = signature.iter().find(|param| !param.keyword_variadic) else {
+        return substitutions;
+    };
+    let Some(annotation) = param.annotation.clone() else {
+        return substitutions;
+    };
+    let Some((expected_params_expr, _)) = annotation.callable_parts() else {
+        return substitutions;
+    };
+    let Some((actual_params, _)) = actual.callable_parts() else {
+        return substitutions;
+    };
+    let SemanticCallableParams::ParamList(actual_param_types) = actual_params else {
+        return substitutions;
+    };
+    let actual_binding =
+        ParamListBinding { params: synthesize_semantic_param_list_binding(actual_param_types.clone()) };
+    let Some(bindings) = infer_callable_param_expr_bindings(
+        node,
+        nodes,
+        expected_params_expr,
+        &actual_binding,
+        &BTreeSet::new(),
+        &param_spec_names,
+        &substitutions,
+    ) else {
+        return substitutions;
+    };
+    let _ = merge_nested_generic_bindings(&mut substitutions, bindings);
+    substitutions
+}
+
+fn resolve_direct_single_semantic_argument_candidate_detailed<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &'a Declaration,
+    actual: &SemanticType,
+) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
+    let callable = declaration_callable_semantics(declaration).ok_or_else(|| {
+        DirectCallResolutionFailure::SignatureInstantiationFailed {
+            declaration_name: declaration.name.clone(),
+            unresolved: Vec::new(),
+        }
+    })?;
+    let signature = callable_signature_sites_from_semantics(&callable);
+    let semantic_signature = callable_semantic_params_from_semantics(&callable);
+    let substitutions = infer_direct_single_semantic_argument_substitutions_detailed(
+        node,
+        nodes,
+        declaration,
+        &semantic_signature,
+        actual,
+    )?;
+    let substitutions = augment_semantic_callable_paramlist_substitutions(
+        node,
+        nodes,
+        declaration,
+        &semantic_signature,
+        actual,
+        substitutions,
+    );
+    let signature_sites = if declaration.type_params.is_empty() {
+        signature
+    } else {
+        instantiate_direct_function_signature(&signature, &substitutions).ok_or_else(|| {
+            DirectCallResolutionFailure::SignatureInstantiationFailed {
+                declaration_name: declaration.name.clone(),
+                unresolved: unresolved_generic_instantiation_params(declaration, &substitutions),
+            }
+        })?
+    };
+    let return_type = callable.return_type.clone().map(|return_type| {
+        if declaration.type_params.is_empty() {
+            return_type
+        } else {
+            substitute_semantic_type_params(&return_type, &substitutions)
+        }
+    });
+    let signature_params = if declaration.type_params.is_empty() {
+        callable_semantic_params_from_semantics(&callable)
+    } else {
+        instantiate_semantic_callable_params(&callable_semantic_params_from_semantics(&callable), &substitutions)
+    };
+    let semantic_param_types = signature_params
+        .iter()
+        .map(SemanticCallableParam::annotation_or_dynamic)
+        .collect();
+    Ok(ResolvedDirectCallCandidate {
+        declaration,
+        substitutions,
+        signature_sites,
+        signature_params,
+        semantic_param_types,
+        return_type,
+    })
+}
+
+fn decorator_candidate_accepts_semantic_callable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    candidate: &ResolvedDirectCallCandidate<'_>,
+    current_callable: &SemanticType,
 ) -> bool {
-    direct_source_function_arity_diagnostic_with_context(context, node, nodes, call, signature)
-        .is_none()
-        && direct_source_function_keyword_diagnostics_with_context(
-            context, node, nodes, call, signature,
-        )
-        .is_empty()
-        && direct_source_function_type_diagnostics_with_context(
-            context, node, nodes, call, signature,
-        )
-        .is_empty()
+    let synthetic_call = synthetic_single_positional_call(&candidate.declaration.name);
+    if !call_signature_params_are_applicable(node, nodes, &synthetic_call, &candidate.signature_params)
+    {
+        return false;
+    }
+    if !candidate.declaration.type_params.is_empty() {
+        return true;
+    }
+    let Some(param) = candidate.signature_sites.iter().find(|param| !param.keyword_variadic) else {
+        return false;
+    };
+    let Some(annotation) = param.annotation.as_deref() else {
+        return true;
+    };
+    semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(annotation), current_callable)
+}
+
+fn substitute_single_paramspec_from_semantic_callable(
+    declaration: &Declaration,
+    current_callable: &SemanticType,
+    ty: &SemanticType,
+) -> SemanticType {
+    let (_type_names, param_spec_names, _type_pack_names) = generic_param_name_sets(declaration);
+    if param_spec_names.len() != 1 {
+        return ty.clone();
+    }
+    let Some((actual_params, _)) = current_callable.callable_parts() else {
+        return ty.clone();
+    };
+    let SemanticCallableParams::ParamList(actual_param_types) = actual_params else {
+        return ty.clone();
+    };
+    let mut substitutions = GenericTypeParamSubstitutions::default();
+    let param_name = param_spec_names.into_iter().next().expect("single paramspec name");
+    if insert_param_spec_binding(
+        &mut substitutions,
+        &param_name,
+        ParamListBinding { params: synthesize_semantic_param_list_binding(actual_param_types.clone()) },
+    )
+    .is_none()
+    {
+        return ty.clone();
+    }
+    substitute_semantic_type_params(ty, &substitutions)
 }
 
 #[cfg(test)]
@@ -564,28 +996,29 @@ pub(super) fn apply_named_callable_decorator_transform_semantic(
 }
 
 pub(super) fn apply_named_callable_decorator_transform_semantic_with_context(
-    context: &CheckerContext<'_>,
+    _context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     decorator_name: &str,
     current_callable: &SemanticType,
 ) -> Option<SemanticType> {
     let (decorator_node, decorator) = resolve_function_provider_with_node(nodes, node, decorator_name)?;
-    let call = synthetic_decorator_application_call_from_semantic(decorator_name, current_callable);
-    let resolved = resolve_direct_call_candidate(decorator_node, nodes, decorator, &call)?;
-    if !decorator_transform_accepts_callable_annotation_with_context(
-        context,
+    let resolved =
+        resolve_direct_single_semantic_argument_candidate_detailed(decorator_node, nodes, decorator, current_callable).ok()?;
+    if !decorator_candidate_accepts_semantic_callable(
         decorator_node,
         nodes,
-        &call,
-        &resolved.signature_sites,
+        &resolved,
+        current_callable,
     ) {
         return None;
     }
-    Some(rewrite_imported_typing_semantic_type(
-        decorator_node,
+    let transformed = substitute_single_paramspec_from_semantic_callable(
+        decorator,
+        current_callable,
         resolved.return_type.as_ref()?,
-    ))
+    );
+    Some(rewrite_imported_typing_semantic_type(decorator_node, &transformed))
 }
 
 #[allow(dead_code)]
@@ -715,17 +1148,17 @@ pub(super) fn resolve_direct_callable_return_semantic_type<'a>(
         return decorated_function_return_semantic_type_from_semantic_callable(&callable_type);
     }
     if let Some(function) = resolve_direct_function(node, nodes, callee) {
-        let return_text = substitute_self_annotation(
-            &declaration_signature_return_annotation_text(function)?,
-            function.owner.as_ref().map(|owner| owner.name.as_str()),
-        );
-        return Some(if function.is_async && !return_text.is_empty() {
+        let return_type = function.owner.as_ref().map_or_else(
+            || declaration_signature_return_semantic_type(function),
+            |owner| declaration_signature_return_semantic_type_with_self(function, &owner.name),
+        )?;
+        return Some(if function.is_async {
             SemanticType::Generic {
                 head: String::from("Awaitable"),
-                args: vec![lower_type_text_or_name(&return_text)],
+                args: vec![return_type],
             }
         } else {
-            lower_type_text_or_name(&return_text)
+            return_type
         });
     }
 
@@ -774,9 +1207,10 @@ pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
         .or_else(|| node.calls.iter().find(|call| call.callee == callee))?;
     let overloads = resolve_direct_overloads(node, nodes, callee);
     if !overloads.is_empty() {
-        let applicable = resolve_applicable_direct_overload_candidates(node, nodes, call, &overloads);
-        let selected = select_most_specific_overload(node, nodes, &applicable)?;
-        return selected.return_type.clone();
+        return match resolve_direct_overload_selection(node, nodes, call, &overloads) {
+            ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
+            _ => None,
+        };
     }
     if let Some(callable_type) =
         resolve_decorated_function_callable_semantic_type_with_context(
