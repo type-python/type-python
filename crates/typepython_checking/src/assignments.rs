@@ -522,7 +522,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
 
     for entry in entries {
         if entry.is_expansion {
-            let Some(expansion_type) = resolve_direct_expression_type_from_metadata(
+            let Some(expansion_type) = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -541,19 +541,20 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 ));
                 continue;
             };
+            let expansion_type_rendered = render_semantic_type(&expansion_type);
 
             let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type_with_context(
                 context,
                 node,
                 nodes,
-                &expansion_type,
+                &expansion_type_rendered,
             ) else {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
                     format!(
                         "TypedDict literal for `{}` uses invalid `**` expansion of `{}`",
-                        target_shape.name, expansion_type
+                        target_shape.name, expansion_type_rendered
                     ),
                 ));
                 continue;
@@ -586,7 +587,9 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                     continue;
                 };
 
-                if !direct_type_matches(node, nodes, target_field.value_type(), &field.value_type) {
+                let expected_type = lower_type_text_or_name(target_field.value_type());
+                let actual_type = lower_type_text_or_name(&field.value_type);
+                if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
                         line,
@@ -594,9 +597,9 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                             "TypedDict literal for `{}` expands `{}` with `{}` where `{}` expects `{}`",
                             target_shape.name,
                             key,
-                            field.value_type,
+                            render_semantic_type(&actual_type),
                             key,
-                            target_field.value_type()
+                            render_semantic_type(&expected_type)
                         ),
                     ));
                 }
@@ -608,11 +611,11 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
 
             if let Some(extra_items) = &expansion_shape.extra_items
                 && target_shape.extra_items.as_ref().is_none_or(|target_extra| {
-                    !direct_type_matches(
+                    !semantic_type_matches(
                         node,
                         nodes,
-                        &target_extra.value_type,
-                        &extra_items.value_type,
+                        &lower_type_text_or_name(&target_extra.value_type),
+                        &lower_type_text_or_name(&extra_items.value_type),
                     )
                 })
             {
@@ -649,7 +652,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
             continue;
         };
 
-        if let Some(actual_type) = resolve_direct_expression_type_from_metadata(
+        if let Some(actual_type) = resolve_assignment_expression_semantic_type(
             node,
             nodes,
             signature,
@@ -658,17 +661,18 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
             line,
             &entry.value,
         ) {
-            if !direct_type_matches(node, nodes, target_field.value_type(), &actual_type) {
+            let expected_type = lower_type_text_or_name(target_field.value_type());
+            if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
                     format!(
                         "TypedDict literal for `{}` assigns `{}` to key `{}` where `{}` expects `{}`",
                         target_shape.name,
-                        actual_type,
+                        render_semantic_type(&actual_type),
                         key,
                         key,
-                        target_field.value_type()
+                        render_semantic_type(&expected_type)
                     ),
                 ));
             }
@@ -742,6 +746,31 @@ pub(super) fn direct_expr_metadata_for_known_type(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn resolve_assignment_expression_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+) -> Option<SemanticType> {
+    resolve_direct_expression_semantic_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        line,
+        metadata,
+    )
+}
+
+fn contextual_result_semantic_type(result: &ContextualCallArgResult) -> SemanticType {
+    lower_type_text_or_name(&result.actual_type)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_augmented_assignment_result_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -753,6 +782,32 @@ pub(super) fn resolve_augmented_assignment_result_type(
     left_type: &str,
     value: &typepython_syntax::DirectExprMetadata,
 ) -> Option<String> {
+    resolve_augmented_assignment_result_semantic_type(
+        node,
+        nodes,
+        signature,
+        owner_name,
+        owner_type_name,
+        current_line,
+        operator,
+        left_type,
+        value,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_augmented_assignment_result_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    current_line: usize,
+    operator: Option<&str>,
+    left_type: &str,
+    value: &typepython_syntax::DirectExprMetadata,
+) -> Option<SemanticType> {
     let left = direct_expr_metadata_for_known_type(left_type);
     resolve_direct_binop_type(
         node,
@@ -765,8 +820,9 @@ pub(super) fn resolve_augmented_assignment_result_type(
         Some(value),
         operator.filter(|operator| !operator.is_empty()),
     )
+    .map(|resolved| lower_type_text_or_name(&resolved))
     .or_else(|| {
-        resolve_direct_expression_type_from_metadata(
+        resolve_assignment_expression_semantic_type(
             node,
             nodes,
             signature,
@@ -799,7 +855,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
             );
-            let owner_type = resolve_direct_expression_type_from_metadata(
+            let owner_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -808,9 +864,14 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
+            let owner_type_rendered = render_semantic_type(&owner_type);
             let key = site.key.as_deref()?;
-            let target_shape =
-                resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &owner_type)?;
+            let target_shape = resolve_known_typed_dict_shape_from_type_with_context(
+                context,
+                node,
+                nodes,
+                &owner_type_rendered,
+            )?;
             let Some(field) = typed_dict_known_or_extra_field(&target_shape, key) else {
                 return Some(
                     Diagnostic::error(
@@ -881,8 +942,9 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         if let Some(diagnostic) = result.diagnostics.pop() {
                             return Some(diagnostic);
                         }
-                        let actual = result.actual_type;
-                        if !direct_type_matches(node, nodes, field.value_type(), &actual) {
+                        let expected = lower_type_text_or_name(field.value_type());
+                        let actual = contextual_result_semantic_type(&result);
+                        if !semantic_type_matches(node, nodes, &expected, &actual) {
                             return Some(
                                 Diagnostic::error(
                                     "TPY4001",
@@ -891,9 +953,9 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                                         key,
                                         target_shape.name,
                                         node.module_path.display(),
-                                        actual,
+                                        render_semantic_type(&actual),
                                         key,
-                                        field.value_type()
+                                        render_semantic_type(&expected)
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -908,7 +970,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         return None;
                     }
 
-                    let actual = resolve_direct_expression_type_from_metadata(
+                    let actual = resolve_assignment_expression_semantic_type(
                         node,
                         nodes,
                         signature,
@@ -917,7 +979,8 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    if !direct_type_matches(node, nodes, field.value_type(), &actual) {
+                    let expected = lower_type_text_or_name(field.value_type());
+                    if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -926,9 +989,9 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                                     key,
                                     target_shape.name,
                                     node.module_path.display(),
-                                    actual,
+                                    render_semantic_type(&actual),
                                     key,
-                                    field.value_type()
+                                    render_semantic_type(&expected)
                                 ),
                             )
                             .with_span(Span::new(
@@ -943,7 +1006,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                 }
                 typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
                     let value = site.value.as_ref()?;
-                    let actual = resolve_augmented_assignment_result_type(
+                    let actual = resolve_augmented_assignment_result_semantic_type(
                         node,
                         nodes,
                         signature,
@@ -954,7 +1017,8 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         field.value_type(),
                         value,
                     )?;
-                    if !direct_type_matches(node, nodes, field.value_type(), &actual) {
+                    let expected = lower_type_text_or_name(field.value_type());
+                    if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
@@ -963,9 +1027,9 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                                     key,
                                     target_shape.name,
                                     node.module_path.display(),
-                                    actual,
+                                    render_semantic_type(&actual),
                                     key,
-                                    field.value_type()
+                                    render_semantic_type(&expected)
                                 ),
                             )
                             .with_span(Span::new(
@@ -987,7 +1051,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
 }
 
 pub(super) enum WritableSubscriptSignature {
-    Writable { key_type: String, value_type: String },
+    Writable { key_type: SemanticType, value_type: SemanticType },
     ReadOnly,
 }
 
@@ -1026,8 +1090,8 @@ pub(super) fn resolve_writable_subscript_signature(
         };
         if params.len() == 2 {
             return Some(WritableSubscriptSignature::Writable {
-                key_type: normalize_type_text(&params[0]),
-                value_type: normalize_type_text(&params[1]),
+                key_type: lower_type_text_or_name(&params[0]),
+                value_type: lower_type_text_or_name(&params[1]),
             });
         }
     }
@@ -1061,7 +1125,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
             );
-            let owner_type = resolve_direct_expression_type_from_metadata(
+            let owner_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1070,20 +1134,26 @@ pub(super) fn subscript_assignment_type_diagnostics(
                 site.line,
                 &site.target,
             )?;
+            let owner_type_rendered = render_semantic_type(&owner_type);
 
-            if resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &owner_type)
-                .is_some()
+            if resolve_known_typed_dict_shape_from_type_with_context(
+                context,
+                node,
+                nodes,
+                &owner_type_rendered,
+            )
+            .is_some()
             {
                 return None;
             }
 
-            match resolve_writable_subscript_signature(node, nodes, &owner_type)? {
+            match resolve_writable_subscript_signature(node, nodes, &owner_type_rendered)? {
                 WritableSubscriptSignature::ReadOnly => Some(
                     Diagnostic::error(
                         "TPY4001",
                         format!(
                             "subscript assignment target `{}` in module `{}` is not writable via `__setitem__`",
-                            owner_type,
+                            owner_type_rendered,
                             node.module_path.display(),
                         ),
                     )
@@ -1096,7 +1166,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                     )),
                 ),
                 WritableSubscriptSignature::Writable { key_type, value_type } => {
-                    let actual_key = resolve_direct_expression_type_from_metadata(
+                    let actual_key = resolve_assignment_expression_semantic_type(
                         node,
                         nodes,
                         signature,
@@ -1105,16 +1175,16 @@ pub(super) fn subscript_assignment_type_diagnostics(
                         site.line,
                         &site.key_value,
                     )?;
-                    if !direct_type_is_assignable(node, nodes, &key_type, &actual_key) {
+                    if !semantic_type_is_assignable(node, nodes, &key_type, &actual_key) {
                         return Some(
                             Diagnostic::error(
                                 "TPY4001",
                                 format!(
                                     "subscript assignment on `{}` in module `{}` passes key `{}` where `__setitem__` expects `{}`",
-                                    owner_type,
+                                    owner_type_rendered,
                                     node.module_path.display(),
-                                    actual_key,
-                                    key_type,
+                                    render_semantic_type(&actual_key),
+                                    render_semantic_type(&key_type),
                                 ),
                             )
                             .with_span(Span::new(
@@ -1136,23 +1206,28 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&value_type),
+                                Some(&render_semantic_type(&value_type)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual_value = result.actual_type;
-                                if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                                let actual_value = contextual_result_semantic_type(&result);
+                                if !semantic_type_is_assignable(
+                                    node,
+                                    nodes,
+                                    &value_type,
+                                    &actual_value,
+                                ) {
                                     return Some(
                                         Diagnostic::error(
                                             "TPY4001",
                                             format!(
                                                 "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
-                                                owner_type,
+                                                owner_type_rendered,
                                                 node.module_path.display(),
-                                                actual_value,
-                                                value_type,
+                                                render_semantic_type(&actual_value),
+                                                render_semantic_type(&value_type),
                                             ),
                                         )
                                         .with_span(Span::new(
@@ -1166,7 +1241,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 }
                                 return None;
                             }
-                            let actual_value = resolve_direct_expression_type_from_metadata(
+                            let actual_value = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1175,16 +1250,17 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                            if !semantic_type_is_assignable(node, nodes, &value_type, &actual_value)
+                            {
                                 return Some(
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
                                             "subscript assignment on `{}` in module `{}` passes value `{}` where `__setitem__` expects `{}`",
-                                            owner_type,
+                                            owner_type_rendered,
                                             node.module_path.display(),
-                                            actual_value,
-                                            value_type,
+                                            render_semantic_type(&actual_value),
+                                            render_semantic_type(&value_type),
                                         ),
                                     )
                                     .with_span(Span::new(
@@ -1198,7 +1274,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                             }
                         }
                         typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
-                            let Some(readable_type) = resolve_subscript_type_from_target_type(
+                            let Some(readable_type) = resolve_subscript_type_from_target_semantic_type(
                                 node,
                                 nodes,
                                 &owner_type,
@@ -1210,7 +1286,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                         "TPY4001",
                                         format!(
                                             "augmented subscript assignment target `{}` in module `{}` is not readable via `__getitem__`",
-                                            owner_type,
+                                            owner_type_rendered,
                                             node.module_path.display(),
                                         ),
                                     )
@@ -1223,7 +1299,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                     )),
                                 );
                             };
-                            let actual_value = resolve_augmented_assignment_result_type(
+                            let actual_value = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1231,19 +1307,20 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &readable_type,
+                                &render_semantic_type(&readable_type),
                                 value,
                             )?;
-                            if !direct_type_is_assignable(node, nodes, &value_type, &actual_value) {
+                            if !semantic_type_is_assignable(node, nodes, &value_type, &actual_value)
+                            {
                                 return Some(
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
                                             "augmented subscript assignment on `{}` in module `{}` produces `{}` where `__setitem__` expects `{}`",
-                                            owner_type,
+                                            owner_type_rendered,
                                             node.module_path.display(),
-                                            actual_value,
-                                            value_type,
+                                            render_semantic_type(&actual_value),
+                                            render_semantic_type(&value_type),
                                         ),
                                     )
                                     .with_span(Span::new(
@@ -1287,7 +1364,7 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
             );
-            let target_type = resolve_direct_expression_type_from_metadata(
+            let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1296,18 +1373,19 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
+            let target_type_rendered = render_semantic_type(&target_type);
             let shape = resolve_known_dataclass_transform_shape_from_type_with_context(
                 context,
                 node,
                 nodes,
-                &target_type,
+                &target_type_rendered,
             )?;
             if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
                 return None;
             }
 
             let in_initializer = site.owner_name.as_deref() == Some("__init__")
-                && site.owner_type_name.as_deref() == Some(target_type.as_str())
+                && site.owner_type_name.as_deref() == Some(target_type_rendered.as_str())
                 && site.target.value_name.as_deref() == Some("self");
             if in_initializer {
                 return None;
@@ -1317,19 +1395,19 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 typepython_syntax::FrozenFieldMutationKind::Assignment => format!(
                     "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be assigned after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
                 typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => format!(
                     "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be updated with augmented assignment after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
                 typepython_syntax::FrozenFieldMutationKind::Delete => format!(
                     "frozen dataclass-transform field `{}` on `{}` in module `{}` cannot be deleted after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
             };
@@ -1365,7 +1443,7 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
             );
-            let target_type = resolve_direct_expression_type_from_metadata(
+            let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1374,19 +1452,20 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
+            let target_type_rendered = render_semantic_type(&target_type);
             let shape =
                 resolve_known_plain_dataclass_shape_from_type_with_context(
                     context,
                     node,
                     nodes,
-                    &target_type,
+                    &target_type_rendered,
                 )?;
             if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
                 return None;
             }
 
             let in_initializer = site.owner_name.as_deref() == Some("__init__")
-                && site.owner_type_name.as_deref() == Some(target_type.as_str())
+                && site.owner_type_name.as_deref() == Some(target_type_rendered.as_str())
                 && site.target.value_name.as_deref() == Some("self");
             if in_initializer {
                 return None;
@@ -1396,19 +1475,19 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
                 typepython_syntax::FrozenFieldMutationKind::Assignment => format!(
                     "frozen dataclass field `{}` on `{}` in module `{}` cannot be assigned after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
                 typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => format!(
                     "frozen dataclass field `{}` on `{}` in module `{}` cannot be updated with augmented assignment after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
                 typepython_syntax::FrozenFieldMutationKind::Delete => format!(
                     "frozen dataclass field `{}` on `{}` in module `{}` cannot be deleted after initialization",
                     site.field_name,
-                    target_type,
+                    target_type_rendered,
                     node.module_path.display()
                 ),
             };
@@ -1464,9 +1543,13 @@ pub(super) fn resolve_writable_member_type(
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,
     owner_type_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     match declaration.kind {
-        DeclarationKind::Value => resolve_readable_member_type(node, declaration, owner_type_name),
+        DeclarationKind::Value => resolve_readable_member_semantic_type(
+            node,
+            declaration,
+            &lower_type_text_or_name(owner_type_name),
+        ),
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
@@ -1476,7 +1559,7 @@ pub(super) fn resolve_writable_member_type(
             );
             let params = direct_param_types(&signature)?;
             let params = params.into_iter().skip(1).collect::<Vec<_>>();
-            (params.len() == 1).then(|| normalize_type_text(&params[0]))
+            (params.len() == 1).then(|| lower_type_text_or_name(&params[0]))
         }
         _ => None,
     }
@@ -1549,7 +1632,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
             );
-            let target_type = resolve_direct_expression_type_from_metadata(
+            let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1558,28 +1641,31 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 site.line,
                 &site.target,
             )?;
+            let target_type_rendered = render_semantic_type(&target_type);
 
             if should_defer_attribute_assignment_to_frozen_checks(
                 context,
                 node,
                 nodes,
                 &site,
-                &target_type,
+                &target_type_rendered,
             ) {
                 return None;
             }
 
-            let (class_node, class_decl) = resolve_direct_base(nodes, node, &target_type)?;
+            let (class_node, class_decl) =
+                resolve_direct_base(nodes, node, &target_type_rendered)?;
             match find_owned_writable_member_target(nodes, class_node, class_decl, &site.field_name) {
                 Some(WritableAttributeTarget::Value(declaration)) => {
                     if declaration.is_final {
                         return Some(final_attribute_reassignment_diagnostic(
                             &node.module_path,
-                            &target_type,
+                            &target_type_rendered,
                             &site.field_name,
                         ));
                     }
-                    let expected = resolve_writable_member_type(node, declaration, &target_type)?;
+                    let expected =
+                        resolve_writable_member_type(node, declaration, &target_type_rendered)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -1589,24 +1675,24 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&expected),
+                                Some(&render_semantic_type(&expected)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual = result.actual_type;
-                                return (!direct_type_matches(node, nodes, &expected, &actual))
+                                let actual = contextual_result_semantic_type(&result);
+                                return (!semantic_type_matches(node, nodes, &expected, &actual))
                                     .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
                                             "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                            target_type,
+                                            target_type_rendered,
                                             node.module_path.display(),
-                                            actual,
+                                            render_semantic_type(&actual),
                                             site.field_name,
-                                            expected,
+                                            render_semantic_type(&expected),
                                         ),
                                     )
                                     .with_span(Span::new(
@@ -1618,7 +1704,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     ))
                                 });
                             }
-                            let actual = resolve_direct_expression_type_from_metadata(
+                            let actual = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1627,16 +1713,16 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
                                         "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                        target_type,
+                                        target_type_rendered,
                                         node.module_path.display(),
-                                        actual,
+                                        render_semantic_type(&actual),
                                         site.field_name,
-                                        expected,
+                                        render_semantic_type(&expected),
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -1649,7 +1735,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             })
                         }
                         typepython_syntax::FrozenFieldMutationKind::AugmentedAssignment => {
-                            let actual = resolve_augmented_assignment_result_type(
+                            let actual = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1657,19 +1743,19 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &expected,
+                                &render_semantic_type(&expected),
                                 value,
                             )?;
-                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
                                         "augmented attribute assignment on `{}` in module `{}` produces `{}` where member `{}` expects `{}`",
-                                        target_type,
+                                        target_type_rendered,
                                         node.module_path.display(),
-                                        actual,
+                                        render_semantic_type(&actual),
                                         site.field_name,
-                                        expected,
+                                        render_semantic_type(&expected),
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -1685,7 +1771,8 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     }
                 }
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
-                    let expected = resolve_writable_member_type(node, declaration, &target_type)?;
+                    let expected =
+                        resolve_writable_member_type(node, declaration, &target_type_rendered)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -1695,24 +1782,24 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&expected),
+                                Some(&render_semantic_type(&expected)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual = result.actual_type;
-                                return (!direct_type_matches(node, nodes, &expected, &actual))
+                                let actual = contextual_result_semantic_type(&result);
+                                return (!semantic_type_matches(node, nodes, &expected, &actual))
                                     .then(|| {
                                     Diagnostic::error(
                                         "TPY4001",
                                         format!(
                                             "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                            target_type,
+                                            target_type_rendered,
                                             node.module_path.display(),
-                                            actual,
+                                            render_semantic_type(&actual),
                                             site.field_name,
-                                            expected,
+                                            render_semantic_type(&expected),
                                         ),
                                     )
                                     .with_span(Span::new(
@@ -1724,7 +1811,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     ))
                                 });
                             }
-                            let actual = resolve_direct_expression_type_from_metadata(
+                            let actual = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1733,16 +1820,16 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.line,
                                 value,
                             )?;
-                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
                                         "attribute assignment on `{}` in module `{}` assigns `{}` where member `{}` expects `{}`",
-                                        target_type,
+                                        target_type_rendered,
                                         node.module_path.display(),
-                                        actual,
+                                        render_semantic_type(&actual),
                                         site.field_name,
-                                        expected,
+                                        render_semantic_type(&expected),
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -1767,7 +1854,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                         format!(
                                             "attribute `{}` on `{}` in module `{}` is not readable for augmented assignment",
                                             site.field_name,
-                                            target_type,
+                                            target_type_rendered,
                                             node.module_path.display(),
                                         ),
                                     )
@@ -1780,8 +1867,9 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                     )),
                                 );
                             };
-                            let readable_type = resolve_readable_member_type(node, readable, &target_type)?;
-                            let actual = resolve_augmented_assignment_result_type(
+                            let readable_type =
+                                resolve_readable_member_semantic_type(node, readable, &target_type)?;
+                            let actual = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
                                 signature,
@@ -1789,19 +1877,19 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &readable_type,
+                                &render_semantic_type(&readable_type),
                                 value,
                             )?;
-                            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
+                            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
                                 Diagnostic::error(
                                     "TPY4001",
                                     format!(
                                         "augmented attribute assignment on `{}` in module `{}` produces `{}` where member `{}` expects `{}`",
-                                        target_type,
+                                        target_type_rendered,
                                         node.module_path.display(),
-                                        actual,
+                                        render_semantic_type(&actual),
                                         site.field_name,
-                                        expected,
+                                        render_semantic_type(&expected),
                                     ),
                                 )
                                 .with_span(Span::new(
@@ -1822,7 +1910,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                         format!(
                             "property `{}` on `{}` in module `{}` is not writable",
                             site.field_name,
-                            target_type,
+                            target_type_rendered,
                             node.module_path.display(),
                         ),
                     )

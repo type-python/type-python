@@ -984,19 +984,6 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
     })
 }
 
-pub(super) fn resolve_readable_member_type(
-    node: &typepython_graph::ModuleNode,
-    declaration: &Declaration,
-    owner_type_name: &str,
-) -> Option<String> {
-    resolve_readable_member_semantic_type(
-        node,
-        declaration,
-        &lower_type_text_or_name(owner_type_name),
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
 pub(super) fn resolve_readable_member_semantic_type(
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,

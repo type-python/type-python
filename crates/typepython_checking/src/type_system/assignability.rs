@@ -40,6 +40,24 @@ pub(super) fn direct_type_matches_normalized_plain(expected: &str, actual: &str)
     direct_semantic_type_matches_plain(&expected, &actual)
 }
 
+pub(super) fn semantic_type_matches(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> bool {
+    direct_semantic_type_matches(node, nodes, expected, actual, &mut BTreeSet::new())
+}
+
+pub(super) fn semantic_type_is_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> bool {
+    direct_semantic_type_is_assignable(node, nodes, expected, actual, &mut BTreeSet::new())
+}
+
 fn direct_semantic_type_matches(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
