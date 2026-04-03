@@ -243,29 +243,15 @@ TypePython currently lowers to compatibility-oriented Python across supported ta
 
 TypePython is built as a modular Rust workspace with 11 crates forming a multi-phase compilation pipeline:
 
-```
-Source (.tpy/.py/.pyi)
-  |
-  v
-[syntax]  Parse via ruff-python
-  |
-  v
-[binding]  Extract symbols, calls, guards
-  |
-  v
-[graph]  Build module dependency graph + prelude
-  |
-  v
-[checking]  Type check (multiple rule categories)
-  |
-  v
-[lowering]  Convert to valid Python + source maps
-  |
-  v
-[emit]  Plan outputs, generate .pyi stubs
-  |
-  v
-[incremental]  Fingerprint for change detection
+```mermaid
+flowchart TD
+    A["Source (.tpy/.py/.pyi)"] --> B["syntax — Parse via ruff-python"]
+    B --> C["binding — Extract symbols, calls, guards"]
+    C --> D["graph — Build module dependency graph + prelude"]
+    D --> E["checking — Type check (multiple rule categories)"]
+    E --> F["lowering — Convert to valid Python + source maps"]
+    F --> G["emit — Plan outputs, generate .pyi stubs"]
+    G --> H["incremental — Fingerprint for change detection"]
 ```
 
 ### Crate Map
