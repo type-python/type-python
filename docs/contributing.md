@@ -417,4 +417,4 @@ New syntax goes through multiple crates:
 - [Clippy Lints](https://rust-lang.github.io/rust-clippy/)
 - [rustfmt Config](https://rust-lang.github.io/rustfmt/)
 - [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html)
-- [TypePython Specification](../TypePython_Spec_v1.md)
+- [TypePython Language Specification](spec/language-spec-v1.md)

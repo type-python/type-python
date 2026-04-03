@@ -215,27 +215,27 @@ typealias PublicConfig = Omit[Config, "debug"]
 
 ### More examples
 
-| Example | Features demonstrated |
-|---|---|
-| [`examples/hello-world/`](examples/hello-world/) | Minimal starter project |
-| [`examples/todo-app/`](examples/todo-app/) | `data class`, `TypedDict`, `overload`, enum, null narrowing, union narrowing |
-| [`examples/shapes/`](examples/shapes/) | `sealed class`, exhaustive `match`, `interface`, `data class`, generic function |
-| [`examples/http-client/`](examples/http-client/) | `interface`, generic class with bound, `overload`, `TypedDict`, null safety |
-| [`examples/config-loader/`](examples/config-loader/) | `unknown` type, `isinstance` narrowing, `assert` narrowing, `unsafe` blocks |
-| [`examples/event-system/`](examples/event-system/) | `sealed class` + `data class` + `interface` + generics + exhaustive `match` |
-| [`examples/showcase/`](examples/showcase/) | All features combined in a multi-file project |
+| Example                                              | Features demonstrated                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [`examples/hello-world/`](examples/hello-world/)     | Minimal starter project                                                         |
+| [`examples/todo-app/`](examples/todo-app/)           | `data class`, `TypedDict`, `overload`, enum, null narrowing, union narrowing    |
+| [`examples/shapes/`](examples/shapes/)               | `sealed class`, exhaustive `match`, `interface`, `data class`, generic function |
+| [`examples/http-client/`](examples/http-client/)     | `interface`, generic class with bound, `overload`, `TypedDict`, null safety     |
+| [`examples/config-loader/`](examples/config-loader/) | `unknown` type, `isinstance` narrowing, `assert` narrowing, `unsafe` blocks     |
+| [`examples/event-system/`](examples/event-system/)   | `sealed class` + `data class` + `interface` + generics + exhaustive `match`     |
+| [`examples/showcase/`](examples/showcase/)           | All features combined in a multi-file project                                   |
 
 ## What TypePython Compiles To
 
-| TypePython (`.tpy`) | Python (`.py`) |
-|---|---|
-| `data class User:` | `@dataclass` + `class User:` |
-| `interface Drawable:` | `class Drawable(Protocol):` |
-| `sealed class Expr:` | `class Expr:  # tpy:sealed` |
-| `overload def f(x: int) -> int:` | `@overload def f(x: int) -> int:` |
+| TypePython (`.tpy`)               | Python (`.py`)                                      |
+| --------------------------------- | --------------------------------------------------- |
+| `data class User:`                | `@dataclass` + `class User:`                        |
+| `interface Drawable:`             | `class Drawable(Protocol):`                         |
+| `sealed class Expr:`              | `class Expr:  # tpy:sealed`                         |
+| `overload def f(x: int) -> int:`  | `@overload def f(x: int) -> int:`                   |
 | `typealias Pair[T] = tuple[T, T]` | `T = TypeVar("T")`; `Pair: TypeAlias = tuple[T, T]` |
-| `def first[T](xs: list[T]) -> T:` | `T = TypeVar("T")`; `def first(xs: list[T]) -> T:` |
-| `unsafe: ...` | wrapped in an `if True:` block |
+| `def first[T](xs: list[T]) -> T:` | `T = TypeVar("T")`; `def first(xs: list[T]) -> T:`  |
+| `unsafe: ...`                     | wrapped in an `if True:` block                      |
 
 TypePython currently lowers to compatibility-oriented Python across supported targets. It does not emit Python 3.12 native `type` statements or `def f[T](...)` syntax.
 
@@ -256,34 +256,34 @@ flowchart TD
 
 ### Crate Map
 
-| Crate | Purpose |
-|---|---|
-| `typepython_cli` | User-facing binary, command routing |
-| `typepython_config` | Project discovery, `typepython.toml` / `pyproject.toml` loading |
-| `typepython_diagnostics` | Shared diagnostic model (errors, warnings, notes) |
-| `typepython_syntax` | Source parsing via ruff-python AST |
-| `typepython_binding` | Symbol extraction, declaration and call-site collection |
-| `typepython_graph` | Module graph construction, prelude injection |
-| `typepython_checking` | Type checking rules and diagnostic generation |
-| `typepython_lowering` | TypePython-to-Python lowering with source maps |
-| `typepython_emit` | Output planning, stub generation, runtime validators |
-| `typepython_incremental` | Fingerprint-based incremental build state |
-| `typepython_lsp` | Language Server Protocol implementation |
+| Crate                    | Purpose                                                         |
+| ------------------------ | --------------------------------------------------------------- |
+| `typepython_cli`         | User-facing binary, command routing                             |
+| `typepython_config`      | Project discovery, `typepython.toml` / `pyproject.toml` loading |
+| `typepython_diagnostics` | Shared diagnostic model (errors, warnings, notes)               |
+| `typepython_syntax`      | Source parsing via ruff-python AST                              |
+| `typepython_binding`     | Symbol extraction, declaration and call-site collection         |
+| `typepython_graph`       | Module graph construction, prelude injection                    |
+| `typepython_checking`    | Type checking rules and diagnostic generation                   |
+| `typepython_lowering`    | TypePython-to-Python lowering with source maps                  |
+| `typepython_emit`        | Output planning, stub generation, runtime validators            |
+| `typepython_incremental` | Fingerprint-based incremental build state                       |
+| `typepython_lsp`         | Language Server Protocol implementation                         |
 
 See [docs/architecture.md](docs/architecture.md) for the full dependency graph and detailed crate breakdown.
 
 ## CLI Commands
 
-| Command | Description |
-|---|---|
-| `typepython init` | Create a new project with starter config and source |
-| `typepython check` | Type-check without emitting output |
-| `typepython build` | Full build: emit `.py`, `.pyi`, and cache |
-| `typepython watch` | Incremental rebuild on file changes |
-| `typepython clean` | Remove build and cache directories |
-| `typepython lsp` | Start the Language Server (stdio JSON-RPC) |
-| `typepython verify` | Validate build artifacts for publication |
-| `typepython migrate` | Analyze and assist migration from Python |
+| Command              | Description                                         |
+| -------------------- | --------------------------------------------------- |
+| `typepython init`    | Create a new project with starter config and source |
+| `typepython check`   | Type-check without emitting output                  |
+| `typepython build`   | Full build: emit `.py`, `.pyi`, and cache           |
+| `typepython watch`   | Incremental rebuild on file changes                 |
+| `typepython clean`   | Remove build and cache directories                  |
+| `typepython lsp`     | Start the Language Server (stdio JSON-RPC)          |
+| `typepython verify`  | Validate build artifacts for publication            |
+| `typepython migrate` | Analyze and assist migration from Python            |
 
 All commands support `--format text|json` for output formatting. See [docs/cli-reference.md](docs/cli-reference.md) for full details.
 
@@ -309,11 +309,11 @@ no_emit_on_error = true
 
 Three built-in **profiles** configure sensible defaults:
 
-| Profile | Use Case | Key Defaults |
-|---|---|---|
-| `library` | Published packages | `strict`, `require_known_public_types` |
-| `application` | Applications | `strict`, relaxed public API requirements |
-| `migration` | Gradual adoption | Lenient, `imports = "dynamic"` |
+| Profile       | Use Case           | Key Defaults                              |
+| ------------- | ------------------ | ----------------------------------------- |
+| `library`     | Published packages | `strict`, `require_known_public_types`    |
+| `application` | Applications       | `strict`, relaxed public API requirements |
+| `migration`   | Gradual adoption   | Lenient, `imports = "dynamic"`            |
 
 See [docs/configuration.md](docs/configuration.md) for the complete reference.
 
@@ -337,14 +337,14 @@ See [docs/type-system.md](docs/type-system.md) and [docs/syntax-guide.md](docs/s
 
 TypePython emits structured diagnostics with unique error codes:
 
-| Range | Category |
-|---|---|
-| `TPY1xxx` | Configuration and project |
-| `TPY2xxx` | Parsing and lowering |
-| `TPY3xxx` | Import and module resolution |
+| Range     | Category                        |
+| --------- | ------------------------------- |
+| `TPY1xxx` | Configuration and project       |
+| `TPY2xxx` | Parsing and lowering            |
+| `TPY3xxx` | Import and module resolution    |
 | `TPY4xxx` | Type checking and flow analysis |
-| `TPY5xxx` | Emit and stub generation |
-| `TPY6xxx` | LSP and infrastructure |
+| `TPY5xxx` | Emit and stub generation        |
+| `TPY6xxx` | LSP and infrastructure          |
 
 Diagnostics include machine-readable **suggestions** with fix spans, making them suitable for editor quick-fix actions. See [docs/diagnostics.md](docs/diagnostics.md) for the full code reference.
 
@@ -410,21 +410,24 @@ type-python/
 
 ## Documentation
 
-| Document | Description |
-|---|---|
-| [Architecture](docs/architecture.md) | Crate map, pipeline, dependency graph |
-| [Getting Started](docs/getting-started.md) | Installation and first project walkthrough |
-| [Configuration Reference](docs/configuration.md) | Complete `typepython.toml` options |
-| [CLI Reference](docs/cli-reference.md) | All commands, flags, and output formats |
-| [Type System](docs/type-system.md) | Types, assignability, subtyping, narrowing |
-| [Interoperability](docs/interop.md) | `.pyi` compatibility with mypy/pyright, semantic boundaries |
-| [Syntax Guide](docs/syntax-guide.md) | TypePython syntax extensions |
-| [Diagnostics Reference](docs/diagnostics.md) | All TPYxxxx error codes |
-| [LSP Integration](docs/lsp.md) | Editor setup and capabilities |
-| [Migration Guide](docs/migration-guide.md) | Adopting TypePython in existing projects |
-| [Contributing](docs/contributing.md) | Development setup and PR workflow |
-| [FAQ](docs/faq.md) | Frequently asked questions |
-| [Specification](TypePython_Spec_v1.md) | Full v1 language specification |
+| Document                                                                        | Description                                                         |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [Architecture](docs/architecture.md)                                            | Crate map, pipeline, dependency graph                               |
+| [Getting Started](docs/getting-started.md)                                      | Installation and first project walkthrough                          |
+| [Configuration Reference](docs/configuration.md)                                | Complete `typepython.toml` options                                  |
+| [CLI Reference](docs/cli-reference.md)                                          | All commands, flags, and output formats                             |
+| [Type System](docs/type-system.md)                                              | Types, assignability, subtyping, narrowing                          |
+| [Interoperability](docs/interop.md)                                             | `.pyi` compatibility with mypy/pyright, semantic boundaries         |
+| [Syntax Guide](docs/syntax-guide.md)                                            | TypePython syntax extensions                                        |
+| [Diagnostics Reference](docs/diagnostics.md)                                    | All TPYxxxx error codes                                             |
+| [LSP Integration](docs/lsp.md)                                                  | Editor setup and capabilities                                       |
+| [Migration Guide](docs/migration-guide.md)                                      | Adopting TypePython in existing projects                            |
+| [Contributing](docs/contributing.md)                                            | Development setup and PR workflow                                   |
+| [FAQ](docs/faq.md)                                                              | Frequently asked questions                                          |
+| [Language Specification](docs/spec/language-spec-v1.md)                         | Normative language semantics and typing rules                       |
+| [Artifact and Tooling Specification](docs/spec/artifact-and-tooling-spec-v1.md) | Project model, lowering, diagnostics, cache, CLI, and LSP contracts |
+| [Conformance and Test Plan](docs/spec/conformance-and-test-plan-v1.md)          | Feature tiers, conformance claims, and required test coverage       |
+| [Implementation Notes](docs/spec/implementation-notes-v1.md)                    | Informative rollout, architecture, and security notes               |
 
 ## Development
 
