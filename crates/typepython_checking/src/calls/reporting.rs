@@ -63,6 +63,39 @@ pub(crate) fn semantic_type_assignability_failure(
     Some(SemanticTypeAssignabilityFailure { expected, actual, mismatch_path, detail })
 }
 
+pub(super) fn declaration_has_runtime_generic_paramlist(declaration: &Declaration) -> bool {
+    declaration.type_params.iter().any(|type_param| {
+        matches!(
+            type_param.kind,
+            typepython_binding::GenericTypeParamKind::ParamSpec
+                | typepython_binding::GenericTypeParamKind::TypeVarTuple
+        )
+    })
+}
+
+pub(super) fn unresolved_generic_call_diagnostic(
+    node: &typepython_graph::ModuleNode,
+    line: usize,
+    callee: &str,
+    failure: &DirectCallResolutionFailure,
+) -> Diagnostic {
+    Diagnostic::error(
+        "TPY4014",
+        format!(
+            "call to `{}` in module `{}` is invalid because generic parameter list of `{}` could not be resolved from this call",
+            callee, node.module_key, callee
+        ),
+    )
+    .with_span(Span::new(
+        node.module_path.display().to_string(),
+        line,
+        1,
+        line,
+        1,
+    ))
+    .with_note(failure.diagnostic_reason())
+}
+
 pub(super) fn unresolved_import_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -77,16 +110,22 @@ pub(super) fn unresolved_import_diagnostics(
         .iter()
         .filter(|declaration| declaration.kind == DeclarationKind::Import)
         .filter_map(|declaration| {
-            let import_target =
-                resolve_imported_symbol_semantic_target_from_declaration(nodes, declaration)?;
             let raw_target = declaration_import_target_ref(declaration)?.raw_target;
-            let root = import_target.provider_node.module_key.split('.').next()?;
+            let import_target =
+                resolve_imported_symbol_semantic_target_from_declaration(nodes, declaration);
+            let root = import_target
+                .as_ref()
+                .map(|target| target.provider_node.module_key.as_str())
+                .unwrap_or(raw_target.as_str())
+                .split('.')
+                .next()?;
             if !project_roots.contains(root) {
                 return None;
             }
 
-            let resolves = import_target.module_target().is_some()
-                || import_target.declaration_target().is_some();
+            let resolves = import_target.as_ref().is_some_and(|target| {
+                target.module_target().is_some() || target.declaration_target().is_some()
+            });
 
             (!resolves).then(|| {
                 Diagnostic::error(
@@ -454,7 +493,6 @@ pub(super) fn inferred_return_type_for_owner(
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
     expected: &str,
-    signature: &str,
 ) -> Option<String> {
     let related_returns = node
         .returns
@@ -467,8 +505,7 @@ pub(super) fn inferred_return_type_for_owner(
 
     let mut trace_types = Vec::new();
     for candidate in related_returns {
-        let contextual =
-            resolve_contextual_return_type(node, nodes, candidate, expected, signature);
+        let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
             .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
@@ -490,7 +527,6 @@ pub(super) fn attach_return_inference_trace(
     return_site: &typepython_binding::ReturnSite,
     expected: &str,
     actual: &str,
-    signature: &str,
 ) -> Diagnostic {
     let related_returns = node
         .returns
@@ -505,8 +541,7 @@ pub(super) fn attach_return_inference_trace(
     let mut trace_lines = Vec::new();
 
     for candidate in related_returns {
-        let contextual =
-            resolve_contextual_return_type(node, nodes, candidate, expected, signature);
+        let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
             .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
@@ -520,9 +555,8 @@ pub(super) fn attach_return_inference_trace(
         ));
     }
 
-    let inferred_return_type =
-        inferred_return_type_for_owner(node, nodes, return_site, expected, signature)
-            .unwrap_or_else(|| normalize_type_text(actual));
+    let inferred_return_type = inferred_return_type_for_owner(node, nodes, return_site, expected)
+        .unwrap_or_else(|| normalize_type_text(actual));
     diagnostic = diagnostic
         .with_note(format!(
             "inferred return type: `{}`",

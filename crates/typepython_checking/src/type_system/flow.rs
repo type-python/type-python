@@ -298,15 +298,12 @@ pub(super) fn parse_guard_return_kind_semantic(
     callee: &str,
 ) -> Option<(String, SemanticType)> {
     let function = resolve_direct_function(node, nodes, callee)?;
-    let return_annotation = declaration_signature_return_annotation_text(function)?;
-    let returns = normalized_direct_return_annotation(&return_annotation)?;
-    if let Some(inner) =
-        returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']'))
+    let returns = declaration_signature_return_semantic_type(function)?;
+    if let SemanticType::Generic { head, args } = returns.strip_annotated()
+        && args.len() == 1
+        && matches!(head.as_str(), "TypeGuard" | "TypeIs")
     {
-        return Some((String::from("TypeGuard"), lower_type_text_or_name(inner)));
-    }
-    if let Some(inner) = returns.strip_prefix("TypeIs[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some((String::from("TypeIs"), lower_type_text_or_name(inner)));
+        return Some((head.clone(), args[0].clone()));
     }
     None
 }
@@ -583,25 +580,6 @@ pub(super) fn resolve_with_target_name_semantic_type(
     resolve_with_target_semantic_type_for_signature(node, nodes, signature, with_site)
 }
 
-pub(super) fn resolve_with_owner_signature(
-    node: &typepython_graph::ModuleNode,
-    with_site: &typepython_binding::WithSite,
-) -> Option<String> {
-    let owner_name = with_site.owner_name.as_deref()?;
-    node.declarations
-        .iter()
-        .find(|declaration| {
-            declaration.kind == DeclarationKind::Function
-                && declaration.name == owner_name
-                && match (&with_site.owner_type_name, &declaration.owner) {
-                    (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
-                    (None, None) => true,
-                    _ => false,
-                }
-        })
-        .and_then(declaration_signature_text)
-}
-
 pub(super) fn resolve_with_target_semantic_type_for_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -639,7 +617,7 @@ pub(super) fn resolve_with_target_semantic_type_for_signature(
         None,
     )?;
 
-    let context_type_name = render_semantic_type(&context_type);
+    let context_type_name = semantic_nominal_owner_name(&context_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &context_type_name)?;
     let enter = class_node.declarations.iter().find(|declaration| {
         declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
@@ -653,8 +631,10 @@ pub(super) fn resolve_with_target_semantic_type_for_signature(
     })?;
     let _ = exit;
 
-    normalized_direct_return_annotation(&declaration_signature_return_annotation_text(enter)?)
-        .map(lower_type_text_or_name)
+    Some(rewrite_imported_typing_semantic_type(
+        node,
+        &declaration_signature_return_semantic_type(enter)?,
+    ))
 }
 
 pub(super) fn resolve_local_assignment_reference_semantic_type(
