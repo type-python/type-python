@@ -959,15 +959,20 @@ pub(super) fn resolve_contextual_return_type(
     signature: &str,
 ) -> ContextualReturnTypeResult {
     let metadata = direct_expr_metadata_from_return_site(return_site);
-    if let Some(actual_type) = resolve_contextual_lambda_callable_type(
-        node,
-        nodes,
-        return_site.line,
-        &metadata,
-        Some(expected),
-    ) {
+    if let Some(lambda) = metadata.value_lambda.as_deref()
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+            node,
+            nodes,
+            None,
+            None,
+            return_site.line,
+            lambda,
+            Some(expected),
+            None,
+        )
+    {
         return ContextualReturnTypeResult {
-            actual_type: Some(lower_type_text_or_name(&actual_type)),
+            actual_type: Some(actual_type),
             diagnostics: Vec::new(),
         };
     }
@@ -1114,15 +1119,20 @@ pub(super) fn resolve_contextual_yield_type(
 ) -> ContextualYieldTypeResult {
     let metadata = direct_expr_metadata_from_yield_site(yield_site);
     if !yield_site.is_yield_from {
-        if let Some(actual_type) = resolve_contextual_lambda_callable_type(
-            node,
-            nodes,
-            yield_site.line,
-            &metadata,
-            Some(expected),
-        ) {
+        if let Some(lambda) = metadata.value_lambda.as_deref()
+            && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+                node,
+                nodes,
+                None,
+                None,
+                yield_site.line,
+                lambda,
+                Some(expected),
+                None,
+            )
+        {
             return ContextualYieldTypeResult {
-                actual_type: Some(lower_type_text_or_name(&actual_type)),
+                actual_type: Some(actual_type),
                 diagnostics: Vec::new(),
             };
         }

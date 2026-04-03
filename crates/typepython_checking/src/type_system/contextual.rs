@@ -585,27 +585,6 @@ pub(super) struct ContextualCallArgSemanticResult {
     pub(super) diagnostics: Vec<Diagnostic>,
 }
 
-pub(super) fn resolve_contextual_lambda_callable_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-    expected: Option<&str>,
-) -> Option<String> {
-    let lambda = metadata.value_lambda.as_deref()?;
-    resolve_contextual_lambda_callable_semantic_type(
-        node,
-        nodes,
-        None,
-        None,
-        current_line,
-        lambda,
-        expected,
-        None,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
 pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
