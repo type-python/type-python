@@ -497,7 +497,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
         })
         .or_else(|| {
             value_name.and_then(|value_name| {
-                resolve_direct_name_reference_type(
+                resolve_direct_name_reference_semantic_type(
                     node,
                     nodes,
                     signature,
@@ -507,7 +507,6 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     current_line,
                     value_name,
                 )
-                .map(|resolved| lower_type_text_or_name(&resolved))
             })
         })
         .or_else(|| {
@@ -748,8 +747,35 @@ pub(super) fn resolve_direct_name_reference_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    resolve_direct_name_reference_semantic_type(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_direct_name_reference_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_direct_name_reference_type_with_context(
+    resolve_direct_name_reference_semantic_type_with_context(
         &context,
         node,
         nodes,
@@ -777,15 +803,46 @@ pub(super) fn resolve_direct_name_reference_type_with_context(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
-    if let Some(receiver_type) =
-        resolve_receiver_name_type(node, current_owner_name, current_owner_type_name, value_name)
-    {
+    resolve_direct_name_reference_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "name reference resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_direct_name_reference_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<SemanticType> {
+    if let Some(receiver_type) = resolve_receiver_name_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+    ) {
         return Some(receiver_type);
     }
-
     let signature =
         signature.map(|signature| substitute_self_annotation(signature, current_owner_type_name));
-    let base_type = resolve_unnarrowed_name_reference_type_with_context(
+    let base_type = resolve_unnarrowed_name_reference_semantic_type_with_context(
         context,
         node,
         nodes,
@@ -796,24 +853,38 @@ pub(super) fn resolve_direct_name_reference_type_with_context(
         current_line,
         value_name,
     )?;
-
-    Some(apply_guard_narrowing(
+    let narrowed = apply_guard_narrowing(
         node,
         nodes,
         current_owner_name,
         current_owner_type_name,
         current_line,
         value_name,
-        &base_type,
-    ))
+        &render_semantic_type(&base_type),
+    );
+    Some(lower_type_text_or_name(&narrowed))
 }
 
+#[allow(
+    dead_code,
+    reason = "string-returning receiver helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_receiver_name_type(
     node: &typepython_graph::ModuleNode,
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     value_name: &str,
 ) -> Option<String> {
+    resolve_receiver_name_semantic_type(node, current_owner_name, current_owner_type_name, value_name)
+        .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_receiver_name_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    value_name: &str,
+) -> Option<SemanticType> {
     let owner_type_name = current_owner_type_name?;
     let owner_name = current_owner_name?;
     let declaration = node.declarations.iter().find(|declaration| {
@@ -826,9 +897,12 @@ pub(super) fn resolve_receiver_name_type(
         (typepython_syntax::MethodKind::Instance, "self")
         | (typepython_syntax::MethodKind::Property, "self")
         | (typepython_syntax::MethodKind::PropertySetter, "self") => {
-            Some(String::from(owner_type_name))
+            Some(SemanticType::Name(String::from(owner_type_name)))
         }
-        (typepython_syntax::MethodKind::Class, "cls") => Some(format!("type[{owner_type_name}]")),
+        (typepython_syntax::MethodKind::Class, "cls") => Some(SemanticType::Generic {
+            head: String::from("type"),
+            args: vec![SemanticType::Name(String::from(owner_type_name))],
+        }),
         _ => None,
     }
 }
@@ -982,7 +1056,7 @@ pub(super) fn resolve_member_access_owner_semantic_type(
         resolve_direct_callable_return_semantic_type(node, nodes, &access.owner_name)
             .or_else(|| Some(SemanticType::Name(access.owner_name.clone())))
     } else {
-        resolve_direct_name_reference_type(
+        resolve_direct_name_reference_semantic_type(
             node,
             nodes,
             None,
@@ -992,7 +1066,6 @@ pub(super) fn resolve_member_access_owner_semantic_type(
             access.line,
             &access.owner_name,
         )
-        .map(|resolved| lower_type_text_or_name(&resolved))
         .or_else(|| Some(SemanticType::Name(access.owner_name.clone())))
     }
 }
@@ -1071,6 +1144,10 @@ pub(super) fn find_owned_callable_declarations_with_visited<'a>(
     clippy::too_many_arguments,
     reason = "unnarrowed name resolution needs scope and source-position context"
 )]
+#[allow(
+    dead_code,
+    reason = "string-returning unnarrowed name helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -1082,13 +1159,42 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
     current_line: usize,
     value_name: &str,
 ) -> Option<String> {
+    resolve_unnarrowed_name_reference_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_name,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "unnarrowed name resolution needs scope and source-position context"
+)]
+pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    value_name: &str,
+) -> Option<SemanticType> {
     if let Some(signature) = signature {
         let signature = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(signature, current_owner_type_name),
         );
         if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
-            return Some(param_type);
+            return Some(lower_type_text_or_name(&param_type));
         }
     }
 
@@ -1103,7 +1209,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(exception_type);
+        return Some(lower_type_text_or_name(&exception_type));
     }
 
     if let Some(loop_type) = resolve_for_loop_target_type(
@@ -1115,7 +1221,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(loop_type);
+        return Some(lower_type_text_or_name(&loop_type));
     }
 
     if let Some(with_type) = resolve_with_target_name_type(
@@ -1127,7 +1233,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(with_type);
+        return Some(lower_type_text_or_name(&with_type));
     }
 
     if let Some(local_type) = resolve_local_assignment_reference_type(
@@ -1139,7 +1245,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(local_type);
+        return Some(lower_type_text_or_name(&local_type));
     }
 
     if current_owner_name.is_none() {
@@ -1150,7 +1256,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
             current_line,
             value_name,
         ) {
-            return Some(module_type);
+            return Some(lower_type_text_or_name(&module_type));
         }
     }
 
@@ -1164,7 +1270,7 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
             node,
             &substitute_self_annotation(&local_value.detail, current_owner_type_name),
         );
-        return normalized_direct_return_annotation(&detail).map(normalize_type_text);
+        return normalized_direct_return_annotation(&detail).map(lower_type_text_or_name);
     }
 
     if let Some(function) = resolve_direct_function(node, nodes, value_name) {
@@ -1173,27 +1279,34 @@ pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
                 context, node, nodes, value_name,
             )
         {
-            return Some(callable_annotation);
+            return Some(lower_type_text_or_name(&callable_annotation));
         }
         let param_types = direct_signature_sites_from_detail(&function.detail)
             .into_iter()
-            .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+            .map(|param| {
+                lower_type_text_or_name(
+                    param.annotation.as_deref().unwrap_or("dynamic"),
+                )
+            })
             .collect::<Vec<_>>();
-        let return_text = resolve_direct_callable_return_type(node, nodes, value_name)?;
-        return Some(format_callable_annotation(&param_types, &return_text));
+        let return_type = resolve_direct_callable_return_semantic_type(node, nodes, value_name)?;
+        return Some(SemanticType::Callable {
+            params: SemanticCallableParams::ParamList(param_types),
+            return_type: Box::new(return_type),
+        });
     }
 
     if let Some(boundary_type) =
         unresolved_import_boundary_type_with_context(context, node, nodes, value_name)
     {
-        return Some(String::from(boundary_type));
+        return Some(SemanticType::Name(String::from(boundary_type)));
     }
 
     if let Some((head, _)) = value_name.split_once('.')
         && let Some(boundary_type) =
             unresolved_import_boundary_type_with_context(context, node, nodes, head)
     {
-        return Some(String::from(boundary_type));
+        return Some(SemanticType::Name(String::from(boundary_type)));
     }
 
     None

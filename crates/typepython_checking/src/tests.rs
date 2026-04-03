@@ -980,6 +980,56 @@ fn semantic_member_method_and_subscript_resolution_preserve_structured_types() {
 }
 
 #[test]
+fn semantic_name_resolution_preserves_callable_shapes() {
+    let source_text = "def greet(name: str) -> int:\n    return 1\n";
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+
+    assert_eq!(
+        super::resolve_direct_name_reference_semantic_type(
+            node,
+            &graph.nodes,
+            None,
+            None,
+            None,
+            None,
+            1,
+            "greet",
+        )
+        .map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("Callable[[str], int]"))
+    );
+    assert_eq!(
+        super::resolve_direct_name_reference_type(
+            node,
+            &graph.nodes,
+            None,
+            None,
+            None,
+            None,
+            1,
+            "greet",
+        ),
+        Some(String::from("Callable[[str], int]"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_reports_callable_decorator_transform_return_rewrite() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable, cast\n\n",

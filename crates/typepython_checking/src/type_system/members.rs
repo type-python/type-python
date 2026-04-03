@@ -60,7 +60,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
         resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
             .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
-        resolve_direct_name_reference_type(
+        resolve_direct_name_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -70,7 +70,6 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
             current_line,
             owner_name,
         )
-        .map(|resolved| lower_type_text_or_name(&resolved))
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
@@ -187,7 +186,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
             .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
-        resolve_direct_name_reference_type(
+        resolve_direct_name_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -197,7 +196,6 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             current_line,
             owner_name,
         )
-        .map(|resolved| lower_type_text_or_name(&resolved))
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
