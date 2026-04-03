@@ -1018,6 +1018,23 @@ pub(super) fn apply_guard_to_local_bindings(
     narrowed
 }
 
+pub(super) fn apply_guard_to_local_semantic_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    local_bindings: &BTreeMap<String, SemanticType>,
+    guard: &typepython_binding::GuardConditionSite,
+    branch_true: bool,
+) -> BTreeMap<String, SemanticType> {
+    let rendered = local_bindings
+        .iter()
+        .map(|(name, ty)| (name.clone(), render_semantic_type(ty)))
+        .collect::<BTreeMap<_, _>>();
+    apply_guard_to_local_bindings(node, nodes, &rendered, guard, branch_true)
+        .into_iter()
+        .map(|(name, ty)| (name, lower_type_text_or_name(&ty)))
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_guard_scope_bindings(
     node: &typepython_graph::ModuleNode,
@@ -1034,6 +1051,37 @@ pub(super) fn resolve_guard_scope_bindings(
     collect_guard_binding_names(guard, &mut names);
     for name in names {
         if let Some(base_type) = resolve_direct_name_reference_type(
+            node,
+            nodes,
+            signature,
+            exclude_name,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            &name,
+        ) {
+            bindings.insert(name, base_type);
+        }
+    }
+    bindings
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_guard_scope_semantic_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    guard: &typepython_binding::GuardConditionSite,
+) -> BTreeMap<String, SemanticType> {
+    let mut bindings = BTreeMap::new();
+    let mut names = BTreeSet::new();
+    collect_guard_binding_names(guard, &mut names);
+    for name in names {
+        if let Some(base_type) = resolve_direct_name_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -1244,6 +1292,232 @@ pub(super) fn resolve_direct_expression_type_from_metadata_with_bindings(
         current_owner_type_name,
         current_line,
         metadata,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    local_bindings: &BTreeMap<String, SemanticType>,
+) -> Option<SemanticType> {
+    if let Some(lambda) = metadata.value_lambda.as_deref() {
+        let rendered_bindings = local_bindings
+            .iter()
+            .map(|(name, ty)| (name.clone(), render_semantic_type(ty)))
+            .collect::<BTreeMap<_, _>>();
+        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+            node,
+            nodes,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            lambda,
+            signature,
+            Some(&rendered_bindings),
+        )?;
+        return Some(lower_type_text_or_name(&format_callable_annotation(
+            &param_types,
+            &return_type,
+        )));
+    }
+    if let Some(value_name) = metadata.value_name.as_deref()
+        && let Some(bound_type) = local_bindings.get(value_name)
+    {
+        return Some(bound_type.clone());
+    }
+    if let Some(target) = metadata.value_subscript_target.as_deref() {
+        let target_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            target,
+            local_bindings,
+        )?;
+        return resolve_subscript_type_from_target_semantic_type(
+            node,
+            nodes,
+            &target_type,
+            metadata.value_subscript_string_key.as_deref(),
+            metadata.value_subscript_index.as_deref(),
+        );
+    }
+    if let (Some(true_branch), Some(false_branch)) =
+        (metadata.value_if_true.as_deref(), metadata.value_if_false.as_deref())
+    {
+        if let Some(guard) = metadata.value_if_guard.as_ref() {
+            let guard = guard_to_site(guard);
+            let true_bindings =
+                apply_guard_to_local_semantic_bindings(node, nodes, local_bindings, &guard, true);
+            let false_bindings =
+                apply_guard_to_local_semantic_bindings(node, nodes, local_bindings, &guard, false);
+            let true_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                true_branch,
+                &true_bindings,
+            )?;
+            let false_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                false_branch,
+                &false_bindings,
+            )?;
+            return Some(join_semantic_type_candidates(vec![true_type, false_type]));
+        }
+        let true_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            true_branch,
+            local_bindings,
+        )?;
+        let false_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            false_branch,
+            local_bindings,
+        )?;
+        return Some(join_semantic_type_candidates(vec![true_type, false_type]));
+    }
+    if let (Some(left), Some(right), Some(operator)) = (
+        metadata.value_bool_left.as_deref(),
+        metadata.value_bool_right.as_deref(),
+        metadata.value_binop_operator.as_deref(),
+    ) && (operator == "and" || operator == "or")
+    {
+        let left_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            left,
+            local_bindings,
+        )?;
+        let right_type = if let Some(guard) = metadata.value_if_guard.as_ref() {
+            let narrowed_bindings = apply_guard_to_local_semantic_bindings(
+                node,
+                nodes,
+                local_bindings,
+                &guard_to_site(guard),
+                operator == "and",
+            );
+            resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                right,
+                &narrowed_bindings,
+            )?
+        } else {
+            resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                right,
+                local_bindings,
+            )?
+        };
+        return Some(join_semantic_type_candidates(vec![left_type, right_type]));
+    }
+    if let (Some(left), Some(right), Some(operator)) = (
+        metadata.value_binop_left.as_deref(),
+        metadata.value_binop_right.as_deref(),
+        metadata.value_binop_operator.as_deref(),
+    ) {
+        let left_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            left,
+            local_bindings,
+        )?;
+        let right_type = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            right,
+            local_bindings,
+        )?;
+        let left_text = render_semantic_type(&left_type);
+        let right_text = render_semantic_type(&right_type);
+        if let Some(result) = match operator {
+            "+" => resolve_plus_result_type(&left_text, &right_text),
+            "-" | "*" | "/" | "//" | "%" if is_numeric_type(&left_text) && is_numeric_type(&right_text) => {
+                Some(join_numeric_result_type(&left_text, &right_text))
+            }
+            _ => None,
+        } {
+            return Some(lower_type_text_or_name(&result));
+        }
+    }
+
+    resolve_direct_expression_semantic_type(
+        node,
+        nodes,
+        signature,
+        None,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata.value_type.as_deref(),
+        metadata.is_awaited,
+        metadata.value_callee.as_deref(),
+        metadata.value_name.as_deref(),
+        metadata.value_member_owner_name.as_deref(),
+        metadata.value_member_name.as_deref(),
+        metadata.value_member_through_instance,
+        metadata.value_method_owner_name.as_deref(),
+        metadata.value_method_name.as_deref(),
+        metadata.value_method_through_instance,
+        metadata.value_subscript_target.as_deref(),
+        metadata.value_subscript_string_key.as_deref(),
+        metadata.value_subscript_index.as_deref(),
+        metadata.value_if_true.as_deref(),
+        metadata.value_if_false.as_deref(),
+        metadata.value_if_guard.as_ref().map(guard_to_site).as_ref(),
+        metadata.value_bool_left.as_deref(),
+        metadata.value_bool_right.as_deref(),
+        metadata.value_binop_left.as_deref(),
+        metadata.value_binop_right.as_deref(),
+        metadata.value_binop_operator.as_deref(),
     )
 }
 

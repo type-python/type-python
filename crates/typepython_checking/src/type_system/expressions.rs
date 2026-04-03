@@ -565,7 +565,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
             let true_branch = value_if_true?;
             let false_branch = value_if_false?;
             if let Some(guard) = value_if_guard {
-                let base_bindings = resolve_guard_scope_bindings(
+                let base_bindings = resolve_guard_scope_semantic_bindings(
                     node,
                     nodes,
                     signature,
@@ -576,38 +576,34 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     guard,
                 );
                 let true_bindings =
-                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, true);
+                    apply_guard_to_local_semantic_bindings(node, nodes, &base_bindings, guard, true);
                 let false_bindings =
-                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, false);
+                    apply_guard_to_local_semantic_bindings(node, nodes, &base_bindings, guard, false);
                 return Some(join_semantic_type_candidates(vec![
-                    lower_type_text_or_name(
-                        &resolve_direct_expression_type_from_metadata_with_bindings(
-                            node,
-                            nodes,
-                            signature,
-                            current_owner_name,
-                            current_owner_type_name,
-                            current_line,
-                            true_branch,
-                            &true_bindings,
-                        )?,
-                    ),
-                    lower_type_text_or_name(
-                        &resolve_direct_expression_type_from_metadata_with_bindings(
-                            node,
-                            nodes,
-                            signature,
-                            current_owner_name,
-                            current_owner_type_name,
-                            current_line,
-                            false_branch,
-                            &false_bindings,
-                        )?,
-                    ),
+                    resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        true_branch,
+                        &true_bindings,
+                    )?,
+                    resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                        node,
+                        nodes,
+                        signature,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        false_branch,
+                        &false_bindings,
+                    )?,
                 ]));
             }
             Some(join_semantic_type_candidates(vec![
-                lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata_with_bindings(
                     node,
                     nodes,
                     signature,
@@ -615,8 +611,9 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     current_owner_type_name,
                     current_line,
                     true_branch,
-                )?),
-                lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
+                    &BTreeMap::new(),
+                )?,
+                resolve_direct_expression_semantic_type_from_metadata_with_bindings(
                     node,
                     nodes,
                     signature,
@@ -624,7 +621,8 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     current_owner_type_name,
                     current_line,
                     false_branch,
-                )?),
+                    &BTreeMap::new(),
+                )?,
             ]))
         })
         .or_else(|| {

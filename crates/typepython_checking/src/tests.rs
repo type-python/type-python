@@ -1,5 +1,6 @@
 use super::{check, check_with_binding_metadata, check_with_options};
 use std::{
+    collections::BTreeMap,
     fs,
     io::ErrorKind,
     path::PathBuf,
@@ -1025,6 +1026,43 @@ fn semantic_name_resolution_preserves_callable_shapes() {
         ),
         Some(String::from("Callable[[str], int]"))
     );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn semantic_guard_bindings_apply_flow_narrowing() {
+    let source_text = "value = 1\n";
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let mut bindings = BTreeMap::new();
+    bindings.insert(String::from("value"), crate::lower_type_text_or_name("Optional[int]"));
+
+    let narrowed = super::apply_guard_to_local_semantic_bindings(
+        node,
+        &graph.nodes,
+        &bindings,
+        &typepython_binding::GuardConditionSite::IsNone {
+            name: String::from("value"),
+            negated: true,
+        },
+        true,
+    );
+
+    assert_eq!(narrowed.get("value").map(crate::render_semantic_type), Some(String::from("int")));
 
     let _ = fs::remove_dir_all(&root);
 }
