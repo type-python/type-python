@@ -284,7 +284,8 @@ pub(crate) fn instantiate_direct_function_param_annotation(
     param: &typepython_syntax::DirectFunctionParamSite,
     substitutions: &GenericTypeParamSubstitutions,
 ) -> Option<SemanticType> {
-    param.annotation
+    param
+        .annotation
         .as_deref()
         .map(|annotation| instantiate_semantic_annotation(annotation, substitutions))
 }

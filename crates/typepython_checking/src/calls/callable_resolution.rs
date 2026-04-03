@@ -376,32 +376,45 @@ pub(super) fn resolve_direct_callable_return_type<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<String> {
+    resolve_direct_callable_return_semantic_type(node, nodes, callee)
+        .map(|return_type| render_semantic_type(&return_type))
+}
+
+pub(super) fn resolve_direct_callable_return_semantic_type<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<SemanticType> {
     if let Some(callable_annotation) =
         resolve_decorated_function_callable_annotation(node, nodes, callee)
     {
-        return decorated_function_return_type_from_callable_annotation(&callable_annotation);
+        return decorated_function_return_type_from_callable_annotation(&callable_annotation)
+            .map(|return_type| lower_type_text_or_name(&return_type));
     }
     if let Some(function) = resolve_direct_function(node, nodes, callee) {
-        let return_type = substitute_self_annotation(
+        let return_text = substitute_self_annotation(
             function.detail.split_once("->")?.1.trim(),
             function.owner.as_ref().map(|owner| owner.name.as_str()),
         );
-        return Some(if function.is_async && !return_type.is_empty() {
-            format!("Awaitable[{return_type}]")
+        return Some(if function.is_async && !return_text.is_empty() {
+            SemanticType::Generic {
+                head: String::from("Awaitable"),
+                args: vec![lower_type_text_or_name(&return_text)],
+            }
         } else {
-            return_type
+            lower_type_text_or_name(&return_text)
         });
     }
 
     if let Some((_, class_decl)) = resolve_direct_base(nodes, node, callee) {
-        return Some(class_decl.name.clone());
+        return Some(SemanticType::Name(class_decl.name.clone()));
     }
 
     if let Some(signature) = resolve_typing_callable_signature(callee) {
-        return Some(signature.split_once("->")?.1.trim().to_owned());
+        return Some(lower_type_text_or_name(signature.split_once("->")?.1.trim()));
     }
 
-    resolve_builtin_return_type(callee).map(str::to_owned)
+    resolve_builtin_return_type(callee).map(lower_type_text_or_name)
 }
 
 pub(super) fn resolve_instantiated_callable_return_type_from_declaration(
@@ -444,12 +457,26 @@ pub(super) fn resolve_instantiated_callable_return_type_id_from_declaration(
         .map(|return_type| store.intern(return_type))
 }
 
+#[allow(
+    dead_code,
+    reason = "string-returning callable return helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_direct_callable_return_type_for_line(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
     line: usize,
 ) -> Option<String> {
+    resolve_direct_callable_return_semantic_type_for_line(node, nodes, callee, line)
+        .map(|return_type| render_semantic_type(&return_type))
+}
+
+pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    callee: &str,
+    line: usize,
+) -> Option<SemanticType> {
     let call = node
         .calls
         .iter()
@@ -464,17 +491,18 @@ pub(super) fn resolve_direct_callable_return_type_for_line(
             })
             .collect::<Vec<_>>();
         let selected = select_most_specific_overload(node, nodes, &applicable)?;
-        return resolve_instantiated_callable_return_type_from_declaration(
+        return resolve_instantiated_callable_return_semantic_type_from_declaration(
             node, nodes, selected, call,
         );
     }
     if let Some(callable_annotation) =
         resolve_decorated_function_callable_annotation(node, nodes, callee)
     {
-        return decorated_function_return_type_from_callable_annotation(&callable_annotation);
+        return decorated_function_return_type_from_callable_annotation(&callable_annotation)
+            .map(|return_type| lower_type_text_or_name(&return_type));
     }
     let function = resolve_direct_function(node, nodes, callee)?;
-    resolve_instantiated_callable_return_type_from_declaration(node, nodes, function, call)
+    resolve_instantiated_callable_return_semantic_type_from_declaration(node, nodes, function, call)
 }
 
 pub(super) fn resolve_direct_callable_signature(

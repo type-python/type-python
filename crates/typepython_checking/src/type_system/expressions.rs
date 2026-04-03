@@ -32,179 +32,37 @@ pub(super) fn resolve_direct_expression_type(
     value_binop_right: Option<&typepython_syntax::DirectExprMetadata>,
     value_binop_operator: Option<&str>,
 ) -> Option<String> {
-    let resolved = value_type
-        .filter(|value_type| !value_type.is_empty())
-        .map(str::trim)
-        .map(normalize_type_text)
-        .or_else(|| {
-            value_callee
-                .and_then(|callee| {
-                    resolve_direct_callable_return_type_for_line(node, nodes, callee, current_line)
-                        .or_else(|| resolve_direct_callable_return_type(node, nodes, callee))
-                })
-                .map(|return_type| normalize_type_text(&return_type))
-        })
-        .or_else(|| {
-            value_name.and_then(|value_name| {
-                resolve_direct_name_reference_type(
-                    node,
-                    nodes,
-                    signature,
-                    exclude_name,
-                    current_owner_name,
-                    current_owner_type_name,
-                    current_line,
-                    value_name,
-                )
-            })
-        })
-        .or_else(|| {
-            value_method_owner_name.and_then(|owner_name| {
-                value_method_name.and_then(|method_name| {
-                    resolve_direct_method_return_type(
-                        node,
-                        nodes,
-                        signature,
-                        exclude_name,
-                        current_owner_name,
-                        current_owner_type_name,
-                        current_line,
-                        owner_name,
-                        method_name,
-                        value_method_through_instance,
-                    )
-                })
-            })
-        })
-        .or_else(|| {
-            value_member_owner_name.and_then(|owner_name| {
-                value_member_name.and_then(|member_name| {
-                    resolve_direct_member_reference_type(
-                        node,
-                        nodes,
-                        signature,
-                        exclude_name,
-                        current_owner_name,
-                        current_owner_type_name,
-                        current_line,
-                        owner_name,
-                        member_name,
-                        value_member_through_instance,
-                    )
-                })
-            })
-        })
-        .or_else(|| {
-            value_subscript_target.and_then(|target| {
-                resolve_direct_subscript_reference_type(
-                    node,
-                    nodes,
-                    signature,
-                    exclude_name,
-                    current_owner_name,
-                    current_owner_type_name,
-                    current_line,
-                    target,
-                    value_subscript_string_key,
-                    value_subscript_index,
-                )
-            })
-        })
-        .or_else(|| {
-            let true_branch = value_if_true?;
-            let false_branch = value_if_false?;
-            if let Some(guard) = value_if_guard {
-                let base_bindings = resolve_guard_scope_bindings(
-                    node,
-                    nodes,
-                    signature,
-                    exclude_name,
-                    current_owner_name,
-                    current_owner_type_name,
-                    current_line,
-                    guard,
-                );
-                let true_bindings =
-                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, true);
-                let false_bindings =
-                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, false);
-                return Some(join_branch_types(vec![
-                    resolve_direct_expression_type_from_metadata_with_bindings(
-                        node,
-                        nodes,
-                        signature,
-                        current_owner_name,
-                        current_owner_type_name,
-                        current_line,
-                        true_branch,
-                        &true_bindings,
-                    )?,
-                    resolve_direct_expression_type_from_metadata_with_bindings(
-                        node,
-                        nodes,
-                        signature,
-                        current_owner_name,
-                        current_owner_type_name,
-                        current_line,
-                        false_branch,
-                        &false_bindings,
-                    )?,
-                ]));
-            }
-            Some(join_branch_types(vec![
-                resolve_direct_expression_type_from_metadata(
-                    node,
-                    nodes,
-                    signature,
-                    current_owner_name,
-                    current_owner_type_name,
-                    current_line,
-                    true_branch,
-                )?,
-                resolve_direct_expression_type_from_metadata(
-                    node,
-                    nodes,
-                    signature,
-                    current_owner_name,
-                    current_owner_type_name,
-                    current_line,
-                    false_branch,
-                )?,
-            ]))
-        })
-        .or_else(|| {
-            resolve_direct_boolop_type(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                value_bool_left,
-                value_bool_right,
-                value_if_guard,
-                value_binop_operator,
-            )
-        })
-        .or_else(|| {
-            resolve_direct_binop_type(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                value_binop_left,
-                value_binop_right,
-                value_binop_operator,
-            )
-        });
-
-    resolved.and_then(
-        |resolved| {
-            if is_awaited { unwrap_awaitable_type(&resolved) } else { Some(resolved) }
-        },
+    resolve_direct_expression_semantic_type(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        value_type,
+        is_awaited,
+        value_callee,
+        value_name,
+        value_member_owner_name,
+        value_member_name,
+        value_member_through_instance,
+        value_method_owner_name,
+        value_method_name,
+        value_method_through_instance,
+        value_subscript_target,
+        value_subscript_string_key,
+        value_subscript_index,
+        value_if_true,
+        value_if_false,
+        value_if_guard,
+        value_bool_left,
+        value_bool_right,
+        value_binop_left,
+        value_binop_right,
+        value_binop_operator,
     )
+    .map(|resolved| render_semantic_type(&resolved))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -492,7 +350,6 @@ pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str)
     clippy::too_many_arguments,
     reason = "semantic expression resolution mirrors the direct expression metadata shape"
 )]
-#[allow(dead_code, reason = "semantic expression entrypoints are staged migration helpers")]
 pub(super) fn resolve_direct_expression_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -523,37 +380,192 @@ pub(super) fn resolve_direct_expression_semantic_type(
     value_binop_right: Option<&typepython_syntax::DirectExprMetadata>,
     value_binop_operator: Option<&str>,
 ) -> Option<SemanticType> {
-    resolve_direct_expression_type(
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        value_type,
-        is_awaited,
-        value_callee,
-        value_name,
-        value_member_owner_name,
-        value_member_name,
-        value_member_through_instance,
-        value_method_owner_name,
-        value_method_name,
-        value_method_through_instance,
-        value_subscript_target,
-        value_subscript_string_key,
-        value_subscript_index,
-        value_if_true,
-        value_if_false,
-        value_if_guard,
-        value_bool_left,
-        value_bool_right,
-        value_binop_left,
-        value_binop_right,
-        value_binop_operator,
-    )
-    .map(|ty| lower_type_text_or_name(&ty))
+    let resolved = value_type
+        .filter(|value_type| !value_type.is_empty())
+        .map(str::trim)
+        .map(lower_type_text_or_name)
+        .or_else(|| {
+            value_callee.and_then(|callee| {
+                resolve_direct_callable_return_semantic_type_for_line(
+                    node,
+                    nodes,
+                    callee,
+                    current_line,
+                )
+                .or_else(|| resolve_direct_callable_return_semantic_type(node, nodes, callee))
+            })
+        })
+        .or_else(|| {
+            value_name.and_then(|value_name| {
+                resolve_direct_name_reference_type(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    value_name,
+                )
+                .map(|resolved| lower_type_text_or_name(&resolved))
+            })
+        })
+        .or_else(|| {
+            value_method_owner_name.and_then(|owner_name| {
+                value_method_name.and_then(|method_name| {
+                    resolve_direct_method_return_type(
+                        node,
+                        nodes,
+                        signature,
+                        exclude_name,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        method_name,
+                        value_method_through_instance,
+                    )
+                    .map(|resolved| lower_type_text_or_name(&resolved))
+                })
+            })
+        })
+        .or_else(|| {
+            value_member_owner_name.and_then(|owner_name| {
+                value_member_name.and_then(|member_name| {
+                    resolve_direct_member_reference_type(
+                        node,
+                        nodes,
+                        signature,
+                        exclude_name,
+                        current_owner_name,
+                        current_owner_type_name,
+                        current_line,
+                        owner_name,
+                        member_name,
+                        value_member_through_instance,
+                    )
+                    .map(|resolved| lower_type_text_or_name(&resolved))
+                })
+            })
+        })
+        .or_else(|| {
+            value_subscript_target.and_then(|target| {
+                resolve_direct_subscript_reference_type(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    target,
+                    value_subscript_string_key,
+                    value_subscript_index,
+                )
+                .map(|resolved| lower_type_text_or_name(&resolved))
+            })
+        })
+        .or_else(|| {
+            let true_branch = value_if_true?;
+            let false_branch = value_if_false?;
+            if let Some(guard) = value_if_guard {
+                let base_bindings = resolve_guard_scope_bindings(
+                    node,
+                    nodes,
+                    signature,
+                    exclude_name,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    guard,
+                );
+                let true_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, true);
+                let false_bindings =
+                    apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, false);
+                return Some(join_semantic_type_candidates(vec![
+                    lower_type_text_or_name(
+                        &resolve_direct_expression_type_from_metadata_with_bindings(
+                            node,
+                            nodes,
+                            signature,
+                            current_owner_name,
+                            current_owner_type_name,
+                            current_line,
+                            true_branch,
+                            &true_bindings,
+                        )?,
+                    ),
+                    lower_type_text_or_name(
+                        &resolve_direct_expression_type_from_metadata_with_bindings(
+                            node,
+                            nodes,
+                            signature,
+                            current_owner_name,
+                            current_owner_type_name,
+                            current_line,
+                            false_branch,
+                            &false_bindings,
+                        )?,
+                    ),
+                ]));
+            }
+            Some(join_semantic_type_candidates(vec![
+                lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    true_branch,
+                )?),
+                lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
+                    node,
+                    nodes,
+                    signature,
+                    current_owner_name,
+                    current_owner_type_name,
+                    current_line,
+                    false_branch,
+                )?),
+            ]))
+        })
+        .or_else(|| {
+            resolve_direct_boolop_type(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_bool_left,
+                value_bool_right,
+                value_if_guard,
+                value_binop_operator,
+            )
+            .map(|resolved| lower_type_text_or_name(&resolved))
+        })
+        .or_else(|| {
+            resolve_direct_binop_type(
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                value_binop_left,
+                value_binop_right,
+                value_binop_operator,
+            )
+            .map(|resolved| lower_type_text_or_name(&resolved))
+        })?;
+
+    if is_awaited {
+        unwrap_awaitable_semantic_type(&resolved)
+    } else {
+        Some(resolved)
+    }
 }
 
 #[expect(

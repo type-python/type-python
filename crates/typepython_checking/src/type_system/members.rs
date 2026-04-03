@@ -193,6 +193,23 @@ pub(super) fn unwrap_awaitable_type(text: &str) -> Option<String> {
     None
 }
 
+pub(super) fn unwrap_awaitable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
+    match ty.strip_annotated() {
+        SemanticType::Generic { head, args }
+            if matches!(head.as_str(), "Awaitable" | "typing.Awaitable") && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        SemanticType::Generic { head, args }
+            if matches!(head.as_str(), "Coroutine" | "typing.Coroutine") && args.len() == 3 =>
+        {
+            Some(args[2].clone())
+        }
+        _ => unwrap_awaitable_type(&render_semantic_type(ty))
+            .map(|inner| lower_type_text_or_name(&inner)),
+    }
+}
+
 pub(super) fn unwrap_generator_yield_type(text: &str) -> Option<String> {
     let text = normalize_type_text(text);
     let inner = text.strip_prefix("Generator[").and_then(|inner| inner.strip_suffix(']'))?;
