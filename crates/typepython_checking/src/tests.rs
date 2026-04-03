@@ -665,6 +665,10 @@ fn check_reports_unresolved_paramspec_call() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4014"));
     assert!(rendered.contains("Callable[P, int]"));
+    assert!(
+        rendered.contains("reason: callable type `Callable[P, int]` still contains an unresolved ParamSpec or Concatenate tail"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -676,6 +680,10 @@ fn check_reports_unresolved_concatenate_call() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4014"));
     assert!(rendered.contains("Concatenate[int, P]"));
+    assert!(
+        rendered.contains("reason: callable type `Callable[Concatenate[int, P], int]` still contains an unresolved ParamSpec or Concatenate tail"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -835,6 +843,176 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
     assert_eq!(
         super::resolve_decorated_function_callable_annotation(node, &graph.nodes, "count"),
         Some(String::from("Callable[[int], str]"))
+    );
+}
+
+#[test]
+fn semantic_callable_assignability_handles_concatenate_structurally() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<callable-assignability>"),
+        module_key: String::from("callable.assignability"),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 1,
+    };
+    let expected = crate::SemanticType::Callable {
+        params: crate::SemanticCallableParams::Concatenate(vec![
+            crate::SemanticType::Name(String::from("int")),
+            crate::SemanticType::Name(String::from("P")),
+        ]),
+        return_type: Box::new(crate::SemanticType::Name(String::from("str"))),
+    };
+    let assignable = crate::SemanticType::Callable {
+        params: crate::SemanticCallableParams::Concatenate(vec![
+            crate::SemanticType::Name(String::from("Any")),
+            crate::SemanticType::Name(String::from("P")),
+        ]),
+        return_type: Box::new(crate::SemanticType::Name(String::from("str"))),
+    };
+    let incompatible = crate::SemanticType::Callable {
+        params: crate::SemanticCallableParams::Concatenate(vec![
+            crate::SemanticType::Name(String::from("str")),
+            crate::SemanticType::Name(String::from("P")),
+        ]),
+        return_type: Box::new(crate::SemanticType::Name(String::from("str"))),
+    };
+
+    assert!(super::semantic_type_is_assignable(&node, &[], &expected, &assignable));
+    assert!(!super::semantic_type_is_assignable(&node, &[], &expected, &incompatible));
+}
+
+#[test]
+fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
+    let graph = ModuleGraph {
+        nodes: vec![
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/pkg/util.pyi"),
+                module_key: String::from("pkg.util"),
+                module_kind: SourceKind::Stub,
+                declarations: vec![Declaration {
+                    name: String::from("parse"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:int)->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            },
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/app.tpy"),
+                module_key: String::from("app"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("util"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.util"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.util.parse"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            },
+        ],
+    };
+    let node = &graph.nodes[1];
+
+    let module_target = super::resolve_imported_symbol_semantic_target(node, &graph.nodes, "util")
+        .expect("module import target");
+    assert_eq!(
+        module_target.module_target().map(|module| module.module_key.as_str()),
+        Some("pkg.util")
+    );
+
+    let symbol_target = super::resolve_imported_symbol_semantic_target(node, &graph.nodes, "parse")
+        .expect("symbol import target");
+    assert_eq!(
+        symbol_target.function_provider().map(|(provider, declaration)| {
+            (provider.module_key.clone(), declaration.name.clone())
+        }),
+        Some((String::from("pkg.util"), String::from("parse"))),
     );
 }
 
@@ -1002,6 +1180,51 @@ fn semantic_name_resolution_preserves_callable_shapes() {
         )
         .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("Callable[[str], int]"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn semantic_name_resolution_uses_decorated_callable_semantic_path() {
+    let source_text = concat!(
+        "def stringify(func: Callable[[int], int]) -> Callable[[int], str]:\n",
+        "    return func\n\n",
+        "@stringify\n",
+        "def count(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let context = super::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+
+    assert_eq!(
+        super::resolve_direct_name_reference_semantic_type_with_context(
+            &context,
+            node,
+            &graph.nodes,
+            None,
+            None,
+            None,
+            None,
+            1,
+            "count",
+        )
+        .map(|ty| crate::diagnostic_type_text(&ty)),
+        Some(String::from("Callable[[int], str]"))
     );
 
     let _ = fs::remove_dir_all(&root);
@@ -1864,7 +2087,7 @@ fn check_accepts_unique_module_symbols() {
         }],
     });
 
-    assert!(result.diagnostics.is_empty());
+    assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
@@ -2564,6 +2787,118 @@ fn check_accepts_imported_generic_callable_resolution_through_module_member() {
 }
 
 #[test]
+fn imported_module_method_return_semantic_type_stays_semantic() {
+    let graph = ModuleGraph {
+        nodes: vec![
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/helpers.pyi"),
+                module_key: String::from("helpers"),
+                module_kind: SourceKind::Stub,
+                declarations: vec![Declaration {
+                    name: String::from("box_value"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:int)->list[int]"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            },
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/app.tpy"),
+                module_key: String::from("app"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![Declaration {
+                    name: String::from("helpers"),
+                    kind: DeclarationKind::Import,
+                    detail: String::from("helpers"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                }],
+                calls: Vec::new(),
+                method_calls: vec![typepython_binding::MethodCallSite {
+                    owner_name: String::from("helpers"),
+                    method: String::from("box_value"),
+                    through_instance: false,
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
+                    line: 1,
+                }],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            },
+        ],
+    };
+
+    assert_eq!(
+        super::resolve_imported_module_method_return_semantic_type(
+            &graph.nodes[1],
+            &graph.nodes,
+            1,
+            "helpers",
+            "box_value",
+        )
+        .as_ref()
+        .map(crate::diagnostic_type_text),
+        Some(String::from("list[int]")),
+    );
+}
+
+#[test]
 fn check_reports_non_applicable_overload_as_call_incompatibility() {
     let result = check_temp_typepython_source(
         "overload def parse(value: int) -> str: ...\noverload def parse(value: str) -> int: ...\ndef parse(value: int) -> str:\n    return \"x\"\n\nparse(None)\n",
@@ -3058,10 +3393,10 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
     };
     let overloads = vec![&generic_overload, &object_overload];
 
-    let applicable =
-        super::resolve_applicable_direct_overload_candidates(&node, &[], &call, &overloads);
-    let selected =
-        super::select_most_specific_overload(&node, &[], &applicable).expect("selected overload");
+    let selected = match super::resolve_direct_overload_selection(&node, &[], &call, &overloads) {
+        super::ResolvedOverloadSelection::Selected(candidate) => candidate,
+        _ => panic!("selected overload"),
+    };
 
     assert!(std::ptr::eq(selected.declaration, overloads[0]));
     assert_eq!(
@@ -7926,6 +8261,7 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
     assert!(rendered.contains("function `build` in module `src/app/module.py` assigns `str` where local `result` expects `int`"));
+    assert!(rendered.contains("reason: `str` is not assignable to `int`"), "{rendered}");
 }
 
 #[test]
@@ -8076,6 +8412,7 @@ fn check_reports_local_name_augmented_assignment_type_mismatch() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
     assert!(rendered.contains("augmented-assigns `str` where local `value` expects `int`"));
+    assert!(rendered.contains("reason: `str` is not assignable to `int`"), "{rendered}");
 }
 
 #[test]
@@ -9965,6 +10302,203 @@ fn check_reports_unresolved_source_authored_typevartuple_call() {
 }
 
 #[test]
+fn check_reports_unresolved_source_authored_typevartuple_method_call() {
+    let result = check(&ModuleGraph {
+        nodes: vec![ModuleNode {
+            module_path: PathBuf::from("src/app/module.py"),
+            module_key: String::from("app.module"),
+            module_kind: SourceKind::Python,
+            declarations: vec![
+                Declaration {
+                    name: String::from("Box"),
+                    kind: DeclarationKind::Class,
+                    detail: String::new(),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: Some(DeclarationOwnerKind::Class),
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("box"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("Box"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    name: String::from("collect"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(self,*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
+                    value_type: None,
+                    method_kind: Some(typepython_syntax::MethodKind::Instance),
+                    class_kind: None,
+                    owner: Some(DeclarationOwner {
+                        name: String::from("Box"),
+                        kind: DeclarationOwnerKind::Class,
+                    }),
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: vec![typepython_binding::GenericTypeParam {
+                        kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
+                        name: String::from("Ts"),
+                        bound: None,
+                        constraints: Vec::new(),
+                        default: None,
+                    }],
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: vec![typepython_binding::MethodCallSite {
+                owner_name: String::from("box"),
+                method: String::from("collect"),
+                through_instance: false,
+                arg_count: 0,
+                arg_types: Vec::new(),
+                arg_values: Vec::new(),
+                starred_arg_types: vec![String::from("list[int]")],
+                starred_arg_values: Vec::new(),
+                keyword_names: Vec::new(),
+                keyword_arg_types: Vec::new(),
+                keyword_arg_values: Vec::new(),
+                keyword_expansion_types: Vec::new(),
+                keyword_expansion_values: Vec::new(),
+                line: 1,
+            }],
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 1,
+        }],
+    });
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4014"), "{rendered}");
+    assert!(rendered.contains("Box.collect"), "{rendered}");
+    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
+}
+
+#[test]
+fn check_reports_unresolved_source_authored_typevartuple_imported_module_method_call() {
+    let result = check_temp_project_sources(&[
+        (
+            "helpers.tpy",
+            "helpers",
+            SourceKind::TypePython,
+            "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n",
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            "import helpers\n\nitems: list[int] = [1, 2]\nvalue = helpers.collect(*items)\n",
+        ),
+    ]);
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4014"), "{rendered}");
+    assert!(rendered.contains("helpers.collect"), "{rendered}");
+    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
+}
+
+#[test]
+fn resolve_scope_param_semantic_type_uses_declaration_signature_sites() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<scope-params>"),
+        module_key: String::from("scope.params"),
+        module_kind: SourceKind::TypePython,
+        declarations: vec![Declaration {
+            name: String::from("build"),
+            kind: DeclarationKind::Function,
+            detail: String::from("(x:int,*args:str,**kwargs:bool)->None"),
+            value_type: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }],
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 1,
+    };
+
+    assert_eq!(
+        super::resolve_scope_param_semantic_type(&node, Some("build"), None, "x")
+            .as_ref()
+            .map(crate::diagnostic_type_text),
+        Some(String::from("int")),
+    );
+    assert_eq!(
+        super::resolve_scope_param_semantic_type(&node, Some("build"), None, "args")
+            .as_ref()
+            .map(crate::diagnostic_type_text),
+        Some(String::from("tuple[str, ...]")),
+    );
+    assert_eq!(
+        super::resolve_scope_param_semantic_type(&node, Some("build"), None, "kwargs")
+            .as_ref()
+            .map(crate::diagnostic_type_text),
+        Some(String::from("dict[str, bool]")),
+    );
+}
+
+#[test]
 fn check_accepts_source_authored_typevartuple_alias_roundtrip() {
     let result = check_temp_typepython_source(
         "typealias Pack[*Ts] = tuple[*Ts]\n\nvalue: Pack[int, str] = (1, \"x\")\n",
@@ -9992,6 +10526,52 @@ fn check_accepts_imported_semantic_type_alias_expansion() {
     ]);
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
+    let alias = Declaration {
+        name: String::from("Items"),
+        kind: DeclarationKind::TypeAlias,
+        detail: String::from("list[T]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVar,
+            name: String::from("T"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+
+    let substitutions = super::alias_type_param_substitutions_semantic(
+        &alias,
+        &[crate::SemanticType::Generic {
+            head: String::from("tuple"),
+            args: vec![
+                crate::SemanticType::Name(String::from("int")),
+                crate::SemanticType::Name(String::from("str")),
+            ],
+        }],
+    )
+    .expect("semantic alias substitution should succeed");
+
+    assert_eq!(
+        substitutions.types.get("T").as_ref().map(|ty| crate::diagnostic_type_text(*ty)),
+        Some(String::from("tuple[int, str]")),
+    );
 }
 
 #[test]
@@ -10347,7 +10927,7 @@ fn check_reports_authored_lambda_parameter_annotation_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered.contains("(str)->str"));
+    assert!(rendered.contains("Callable[[str], str]"));
     assert!(rendered.contains("Callable[[int], str]"));
 }
 
@@ -11305,8 +11885,9 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered
-        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+    assert!(rendered.contains(
+        "assigns callable `Callable[[str], str]` where `handler` expects `Callable[[int], str]`"
+    ));
 }
 
 #[test]
@@ -11513,7 +12094,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
     assert!(rendered.contains(
-        "assigns callable `(str,int)->str` where `handler` expects `Callable[..., int]`"
+        "assigns callable `Callable[[str, int], str]` where `handler` expects `Callable[..., int]`"
     ));
 }
 
@@ -11802,8 +12383,9 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered
-        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+    assert!(rendered.contains(
+        "assigns callable `Callable[[str], str]` where `handler` expects `Callable[[int], str]`"
+    ));
 }
 
 #[test]
@@ -12091,8 +12673,9 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered
-        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
+    assert!(rendered.contains(
+        "assigns callable `Callable[[str], str]` where `handler` expects `Callable[[int], str]`"
+    ));
 }
 
 #[test]
@@ -16913,6 +17496,7 @@ fn check_reports_incompatible_direct_override_signature() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4005"));
     assert!(rendered.contains("incompatible signature or annotation"));
+    assert!(rendered.contains("parameter `x`"), "{rendered}");
 }
 
 #[test]

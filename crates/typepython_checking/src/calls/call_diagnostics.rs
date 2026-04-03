@@ -18,6 +18,44 @@ pub(super) fn direct_call_arity_diagnostics(
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
             }
+            if let Some(failure) = direct_imported_call_unresolved_typepack_failure(node, nodes, call) {
+                return Some(unresolved_generic_call_diagnostic(
+                    node,
+                    call.line,
+                    &call.callee,
+                    &failure,
+                ));
+            }
+            if let Some((_, function)) = resolve_function_provider_with_node(nodes, node, &call.callee)
+                && let Some(failure) = direct_call_unresolved_typepack_failure(node, nodes, function, call)
+            {
+                return Some(unresolved_generic_call_diagnostic(
+                    node,
+                    call.line,
+                    &call.callee,
+                    &failure,
+                ));
+            }
+            if !call.starred_arg_types.is_empty()
+                && resolve_function_provider_with_node(nodes, node, &call.callee).is_some()
+            {
+                return None;
+            }
+            if resolve_direct_name_reference_semantic_type(
+                node,
+                nodes,
+                None,
+                None,
+                None,
+                None,
+                call.line,
+                &call.callee,
+            )
+            .as_ref()
+            .is_some_and(semantic_callable_has_unresolved_paramlist)
+            {
+                return None;
+            }
             if let Some(signature) =
                 resolve_direct_callable_signature_sites_with_context(
                     context,
@@ -91,7 +129,23 @@ pub(super) fn direct_call_type_diagnostics(
                     &shape,
                 );
             }
-            if let Some(function) = resolve_direct_function(node, nodes, &call.callee) {
+            if let Some(failure) = direct_imported_call_unresolved_typepack_failure(node, nodes, call) {
+                return vec![unresolved_generic_call_diagnostic(
+                    node,
+                    call.line,
+                    &call.callee,
+                    &failure,
+                )];
+            }
+            if let Some((_, function)) = resolve_function_provider_with_node(nodes, node, &call.callee) {
+                if let Some(failure) = direct_call_unresolved_typepack_failure(node, nodes, function, call) {
+                    return vec![unresolved_generic_call_diagnostic(
+                        node,
+                        call.line,
+                        &call.callee,
+                        &failure,
+                    )];
+                }
                 match resolve_direct_call_candidate_with_context_detailed(
                     context,
                     node,
@@ -109,31 +163,14 @@ pub(super) fn direct_call_type_diagnostics(
                         );
                     }
                     Err(failure)
-                        if function.type_params.iter().any(|type_param| {
-                            matches!(
-                                type_param.kind,
-                                typepython_binding::GenericTypeParamKind::ParamSpec
-                                    | typepython_binding::GenericTypeParamKind::TypeVarTuple
-                            )
-                        }) =>
+                        if declaration_has_runtime_generic_paramlist(function) =>
                     {
-                        return vec![
-                            Diagnostic::error(
-                                "TPY4014",
-                                format!(
-                                    "call to `{}` in module `{}` is invalid because generic parameter list of `{}` could not be resolved from this call",
-                                    call.callee, node.module_key, call.callee
-                                ),
-                            )
-                            .with_span(Span::new(
-                                node.module_path.display().to_string(),
-                                call.line,
-                                1,
-                                call.line,
-                                1,
-                            ))
-                            .with_note(failure.diagnostic_reason()),
-                        ];
+                        return vec![unresolved_generic_call_diagnostic(
+                            node,
+                            call.line,
+                            &call.callee,
+                            &failure,
+                        )];
                     }
                     Err(_) => {}
                 }
@@ -171,6 +208,73 @@ pub(super) fn direct_call_type_diagnostics(
             )
         })
         .collect()
+}
+
+pub(super) fn direct_call_unresolved_typepack_failure(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    call: &typepython_binding::CallSite,
+) -> Option<DirectCallResolutionFailure> {
+    let type_pack_name = function
+        .type_params
+        .iter()
+        .find(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple)
+        .map(|type_param| type_param.name.clone())
+        .or_else(|| {
+            declaration_semantic_signature_params(function)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|param| param.variadic)
+                .and_then(|param| param.annotation)
+                .and_then(|annotation| annotation.unpacked_inner().cloned())
+                .and_then(|annotation| match annotation {
+                    SemanticType::Name(name) => Some(name),
+                    _ => None,
+                })
+        })
+        .or_else(|| {
+            let (provider_node, _) = resolve_function_provider_with_node(nodes, node, &call.callee)?;
+            let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+            context
+                .load_direct_function_signatures(provider_node)
+                .get(&function.name)
+                .and_then(|signature| {
+                    signature.iter().find(|param| param.variadic).and_then(|param| {
+                        param.annotation.as_deref().map(|annotation| {
+                            let annotation = annotation.trim();
+                            annotation
+                                .strip_prefix("Unpack[")
+                                .and_then(|inner| inner.strip_suffix(']'))
+                                .map(str::trim)
+                                .or_else(|| annotation.strip_prefix('*').map(str::trim))
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| String::from("Ts"))
+                        })
+                    })
+                })
+        })
+        .or_else(|| {
+            (function.detail.contains('*') || function.detail.contains("Unpack["))
+                .then(|| String::from("Ts"))
+        })?;
+    resolved_starred_positional_expansions(node, nodes, call)
+        .iter()
+        .any(|expansion| matches!(expansion, PositionalExpansion::Variadic(_)))
+        .then_some(DirectCallResolutionFailure::GenericSolve(
+            GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
+                param_name: type_pack_name,
+            },
+        ))
+}
+
+fn direct_imported_call_unresolved_typepack_failure(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+) -> Option<DirectCallResolutionFailure> {
+    let (_provider_node, function) = resolve_function_provider_with_node(nodes, node, &call.callee)?;
+    direct_call_unresolved_typepack_failure(node, nodes, function, call)
 }
 
 pub(super) fn direct_call_keyword_diagnostics(
@@ -252,6 +356,9 @@ pub(super) fn direct_source_function_arity_diagnostic_with_context(
     if !has_variadic
         && (positional_types.len() > positional_params.len() || !variadic_starred_types.is_empty())
     {
+        if !variadic_starred_types.is_empty() && call.callee.contains('.') {
+            return None;
+        }
         return Some(Diagnostic::error(
             "TPY4001",
             format!(
@@ -537,7 +644,7 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
 
 pub(super) fn keyword_duplicates_positional_arguments(
     call: &typepython_binding::CallSite,
-    params: &[DirectSignatureParam],
+    params: &[SemanticCallableParam],
 ) -> bool {
     let positional_param_names = params
         .iter()
@@ -733,6 +840,44 @@ pub(super) fn resolved_call_arg_semantic_types(
         .collect()
 }
 
+pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+) -> Vec<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    if call.arg_values.is_empty() {
+        return call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+    }
+    call.arg_values
+        .iter()
+        .enumerate()
+        .map(|(index, metadata)| {
+            resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+                &context,
+                node,
+                nodes,
+                call.line,
+                metadata,
+                expected_types.get(index).and_then(|expected| expected.as_ref()),
+            )
+            .map(|result| result.actual_type)
+            .or_else(|| {
+                resolve_direct_expression_semantic_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
+            .unwrap_or_else(|| {
+                call.arg_types
+                    .get(index)
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .unwrap_or_else(|| SemanticType::Name(String::new()))
+            })
+        })
+        .collect()
+}
+
 pub(super) fn resolved_keyword_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -764,6 +909,44 @@ pub(super) fn resolved_keyword_arg_semantic_types(
             .unwrap_or_else(|| {
                 call
                     .keyword_arg_types
+                    .get(index)
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .unwrap_or_else(|| SemanticType::Name(String::new()))
+            })
+        })
+        .collect()
+}
+
+pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+) -> Vec<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    if call.keyword_arg_values.is_empty() {
+        return call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+    }
+    call.keyword_arg_values
+        .iter()
+        .enumerate()
+        .map(|(index, metadata)| {
+            resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+                &context,
+                node,
+                nodes,
+                call.line,
+                metadata,
+                expected_types.get(index).and_then(|expected| expected.as_ref()),
+            )
+            .map(|result| result.actual_type)
+            .or_else(|| {
+                resolve_direct_expression_semantic_type_from_metadata(
+                    node, nodes, None, None, None, call.line, metadata,
+                )
+            })
+            .unwrap_or_else(|| {
+                call.keyword_arg_types
                     .get(index)
                     .map(|ty| lower_type_text_or_name(ty))
                     .unwrap_or_else(|| SemanticType::Name(String::new()))
@@ -1169,10 +1352,15 @@ pub(super) fn resolve_direct_callable_signature_sites_with_context(
         return direct_function_signature_sites_from_semantic_callable(&callable_type);
     }
 
-    if let Some(function) = resolve_direct_function(node, nodes, callee)
-        && let Some(callable) = context.load_declaration_semantics(function).callable
-    {
-        return Some(callable_signature_sites_from_semantics(&callable));
+    if let Some((provider_node, function)) = resolve_direct_function_with_node(node, nodes, callee) {
+        if let Some(callable) = context.load_declaration_semantics(function).callable
+        {
+            return Some(callable_signature_sites_from_semantics(&callable));
+        }
+        let provider_signatures = context.load_direct_function_signatures(provider_node);
+        if let Some(signature) = provider_signatures.get(&function.name) {
+            return Some(signature.clone());
+        }
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
@@ -1404,6 +1592,28 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
     typepython_syntax::collect_direct_call_context_sites(&source)
         .into_iter()
         .filter_map(|call_site| {
+            if let Some((_, function)) = resolve_function_provider_with_node(nodes, node, &call_site.callee)
+                && let Some(bound_call) = node
+                    .calls
+                    .iter()
+                    .find(|call| call.callee == call_site.callee && call.line == call_site.line)
+                && let Some(failure) = direct_call_unresolved_typepack_failure(node, nodes, function, bound_call)
+                    .or_else(|| direct_imported_call_unresolved_typepack_failure(node, nodes, bound_call))
+            {
+                return Some(unresolved_generic_call_diagnostic(
+                    node,
+                    call_site.line,
+                    &call_site.callee,
+                    &failure,
+                ));
+            }
+            if node.declarations.iter().any(|declaration| {
+                declaration.owner.is_none()
+                    && declaration.kind == DeclarationKind::Function
+                    && declaration.name == call_site.callee
+            }) {
+                return None;
+            }
             let owner_has_paramspec = resolve_scope_owner_declaration(
                 node,
                 call_site.owner_name.as_deref(),
@@ -1414,34 +1624,30 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                     type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec
                 })
             });
-            let signature = resolve_scope_owner_signature(
-                node,
-                call_site.owner_name.as_deref(),
-                call_site.owner_type_name.as_deref(),
-            );
             let callable_type = resolve_direct_name_reference_semantic_type(
                 node,
                 nodes,
-                signature.as_deref(),
+                None,
                 None,
                 call_site.owner_name.as_deref(),
                 call_site.owner_type_name.as_deref(),
                 call_site.line,
                 &call_site.callee,
             )?;
-            let callable_type =
-                rewrite_imported_typing_aliases(node, &diagnostic_type_text(&callable_type));
-            if owner_has_paramspec && callable_has_unresolved_paramlist(&callable_type) {
+            if owner_has_paramspec && semantic_callable_has_unresolved_paramlist(&callable_type) {
                 return None;
             }
-            callable_has_unresolved_paramlist(&callable_type).then(|| {
+            semantic_callable_has_unresolved_paramlist(&callable_type).then(|| {
+                let failure = DirectCallResolutionFailure::UnresolvedCallableParamList {
+                    callable: callable_type.clone(),
+                };
                 Diagnostic::error(
                     "TPY4014",
                     format!(
                         "call to `{}` in module `{}` is invalid because callable type `{}` still contains an unresolved ParamSpec or Concatenate tail",
                         call_site.callee,
                         node.module_path.display(),
-                        callable_type
+                        diagnostic_type_text(&callable_type)
                     ),
                 )
                 .with_span(Span::new(
@@ -1451,40 +1657,22 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                     call_site.line,
                     1,
                 ))
+                .with_note(failure.diagnostic_reason())
             })
         })
         .collect()
 }
 
-pub(super) fn callable_has_unresolved_paramlist(text: &str) -> bool {
-    let text = normalize_type_text(text);
-    let Some(inner) = text.strip_prefix("Callable[").and_then(|inner| inner.strip_suffix(']'))
-    else {
+pub(super) fn semantic_callable_has_unresolved_paramlist(callable: &SemanticType) -> bool {
+    let Some((params, _)) = callable.callable_parts() else {
         return false;
     };
-    let parts = split_top_level_type_args(inner);
-    if parts.len() != 2 {
-        return false;
-    }
-
-    callable_params_are_unresolved(parts[0])
+    semantic_callable_params_are_unresolved(params)
 }
 
-pub(super) fn callable_params_are_unresolved(params: &str) -> bool {
-    let params = params.trim();
-    if params == "..." || params.is_empty() {
-        return false;
+pub(super) fn semantic_callable_params_are_unresolved(params: &SemanticCallableParams) -> bool {
+    match params {
+        SemanticCallableParams::Ellipsis | SemanticCallableParams::ParamList(_) => false,
+        SemanticCallableParams::Single(_) | SemanticCallableParams::Concatenate(_) => true,
     }
-    if params.starts_with('[') && params.ends_with(']') {
-        return false;
-    }
-    if let Some(inner) =
-        params.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        return split_top_level_type_args(inner)
-            .last()
-            .is_some_and(|tail| callable_params_are_unresolved(tail));
-    }
-
-    true
 }
