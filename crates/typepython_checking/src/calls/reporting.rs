@@ -428,15 +428,15 @@ pub(super) fn inferred_return_type_for_owner(
             resolve_contextual_return_type(node, nodes, candidate, expected, signature);
         let candidate_type = contextual
             .actual_type
-            .or_else(|| candidate.value_type.clone())
-            .unwrap_or_else(|| String::from("unknown"));
+            .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
+            .unwrap_or_else(|| lower_type_text_or_name("unknown"));
         trace_types.push(candidate_type);
     }
 
     Some(if trace_types.len() > 1 {
-        join_branch_types(trace_types)
+        render_semantic_type(&join_semantic_type_candidates(trace_types))
     } else {
-        normalize_type_text(trace_types.first().expect("single return type should exist"))
+        render_semantic_type(trace_types.first().expect("single return type should exist"))
     })
 }
 
@@ -466,14 +466,14 @@ pub(super) fn attach_return_inference_trace(
             resolve_contextual_return_type(node, nodes, candidate, expected, signature);
         let candidate_type = contextual
             .actual_type
-            .or_else(|| candidate.value_type.clone())
-            .unwrap_or_else(|| String::from("unknown"));
+            .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
+            .unwrap_or_else(|| lower_type_text_or_name("unknown"));
         trace_types.push(candidate_type.clone());
         trace_lines.push(format!(
             "line {}: {} -> {}",
             candidate.line,
             describe_return_trace_expression(candidate),
-            normalize_type_text(&candidate_type)
+            render_semantic_type(&candidate_type)
         ));
     }
 

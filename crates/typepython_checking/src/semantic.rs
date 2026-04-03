@@ -848,8 +848,10 @@ pub(super) fn direct_return_type_diagnostics(
         let Some(actual) = contextual.actual_type else {
             continue;
         };
+        let expected_type = lower_type_text_or_name(&expected);
+        let actual_text = render_semantic_type(&actual);
 
-        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
+        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 match &return_site.owner_type_name {
@@ -857,7 +859,7 @@ pub(super) fn direct_return_type_diagnostics(
                         "type `{}` in module `{}` returns `{}` where member `{}` expects `{}`",
                         owner_type,
                         node.module_path.display(),
-                        actual,
+                        actual_text,
                         return_site.owner_name,
                         expected
                     ),
@@ -865,7 +867,7 @@ pub(super) fn direct_return_type_diagnostics(
                         "function `{}` in module `{}` returns `{}` where `{}` expects `{}`",
                         return_site.owner_name,
                         node.module_path.display(),
-                        actual,
+                        actual_text,
                         return_site.owner_name,
                         expected
                     ),
@@ -879,14 +881,14 @@ pub(super) fn direct_return_type_diagnostics(
                 1,
             ));
             let diagnostic =
-                attach_type_mismatch_notes(diagnostic, node, nodes, &expected, &actual);
+                attach_type_mismatch_notes(diagnostic, node, nodes, &expected, &actual_text);
             let diagnostic = attach_return_inference_trace(
                 diagnostic,
                 node,
                 nodes,
                 return_site,
                 &expected,
-                &actual,
+                &actual_text,
                 &target.detail,
             );
             diagnostics.push(attach_missing_none_return_suggestion(
@@ -896,7 +898,7 @@ pub(super) fn direct_return_type_diagnostics(
                 return_site,
                 &expected_text,
                 &expected,
-                &actual,
+                &actual_text,
                 &target.detail,
             ));
         }
@@ -906,7 +908,7 @@ pub(super) fn direct_return_type_diagnostics(
 }
 
 pub(super) struct ContextualReturnTypeResult {
-    pub(super) actual_type: Option<String>,
+    pub(super) actual_type: Option<SemanticType>,
     pub(super) diagnostics: Vec<Diagnostic>,
 }
 
@@ -926,7 +928,7 @@ pub(super) fn resolve_contextual_return_type(
         Some(expected),
     ) {
         return ContextualReturnTypeResult {
-            actual_type: Some(actual_type),
+            actual_type: Some(lower_type_text_or_name(&actual_type)),
             diagnostics: Vec::new(),
         };
     }
@@ -938,7 +940,7 @@ pub(super) fn resolve_contextual_return_type(
         Some(expected),
     ) {
         return ContextualReturnTypeResult {
-            actual_type: Some(result.actual_type),
+            actual_type: Some(lower_type_text_or_name(&result.actual_type)),
             diagnostics: result.diagnostics,
         };
     }
@@ -950,12 +952,12 @@ pub(super) fn resolve_contextual_return_type(
         Some(expected),
     ) {
         return ContextualReturnTypeResult {
-            actual_type: Some(result.actual_type),
+            actual_type: Some(lower_type_text_or_name(&result.actual_type)),
             diagnostics: result.diagnostics,
         };
     }
     ContextualReturnTypeResult {
-        actual_type: resolve_direct_expression_type(
+        actual_type: resolve_direct_expression_semantic_type(
             node,
             nodes,
             Some(signature),
@@ -1058,7 +1060,7 @@ pub(super) fn direct_expr_metadata_from_yield_site(
 }
 
 pub(super) struct ContextualYieldTypeResult {
-    pub(super) actual_type: Option<String>,
+    pub(super) actual_type: Option<SemanticType>,
     pub(super) diagnostics: Vec<Diagnostic>,
 }
 
@@ -1079,7 +1081,7 @@ pub(super) fn resolve_contextual_yield_type(
             Some(expected),
         ) {
             return ContextualYieldTypeResult {
-                actual_type: Some(actual_type),
+                actual_type: Some(lower_type_text_or_name(&actual_type)),
                 diagnostics: Vec::new(),
             };
         }
@@ -1091,7 +1093,7 @@ pub(super) fn resolve_contextual_yield_type(
             Some(expected),
         ) {
             return ContextualYieldTypeResult {
-                actual_type: Some(result.actual_type),
+                actual_type: Some(lower_type_text_or_name(&result.actual_type)),
                 diagnostics: result.diagnostics,
             };
         }
@@ -1103,13 +1105,13 @@ pub(super) fn resolve_contextual_yield_type(
             Some(expected),
         ) {
             return ContextualYieldTypeResult {
-                actual_type: Some(result.actual_type),
+                actual_type: Some(lower_type_text_or_name(&result.actual_type)),
                 diagnostics: result.diagnostics,
             };
         }
     }
     ContextualYieldTypeResult {
-        actual_type: resolve_direct_expression_type(
+        actual_type: resolve_direct_expression_semantic_type(
             node,
             nodes,
             Some(signature),
@@ -1211,12 +1213,16 @@ pub(super) fn direct_yield_type_diagnostics(
         };
 
         let actual = if yield_site.is_yield_from {
-            unwrap_yield_from_type(&actual).unwrap_or(actual)
+            unwrap_yield_from_type(&render_semantic_type(&actual))
+                .map(|resolved| lower_type_text_or_name(&resolved))
+                .unwrap_or(actual)
         } else {
             actual
         };
+        let expected_type = lower_type_text_or_name(&expected);
+        let actual_text = render_semantic_type(&actual);
 
-        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
+        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
             diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match &yield_site.owner_type_name {
@@ -1224,7 +1230,7 @@ pub(super) fn direct_yield_type_diagnostics(
                             "type `{}` in module `{}` yields `{}` where member `{}` expects `Generator[{}, ...]`",
                             owner_type_name,
                             node.module_path.display(),
-                            actual,
+                            actual_text,
                             yield_site.owner_name,
                             expected
                         ),
@@ -1232,7 +1238,7 @@ pub(super) fn direct_yield_type_diagnostics(
                             "function `{}` in module `{}` yields `{}` where `Generator[{}, ...]` expects `{}`",
                             yield_site.owner_name,
                             node.module_path.display(),
-                            actual,
+                            actual_text,
                             expected,
                             expected
                         ),
@@ -1260,7 +1266,7 @@ pub(super) fn for_loop_target_diagnostics(
         .iter()
         .filter(|for_loop| !for_loop.target_names.is_empty())
         .filter_map(|for_loop| {
-            let iter_type = resolve_direct_expression_type(
+            let iter_type = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
                 resolve_for_owner_signature(node, for_loop),
@@ -1290,9 +1296,9 @@ pub(super) fn for_loop_target_diagnostics(
                 None,
                 None,
             )?;
-
-            let element_type = unwrap_for_iterable_type(&iter_type)?;
-            let tuple_elements = unwrap_fixed_tuple_elements(&element_type)?;
+            let element_type =
+                lower_type_text_or_name(&unwrap_for_iterable_type(&render_semantic_type(&iter_type))?);
+            let tuple_elements = unpacked_fixed_tuple_semantic_elements(&element_type)?;
 
             (tuple_elements.len() != for_loop.target_names.len()).then(|| {
                 Diagnostic::error(
@@ -1304,7 +1310,7 @@ pub(super) fn for_loop_target_diagnostics(
                             node.module_path.display(),
                             for_loop.target_names.join(", "),
                             for_loop.target_names.len(),
-                            element_type,
+                            render_semantic_type(&element_type),
                             tuple_elements.len(),
                             owner_name,
                         ),
@@ -1314,7 +1320,7 @@ pub(super) fn for_loop_target_diagnostics(
                             node.module_path.display(),
                             for_loop.target_names.join(", "),
                             for_loop.target_names.len(),
-                            element_type,
+                            render_semantic_type(&element_type),
                             tuple_elements.len(),
                         ),
                         _ => format!(
@@ -1322,7 +1328,7 @@ pub(super) fn for_loop_target_diagnostics(
                             node.module_path.display(),
                             for_loop.target_names.join(", "),
                             for_loop.target_names.len(),
-                            element_type,
+                            render_semantic_type(&element_type),
                             tuple_elements.len(),
                         ),
                     },
@@ -1342,7 +1348,7 @@ pub(super) fn destructuring_assignment_diagnostics(
         .filter_map(|assignment| {
             let target_names = assignment.destructuring_target_names.as_ref()?;
             let signature = resolve_assignment_owner_signature(node, assignment);
-            let actual = resolve_direct_expression_type(
+            let actual = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1372,7 +1378,7 @@ pub(super) fn destructuring_assignment_diagnostics(
                 assignment.value_binop_right.as_deref(),
                 assignment.value_binop_operator.as_deref(),
             )?;
-            let tuple_elements = unwrap_fixed_tuple_elements(&actual)?;
+            let tuple_elements = unpacked_fixed_tuple_semantic_elements(&actual)?;
             (tuple_elements.len() != target_names.len()).then(|| {
                 Diagnostic::error(
                     "TPY4001",
@@ -1383,7 +1389,7 @@ pub(super) fn destructuring_assignment_diagnostics(
                             node.module_path.display(),
                             target_names.join(", "),
                             target_names.len(),
-                            actual,
+                            render_semantic_type(&actual),
                             tuple_elements.len(),
                             owner_name,
                         ),
@@ -1393,7 +1399,7 @@ pub(super) fn destructuring_assignment_diagnostics(
                             node.module_path.display(),
                             target_names.join(", "),
                             target_names.len(),
-                            actual,
+                            render_semantic_type(&actual),
                             tuple_elements.len(),
                         ),
                         _ => format!(
@@ -1401,7 +1407,7 @@ pub(super) fn destructuring_assignment_diagnostics(
                             node.module_path.display(),
                             target_names.join(", "),
                             target_names.len(),
-                            actual,
+                            render_semantic_type(&actual),
                             tuple_elements.len(),
                         ),
                     },
