@@ -66,20 +66,22 @@ pub(super) fn ambiguous_overload_call_diagnostics(
                 return None;
             }
 
-            let applicable = resolve_applicable_direct_overload_candidates(node, nodes, call, &overloads);
-            if applicable.len() < 2 || select_most_specific_overload(node, nodes, &applicable).is_some() {
-                return None;
+            match resolve_direct_overload_selection(node, nodes, call, &overloads) {
+                ResolvedOverloadSelection::Ambiguous { applicable_count }
+                    if applicable_count >= 2 =>
+                {
+                    Some(Diagnostic::error(
+                        "TPY4012",
+                        format!(
+                            "call to `{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                            call.callee,
+                            node.module_path.display(),
+                            applicable_count
+                        ),
+                    ))
+                }
+                _ => None,
             }
-
-            Some(Diagnostic::error(
-                "TPY4012",
-                format!(
-                    "call to `{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
-                    call.callee,
-                    node.module_path.display(),
-                    applicable.len()
-                ),
-            ))
         })
         .collect()
 }
@@ -128,12 +130,16 @@ pub(super) fn overload_is_more_specific(
 ) -> bool {
     let candidate_params = &candidate.signature_params;
     let baseline_params = &baseline.signature_params;
+    let candidate_semantic_params = &candidate.semantic_param_types;
+    let baseline_semantic_params = &baseline.semantic_param_types;
     if candidate_params.len() != baseline_params.len() {
         return false;
     }
 
     let mut strictly_more_specific = false;
-    for (candidate_param, baseline_param) in candidate_params.iter().zip(baseline_params.iter()) {
+    for (index, (candidate_param, baseline_param)) in
+        candidate_params.iter().zip(baseline_params.iter()).enumerate()
+    {
         if candidate_param.name != baseline_param.name
             || candidate_param.has_default != baseline_param.has_default
             || candidate_param.positional_only != baseline_param.positional_only
@@ -143,23 +149,22 @@ pub(super) fn overload_is_more_specific(
         {
             return false;
         }
-        if candidate_param.annotation.is_empty() || baseline_param.annotation.is_empty() {
-            if candidate_param.annotation != baseline_param.annotation {
+        if candidate_param.annotation.is_none() || baseline_param.annotation.is_none() {
+            if candidate_param.annotation_text != baseline_param.annotation_text {
                 return false;
             }
             continue;
         }
-        if !semantic_type_is_assignable(
-            node,
-            nodes,
-            &lower_type_text_or_name(&baseline_param.annotation),
-            &lower_type_text_or_name(&candidate_param.annotation),
-        ) {
+        let Some(candidate_param_type) = candidate_semantic_params.get(index) else {
+            return false;
+        };
+        let Some(baseline_param_type) = baseline_semantic_params.get(index) else {
+            return false;
+        };
+        if !semantic_type_is_assignable(node, nodes, baseline_param_type, candidate_param_type) {
             return false;
         }
-        if normalize_type_text(&candidate_param.annotation)
-            != normalize_type_text(&baseline_param.annotation)
-        {
+        if candidate_param_type != baseline_param_type {
             strictly_more_specific = true;
         }
     }
@@ -167,26 +172,70 @@ pub(super) fn overload_is_more_specific(
     strictly_more_specific
 }
 
-pub(super) fn select_most_specific_overload<'a>(
+fn select_most_specific_overload_index(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    applicable: &'a [ResolvedDirectCallCandidate<'a>],
-) -> Option<&'a ResolvedDirectCallCandidate<'a>> {
+    applicable: &[ResolvedDirectCallCandidate<'_>],
+) -> Option<usize> {
     if applicable.len() == 1 {
-        return applicable.first();
+        return Some(0);
     }
 
     let best = applicable
         .iter()
+        .enumerate()
         .filter(|candidate| {
             applicable.iter().all(|other| {
-                std::ptr::eq::<Declaration>(candidate.declaration, other.declaration)
-                    || overload_is_more_specific(node, nodes, candidate, other)
+                std::ptr::eq::<Declaration>(candidate.1.declaration, other.declaration)
+                    || overload_is_more_specific(node, nodes, candidate.1, other)
             })
         })
         .collect::<Vec<_>>();
 
-    if best.len() == 1 { best.into_iter().next() } else { None }
+    if best.len() == 1 { Some(best[0].0) } else { None }
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum ResolvedOverloadSelection<'a> {
+    Selected(ResolvedDirectCallCandidate<'a>),
+    Ambiguous { applicable_count: usize },
+    NotApplicable {
+        runtime_generic_failures: Vec<(&'a Declaration, DirectCallResolutionFailure)>,
+    },
+}
+
+pub(super) fn resolve_overload_selection_from_attempts<'a>(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    attempts: Vec<(&'a Declaration, Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure>)>,
+) -> ResolvedOverloadSelection<'a> {
+    let mut applicable = Vec::new();
+    let mut runtime_generic_failures = Vec::new();
+
+    for (declaration, attempt) in attempts {
+        match attempt {
+            Ok(candidate)
+                if call_signature_params_are_applicable(node, nodes, call, &candidate.signature_params) =>
+            {
+                applicable.push(candidate);
+            }
+            Ok(_) => {}
+            Err(failure) if declaration_has_runtime_generic_paramlist(declaration) => {
+                runtime_generic_failures.push((declaration, failure));
+            }
+            Err(_) => {}
+        }
+    }
+
+    match applicable.len() {
+        0 => ResolvedOverloadSelection::NotApplicable { runtime_generic_failures },
+        1 => ResolvedOverloadSelection::Selected(applicable.pop().expect("single applicable overload")),
+        applicable_count => match select_most_specific_overload_index(node, nodes, &applicable) {
+            Some(index) => ResolvedOverloadSelection::Selected(applicable.swap_remove(index)),
+            None => ResolvedOverloadSelection::Ambiguous { applicable_count },
+        },
+    }
 }
 
 #[cfg(test)]
@@ -234,7 +283,7 @@ pub(super) fn call_signature_params_are_applicable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
-    params: &[DirectSignatureParam],
+    params: &[SemanticCallableParam],
 ) -> bool {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     let positional_params = params
@@ -243,43 +292,55 @@ pub(super) fn call_signature_params_are_applicable(
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
     let starred_positional = resolved_starred_positional_expansions(node, nodes, call);
-    let expected_positional_arg_types =
-        expected_positional_arg_types_from_direct_signature(params, call.arg_count);
+    let expected_positional_arg_types = expected_positional_arg_semantic_types_from_params(
+        params,
+        call.arg_count,
+    );
     let expected_keyword_arg_types =
-        expected_keyword_arg_types_from_direct_signature(params, &call.keyword_names);
+        expected_keyword_arg_semantic_types_from_params(params, &call.keyword_names);
     if call.arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_semantic_type_with_context(
+        resolve_contextual_call_arg_semantic_type_with_expected_semantic(
             &context,
             node,
             nodes,
             call.line,
             metadata,
-            expected_positional_arg_types.get(index).and_then(|expected| expected.as_deref()),
+            expected_positional_arg_types.get(index).and_then(|expected| expected.as_ref()),
         )
         .is_some_and(|result| !result.diagnostics.is_empty())
     }) {
         return false;
     }
     if call.keyword_arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_semantic_type_with_context(
+        resolve_contextual_call_arg_semantic_type_with_expected_semantic(
             &context,
             node,
             nodes,
             call.line,
             metadata,
-            expected_keyword_arg_types.get(index).and_then(|expected| expected.as_deref()),
+            expected_keyword_arg_types.get(index).and_then(|expected| expected.as_ref()),
         )
         .is_some_and(|result| !result.diagnostics.is_empty())
     }) {
         return false;
     }
     let resolved_keyword_arg_types =
-        resolved_keyword_arg_semantic_types(node, nodes, call, &expected_keyword_arg_types)
+        resolved_keyword_arg_semantic_types_with_expected_semantic(
+            node,
+            nodes,
+            call,
+            &expected_keyword_arg_types,
+        )
             .into_iter()
             .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
             .collect::<Vec<_>>();
     let mut positional_types =
-        resolved_call_arg_semantic_types(node, nodes, call, &expected_positional_arg_types)
+        resolved_call_arg_semantic_types_with_expected_semantic(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+        )
             .into_iter()
             .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
             .collect::<Vec<_>>();
@@ -365,16 +426,15 @@ pub(super) fn call_signature_params_are_applicable(
 
     let param_types = params
         .iter()
-        .map(|param| {
-            (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
-        })
+        .map(|param| param.annotation.clone())
         .collect::<Vec<_>>();
-    let variadic_type = params.iter().find(|param| param.variadic).and_then(|param| {
-        (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
-    });
+    let variadic_type = params
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| param.annotation.clone());
     let keyword_variadic_type =
         params.iter().find(|param| param.keyword_variadic).and_then(|param| {
-            (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
+            param.annotation.clone()
         });
     let positional_ok =
         positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
@@ -452,6 +512,50 @@ pub(super) fn call_signature_params_are_applicable(
         });
 
     positional_ok && keyword_ok
+}
+
+fn expected_positional_arg_semantic_types_from_params(
+    params: &[SemanticCallableParam],
+    arg_count: usize,
+) -> Vec<Option<SemanticType>> {
+    let positional_params = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let variadic_type = params
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| param.annotation.clone());
+
+    (0..arg_count)
+        .map(|index| {
+            positional_params
+                .get(index)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_keyword_arg_semantic_types_from_params(
+    params: &[SemanticCallableParam],
+    keyword_names: &[String],
+) -> Vec<Option<SemanticType>> {
+    let keyword_variadic_type = params
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.clone());
+
+    keyword_names
+        .iter()
+        .map(|keyword| {
+            params
+                .iter()
+                .find(|param| param.name == *keyword && !param.positional_only)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| keyword_variadic_type.clone())
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -720,8 +824,19 @@ pub(super) fn name_is_unknown_boundary(
 ) -> bool {
     if resolve_typing_callable_signature(name).is_some()
         || resolve_builtin_return_type(name).is_some()
+        || matches!(name, "eval" | "exec" | "setattr" | "delattr")
         || resolve_direct_function(node, nodes, name).is_some()
         || resolve_direct_base(nodes, node, name).is_some()
+        || resolve_module_level_assignment_reference_semantic_type(node, nodes, None, usize::MAX, name)
+            .is_some()
+        || node.declarations.iter().any(|declaration| {
+            declaration.owner.is_none()
+                && declaration.kind == DeclarationKind::Value
+                && declaration.name == name
+                && declaration_value_annotation_semantic_type(declaration).is_some_and(|annotation| {
+                    !matches!(annotation.strip_annotated(), SemanticType::Name(name) if name == "unknown")
+                })
+        })
     {
         return false;
     }
@@ -765,12 +880,7 @@ pub(super) fn unresolved_import_boundary_type_with_context<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     local_name: &str,
 ) -> Option<&'static str> {
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == local_name
-    })?;
-    if resolve_import_target(node, nodes, import).is_some()
-        || resolve_imported_module_target(node, nodes, local_name).is_some()
-    {
+    if resolve_imported_symbol_semantic_target(node, nodes, local_name).is_some() {
         return None;
     }
     Some(context.import_fallback_type())
@@ -836,26 +946,23 @@ pub(super) fn direct_return_type_diagnostics(
             continue;
         };
 
-        let expected_text = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(
-                &declaration_signature_return_annotation_text(target).unwrap_or_default(),
-                return_site.owner_type_name.as_deref(),
-            ),
-        );
-        let Some(expected) =
-            normalized_direct_return_annotation(&expected_text).map(normalize_type_text)
-        else {
+        let Some(expected_type) = target.owner.as_ref().map_or_else(
+            || declaration_signature_return_semantic_type(target),
+            |owner| declaration_signature_return_semantic_type_with_self(target, &owner.name),
+        ) else {
             continue;
         };
+        let expected_type = rewrite_imported_typing_semantic_type(node, &expected_type);
+        if matches!(expected_type.strip_annotated(), SemanticType::Name(name) if name.is_empty()) {
+            continue;
+        }
+        let expected = diagnostic_type_text(&expected_type);
 
-        let contextual =
-            resolve_contextual_return_type(node, nodes, return_site, &expected, &target.detail);
+        let contextual = resolve_contextual_return_type(node, nodes, return_site, &expected);
         diagnostics.extend(contextual.diagnostics);
         let Some(actual) = contextual.actual_type else {
             continue;
         };
-        let expected_type = lower_type_text_or_name(&expected);
         let actual_text = diagnostic_type_text(&actual);
 
         if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
@@ -896,17 +1003,14 @@ pub(super) fn direct_return_type_diagnostics(
                 return_site,
                 &expected,
                 &actual_text,
-                &target.detail,
             );
             diagnostics.push(attach_missing_none_return_suggestion(
                 diagnostic,
                 node,
                 nodes,
                 return_site,
-                &expected_text,
                 &expected,
                 &actual_text,
-                &target.detail,
             ));
         }
     }
@@ -924,7 +1028,6 @@ pub(super) fn resolve_contextual_return_type(
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
     expected: &str,
-    signature: &str,
 ) -> ContextualReturnTypeResult {
     let metadata = direct_expr_metadata_from_return_site(return_site);
     if let Some(lambda) = metadata.value_lambda.as_deref()
@@ -957,10 +1060,13 @@ pub(super) fn resolve_contextual_return_type(
             diagnostics: result.diagnostics,
         };
     }
-    if let Some(result) = resolve_contextual_collection_literal_semantic_type_with_context(
+    if let Some(result) = resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
         &CheckerContext::new(nodes, ImportFallback::Unknown, None),
         node,
         nodes,
+        None,
+        Some(return_site.owner_name.as_str()),
+        return_site.owner_type_name.as_deref(),
         return_site.line,
         &metadata,
         Some(expected),
@@ -974,7 +1080,7 @@ pub(super) fn resolve_contextual_return_type(
         actual_type: resolve_direct_expression_semantic_type(
             node,
             nodes,
-            Some(signature),
+            None,
             None,
             Some(return_site.owner_name.as_str()),
             return_site.owner_type_name.as_deref(),
@@ -1083,7 +1189,6 @@ pub(super) fn resolve_contextual_yield_type(
     nodes: &[typepython_graph::ModuleNode],
     yield_site: &typepython_binding::YieldSite,
     expected: &str,
-    signature: &str,
 ) -> ContextualYieldTypeResult {
     let metadata = direct_expr_metadata_from_yield_site(yield_site);
     if !yield_site.is_yield_from {
@@ -1117,10 +1222,13 @@ pub(super) fn resolve_contextual_yield_type(
                 diagnostics: result.diagnostics,
             };
         }
-        if let Some(result) = resolve_contextual_collection_literal_semantic_type_with_context(
+        if let Some(result) = resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
             &CheckerContext::new(nodes, ImportFallback::Unknown, None),
             node,
             nodes,
+            None,
+            Some(yield_site.owner_name.as_str()),
+            yield_site.owner_type_name.as_deref(),
             yield_site.line,
             &metadata,
             Some(expected),
@@ -1135,7 +1243,7 @@ pub(super) fn resolve_contextual_yield_type(
         actual_type: resolve_direct_expression_semantic_type(
             node,
             nodes,
-            Some(signature),
+            None,
             None,
             Some(yield_site.owner_name.as_str()),
             yield_site.owner_type_name.as_deref(),
@@ -1220,14 +1328,18 @@ pub(super) fn direct_yield_type_diagnostics(
             continue;
         };
 
-        let Some(returns) = declaration_signature_return_annotation_text(target) else {
+        let Some(returns) = target.owner.as_ref().map_or_else(
+            || declaration_signature_return_semantic_type(target),
+            |owner| declaration_signature_return_semantic_type_with_self(target, &owner.name),
+        ) else {
             continue;
         };
-        let Some(expected) = unwrap_generator_yield_type(&returns) else {
+        let Some(expected_type) = unwrap_generator_yield_semantic_type(&returns) else {
             continue;
         };
-        let contextual =
-            resolve_contextual_yield_type(node, nodes, yield_site, &expected, &target.detail);
+        let expected_type = rewrite_imported_typing_semantic_type(node, &expected_type);
+        let expected = diagnostic_type_text(&expected_type);
+        let contextual = resolve_contextual_yield_type(node, nodes, yield_site, &expected);
         diagnostics.extend(contextual.diagnostics);
         let Some(actual) = contextual.actual_type else {
             continue;
@@ -1238,7 +1350,6 @@ pub(super) fn direct_yield_type_diagnostics(
         } else {
             actual
         };
-        let expected_type = lower_type_text_or_name(&expected);
         let actual_text = diagnostic_type_text(&actual);
 
         if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
@@ -1285,11 +1396,10 @@ pub(super) fn for_loop_target_diagnostics(
         .iter()
         .filter(|for_loop| !for_loop.target_names.is_empty())
         .filter_map(|for_loop| {
-            let signature = resolve_for_owner_signature(node, for_loop);
             let iter_type = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
-                signature.as_deref(),
+                None,
                 None,
                 for_loop.owner_name.as_deref(),
                 for_loop.owner_type_name.as_deref(),
@@ -1366,11 +1476,10 @@ pub(super) fn destructuring_assignment_diagnostics(
         .filter(|assignment| assignment.destructuring_index == Some(0))
         .filter_map(|assignment| {
             let target_names = assignment.destructuring_target_names.as_ref()?;
-            let signature = resolve_assignment_owner_signature(node, assignment);
             let actual = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
-                signature.as_deref(),
+                None,
                 Some(assignment.name.as_str()),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
@@ -1443,8 +1552,7 @@ pub(super) fn with_statement_diagnostics(
     node.with_statements
         .iter()
         .filter_map(|with_site| {
-            let signature = resolve_with_owner_signature(node, with_site);
-            resolve_with_target_semantic_type_for_signature(node, nodes, signature.as_deref(), with_site)
+            resolve_with_target_semantic_type_for_signature(node, nodes, None, with_site)
                 .is_none()
                 .then(|| {
                 Diagnostic::error(
