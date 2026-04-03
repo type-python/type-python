@@ -125,8 +125,8 @@ pub(super) fn method_override_incompatibility(
         return Some(OverrideCompatibilityFailure::MethodKindMismatch);
     }
 
-    let member_params = direct_signature_params_from_sites(&declaration_signature_sites(member));
-    let base_params = direct_signature_params_from_sites(&declaration_signature_sites(base_member));
+    let member_params = declaration_semantic_signature_params(member)?;
+    let base_params = declaration_semantic_signature_params(base_member)?;
     if member_params.len() != base_params.len() {
         return Some(OverrideCompatibilityFailure::ParameterCountMismatch {
             child_count: member_params.len(),
@@ -151,12 +151,13 @@ pub(super) fn method_override_incompatibility(
                 base_name: base.name.clone(),
             });
         }
-        if !child.annotation.is_empty() && !base.annotation.is_empty()
+        if let (Some(child_annotation), Some(base_annotation)) =
+            (child.annotation.as_ref(), base.annotation.as_ref())
             && let Some(reason) = semantic_type_assignability_failure(
                 node,
                 nodes,
-                &lower_type_text_or_name(&child.annotation),
-                &lower_type_text_or_name(&base.annotation),
+                child_annotation,
+                base_annotation,
             )
         {
             return Some(OverrideCompatibilityFailure::ParameterTypeMismatch {
@@ -166,18 +167,19 @@ pub(super) fn method_override_incompatibility(
         }
     }
 
-    let child_return = declaration_signature_return_annotation_text(member).unwrap_or_default();
-    let base_return = declaration_signature_return_annotation_text(base_member).unwrap_or_default();
-    if child_return.is_empty() || base_return.is_empty() {
+    let child_return = member.owner.as_ref().map_or_else(
+        || declaration_signature_return_semantic_type(member),
+        |owner| declaration_signature_return_semantic_type_with_self(member, &owner.name),
+    );
+    let base_return = base_member.owner.as_ref().map_or_else(
+        || declaration_signature_return_semantic_type(base_member),
+        |owner| declaration_signature_return_semantic_type_with_self(base_member, &owner.name),
+    );
+    let (Some(child_return), Some(base_return)) = (child_return, base_return) else {
         return None;
-    }
-    semantic_type_assignability_failure(
-        node,
-        nodes,
-        &lower_type_text_or_name(&base_return),
-        &lower_type_text_or_name(&child_return),
-    )
-    .map(|reason| OverrideCompatibilityFailure::ReturnTypeMismatch { reason })
+    };
+    semantic_type_assignability_failure(node, nodes, &base_return, &child_return)
+        .map(|reason| OverrideCompatibilityFailure::ReturnTypeMismatch { reason })
 }
 
 pub(super) fn missing_override_diagnostics<'a>(
@@ -732,25 +734,10 @@ pub(super) fn resolve_match_subject_semantic_type(
     nodes: &[typepython_graph::ModuleNode],
     match_site: &typepython_binding::MatchSite,
 ) -> Option<SemanticType> {
-    let signature = match_site.owner_name.as_deref().and_then(|owner_name| {
-        node.declarations
-            .iter()
-            .find(|declaration| {
-                declaration.kind == DeclarationKind::Function
-                    && declaration.name == owner_name
-                    && match (&match_site.owner_type_name, &declaration.owner) {
-                        (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
-                        (None, None) => true,
-                        _ => false,
-                    }
-            })
-            .and_then(declaration_signature_text)
-    });
-
     resolve_direct_expression_semantic_type(
         node,
         nodes,
-        signature.as_deref(),
+        None,
         None,
         match_site.owner_name.as_deref(),
         match_site.owner_type_name.as_deref(),
@@ -1300,8 +1287,8 @@ pub(super) fn property_setter_compatibility_diagnostics(
                     && decl.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
             })?;
             let getter_type = declaration_signature_return_semantic_type(getter)?;
-            let setter_params = declaration_signature_param_types(setter)?;
-            let setter_type = lower_type_text_or_name(setter_params.get(1)?);
+            let setter_params = declaration_semantic_signature_params(setter)?;
+            let setter_type = setter_params.get(1)?.annotation_or_dynamic();
             (getter_type != setter_type).then(|| {
                 Diagnostic::error(
                     "TPY4001",

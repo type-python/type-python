@@ -271,71 +271,79 @@ pub(super) fn resolve_nominal_getitem_return_semantic_type(
     nodes: &[typepython_graph::ModuleNode],
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
-    let owner_type_name = render_semantic_type(owner_type);
+    let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     let nominal_owner_name = owner_type
         .generic_parts()
         .map(|(head, _)| head.to_owned())
         .unwrap_or_else(|| owner_type_name.clone());
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
     let getitem = find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")?;
-    let return_text = rewrite_imported_typing_aliases(
+    Some(rewrite_imported_typing_semantic_type(
         node,
-        &substitute_self_annotation(
-            &declaration_signature_return_annotation_text(getitem)?,
-            Some(&owner_type_name),
-        ),
-    );
-    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+        &declaration_signature_return_semantic_type_with_self(getitem, &owner_type_name)?,
+    ))
 }
 
-pub(super) fn resolve_direct_return_name_semantic_type(
-    signature: &str,
-    value_name: &str,
-) -> Option<SemanticType> {
-    direct_signature_params(signature)?.into_iter().find_map(|param| {
-        if param.name != value_name {
-            return None;
-        }
-        let annotation = normalize_type_text(&param.annotation);
-        Some(if param.variadic {
-            if annotation.is_empty() {
+fn semantic_type_from_scope_param(
+    param: &SemanticCallableParam,
+) -> SemanticType {
+    if param.variadic {
+        if let Some(annotation) = param.annotation.as_ref() {
+            if matches!(annotation.strip_annotated(), SemanticType::Unpack(_)) {
                 SemanticType::Generic {
                     head: String::from("tuple"),
-                    args: vec![SemanticType::Name(String::from("dynamic")), SemanticType::Name(String::from("..."))],
-                }
-            } else if annotation.starts_with("Unpack[") {
-                SemanticType::Generic {
-                    head: String::from("tuple"),
-                    args: vec![lower_type_text_or_name(&annotation)],
+                    args: vec![annotation.clone()],
                 }
             } else {
                 SemanticType::Generic {
                     head: String::from("tuple"),
-                    args: vec![lower_type_text_or_name(&annotation), SemanticType::Name(String::from("..."))],
-                }
-            }
-        } else if param.keyword_variadic {
-            if annotation.is_empty() {
-                SemanticType::Generic {
-                    head: String::from("dict"),
-                    args: vec![
-                        SemanticType::Name(String::from("str")),
-                        SemanticType::Name(String::from("dynamic")),
-                    ],
-                }
-            } else {
-                SemanticType::Generic {
-                    head: String::from("dict"),
-                    args: vec![
-                        SemanticType::Name(String::from("str")),
-                        lower_type_text_or_name(&annotation),
-                    ],
+                    args: vec![annotation.clone(), SemanticType::Name(String::from("..."))],
                 }
             }
         } else {
-            lower_type_text_or_name(&annotation)
-        })
-    })
+            SemanticType::Generic {
+                head: String::from("tuple"),
+                args: vec![
+                    SemanticType::Name(String::from("dynamic")),
+                    SemanticType::Name(String::from("...")),
+                ],
+            }
+        }
+    } else if param.keyword_variadic {
+        if let Some(annotation) = param.annotation.as_ref() {
+            SemanticType::Generic {
+                head: String::from("dict"),
+                args: vec![SemanticType::Name(String::from("str")), annotation.clone()],
+            }
+        } else {
+            SemanticType::Generic {
+                head: String::from("dict"),
+                args: vec![
+                    SemanticType::Name(String::from("str")),
+                    SemanticType::Name(String::from("dynamic")),
+                ],
+            }
+        }
+    } else {
+        param.annotation_or_dynamic()
+    }
+}
+
+pub(super) fn resolve_scope_param_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
+    value_name: &str,
+) -> Option<SemanticType> {
+    let declaration = resolve_scope_owner_declaration(node, owner_name, owner_type_name)?;
+    let callable = declaration_callable_semantics(declaration)?;
+    let params = owner_type_name
+        .map(|owner_type_name| callable_semantic_params_with_self_from_semantics(&callable, owner_type_name))
+        .unwrap_or_else(|| callable_semantic_params_from_semantics(&callable));
+    params
+        .iter()
+        .find(|param| param.name == value_name)
+        .map(semantic_type_from_scope_param)
 }
 
 #[expect(
@@ -740,7 +748,7 @@ pub(super) fn resolve_readable_member_semantic_type(
     declaration: &Declaration,
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
-    let owner_type_name = render_semantic_type(owner_type);
+    let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     match declaration.kind {
         DeclarationKind::Value => {
             let detail = rewrite_imported_typing_aliases(
@@ -762,14 +770,10 @@ pub(super) fn resolve_readable_member_semantic_type(
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
         {
-            let return_text = rewrite_imported_typing_aliases(
+            Some(rewrite_imported_typing_semantic_type(
                 node,
-                &substitute_self_annotation(
-                    &declaration_signature_return_annotation_text(declaration)?,
-                    Some(&owner_type_name),
-                ),
-            );
-            normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+                &declaration_signature_return_semantic_type_with_self(declaration, &owner_type_name)?,
+            ))
         }
         _ => None,
     }
@@ -883,14 +887,10 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
     current_line: usize,
     value_name: &str,
 ) -> Option<SemanticType> {
-    if let Some(signature) = signature {
-        let signature = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(signature, current_owner_type_name),
-        );
-        if let Some(param_type) = resolve_direct_return_name_semantic_type(&signature, value_name) {
-            return Some(param_type);
-        }
+    if let Some(param_type) =
+        resolve_scope_param_semantic_type(node, current_owner_name, current_owner_type_name, value_name)
+    {
+        return Some(param_type);
     }
 
     if exclude_name.is_some_and(|name| name == value_name) {
@@ -971,27 +971,37 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return normalized_direct_return_annotation(&detail).map(lower_type_text_or_name);
     }
 
-    if let Some(function) = resolve_direct_function(node, nodes, value_name) {
-        if let Some(callable_annotation) =
-            resolve_decorated_function_callable_annotation_with_context(
-                context, node, nodes, value_name,
-            )
+    if let Some((provider_node, function)) = resolve_direct_function_with_node(node, nodes, value_name) {
+        if let Some(callable_type) = resolve_decorated_function_callable_semantic_type_with_context(
+            context,
+            node,
+            nodes,
+            value_name,
+        )
         {
-            return Some(lower_type_text_or_name(&callable_annotation));
+            return Some(callable_type);
         }
-        let param_types = declaration_signature_sites(function)
-            .into_iter()
-            .map(|param| {
-                lower_type_text_or_name(
-                    param.annotation.as_deref().unwrap_or("dynamic"),
-                )
-            })
-            .collect::<Vec<_>>();
+        let param_types = if let Some(params) = declaration_semantic_signature_params(function) {
+            params.into_iter().map(|param| param.annotation_or_dynamic()).collect::<Vec<_>>()
+        } else {
+            context
+                .load_direct_function_signatures(provider_node)
+                .get(&function.name)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|param| param_annotation_semantic_type(&param))
+                .collect::<Vec<_>>()
+        };
         let return_type = resolve_direct_callable_return_semantic_type(node, nodes, value_name)?;
         return Some(SemanticType::Callable {
             params: SemanticCallableParams::ParamList(param_types),
             return_type: Box::new(return_type),
         });
+    }
+
+    if let Some((_, class_decl)) = resolve_direct_base(nodes, node, value_name) {
+        return Some(SemanticType::Name(class_decl.name.clone()));
     }
 
     if let Some(boundary_type) =
