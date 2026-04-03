@@ -20,7 +20,7 @@ def _cargo_typepython_command() -> list[str] | None:
     cargo = shutil.which("cargo")
     if cargo is None:
         return None
-    return [cargo, "run", "-p", "typepython-cli", "--"]
+    return [cargo, "run", "--manifest-path", str(cargo_toml), "-p", "typepython-cli", "--"]
 
 
 def _configured_command() -> list[str] | None:
@@ -56,5 +56,5 @@ def _command() -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     command = [*_command(), *args]
-    completed = subprocess.run(command, cwd=_repo_root(), check=False)
+    completed = subprocess.run(command, check=False)
     return completed.returncode

@@ -32,3 +32,17 @@ jobs:
 
       - name: Bench compile check
         run: cargo bench --workspace --no-run
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade build twine
+
+      - name: Build Python distribution artifacts
+        run: python -m build --sdist --wheel
+
+      - name: Validate Python distribution metadata
+        run: python -m twine check dist/*

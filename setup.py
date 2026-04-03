@@ -10,9 +10,12 @@ from setuptools import Command, setup
 from setuptools.command.build_py import build_py as _build_py
 
 try:
-    from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+    from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
 except ImportError:
-    _bdist_wheel = None
+    try:
+        from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
+    except ImportError:
+        _bdist_wheel = None
 
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -54,6 +57,12 @@ if _bdist_wheel is not None:
         def finalize_options(self) -> None:
             super().finalize_options()
             self.root_is_pure = False
+
+        def get_tag(self) -> tuple[str, str, str]:
+            _, _, plat = super().get_tag()
+            # The bundled Rust CLI makes the wheel platform-specific, but the
+            # Python wrapper itself is not tied to a single CPython minor/ABI.
+            return ("py3", "none", plat)
 
     cmdclass["bdist_wheel"] = cast(type[Command], bdist_wheel)
 

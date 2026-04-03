@@ -2,7 +2,9 @@ include Cargo.toml
 include Cargo.lock
 include LICENSE
 include README.md
+include README-PyPI.md
 include pyproject.toml
+include setup.py
 include rust-toolchain.toml
 include rustfmt.toml
 graft crates

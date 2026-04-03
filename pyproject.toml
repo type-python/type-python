@@ -4,13 +4,35 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "type-python"
-version = "0.0.1"
-description = "Rust workspace for the TypePython compiler, CLI, and LSP"
-readme = "README.md"
+version = "0.1.0"
+description = "A statically-typed authoring language that compiles to standard Python"
+readme = { file = "README-PyPI.md", content-type = "text/markdown" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [
   { name = "unadlib" }
 ]
+keywords = ["typepython", "type-checking", "compiler", "python", "static-typing"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: Software Development :: Quality Assurance",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/type-python/type-python"
+Repository = "https://github.com/type-python/type-python"
+Documentation = "https://github.com/type-python/type-python/tree/main/docs"
+Issues = "https://github.com/type-python/type-python/issues"
 
 [project.scripts]
 typepython = "typepython.__main__:main"

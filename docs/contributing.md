@@ -23,7 +23,7 @@ cd type-python
 make ci
 ```
 
-The `make ci` target runs: format check -> clippy lint -> all tests.
+The `make ci` target runs: format check -> clippy lint -> all tests -> bench compile check -> Python packaging validation.
 
 ### Building
 
@@ -280,7 +280,8 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 | `make lint`      | `cargo clippy --workspace --all-targets -- -D warnings`      | Lint with clippy       |
 | `make test`      | `cargo test --workspace`                                     | Run all tests          |
 | `make docs`      | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Generate rustdoc       |
-| `make ci`        | `fmt-check` + `lint` + `test`                                | Full CI pipeline       |
+| `make package-check` | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*` | Validate Python package artifacts |
+| `make ci`        | `fmt-check` + `lint` + `test` + `bench-check` + `package-check` | Full CI pipeline       |
 
 ## Python Packaging
 
@@ -292,7 +293,7 @@ The Python package (`type-python` on PyPI, `import typepython`) is a thin bridge
 2. Custom `build_py` class runs `cargo build --release -p typepython-cli`
 3. Built binary is copied to `typepython/bin/typepython` (or `.exe` on Windows)
 4. Permissions set to 0o755
-5. `bdist_wheel` is marked as non-pure (platform-specific)
+5. `bdist_wheel` is marked as non-pure and tagged as `py3-none-<platform>`
 
 ### Binary resolution order
 
@@ -300,10 +301,16 @@ When `typepython` or `python -m typepython` is invoked:
 
 1. `TYPEPYTHON_BIN` environment variable (if set)
 2. Bundled binary at `typepython/bin/typepython` (wheel deployment)
-3. `cargo run -p typepython-cli --` (development from repo root)
+3. `cargo run --manifest-path <repo>/Cargo.toml -p typepython-cli --` (development from a repo checkout)
 4. `RuntimeError` if none available
 
 During development, option 3 means you can run `python -m typepython check --project .` without rebuilding the wheel -- cargo compiles on the fly.
+
+### Release hygiene
+
+- Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
+- Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
+- If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist.
 
 ## Pull Request Workflow
 
