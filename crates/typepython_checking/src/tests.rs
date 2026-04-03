@@ -785,7 +785,18 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
         decorator,
         &fake_call,
     );
+    let instantiated_semantic_return =
+        super::resolve_instantiated_callable_return_semantic_type_from_declaration(
+            decorator_node,
+            &graph.nodes,
+            decorator,
+            &fake_call,
+        );
     assert_eq!(instantiated_return, Some(String::from("Callable[[int], str]")));
+    assert_eq!(
+        instantiated_semantic_return.map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("Callable[[int], str]"))
+    );
     assert_eq!(
         super::apply_named_callable_decorator_transform(
             decorator_node,

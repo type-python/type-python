@@ -275,11 +275,25 @@ pub(crate) fn instantiate_direct_function_param(
     mut param: typepython_syntax::DirectFunctionParamSite,
     substitutions: &GenericTypeParamSubstitutions,
 ) -> typepython_syntax::DirectFunctionParamSite {
-    param.annotation = param
-        .annotation
-        .as_deref()
-        .map(|annotation| substitute_generic_type_params(annotation, substitutions));
+    param.annotation = instantiate_direct_function_param_annotation(&param, substitutions)
+        .map(|annotation| render_semantic_type(&annotation));
     param
+}
+
+pub(crate) fn instantiate_direct_function_param_annotation(
+    param: &typepython_syntax::DirectFunctionParamSite,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> Option<SemanticType> {
+    param.annotation
+        .as_deref()
+        .map(|annotation| instantiate_semantic_annotation(annotation, substitutions))
+}
+
+pub(crate) fn instantiate_semantic_annotation(
+    annotation: &str,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> SemanticType {
+    substitute_semantic_type_params(&lower_type_text_or_name(annotation), substitutions)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -870,14 +884,6 @@ pub(crate) fn param_annotation_semantic_type(
         .as_deref()
         .map(lower_type_text_or_name)
         .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
-}
-
-pub(crate) fn substitute_generic_type_params(
-    annotation: &str,
-    substitutions: &GenericTypeParamSubstitutions,
-) -> String {
-    let annotation = lower_type_text_or_name(annotation);
-    render_semantic_type(&substitute_semantic_type_params(&annotation, substitutions))
 }
 
 pub(crate) fn expand_substituted_semantic_generic_args(

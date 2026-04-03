@@ -410,16 +410,38 @@ pub(super) fn resolve_instantiated_callable_return_type_from_declaration(
     declaration: &Declaration,
     call: &typepython_binding::CallSite,
 ) -> Option<String> {
+    resolve_instantiated_callable_return_semantic_type_from_declaration(node, nodes, declaration, call)
+        .map(|return_type| render_semantic_type(&return_type))
+}
+
+pub(super) fn resolve_instantiated_callable_return_semantic_type_from_declaration(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+    call: &typepython_binding::CallSite,
+) -> Option<SemanticType> {
     if declaration.type_params.is_empty() {
-        return Some(declaration.detail.split_once("->")?.1.trim().to_owned());
+        return Some(lower_type_text_or_name(declaration.detail.split_once("->")?.1.trim()));
     }
     let signature = direct_signature_sites_from_detail(&declaration.detail);
     let substitutions =
         infer_generic_type_param_substitutions(node, nodes, declaration, &signature, call)?;
-    Some(substitute_generic_type_params(
+    Some(instantiate_semantic_annotation(
         declaration.detail.split_once("->")?.1.trim(),
         &substitutions,
     ))
+}
+
+#[allow(dead_code)]
+pub(super) fn resolve_instantiated_callable_return_type_id_from_declaration(
+    store: &mut TypeStore,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+    call: &typepython_binding::CallSite,
+) -> Option<TypeId> {
+    resolve_instantiated_callable_return_semantic_type_from_declaration(node, nodes, declaration, call)
+        .map(|return_type| store.intern(return_type))
 }
 
 pub(super) fn resolve_direct_callable_return_type_for_line(
@@ -511,4 +533,3 @@ pub(super) fn resolve_direct_callable_signature(
         direct_param_names(&function.detail).unwrap_or_default(),
     ))
 }
-
