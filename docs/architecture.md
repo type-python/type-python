@@ -192,17 +192,19 @@ The core type-checking engine. Runs multiple diagnostic rule categories against 
 
 **Current checker architecture:**
 
-- Bound `Declaration.detail` strings are normalized once into checker-owned `SemanticDeclarationFacts` and cached by declaration content in the semantic helper layer itself. Callable signatures, type-alias bodies, import targets, and value annotations now enter the active checker path through the same cache-backed helper surface rather than repeated ad hoc string splitting.
+- Bound `Declaration.detail` strings are normalized once into checker-owned `SemanticDeclarationFacts` and cached by declaration content in the semantic helper layer itself. Callable signatures now cache both semantic parameter data and semantic returns, while type-alias bodies, import targets, and value annotations enter the checker through that same cache-backed semantic surface rather than repeated ad hoc string splitting.
 - Generic inference is organized as an explicit solver: the checker collects TypeVar, ParamSpec, and TypeVarTuple constraints, solves them in a separate phase, and preserves structured failure reasons (`GenericSolveFailure`) for diagnostic use.
 - Direct overload and callable resolution flow through solver-backed resolved candidates (`ResolvedDirectCallCandidate`) that carry instantiated params, return type, and substitutions. Applicability and specificity use this instantiated information instead of comparing raw declaration text first.
 - The active call-diagnostic path keeps structured failure information long enough to explain `TPY4014` and related unresolved generic-call failures with reason notes instead of collapsing directly to `None`.
-- Touched semantic/call/assignment diagnostics now render semantic types through a shared exit path (`diagnostic_type_text`) so the checker does not maintain multiple independent formatting behaviors in its active direct-call path.
+- Touched semantic/call/assignment diagnostics render semantic types through a shared exit path (`diagnostic_type_text`) so the checker does not maintain multiple independent formatting behaviors in its direct-call path.
+- Alias expansion now stays on semantic alias bodies: imported typing rewrites and generic substitution operate on `SemanticType` values directly instead of rendering alias bodies back to text for reparsing.
+- Contextual and flow-sensitive owner lookup no longer bridge through rendered owner signature text in the active path; scope-local parameter lookup uses owner declarations and semantic signature sites directly.
 
 **TypeStore decision (implemented narrowly in the main path):**
 
-`TypeStore` is now part of the active checker declaration-semantic path rather than only a localized helper. The shared declaration semantic cache interns declaration-derived semantic types (callable returns, value annotations, alias bodies) into `TypeStore` and materializes semantic facts from those stored IDs. The checker still passes `SemanticType` values through solver state and final diagnostics for clarity, but the declaration-driven hot path no longer rebuilds those semantic types from raw text on every access.
+`TypeStore` is part of the checker declaration-semantic hot path. The shared declaration semantic cache interns declaration-derived semantic types (callable parameter annotations, callable returns, value annotations, alias bodies) into `TypeStore` and materializes semantic facts from those stored IDs. Solver state and final diagnostics continue to use `SemanticType` values as their human-readable working surface, while declaration-driven lookup and reuse rely on the interned store.
 
-The new `typepython_checking` Criterion suite remains the benchmark baseline for deciding whether a deeper ID-threaded `TypeStore` rollout is justified. If those benches or follow-up profiles show declaration-fact interning is not enough and semantic-type cloning/rendering still dominates, the next step would be pushing Type IDs further into solver/candidate/diagnostic boundaries.
+The `typepython_checking` Criterion suite remains the baseline for deciding whether to thread Type IDs deeper into solver/candidate/diagnostic boundaries, but the current architecture already treats `TypeStore` as live checker infrastructure rather than a deferred side utility.
 
 **Checker naming conventions:**
 

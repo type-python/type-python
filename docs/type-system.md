@@ -197,17 +197,19 @@ Current limits:
 
 The checker no longer treats declaration strings as the primary interface for active generic/callable work.
 
-- Declaration-driven paths first load checker-owned semantic declaration facts: callable params/returns, type-alias heads/bodies/type parameters, import targets, and value annotations.
+- Declaration-driven paths first load checker-owned semantic declaration facts: semantic callable params/returns, type-alias heads/bodies/type parameters, import targets, and value annotations.
 - Those declaration facts are cache-backed by declaration content, so active helper paths do not need a fresh checker context just to avoid reparsing the same declaration detail.
+- Alias expansion stays on semantic alias bodies: imported typing rewrites and generic substitutions are applied to `SemanticType` values directly instead of rendering alias bodies back to text for reparsing.
+- Scope-local contextual and flow-sensitive lookup uses owner declarations plus semantic signature sites directly rather than owner-signature text bridges.
 - Direct calls and overload sets are resolved through instantiated semantic candidates, so applicability, specificity, call signatures, and callable returns all use the same generic substitutions.
 - Generic solving is explicit rather than opportunistic: the checker collects TypeVar, ParamSpec, and TypeVarTuple constraints, then solves them in a separate phase with structured failures that diagnostics can report.
 - Touched diagnostics render semantic types through a shared helper instead of many local formatting paths.
 
 ### TypeStore status
 
-`TypeStore` is now integrated into the declaration-semantic path used by the active checker. Declaration semantic facts intern their semantic types through a shared store and recover them by ID when helper accessors materialize callable returns, value annotations, or alias bodies.
+`TypeStore` is integrated into the declaration-semantic checker path. Declaration semantic facts intern their semantic types through a shared store and recover them by ID when helper accessors materialize callable parameter annotations, callable returns, value annotations, or alias bodies.
 
-The checker still uses `SemanticType` values directly in solver state, resolved call candidates, and final diagnostics, so `TypeStore` is not yet the only main representation. The current benchmark baseline measures whether declaration-side interning is sufficient. If semantic-type clone/render costs still dominate, that is the trigger for threading Type IDs deeper into solver and diagnostic boundaries.
+The checker uses `SemanticType` values as the solver and diagnostic surface while `TypeStore` backs declaration-semantic reuse and sharing. Benchmarking and profiling determine whether pushing Type IDs deeper into solver and diagnostic boundaries is worthwhile, but the current checker path already depends on the store for declaration-side semantics.
 
 ### `Self` type
 
