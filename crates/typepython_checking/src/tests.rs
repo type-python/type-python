@@ -10569,7 +10569,7 @@ fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
     .expect("semantic alias substitution should succeed");
 
     assert_eq!(
-        substitutions.types.get("T").as_ref().map(crate::diagnostic_type_text),
+        substitutions.types.get("T").map(crate::diagnostic_type_text),
         Some(String::from("tuple[int, str]")),
     );
 }
