@@ -1115,19 +1115,6 @@ fn semantic_metadata_resolution_reuses_expression_semantic_path() {
         .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("int"))
     );
-    assert_eq!(
-        super::resolve_direct_expression_type_from_metadata(
-            node,
-            &graph.nodes,
-            None,
-            None,
-            None,
-            1,
-            &metadata,
-        ),
-        Some(String::from("int"))
-    );
-
     let _ = fs::remove_dir_all(&root);
 }
 

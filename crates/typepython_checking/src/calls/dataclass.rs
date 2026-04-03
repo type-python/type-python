@@ -355,7 +355,7 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
                 .value_metadata
                 .as_ref()
                 .and_then(|metadata| {
-                    resolve_direct_expression_type_from_metadata(
+                    resolve_direct_expression_semantic_type_from_metadata(
                         class_node,
                         nodes,
                         None,
@@ -365,7 +365,9 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
                         metadata,
                     )
                 })
-                .is_some_and(|value_type| is_descriptor_type(nodes, class_node, &value_type))
+                .is_some_and(|value_type| {
+                    is_descriptor_semantic_type(nodes, class_node, &value_type)
+                })
         {
             continue;
         }
@@ -422,6 +424,14 @@ pub(super) fn is_descriptor_type(
         })
         .is_some()
     })
+}
+
+pub(super) fn is_descriptor_semantic_type(
+    nodes: &[typepython_graph::ModuleNode],
+    node: &typepython_graph::ModuleNode,
+    ty: &SemanticType,
+) -> bool {
+    is_descriptor_type(nodes, node, &render_semantic_type(ty))
 }
 
 pub(super) fn load_dataclass_transform_module_info_with_context(

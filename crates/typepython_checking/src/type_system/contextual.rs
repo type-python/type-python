@@ -1,24 +1,3 @@
-pub(super) fn resolve_direct_expression_type_from_metadata(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-) -> Option<String> {
-    resolve_direct_expression_semantic_type_from_metadata(
-        node,
-        nodes,
-        signature,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        metadata,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
 pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
