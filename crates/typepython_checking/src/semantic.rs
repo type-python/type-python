@@ -247,6 +247,7 @@ pub(super) fn call_signature_params_are_applicable(
     call: &typepython_binding::CallSite,
     params: &[DirectSignatureParam],
 ) -> bool {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     let positional_params = params
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
@@ -258,7 +259,8 @@ pub(super) fn call_signature_params_are_applicable(
     let expected_keyword_arg_types =
         expected_keyword_arg_types_from_direct_signature(params, &call.keyword_names);
     if call.arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_type(
+        resolve_contextual_call_arg_semantic_type_with_context(
+            &context,
             node,
             nodes,
             call.line,
@@ -270,7 +272,8 @@ pub(super) fn call_signature_params_are_applicable(
         return false;
     }
     if call.keyword_arg_values.iter().enumerate().any(|(index, metadata)| {
-        resolve_contextual_call_arg_type(
+        resolve_contextual_call_arg_semantic_type_with_context(
+            &context,
             node,
             nodes,
             call.line,
@@ -282,11 +285,14 @@ pub(super) fn call_signature_params_are_applicable(
         return false;
     }
     let resolved_keyword_arg_types =
-        resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
-    let mut positional_types =
-        resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types)
+        resolved_keyword_arg_semantic_types(node, nodes, call, &expected_keyword_arg_types)
             .into_iter()
-            .map(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(&ty)))
+            .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
+            .collect::<Vec<_>>();
+    let mut positional_types =
+        resolved_call_arg_semantic_types(node, nodes, call, &expected_positional_arg_types)
+            .into_iter()
+            .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
             .collect::<Vec<_>>();
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
@@ -381,10 +387,6 @@ pub(super) fn call_signature_params_are_applicable(
         params.iter().find(|param| param.keyword_variadic).and_then(|param| {
             (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
         });
-    let resolved_keyword_arg_types = resolved_keyword_arg_types
-        .into_iter()
-        .map(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(&ty)))
-        .collect::<Vec<_>>();
     let positional_ok =
         positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
             |(arg_ty, param_ty)| match (arg_ty, param_ty) {
@@ -967,7 +969,8 @@ pub(super) fn resolve_contextual_return_type(
             diagnostics: Vec::new(),
         };
     }
-    if let Some(result) = resolve_contextual_typed_dict_literal_type(
+    if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
         node,
         nodes,
         return_site.line,
@@ -975,11 +978,12 @@ pub(super) fn resolve_contextual_return_type(
         Some(expected),
     ) {
         return ContextualReturnTypeResult {
-            actual_type: Some(lower_type_text_or_name(&result.actual_type)),
+            actual_type: Some(result.actual_type),
             diagnostics: result.diagnostics,
         };
     }
-    if let Some(result) = resolve_contextual_collection_literal_type(
+    if let Some(result) = resolve_contextual_collection_literal_semantic_type_with_context(
+        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
         node,
         nodes,
         return_site.line,
@@ -987,7 +991,7 @@ pub(super) fn resolve_contextual_return_type(
         Some(expected),
     ) {
         return ContextualReturnTypeResult {
-            actual_type: Some(lower_type_text_or_name(&result.actual_type)),
+            actual_type: Some(result.actual_type),
             diagnostics: result.diagnostics,
         };
     }
@@ -1120,7 +1124,8 @@ pub(super) fn resolve_contextual_yield_type(
                 diagnostics: Vec::new(),
             };
         }
-        if let Some(result) = resolve_contextual_typed_dict_literal_type(
+        if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
             node,
             nodes,
             yield_site.line,
@@ -1128,11 +1133,12 @@ pub(super) fn resolve_contextual_yield_type(
             Some(expected),
         ) {
             return ContextualYieldTypeResult {
-                actual_type: Some(lower_type_text_or_name(&result.actual_type)),
+                actual_type: Some(result.actual_type),
                 diagnostics: result.diagnostics,
             };
         }
-        if let Some(result) = resolve_contextual_collection_literal_type(
+        if let Some(result) = resolve_contextual_collection_literal_semantic_type_with_context(
+            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
             node,
             nodes,
             yield_site.line,
@@ -1140,7 +1146,7 @@ pub(super) fn resolve_contextual_yield_type(
             Some(expected),
         ) {
             return ContextualYieldTypeResult {
-                actual_type: Some(lower_type_text_or_name(&result.actual_type)),
+                actual_type: Some(result.actual_type),
                 diagnostics: result.diagnostics,
             };
         }

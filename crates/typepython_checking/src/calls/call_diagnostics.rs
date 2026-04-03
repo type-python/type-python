@@ -735,24 +735,13 @@ pub(super) fn expanded_positional_arg_semantic_types(
     (positional_types, variadic_starred_types)
 }
 
-pub(super) fn resolved_call_arg_types(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    expected_types: &[Option<String>],
-) -> Vec<String> {
-    resolved_call_arg_semantic_types(node, nodes, call, expected_types)
-        .into_iter()
-        .map(|ty| render_semantic_type(&ty))
-        .collect()
-}
-
 pub(super) fn resolved_call_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     if call.arg_values.is_empty() {
         return call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
@@ -760,14 +749,15 @@ pub(super) fn resolved_call_arg_semantic_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_type(
+            resolve_contextual_call_arg_semantic_type_with_context(
+                &context,
                 node,
                 nodes,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .map(|result| lower_type_text_or_name(&result.actual_type))
+            .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
@@ -784,24 +774,13 @@ pub(super) fn resolved_call_arg_semantic_types(
         .collect()
 }
 
-pub(super) fn resolved_keyword_arg_types(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    expected_types: &[Option<String>],
-) -> Vec<String> {
-    resolved_keyword_arg_semantic_types(node, nodes, call, expected_types)
-        .into_iter()
-        .map(|ty| render_semantic_type(&ty))
-        .collect()
-}
-
 pub(super) fn resolved_keyword_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     if call.keyword_arg_values.is_empty() {
         return call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
@@ -809,14 +788,15 @@ pub(super) fn resolved_keyword_arg_semantic_types(
         .iter()
         .enumerate()
         .map(|(index, metadata)| {
-            resolve_contextual_call_arg_type(
+            resolve_contextual_call_arg_semantic_type_with_context(
+                &context,
                 node,
                 nodes,
                 call.line,
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .map(|result| lower_type_text_or_name(&result.actual_type))
+            .map(|result| result.actual_type)
             .or_else(|| {
                 resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
