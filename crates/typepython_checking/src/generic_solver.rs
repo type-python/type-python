@@ -356,6 +356,18 @@ fn finalize_generic_solution_detailed(
     Ok(substitutions)
 }
 
+pub(crate) fn finalize_generic_type_param_substitutions_detailed(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    substitutions: GenericTypeParamSubstitutions,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let metadata = GenericSolverMetadata::from_function(function);
+    let mut constraints = GenericConstraintSet::default();
+    constraints.extend_bindings(substitutions);
+    finalize_generic_solution_detailed(node, nodes, &metadata, &constraints)
+}
+
 #[allow(dead_code)]
 pub(crate) fn infer_generic_type_param_substitutions(
     node: &typepython_graph::ModuleNode,
@@ -493,6 +505,172 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
             continue;
         };
         let annotation = lower_type_text_or_name(annotation_text);
+        let annotation_mentions_param_spec =
+            annotation.callable_parts().is_some_and(|(params, _)| {
+                callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
+            });
+        let existing = solver.current_bindings_detailed()?;
+        let actual_type = lower_type_text_or_name(actual);
+        let bindings = infer_callable_param_spec_bindings(
+            node,
+            nodes,
+            &annotation,
+            &actual_type,
+            call.keyword_arg_values.get(index),
+            &solver.metadata.type_names,
+            &solver.metadata.param_spec_names,
+            &existing,
+        )
+        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type.clone(),
+        })?;
+        solver.record_bindings(bindings);
+        if annotation_mentions_param_spec {
+            continue;
+        }
+        let existing = solver.current_bindings_detailed()?;
+        let bindings = infer_generic_type_param_bindings(
+            node,
+            nodes,
+            &annotation,
+            &actual_type,
+            &solver.metadata.type_names,
+            &existing,
+            &solver.metadata.type_pack_names,
+        )
+        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type,
+        })?;
+        solver.record_bindings(bindings);
+    }
+
+    solver.finish_detailed(node, nodes)
+}
+
+pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detailed(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    params: &[SemanticCallableParam],
+    call: &typepython_binding::CallSite,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let mut solver = GenericSolverState::new(function);
+    let expected_positional_arg_types =
+        expected_positional_arg_types_from_semantic_params(params, call.arg_count);
+    let (positional_types, variadic_starred_types) =
+        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+    let mut positional_index = 0;
+
+    for param in params.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
+        let Some(annotation) = param.annotation.clone() else {
+            if param.variadic {
+                positional_index = positional_types.len();
+            } else if positional_index < positional_types.len() {
+                positional_index += 1;
+            }
+            continue;
+        };
+        if param.variadic {
+            if extract_param_spec_args_name_from_semantic(&annotation).is_some() {
+                positional_index = positional_types.len();
+                continue;
+            }
+            if let Some(type_pack_name) =
+                type_pack_name_from_unpack_semantic_annotation(&annotation, &solver.metadata.type_pack_names)
+            {
+                if !variadic_starred_types.is_empty() {
+                    return Err(GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
+                        param_name: type_pack_name,
+                    });
+                }
+                solver.record_type_pack_binding(
+                    &type_pack_name,
+                    TypePackBinding {
+                        types: positional_types[positional_index..]
+                            .iter()
+                            .map(|ty| lower_type_text_or_name(ty))
+                            .collect(),
+                    },
+                );
+                positional_index = positional_types.len();
+                continue;
+            }
+            let existing = solver.current_bindings_detailed()?;
+            for actual in positional_types.iter().skip(positional_index) {
+                let actual_type = lower_type_text_or_name(actual);
+                let bindings = infer_generic_type_param_bindings(
+                    node,
+                    nodes,
+                    &annotation,
+                    &actual_type,
+                    &solver.metadata.type_names,
+                    &existing,
+                    &solver.metadata.type_pack_names,
+                )
+                .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+                    annotation: annotation.clone(),
+                    actual: actual_type,
+                })?;
+                solver.record_bindings(bindings);
+            }
+            positional_index = positional_types.len();
+            continue;
+        }
+        let Some(actual) = positional_types.get(positional_index) else {
+            continue;
+        };
+        let annotation_mentions_param_spec =
+            annotation.callable_parts().is_some_and(|(params, _)| {
+                callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
+            });
+        let existing = solver.current_bindings_detailed()?;
+        let actual_type = lower_type_text_or_name(actual);
+        let bindings = infer_callable_param_spec_bindings(
+            node,
+            nodes,
+            &annotation,
+            &actual_type,
+            call.arg_values.get(positional_index),
+            &solver.metadata.type_names,
+            &solver.metadata.param_spec_names,
+            &existing,
+        )
+        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type.clone(),
+        })?;
+        solver.record_bindings(bindings);
+        if annotation_mentions_param_spec {
+            positional_index += 1;
+            continue;
+        }
+        let existing = solver.current_bindings_detailed()?;
+        let bindings = infer_generic_type_param_bindings(
+            node,
+            nodes,
+            &annotation,
+            &actual_type,
+            &solver.metadata.type_names,
+            &existing,
+            &solver.metadata.type_pack_names,
+        )
+        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type,
+        })?;
+        solver.record_bindings(bindings);
+        positional_index += 1;
+    }
+
+    for (index, (keyword, actual)) in call.keyword_names.iter().zip(&call.keyword_arg_types).enumerate() {
+        let Some(param) = params.iter().find(|param| param.name == *keyword) else {
+            continue;
+        };
+        let Some(annotation) = param.annotation.clone() else {
+            continue;
+        };
         let annotation_mentions_param_spec =
             annotation.callable_parts().is_some_and(|(params, _)| {
                 callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
@@ -1198,7 +1376,7 @@ pub(crate) fn param_annotation_semantic_type(
     param
         .annotation
         .as_deref()
-        .map(lower_type_text_or_name)
+        .map(|annotation| lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic))
         .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
 }
 
