@@ -84,7 +84,12 @@ pub(super) fn methods_are_compatible_for_override(
             && child.name == base.name
             && (child.annotation.is_empty()
                 || base.annotation.is_empty()
-                || direct_type_is_assignable(node, nodes, &child.annotation, &base.annotation))
+                || semantic_type_is_assignable(
+                    node,
+                    nodes,
+                    &lower_type_text_or_name(&child.annotation),
+                    &lower_type_text_or_name(&base.annotation),
+                ))
     });
     if !params_compatible {
         return false;
@@ -95,7 +100,12 @@ pub(super) fn methods_are_compatible_for_override(
         base_member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
     child_return.is_empty()
         || base_return.is_empty()
-        || direct_type_is_assignable(node, nodes, base_return, child_return)
+        || semantic_type_is_assignable(
+            node,
+            nodes,
+            &lower_type_text_or_name(base_return),
+            &lower_type_text_or_name(child_return),
+        )
 }
 
 pub(super) fn missing_override_diagnostics<'a>(
@@ -1211,9 +1221,9 @@ pub(super) fn property_setter_compatibility_diagnostics(
                 decl.kind == DeclarationKind::Function
                     && decl.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
             })?;
-            let getter_type = normalize_type_text(getter.detail.split_once("->")?.1.trim());
+            let getter_type = lower_type_text_or_name(getter.detail.split_once("->")?.1.trim());
             let setter_params = direct_param_types(&setter.detail)?;
-            let setter_type = normalize_type_text(setter_params.get(1)?);
+            let setter_type = lower_type_text_or_name(setter_params.get(1)?);
             (getter_type != setter_type).then(|| {
                 Diagnostic::error(
                     "TPY4001",
@@ -1223,15 +1233,15 @@ pub(super) fn property_setter_compatibility_diagnostics(
                             owner_name,
                             module_path.display(),
                             member_name,
-                            getter_type,
-                            setter_type,
+                            render_semantic_type(&getter_type),
+                            render_semantic_type(&setter_type),
                         ),
                         None => format!(
                             "module `{}` declares property `{}` with getter type `{}` but setter expects `{}`",
                             module_path.display(),
                             member_name,
-                            getter_type,
-                            setter_type,
+                            render_semantic_type(&getter_type),
+                            render_semantic_type(&setter_type),
                         ),
                     },
                 )
