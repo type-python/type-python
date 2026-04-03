@@ -1307,11 +1307,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
     local_bindings: &BTreeMap<String, SemanticType>,
 ) -> Option<SemanticType> {
     if let Some(lambda) = metadata.value_lambda.as_deref() {
-        let rendered_bindings = local_bindings
-            .iter()
-            .map(|(name, ty)| (name.clone(), render_semantic_type(ty)))
-            .collect::<BTreeMap<_, _>>();
-        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+        return resolve_contextual_lambda_callable_semantic_type(
             node,
             nodes,
             current_owner_name,
@@ -1319,12 +1315,8 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
             current_line,
             lambda,
             signature,
-            Some(&rendered_bindings),
-        )?;
-        return Some(lower_type_text_or_name(&format_callable_annotation(
-            &param_types,
-            &return_type,
-        )));
+            Some(local_bindings),
+        );
     }
     if let Some(value_name) = metadata.value_name.as_deref()
         && let Some(bound_type) = local_bindings.get(value_name)

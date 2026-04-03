@@ -29,7 +29,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
     if let Some(lambda) = metadata.value_lambda.as_deref() {
-        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+        return resolve_contextual_lambda_callable_semantic_type(
             node,
             nodes,
             current_owner_name,
@@ -38,8 +38,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
             lambda,
             signature,
             None,
-        )?;
-        return Some(lower_type_text_or_name(&format_callable_annotation(&param_types, &return_type)));
+        );
     }
     let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
     resolve_direct_expression_semantic_type(
@@ -486,13 +485,50 @@ pub(super) fn resolve_contextual_lambda_callable_signature(
     expected: Option<&str>,
     outer_bindings: Option<&BTreeMap<String, String>>,
 ) -> Option<(Vec<String>, String)> {
+    let semantic_outer_bindings = outer_bindings.map(|bindings| {
+        bindings
+            .iter()
+            .map(|(name, ty)| (name.clone(), lower_type_text_or_name(ty)))
+            .collect::<BTreeMap<_, _>>()
+    });
+    let (param_types, return_type) = resolve_contextual_lambda_callable_semantic_signature(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        lambda,
+        expected,
+        semantic_outer_bindings.as_ref(),
+    )?;
+    Some((
+        param_types.into_iter().map(|ty| render_semantic_type(&ty)).collect(),
+        render_semantic_type(&return_type),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: Option<&str>,
+    outer_bindings: Option<&BTreeMap<String, SemanticType>>,
+) -> Option<(Vec<SemanticType>, SemanticType)> {
     let expected_params = expected
         .and_then(parse_callable_annotation)
-        .and_then(|(expected_params, _)| expected_params);
+        .and_then(|(expected_params, _)| expected_params)
+        .map(|params| params.into_iter().map(|ty| lower_type_text_or_name(&ty)).collect::<Vec<_>>());
     if let Some(expected_params) = expected_params.as_ref()
         && expected_params.len() != lambda.params.len()
     {
-        return Some((vec![String::from("dynamic"); lambda.params.len()], String::from("dynamic")));
+        return Some((
+            vec![SemanticType::Name(String::from("dynamic")); lambda.params.len()],
+            SemanticType::Name(String::from("dynamic")),
+        ));
     }
     let param_types = lambda
         .params
@@ -502,20 +538,20 @@ pub(super) fn resolve_contextual_lambda_callable_signature(
             param
                 .annotation
                 .as_deref()
-                .map(normalize_type_text)
+                .map(lower_type_text_or_name)
                 .or_else(|| {
                     expected_params
                         .as_ref()
                         .and_then(|expected_params| expected_params.get(index).cloned())
                 })
-                .unwrap_or_else(|| String::from("dynamic"))
+                .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
         })
         .collect::<Vec<_>>();
     let mut local_bindings = outer_bindings.cloned().unwrap_or_default();
     local_bindings.extend(
         lambda.params.iter().map(|param| param.name.clone()).zip(param_types.iter().cloned()),
     );
-    let actual_return = resolve_direct_expression_type_from_metadata_with_bindings(
+    let actual_return = resolve_direct_expression_semantic_type_from_metadata_with_bindings(
         node,
         nodes,
         None,
@@ -526,6 +562,33 @@ pub(super) fn resolve_contextual_lambda_callable_signature(
         &local_bindings,
     )?;
     Some((param_types, actual_return))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_contextual_lambda_callable_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    lambda: &typepython_syntax::LambdaMetadata,
+    expected: Option<&str>,
+    outer_bindings: Option<&BTreeMap<String, SemanticType>>,
+) -> Option<SemanticType> {
+    let (param_types, return_type) = resolve_contextual_lambda_callable_semantic_signature(
+        node,
+        nodes,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        lambda,
+        expected,
+        outer_bindings,
+    )?;
+    Some(SemanticType::Callable {
+        params: SemanticCallableParams::ParamList(param_types),
+        return_type: Box::new(return_type),
+    })
 }
 
 pub(super) fn format_callable_annotation(param_types: &[String], return_type: &str) -> String {
@@ -550,7 +613,7 @@ pub(super) fn resolve_contextual_lambda_callable_type(
     expected: Option<&str>,
 ) -> Option<String> {
     let lambda = metadata.value_lambda.as_deref()?;
-    let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
+    resolve_contextual_lambda_callable_semantic_type(
         node,
         nodes,
         None,
@@ -559,8 +622,8 @@ pub(super) fn resolve_contextual_lambda_callable_type(
         lambda,
         expected,
         None,
-    )?;
-    Some(format_callable_annotation(&param_types, &return_type))
+    )
+    .map(|resolved| render_semantic_type(&resolved))
 }
 
 pub(super) fn resolve_contextual_typed_dict_literal_type(
@@ -922,15 +985,30 @@ pub(super) fn resolve_contextual_named_callable_type(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<String> {
+    resolve_contextual_named_callable_semantic_type(node, nodes, metadata, expected)
+        .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_contextual_named_callable_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<SemanticType> {
     parse_callable_annotation_parts(expected?)?;
     let function_name = metadata.value_name.as_deref()?;
     let function = resolve_direct_function(node, nodes, function_name)?;
     let param_types = direct_signature_sites_from_detail(&function.detail)
         .into_iter()
-        .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+        .map(|param| {
+            lower_type_text_or_name(param.annotation.as_deref().unwrap_or("dynamic"))
+        })
         .collect::<Vec<_>>();
-    let return_type = function.detail.split_once("->")?.1.trim();
-    Some(format_callable_annotation(&param_types, return_type))
+    let return_type = resolve_direct_callable_return_semantic_type(node, nodes, function_name)?;
+    Some(SemanticType::Callable {
+        params: SemanticCallableParams::ParamList(param_types),
+        return_type: Box::new(return_type),
+    })
 }
 
 pub(super) fn expected_positional_arg_types_from_direct_signature(

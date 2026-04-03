@@ -1145,6 +1145,83 @@ fn semantic_metadata_resolution_reuses_expression_semantic_path() {
 }
 
 #[test]
+fn semantic_contextual_lambda_resolution_builds_callable_types() {
+    let source_text = "value = 1\n";
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let lambda = typepython_syntax::LambdaMetadata {
+        params: vec![typepython_syntax::FunctionParam {
+            name: String::from("item"),
+            annotation: None,
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        }],
+        body: Box::new(typepython_syntax::DirectExprMetadata {
+            value_type: Some(String::from("str")),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        }),
+    };
+
+    assert_eq!(
+        super::resolve_contextual_lambda_callable_semantic_type(
+            node,
+            &graph.nodes,
+            None,
+            None,
+            1,
+            &lambda,
+            Some("Callable[[int], str]"),
+            None,
+        )
+        .map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("Callable[[int], str]"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_reports_callable_decorator_transform_return_rewrite() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable, cast\n\n",
