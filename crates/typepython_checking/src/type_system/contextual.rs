@@ -352,15 +352,10 @@ fn format_semantic_assignment_signature(
     param_types: &[SemanticType],
     return_type: &SemanticType,
 ) -> String {
-    format!(
-        "({})->{}",
-        param_types
-            .iter()
-            .map(render_semantic_type)
-            .collect::<Vec<_>>()
-            .join(","),
-        render_semantic_type(return_type)
-    )
+    diagnostic_type_text(&SemanticType::Callable {
+        params: SemanticCallableParams::ParamList(param_types.to_vec()),
+        return_type: Box::new(return_type.clone()),
+    })
 }
 
 pub(super) fn resolve_callable_assignment_semantic_signature(
@@ -384,10 +379,10 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
 
     if let Some(value_name) = assignment.value_name.as_deref() {
         let function = resolve_direct_function(node, nodes, value_name)?;
-        let actual_params = declaration_signature_param_types(function)
+        let actual_params = declaration_semantic_signature_params(function)
             .unwrap_or_default()
             .into_iter()
-            .map(|param| lower_type_text_or_name(&param))
+            .map(|param| param.annotation_or_dynamic())
             .collect::<Vec<_>>();
         let actual_return = resolve_direct_callable_return_semantic_type(node, nodes, value_name)?;
         return Some((actual_params, actual_return));
@@ -437,7 +432,7 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
         )
         .or_else(|| Some(lower_type_text_or_name(owner_name)))
     }?;
-    let owner_type_name = render_semantic_type(&owner_type);
+    let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let method =
@@ -462,25 +457,15 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
             return_type.clone(),
         )
     } else {
-        let actual_params = declaration_signature_sites_with_self(method, &owner_type_name)
+        let actual_params = declaration_semantic_signature_params_with_self(method, &owner_type_name)
             .unwrap_or_default()
             .into_iter()
-            .map(|param| {
-                lower_type_text_or_name(&rewrite_imported_typing_aliases(
-                    node,
-                    param.annotation.as_deref().unwrap_or("dynamic"),
-                ))
-            })
+            .map(|param| rewrite_imported_typing_semantic_type(node, &param.annotation_or_dynamic()))
             .collect::<Vec<_>>();
-        let return_text = rewrite_imported_typing_aliases(
+        let actual_return = rewrite_imported_typing_semantic_type(
             node,
-            &substitute_self_annotation(
-                &declaration_signature_return_annotation_text(method)?,
-                Some(&owner_type_name),
-            ),
+            &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
         );
-        let actual_return = normalized_direct_return_annotation(&return_text)
-            .map(lower_type_text_or_name)?;
         (actual_params, actual_return)
     };
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
@@ -628,6 +613,46 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgSemanticResult> {
+    resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
+        context,
+        node,
+        nodes,
+        None,
+        None,
+        None,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "collection literal contextual typing needs optional scope context"
+)]
+pub(super) fn resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgSemanticResult> {
+    let resolve_fallback = |metadata: &typepython_syntax::DirectExprMetadata| {
+        resolve_direct_expression_semantic_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            metadata,
+        )
+    };
+
     let expected = lower_type_text_or_name(expected?);
     let (head, args) = expected.generic_parts()?;
     match head {
@@ -663,11 +688,7 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
                             Some(&render_semantic_type(&args[0])),
                         )
                         .map(|result| result.actual_type)
-                        .or_else(|| {
-                            resolve_direct_expression_semantic_type_from_metadata(
-                                node, nodes, None, None, None, current_line, element,
-                            )
-                        })
+                        .or_else(|| resolve_fallback(element))
                         .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
@@ -712,11 +733,7 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
                             Some(&render_semantic_type(&args[0])),
                         )
                         .map(|result| result.actual_type)
-                        .or_else(|| {
-                            resolve_direct_expression_semantic_type_from_metadata(
-                                node, nodes, None, None, None, current_line, element,
-                            )
-                        })
+                        .or_else(|| resolve_fallback(element))
                         .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
@@ -785,13 +802,7 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
                                 )
                             })
                             .map(|result| result.actual_type)
-                            .or_else(|| {
-                                entry.key_value.as_deref().and_then(|key| {
-                                    resolve_direct_expression_semantic_type_from_metadata(
-                                        node, nodes, None, None, None, current_line, key,
-                                    )
-                                })
-                            })
+                            .or_else(|| entry.key_value.as_deref().and_then(resolve_fallback))
                             .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
@@ -811,17 +822,7 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_with_context(
                             Some(&render_semantic_type(&args[1])),
                         )
                         .map(|result| result.actual_type)
-                        .or_else(|| {
-                            resolve_direct_expression_semantic_type_from_metadata(
-                                node,
-                                nodes,
-                                None,
-                                None,
-                                None,
-                                current_line,
-                                &entry.value,
-                            )
-                        })
+                        .or_else(|| resolve_fallback(&entry.value))
                         .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
                     })
                     .collect::<Vec<_>>()
@@ -889,6 +890,59 @@ pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
     )
 }
 
+pub(super) fn resolve_contextual_call_arg_semantic_type_with_expected_semantic(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&SemanticType>,
+) -> Option<ContextualCallArgSemanticResult> {
+    let expected_text = expected.map(diagnostic_type_text);
+    if let Some(lambda) = metadata.value_lambda.as_deref()
+        && let Some(actual_type) = resolve_contextual_lambda_callable_semantic_type(
+            node,
+            nodes,
+            None,
+            None,
+            current_line,
+            lambda,
+            expected_text.as_deref(),
+            None,
+        )
+    {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
+    if let Some(actual_type) =
+        resolve_contextual_named_callable_semantic_type_with_expected_semantic(
+            node, nodes, metadata, expected,
+        )
+    {
+        return Some(ContextualCallArgSemanticResult { actual_type, diagnostics: Vec::new() });
+    }
+    if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected_text.as_deref(),
+    ) {
+        return Some(ContextualCallArgSemanticResult {
+            actual_type: result.actual_type,
+            diagnostics: result.diagnostics,
+        });
+    }
+    resolve_contextual_collection_literal_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected_text.as_deref(),
+    )
+}
+
 pub(super) fn resolve_contextual_named_callable_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -898,11 +952,10 @@ pub(super) fn resolve_contextual_named_callable_semantic_type(
     parse_callable_annotation_parts(expected?)?;
     let function_name = metadata.value_name.as_deref()?;
     let function = resolve_direct_function(node, nodes, function_name)?;
-    let param_types = declaration_signature_sites(function)
+    let param_types = declaration_semantic_signature_params(function)
+        .unwrap_or_default()
         .into_iter()
-        .map(|param| {
-            lower_type_text_or_name(param.annotation.as_deref().unwrap_or("dynamic"))
-        })
+        .map(|param| param.annotation_or_dynamic())
         .collect::<Vec<_>>();
     let return_type = resolve_direct_callable_return_semantic_type(node, nodes, function_name)?;
     Some(SemanticType::Callable {
@@ -911,8 +964,29 @@ pub(super) fn resolve_contextual_named_callable_semantic_type(
     })
 }
 
-pub(super) fn expected_positional_arg_types_from_direct_signature(
-    params: &[DirectSignatureParam],
+pub(super) fn resolve_contextual_named_callable_semantic_type_with_expected_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&SemanticType>,
+) -> Option<SemanticType> {
+    expected?.callable_parts()?;
+    let function_name = metadata.value_name.as_deref()?;
+    let function = resolve_direct_function(node, nodes, function_name)?;
+    let param_types = declaration_semantic_signature_params(function)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|param| param.annotation_or_dynamic())
+        .collect::<Vec<_>>();
+    let return_type = resolve_direct_callable_return_semantic_type(node, nodes, function_name)?;
+    Some(SemanticType::Callable {
+        params: SemanticCallableParams::ParamList(param_types),
+        return_type: Box::new(return_type),
+    })
+}
+
+pub(super) fn expected_positional_arg_types_from_semantic_params(
+    params: &[SemanticCallableParam],
     arg_count: usize,
 ) -> Vec<Option<String>> {
     let positional_params = params
@@ -922,35 +996,14 @@ pub(super) fn expected_positional_arg_types_from_direct_signature(
     let variadic_type = params
         .iter()
         .find(|param| param.variadic)
-        .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()));
+        .and_then(|param| param.annotation_text.clone());
 
     (0..arg_count)
         .map(|index| {
             positional_params
                 .get(index)
-                .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()))
+                .and_then(|param| param.annotation_text.clone())
                 .or_else(|| variadic_type.clone())
-        })
-        .collect()
-}
-
-pub(super) fn expected_keyword_arg_types_from_direct_signature(
-    params: &[DirectSignatureParam],
-    keyword_names: &[String],
-) -> Vec<Option<String>> {
-    let keyword_variadic_type = params
-        .iter()
-        .find(|param| param.keyword_variadic)
-        .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()));
-
-    keyword_names
-        .iter()
-        .map(|keyword| {
-            params
-                .iter()
-                .find(|param| param.name == *keyword && !param.positional_only)
-                .and_then(|param| (!param.annotation.is_empty()).then(|| param.annotation.clone()))
-                .or_else(|| keyword_variadic_type.clone())
         })
         .collect()
 }
@@ -997,25 +1050,6 @@ pub(super) fn expected_keyword_arg_types_from_signature_sites(
         .collect()
 }
 
-pub(super) fn resolve_assignment_owner_signature(
-    node: &typepython_graph::ModuleNode,
-    assignment: &typepython_binding::AssignmentSite,
-) -> Option<String> {
-    resolve_scope_owner_signature(
-        node,
-        assignment.owner_name.as_deref(),
-        assignment.owner_type_name.as_deref(),
-    )
-}
-
-pub(super) fn resolve_scope_owner_signature(
-    node: &typepython_graph::ModuleNode,
-    owner_name: Option<&str>,
-    owner_type_name: Option<&str>,
-) -> Option<String> {
-    resolve_scope_owner_declaration(node, owner_name, owner_type_name).and_then(declaration_signature_text)
-}
-
 pub(super) fn resolve_scope_owner_declaration<'a>(
     node: &'a typepython_graph::ModuleNode,
     owner_name: Option<&str>,
@@ -1031,25 +1065,6 @@ pub(super) fn resolve_scope_owner_declaration<'a>(
                 _ => false,
             }
     })
-}
-
-pub(super) fn resolve_for_owner_signature(
-    node: &typepython_graph::ModuleNode,
-    for_loop: &typepython_binding::ForSite,
-) -> Option<String> {
-    let owner_name = for_loop.owner_name.as_deref()?;
-    node.declarations
-        .iter()
-        .find(|declaration| {
-            declaration.kind == DeclarationKind::Function
-                && declaration.name == owner_name
-                && match (&for_loop.owner_type_name, &declaration.owner) {
-                    (Some(owner_type_name), Some(owner)) => owner.name == *owner_type_name,
-                    (None, None) => true,
-                    _ => false,
-                }
-        })
-        .and_then(declaration_signature_text)
 }
 
 pub(super) fn normalized_direct_return_annotation(annotation: &str) -> Option<&str> {
@@ -1187,9 +1202,20 @@ pub(super) fn normalized_assignment_annotation(annotation: &str) -> Option<&str>
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn alias_type_param_substitutions(
     alias_decl: &Declaration,
     args: &[String],
+) -> Option<GenericSolution> {
+    alias_type_param_substitutions_semantic(
+        alias_decl,
+        &args.iter().map(|arg| lower_type_text_or_name(arg)).collect::<Vec<_>>(),
+    )
+}
+
+pub(super) fn alias_type_param_substitutions_semantic(
+    alias_decl: &Declaration,
+    args: &[SemanticType],
 ) -> Option<GenericSolution> {
     let type_pack_indexes = alias_decl
         .type_params
@@ -1208,15 +1234,14 @@ pub(super) fn alias_type_param_substitutions(
     if let Some(type_pack_index) = type_pack_indexes.first().copied() {
         let mut start = 0usize;
         for type_param in &alias_decl.type_params[..type_pack_index] {
-            let argument = args.get(start).cloned().or_else(|| {
-                type_param.default.as_ref().map(|default| normalize_type_text(default))
-            })?;
+            let argument = args
+                .get(start)
+                .cloned()
+                .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
             if args.get(start).is_some() {
                 start += 1;
             }
-            substitutions
-                .types
-                .insert(type_param.name.clone(), lower_type_text_or_name(&argument));
+            substitutions.types.insert(type_param.name.clone(), argument);
         }
 
         let mut end = args.len();
@@ -1228,20 +1253,15 @@ pub(super) fn alias_type_param_substitutions(
             } else {
                 None
             }
-            .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
-            trailing.push((type_param.name.clone(), normalize_type_text(&argument)));
+            .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
+            trailing.push((type_param.name.clone(), argument));
         }
         for (name, argument) in trailing.into_iter().rev() {
-            substitutions.types.insert(name, lower_type_text_or_name(&argument));
+            substitutions.types.insert(name, argument);
         }
         substitutions.type_packs.insert(
             alias_decl.type_params[type_pack_index].name.clone(),
-            TypePackBinding {
-                types: args[start..end]
-                    .iter()
-                    .map(|arg| lower_type_text_or_name(arg))
-                    .collect(),
-            },
+            TypePackBinding { types: args[start..end].to_vec() },
         );
         return Some(substitutions);
     }
@@ -1254,10 +1274,8 @@ pub(super) fn alias_type_param_substitutions(
         let argument = args
             .get(index)
             .cloned()
-            .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
-        substitutions
-            .types
-            .insert(type_param.name.clone(), lower_type_text_or_name(&argument));
+            .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
+        substitutions.types.insert(type_param.name.clone(), argument);
     }
     Some(substitutions)
 }
