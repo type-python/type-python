@@ -1203,7 +1203,7 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return Some(lower_type_text_or_name(&exception_type));
     }
 
-    if let Some(loop_type) = resolve_for_loop_target_type(
+    if let Some(loop_type) = resolve_for_loop_target_semantic_type(
         node,
         nodes,
         signature,
@@ -1212,10 +1212,10 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(lower_type_text_or_name(&loop_type));
+        return Some(loop_type);
     }
 
-    if let Some(with_type) = resolve_with_target_name_type(
+    if let Some(with_type) = resolve_with_target_name_semantic_type(
         node,
         nodes,
         signature,
@@ -1224,7 +1224,7 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(lower_type_text_or_name(&with_type));
+        return Some(with_type);
     }
 
     if let Some(local_type) = resolve_local_assignment_reference_semantic_type(

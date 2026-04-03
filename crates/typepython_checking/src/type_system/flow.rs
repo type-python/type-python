@@ -695,7 +695,7 @@ pub(super) fn normalize_exception_binding_type(text: &str) -> String {
     normalize_type_text(text)
 }
 
-pub(super) fn resolve_for_loop_target_type(
+pub(super) fn resolve_for_loop_target_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -703,7 +703,7 @@ pub(super) fn resolve_for_loop_target_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let loop_site = node.for_loops.iter().rev().find(|for_loop| {
         (for_loop.target_name == value_name
             || for_loop.target_names.iter().any(|name| name == value_name))
@@ -712,7 +712,7 @@ pub(super) fn resolve_for_loop_target_type(
             && for_loop.line < current_line
     })?;
 
-    let iter_type = resolve_direct_expression_type(
+    let iter_type = resolve_direct_expression_semantic_type(
         node,
         nodes,
         signature,
@@ -743,34 +743,22 @@ pub(super) fn resolve_for_loop_target_type(
         None,
     )?;
 
-    let element_type = unwrap_for_iterable_type(&iter_type)?;
+    let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
 
     if let Some(index) = loop_site.target_names.iter().position(|name| name == value_name) {
-        if let Some(elements) = unwrap_fixed_tuple_elements(&element_type) {
+        if let Some(elements) = unpacked_fixed_tuple_semantic_elements(&element_type) {
             if elements.len() == loop_site.target_names.len() {
                 return elements.get(index).cloned();
             }
             return None;
         }
-        return unwrap_for_iterable_type(&element_type);
+        return unwrap_for_iterable_semantic_type(&element_type);
     }
 
     Some(element_type)
 }
 
-pub(super) fn unwrap_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {
-    let text = normalize_type_text(text);
-    let inner = text.strip_prefix("tuple[").and_then(|inner| inner.strip_suffix(']'))?;
-    let args = expanded_tuple_shape_args(
-        &split_top_level_type_args(inner).into_iter().map(str::to_owned).collect::<Vec<_>>(),
-    );
-    if args.len() == 2 && args[1] == "..." {
-        return None;
-    }
-    Some(args)
-}
-
-pub(super) fn resolve_with_target_name_type(
+pub(super) fn resolve_with_target_name_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -778,7 +766,7 @@ pub(super) fn resolve_with_target_name_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let with_site = node.with_statements.iter().rev().find(|with_site| {
         with_site.target_name.as_deref() == Some(value_name)
             && with_site.owner_name.as_deref() == current_owner_name
@@ -786,7 +774,7 @@ pub(super) fn resolve_with_target_name_type(
             && with_site.line < current_line
     })?;
 
-    resolve_with_target_type_for_signature(node, nodes, signature, with_site)
+    resolve_with_target_semantic_type_for_signature(node, nodes, signature, with_site)
 }
 
 pub(super) fn resolve_with_owner_signature<'a>(
@@ -808,13 +796,13 @@ pub(super) fn resolve_with_owner_signature<'a>(
         .map(|declaration| declaration.detail.as_str())
 }
 
-pub(super) fn resolve_with_target_type_for_signature(
+pub(super) fn resolve_with_target_semantic_type_for_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
     with_site: &typepython_binding::WithSite,
-) -> Option<String> {
-    let context_type = resolve_direct_expression_type(
+) -> Option<SemanticType> {
+    let context_type = resolve_direct_expression_semantic_type(
         node,
         nodes,
         signature,
@@ -845,7 +833,8 @@ pub(super) fn resolve_with_target_type_for_signature(
         None,
     )?;
 
-    let (class_node, class_decl) = resolve_direct_base(nodes, node, &context_type)?;
+    let context_type_name = render_semantic_type(&context_type);
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, &context_type_name)?;
     let enter = class_node.declarations.iter().find(|declaration| {
         declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
             && declaration.name == "__enter__"
@@ -859,7 +848,7 @@ pub(super) fn resolve_with_target_type_for_signature(
     let _ = exit;
 
     normalized_direct_return_annotation(enter.detail.split_once("->")?.1.trim())
-        .map(normalize_type_text)
+        .map(lower_type_text_or_name)
 }
 
 pub(super) fn resolve_local_assignment_reference_semantic_type(

@@ -1466,7 +1466,7 @@ pub(super) fn with_statement_diagnostics(
         .iter()
         .filter_map(|with_site| {
             let signature = resolve_with_owner_signature(node, with_site);
-            resolve_with_target_type_for_signature(node, nodes, signature, with_site)
+            resolve_with_target_semantic_type_for_signature(node, nodes, signature, with_site)
                 .is_none()
                 .then(|| {
                 Diagnostic::error(
