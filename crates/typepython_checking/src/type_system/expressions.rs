@@ -313,7 +313,7 @@ pub(super) fn resolve_direct_subscript_reference_semantic_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<SemanticType> {
-    let target_type = lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
+    let target_type = resolve_direct_expression_semantic_type_from_metadata(
         node,
         nodes,
         signature,
@@ -321,7 +321,7 @@ pub(super) fn resolve_direct_subscript_reference_semantic_type(
         current_owner_type_name,
         current_line,
         target,
-    )?);
+    )?;
     resolve_subscript_type_from_target_semantic_type(node, nodes, &target_type, string_key, index_text)
 }
 
