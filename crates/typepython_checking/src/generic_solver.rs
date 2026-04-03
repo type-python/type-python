@@ -56,7 +56,7 @@ pub(crate) fn infer_generic_type_param_substitutions(
     let mut positional_index = 0;
 
     for param in signature.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
-        let Some(annotation) = param.annotation.as_deref() else {
+        let Some(annotation_text) = param.annotation.as_deref() else {
             if param.variadic {
                 positional_index = positional_types.len();
             } else if positional_index < positional_types.len() {
@@ -64,13 +64,14 @@ pub(crate) fn infer_generic_type_param_substitutions(
             }
             continue;
         };
+        let annotation = lower_type_text_or_name(annotation_text);
         if param.variadic {
-            if extract_param_spec_args_name(annotation).is_some() {
+            if extract_param_spec_args_name_from_semantic(&annotation).is_some() {
                 positional_index = positional_types.len();
                 continue;
             }
             if let Some(type_pack_name) =
-                type_pack_name_from_unpack_annotation(annotation, &type_pack_names)
+                type_pack_name_from_unpack_semantic_annotation(&annotation, &type_pack_names)
             {
                 if !variadic_starred_types.is_empty() {
                     return None;
@@ -92,8 +93,8 @@ pub(crate) fn infer_generic_type_param_substitutions(
                 bind_generic_type_params(
                     node,
                     nodes,
-                    annotation,
-                    actual,
+                    &annotation,
+                    &lower_type_text_or_name(actual),
                     &type_names,
                     &type_pack_names,
                     &mut substitutions,
@@ -105,15 +106,15 @@ pub(crate) fn infer_generic_type_param_substitutions(
         let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
-        let annotation_mentions_param_spec = parse_callable_annotation_parts(annotation)
-            .is_some_and(|(params_expr, _)| {
-                callable_param_expr_mentions_param_spec(&params_expr, &param_spec_names)
+        let annotation_mentions_param_spec =
+            annotation.callable_parts().is_some_and(|(params, _)| {
+                callable_param_expr_mentions_param_spec_semantic(params, &param_spec_names)
             });
         bind_callable_param_spec_type_params(
             node,
             nodes,
-            annotation,
-            actual,
+            &annotation,
+            &lower_type_text_or_name(actual),
             call.arg_values.get(positional_index),
             &type_names,
             &param_spec_names,
@@ -126,8 +127,8 @@ pub(crate) fn infer_generic_type_param_substitutions(
         bind_generic_type_params(
             node,
             nodes,
-            annotation,
-            actual,
+            &annotation,
+            &lower_type_text_or_name(actual),
             &type_names,
             &type_pack_names,
             &mut substitutions,
@@ -141,18 +142,19 @@ pub(crate) fn infer_generic_type_param_substitutions(
         let Some(param) = signature.iter().find(|param| param.name == *keyword) else {
             continue;
         };
-        let Some(annotation) = param.annotation.as_deref() else {
+        let Some(annotation_text) = param.annotation.as_deref() else {
             continue;
         };
-        let annotation_mentions_param_spec = parse_callable_annotation_parts(annotation)
-            .is_some_and(|(params_expr, _)| {
-                callable_param_expr_mentions_param_spec(&params_expr, &param_spec_names)
+        let annotation = lower_type_text_or_name(annotation_text);
+        let annotation_mentions_param_spec =
+            annotation.callable_parts().is_some_and(|(params, _)| {
+                callable_param_expr_mentions_param_spec_semantic(params, &param_spec_names)
             });
         bind_callable_param_spec_type_params(
             node,
             nodes,
-            annotation,
-            actual,
+            &annotation,
+            &lower_type_text_or_name(actual),
             call.keyword_arg_values.get(index),
             &type_names,
             &param_spec_names,
@@ -164,8 +166,8 @@ pub(crate) fn infer_generic_type_param_substitutions(
         bind_generic_type_params(
             node,
             nodes,
-            annotation,
-            actual,
+            &annotation,
+            &lower_type_text_or_name(actual),
             &type_names,
             &type_pack_names,
             &mut substitutions,
@@ -301,8 +303,8 @@ pub(crate) fn instantiate_semantic_annotation(
 pub(crate) fn bind_callable_param_spec_type_params(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    annotation: &str,
-    actual: &str,
+    annotation: &SemanticType,
+    actual: &SemanticType,
     actual_value: Option<&typepython_syntax::DirectExprMetadata>,
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
@@ -312,11 +314,10 @@ pub(crate) fn bind_callable_param_spec_type_params(
         return Some(());
     }
 
-    let Some((expected_params_expr, expected_return)) = parse_callable_annotation_parts(annotation)
-    else {
+    let Some((expected_params_expr, expected_return)) = annotation.callable_parts() else {
         return Some(());
     };
-    if !callable_param_expr_mentions_param_spec(&expected_params_expr, param_spec_names) {
+    if !callable_param_expr_mentions_param_spec_semantic(expected_params_expr, param_spec_names) {
         return Some(());
     }
 
@@ -325,7 +326,7 @@ pub(crate) fn bind_callable_param_spec_type_params(
     bind_callable_param_expr(
         node,
         nodes,
-        &expected_params_expr,
+        expected_params_expr,
         &actual_binding,
         type_names,
         param_spec_names,
@@ -334,7 +335,7 @@ pub(crate) fn bind_callable_param_spec_type_params(
     bind_generic_type_params(
         node,
         nodes,
-        &expected_return,
+        expected_return,
         &actual_return,
         type_names,
         &BTreeSet::new(),
@@ -342,69 +343,71 @@ pub(crate) fn bind_callable_param_spec_type_params(
     )
 }
 
-pub(crate) fn callable_param_expr_mentions_param_spec(
-    params_expr: &str,
+pub(crate) fn callable_param_expr_mentions_param_spec_semantic(
+    params_expr: &SemanticCallableParams,
     param_spec_names: &BTreeSet<String>,
 ) -> bool {
-    if param_spec_names.contains(params_expr.trim()) {
-        return true;
-    }
-    if let Some(inner) =
-        params_expr.trim().strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        return split_top_level_type_args(inner)
+    match params_expr {
+        SemanticCallableParams::Single(expr) => {
+            matches!(expr.as_ref(), SemanticType::Name(name) if param_spec_names.contains(name.trim()))
+        }
+        SemanticCallableParams::Concatenate(parts) => parts
             .last()
-            .is_some_and(|tail| param_spec_names.contains(tail.trim()));
+            .is_some_and(|tail| matches!(tail, SemanticType::Name(name) if param_spec_names.contains(name.trim()))),
+        _ => false,
     }
-    false
 }
 
 pub(crate) fn bind_callable_param_expr(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected_params_expr: &str,
+    expected_params_expr: &SemanticCallableParams,
     actual_binding: &ParamListBinding,
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
     substitutions: &mut GenericTypeParamSubstitutions,
 ) -> Option<()> {
-    let expected_params_expr = expected_params_expr.trim();
-    if let Some(param_spec_name) =
-        param_spec_names.contains(expected_params_expr).then_some(expected_params_expr)
-    {
-        return insert_param_spec_binding(substitutions, param_spec_name, actual_binding.clone());
-    }
-
-    if let Some(inner) =
-        expected_params_expr.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        let parts = split_top_level_type_args(inner);
-        let (tail, prefixes) = parts.split_last()?;
-        let tail = tail.trim();
-        if !param_spec_names.contains(tail) || actual_binding.params.len() < prefixes.len() {
-            return None;
+    match expected_params_expr {
+        SemanticCallableParams::Single(expr) => {
+            if let SemanticType::Name(name) = expr.as_ref()
+                && param_spec_names.contains(name.trim())
+            {
+                return insert_param_spec_binding(
+                    substitutions,
+                    name.trim(),
+                    actual_binding.clone(),
+                );
+            }
         }
-        for (expected_prefix, actual_param) in prefixes.iter().zip(actual_binding.params.iter()) {
-            let actual_annotation = actual_param
-                .annotation
-                .as_deref()
-                .filter(|annotation| !annotation.is_empty())
-                .unwrap_or("dynamic");
-            bind_generic_type_params(
-                node,
-                nodes,
-                expected_prefix,
-                actual_annotation,
-                type_names,
-                &BTreeSet::new(),
+        SemanticCallableParams::Concatenate(parts) => {
+            let (tail, prefixes) = parts.split_last()?;
+            let SemanticType::Name(tail) = tail else {
+                return None;
+            };
+            if !param_spec_names.contains(tail.trim())
+                || actual_binding.params.len() < prefixes.len()
+            {
+                return None;
+            }
+            for (expected_prefix, actual_param) in prefixes.iter().zip(actual_binding.params.iter())
+            {
+                bind_generic_type_params(
+                    node,
+                    nodes,
+                    expected_prefix,
+                    &param_annotation_semantic_type(actual_param),
+                    type_names,
+                    &BTreeSet::new(),
+                    substitutions,
+                )?;
+            }
+            return insert_param_spec_binding(
                 substitutions,
-            )?;
+                tail.trim(),
+                ParamListBinding { params: actual_binding.params[prefixes.len()..].to_vec() },
+            );
         }
-        return insert_param_spec_binding(
-            substitutions,
-            tail,
-            ParamListBinding { params: actual_binding.params[prefixes.len()..].to_vec() },
-        );
+        _ => {}
     }
 
     Some(())
@@ -428,38 +431,46 @@ pub(crate) fn insert_param_spec_binding(
 pub(crate) fn resolve_callable_shape_from_actual(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    actual: &str,
+    actual: &SemanticType,
     actual_value: Option<&typepython_syntax::DirectExprMetadata>,
-) -> Option<(ParamListBinding, String)> {
+) -> Option<(ParamListBinding, SemanticType)> {
     if let Some(actual_value) = actual_value
         && let Some(shape) = resolve_callable_shape_from_metadata(node, nodes, actual_value, actual)
     {
         return Some(shape);
     }
 
-    let (params, return_type) = parse_callable_annotation(actual)?;
-    Some((ParamListBinding { params: synthesize_param_list_binding(params?) }, return_type))
+    let (params, return_type) = actual.callable_parts()?;
+    let SemanticCallableParams::ParamList(param_types) = params else {
+        return None;
+    };
+    Some((
+        ParamListBinding { params: synthesize_semantic_param_list_binding(param_types.clone()) },
+        return_type.clone(),
+    ))
 }
 
 pub(crate) fn resolve_callable_shape_from_metadata(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     actual_value: &typepython_syntax::DirectExprMetadata,
-    actual: &str,
-) -> Option<(ParamListBinding, String)> {
+    actual: &SemanticType,
+) -> Option<(ParamListBinding, SemanticType)> {
     if let Some(lambda) = actual_value.value_lambda.as_deref() {
-        let (param_types, return_type) = parse_callable_annotation(actual)?;
-        let param_types = param_types?;
+        let (params, return_type) = actual.callable_parts()?;
+        let SemanticCallableParams::ParamList(param_types) = params else {
+            return None;
+        };
         if param_types.len() != lambda.params.len() {
             return None;
         }
         let params = lambda
             .params
             .iter()
-            .zip(param_types)
+            .zip(param_types.iter())
             .map(|(param, annotation)| typepython_syntax::DirectFunctionParamSite {
                 name: param.name.clone(),
-                annotation: Some(annotation),
+                annotation: Some(render_semantic_type(annotation)),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -467,7 +478,7 @@ pub(crate) fn resolve_callable_shape_from_metadata(
                 keyword_variadic: param.keyword_variadic,
             })
             .collect();
-        return Some((ParamListBinding { params }, return_type));
+        return Some((ParamListBinding { params }, return_type.clone()));
     }
 
     let function_name = actual_value.value_name.as_deref()?;
@@ -478,13 +489,16 @@ pub(crate) fn resolve_callable_shape_from_metadata(
             direct_function_signature_sites_from_callable_annotation(&callable_annotation)?;
         let return_type =
             decorated_function_return_type_from_callable_annotation(&callable_annotation)?;
-        return Some((ParamListBinding { params: signature }, return_type));
+        return Some((
+            ParamListBinding { params: signature },
+            lower_type_text_or_name(&return_type),
+        ));
     }
     let function = resolve_direct_function(node, nodes, function_name)?;
     let return_type = function.detail.split_once("->")?.1.trim().to_owned();
     Some((
         ParamListBinding { params: direct_signature_sites_from_detail(&function.detail) },
-        return_type,
+        lower_type_text_or_name(&return_type),
     ))
 }
 
@@ -497,6 +511,24 @@ pub(crate) fn synthesize_param_list_binding(
         .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
             name: format!("arg{index}"),
             annotation: Some(annotation),
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        })
+        .collect()
+}
+
+pub(crate) fn synthesize_semantic_param_list_binding(
+    param_types: Vec<SemanticType>,
+) -> Vec<typepython_syntax::DirectFunctionParamSite> {
+    param_types
+        .into_iter()
+        .enumerate()
+        .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
+            name: format!("arg{index}"),
+            annotation: Some(render_semantic_type(&annotation)),
             has_default: false,
             positional_only: false,
             keyword_only: false,
@@ -532,21 +564,30 @@ pub(crate) fn extract_param_spec_kwargs_name(annotation: &str) -> Option<&str> {
     annotation.strip_suffix(".kwargs").map(str::trim).filter(|name| !name.is_empty())
 }
 
+pub(crate) fn extract_param_spec_args_name_from_semantic(
+    annotation: &SemanticType,
+) -> Option<&str> {
+    match annotation.strip_annotated() {
+        SemanticType::Name(name) => extract_param_spec_args_name(name),
+        _ => None,
+    }
+}
+
 pub(crate) fn generic_type_param_accepts_actual(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_param: &typepython_binding::GenericTypeParam,
     actual: &SemanticType,
 ) -> bool {
-    let actual = render_semantic_type(actual);
     if let Some(bound) = &type_param.bound {
-        return direct_type_is_assignable(node, nodes, bound, &actual);
+        return semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(bound), actual);
     }
     if !type_param.constraints.is_empty() {
         return type_param
             .constraints
             .iter()
-            .any(|constraint| direct_type_is_assignable(node, nodes, constraint, &actual));
+            .map(|constraint| lower_type_text_or_name(constraint))
+            .any(|constraint| semantic_type_is_assignable(node, nodes, &constraint, actual));
     }
     true
 }
@@ -554,8 +595,8 @@ pub(crate) fn generic_type_param_accepts_actual(
 pub(crate) fn bind_generic_type_params(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    annotation: &str,
-    actual: &str,
+    annotation: &SemanticType,
+    actual: &SemanticType,
     generic_names: &BTreeSet<String>,
     type_pack_names: &BTreeSet<String>,
     substitutions: &mut GenericTypeParamSubstitutions,
@@ -591,19 +632,17 @@ pub(crate) fn bind_generic_type_params(
 pub(crate) fn infer_generic_type_param_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    annotation: &str,
-    actual: &str,
+    annotation: &SemanticType,
+    actual: &SemanticType,
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
 ) -> Option<GenericTypeParamSubstitutions> {
-    let annotation = lower_type_text_or_name(annotation);
-    let actual = lower_type_text_or_name(actual);
     infer_generic_type_param_bindings_full(
         node,
         nodes,
-        &annotation,
-        &actual,
+        annotation,
+        actual,
         generic_names,
         substitutions,
         type_pack_names,
@@ -654,12 +693,7 @@ fn infer_generic_type_param_bindings_full(
             )?;
             let combined = combine_generic_substitutions(substitutions, &candidate);
             let substituted_annotation = substitute_semantic_type_params(annotation, &combined);
-            if !direct_type_is_assignable(
-                node,
-                nodes,
-                &render_semantic_type(&substituted_annotation),
-                &render_semantic_type(&branch),
-            ) {
+            if !semantic_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
                 return None;
             }
             candidates.push(candidate);
@@ -684,13 +718,8 @@ fn infer_generic_type_param_bindings_full(
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
                 let substituted_branch = substitute_semantic_type_params(&branch, &combined);
-                direct_type_is_assignable(
-                    node,
-                    nodes,
-                    &render_semantic_type(&substituted_branch),
-                    &render_semantic_type(actual),
-                )
-                .then_some(candidate)
+                semantic_type_is_assignable(node, nodes, &substituted_branch, actual)
+                    .then_some(candidate)
             })
             .collect::<Vec<_>>();
         return select_best_union_branch_binding(candidates);
@@ -730,13 +759,8 @@ pub(crate) fn infer_generic_type_param_bindings_semantic(
                 type_pack_names,
             )
         }
-        _ => direct_type_is_assignable(
-            node,
-            nodes,
-            &render_semantic_type(annotation),
-            &render_semantic_type(actual),
-        )
-        .then_some(GenericTypeParamSubstitutions::default()),
+        _ => semantic_type_is_assignable(node, nodes, annotation, actual)
+            .then_some(GenericTypeParamSubstitutions::default()),
     }
 }
 
@@ -952,11 +976,14 @@ pub(crate) fn merge_type_pack_candidates(
     })
 }
 
-pub(crate) fn type_pack_name_from_unpack_annotation(
-    annotation: &str,
+pub(crate) fn type_pack_name_from_unpack_semantic_annotation(
+    annotation: &SemanticType,
     type_pack_names: &BTreeSet<String>,
 ) -> Option<String> {
-    let inner = unpack_inner(&normalize_type_text(annotation))?;
+    let inner = annotation.unpacked_inner()?;
+    let SemanticType::Name(inner) = inner else {
+        return None;
+    };
     let inner = inner.trim();
     type_pack_names.contains(inner).then(|| inner.to_owned())
 }

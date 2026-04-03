@@ -69,6 +69,13 @@ impl SemanticType {
             _ => None,
         }
     }
+
+    pub(crate) fn callable_parts(&self) -> Option<(&SemanticCallableParams, &SemanticType)> {
+        match self.strip_annotated() {
+            Self::Callable { params, return_type } => Some((params, return_type.as_ref())),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn lower_type_text(text: &str) -> Option<SemanticType> {
