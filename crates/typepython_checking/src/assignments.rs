@@ -137,8 +137,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         }
 
-        let Some(actual) =
-            resolve_assignment_site_semantic_type(node, nodes, None, assignment)
+        let Some(actual) = resolve_assignment_site_semantic_type(node, nodes, None, assignment)
         else {
             continue;
         };
@@ -348,9 +347,12 @@ pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
     current_line: usize,
     value_name: &str,
 ) -> Option<SemanticType> {
-    if let Some(param_type) =
-        resolve_scope_param_semantic_type(node, current_owner_name, current_owner_type_name, value_name)
-    {
+    if let Some(param_type) = resolve_scope_param_semantic_type(
+        node,
+        current_owner_name,
+        current_owner_type_name,
+        value_name,
+    ) {
         return Some(param_type);
     }
 
@@ -1073,7 +1075,10 @@ pub(super) fn resolve_writable_subscript_signature(
         };
         if params.len() == 2 {
             return Some(WritableSubscriptSignature::Writable {
-                key_type: rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic()),
+                key_type: rewrite_imported_typing_semantic_type(
+                    node,
+                    &params[0].annotation_or_dynamic(),
+                ),
                 value_type: rewrite_imported_typing_semantic_type(
                     node,
                     &params[1].annotation_or_dynamic(),
@@ -1523,10 +1528,12 @@ pub(super) fn resolve_writable_member_semantic_type(
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
             let owner_type_name = diagnostic_type_text(owner_type);
-            let params = declaration_semantic_signature_params_with_self(declaration, &owner_type_name)?;
+            let params =
+                declaration_semantic_signature_params_with_self(declaration, &owner_type_name)?;
             let params = params.into_iter().skip(1).collect::<Vec<_>>();
-            (params.len() == 1)
-                .then(|| rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic()))
+            (params.len() == 1).then(|| {
+                rewrite_imported_typing_semantic_type(node, &params[0].annotation_or_dynamic())
+            })
         }
         _ => None,
     }

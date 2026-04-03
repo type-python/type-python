@@ -166,7 +166,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             .filter(|declaration| declaration.kind == DeclarationKind::Overload)
             .map(|declaration| (*declaration, declaration_callable_semantics(declaration)))
             .collect::<Vec<_>>();
-        return match resolve_method_overload_selection(
+        match resolve_method_overload_selection(
             node,
             nodes,
             &call,
@@ -175,7 +175,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         ) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
             _ => None,
-        };
+        }
     } else {
         let method = *methods.first()?;
         if let Some(call) = node.method_calls.iter().find(|call| {

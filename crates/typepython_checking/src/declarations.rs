@@ -1,5 +1,9 @@
 use super::*;
 
+#[expect(
+    clippy::enum_variant_names,
+    reason = "override compatibility diagnostics read more clearly with explicit mismatch labels"
+)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum OverrideCompatibilityFailure {
     MethodKindMismatch,
@@ -14,9 +18,9 @@ pub(super) enum OverrideCompatibilityFailure {
 impl OverrideCompatibilityFailure {
     pub(super) fn diagnostic_note(&self) -> String {
         match self {
-            Self::MethodKindMismatch => {
-                String::from("reason: overriding member changes method kind (instance/class/static/property)")
-            }
+            Self::MethodKindMismatch => String::from(
+                "reason: overriding member changes method kind (instance/class/static/property)",
+            ),
             Self::ParameterCountMismatch { child_count, base_count } => format!(
                 "reason: overriding member declares {} parameter(s) but the base member declares {}",
                 child_count, base_count
@@ -66,7 +70,9 @@ pub(super) fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     }) {
-                        if let Some(reason) = method_override_incompatibility(node, nodes, member, base_member) {
+                        if let Some(reason) =
+                            method_override_incompatibility(node, nodes, member, base_member)
+                        {
                             diagnostics.push(Diagnostic::error(
                              "TPY4005",
                              format!(
@@ -115,10 +121,10 @@ pub(super) fn method_override_incompatibility(
     {
         return (declaration_signature_param_count(member)
             != declaration_signature_param_count(base_member))
-            .then(|| OverrideCompatibilityFailure::SpecialContextManagerArityMismatch {
-                child_count: declaration_signature_param_count(member),
-                base_count: declaration_signature_param_count(base_member),
-            });
+        .then(|| OverrideCompatibilityFailure::SpecialContextManagerArityMismatch {
+            child_count: declaration_signature_param_count(member),
+            base_count: declaration_signature_param_count(base_member),
+        });
     }
 
     if member.method_kind != base_member.method_kind {
@@ -153,12 +159,8 @@ pub(super) fn method_override_incompatibility(
         }
         if let (Some(child_annotation), Some(base_annotation)) =
             (child.annotation.as_ref(), base.annotation.as_ref())
-            && let Some(reason) = semantic_type_assignability_failure(
-                node,
-                nodes,
-                child_annotation,
-                base_annotation,
-            )
+            && let Some(reason) =
+                semantic_type_assignability_failure(node, nodes, child_annotation, base_annotation)
         {
             return Some(OverrideCompatibilityFailure::ParameterTypeMismatch {
                 parameter_name: child.name.clone(),

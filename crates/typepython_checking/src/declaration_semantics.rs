@@ -523,10 +523,9 @@ pub(crate) fn parse_direct_callable_declaration(
         .map(|param| SemanticCallableParam {
             name: param.name,
             annotation_text: param.annotation.clone(),
-            annotation: param
-                .annotation
-                .as_deref()
-                .map(|annotation| lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)),
+            annotation: param.annotation.as_deref().map(|annotation| {
+                lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
+            }),
             has_default: param.has_default,
             positional_only: param.positional_only,
             keyword_only: param.keyword_only,

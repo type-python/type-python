@@ -177,11 +177,7 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         source_overrides: Option<&'a BTreeMap<String, String>>,
         bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
     ) -> Self {
-        Self {
-            bound_surface_facts,
-            modules: RefCell::new(BTreeMap::new()),
-            source_overrides,
-        }
+        Self { bound_surface_facts, modules: RefCell::new(BTreeMap::new()), source_overrides }
     }
 
     fn with_module_facts<T>(

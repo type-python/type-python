@@ -199,16 +199,17 @@ fn select_most_specific_overload_index(
 pub(super) enum ResolvedOverloadSelection<'a> {
     Selected(ResolvedDirectCallCandidate<'a>),
     Ambiguous { applicable_count: usize },
-    NotApplicable {
-        runtime_generic_failures: Vec<(&'a Declaration, DirectCallResolutionFailure)>,
-    },
+    NotApplicable { runtime_generic_failures: Vec<(&'a Declaration, DirectCallResolutionFailure)> },
 }
 
 pub(super) fn resolve_overload_selection_from_attempts<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
-    attempts: Vec<(&'a Declaration, Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure>)>,
+    attempts: Vec<(
+        &'a Declaration,
+        Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure>,
+    )>,
 ) -> ResolvedOverloadSelection<'a> {
     let mut applicable = Vec::new();
     let mut runtime_generic_failures = Vec::new();
@@ -216,7 +217,12 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
     for (declaration, attempt) in attempts {
         match attempt {
             Ok(candidate)
-                if call_signature_params_are_applicable(node, nodes, call, &candidate.signature_params) =>
+                if call_signature_params_are_applicable(
+                    node,
+                    nodes,
+                    call,
+                    &candidate.signature_params,
+                ) =>
             {
                 applicable.push(candidate);
             }
@@ -230,7 +236,9 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
 
     match applicable.len() {
         0 => ResolvedOverloadSelection::NotApplicable { runtime_generic_failures },
-        1 => ResolvedOverloadSelection::Selected(applicable.pop().expect("single applicable overload")),
+        1 => ResolvedOverloadSelection::Selected(
+            applicable.pop().expect("single applicable overload"),
+        ),
         applicable_count => match select_most_specific_overload_index(node, nodes, &applicable) {
             Some(index) => ResolvedOverloadSelection::Selected(applicable.swap_remove(index)),
             None => ResolvedOverloadSelection::Ambiguous { applicable_count },
@@ -292,10 +300,8 @@ pub(super) fn call_signature_params_are_applicable(
         .collect::<Vec<_>>();
     let has_variadic = params.iter().any(|param| param.variadic);
     let starred_positional = resolved_starred_positional_expansions(node, nodes, call);
-    let expected_positional_arg_types = expected_positional_arg_semantic_types_from_params(
-        params,
-        call.arg_count,
-    );
+    let expected_positional_arg_types =
+        expected_positional_arg_semantic_types_from_params(params, call.arg_count);
     let expected_keyword_arg_types =
         expected_keyword_arg_semantic_types_from_params(params, &call.keyword_names);
     if call.arg_values.iter().enumerate().any(|(index, metadata)| {
@@ -324,26 +330,24 @@ pub(super) fn call_signature_params_are_applicable(
     }) {
         return false;
     }
-    let resolved_keyword_arg_types =
-        resolved_keyword_arg_semantic_types_with_expected_semantic(
-            node,
-            nodes,
-            call,
-            &expected_keyword_arg_types,
-        )
-            .into_iter()
-            .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
-            .collect::<Vec<_>>();
-    let mut positional_types =
-        resolved_call_arg_semantic_types_with_expected_semantic(
-            node,
-            nodes,
-            call,
-            &expected_positional_arg_types,
-        )
-            .into_iter()
-            .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
-            .collect::<Vec<_>>();
+    let resolved_keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
+        node,
+        nodes,
+        call,
+        &expected_keyword_arg_types,
+    )
+    .into_iter()
+    .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
+    .collect::<Vec<_>>();
+    let mut positional_types = resolved_call_arg_semantic_types_with_expected_semantic(
+        node,
+        nodes,
+        call,
+        &expected_positional_arg_types,
+    )
+    .into_iter()
+    .map(|ty| (!matches!(&ty, SemanticType::Name(name) if name.is_empty())).then_some(ty))
+    .collect::<Vec<_>>();
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
         match expansion {
@@ -424,18 +428,13 @@ pub(super) fn call_signature_params_are_applicable(
         return false;
     }
 
-    let param_types = params
+    let param_types = params.iter().map(|param| param.annotation.clone()).collect::<Vec<_>>();
+    let variadic_type =
+        params.iter().find(|param| param.variadic).and_then(|param| param.annotation.clone());
+    let keyword_variadic_type = params
         .iter()
-        .map(|param| param.annotation.clone())
-        .collect::<Vec<_>>();
-    let variadic_type = params
-        .iter()
-        .find(|param| param.variadic)
+        .find(|param| param.keyword_variadic)
         .and_then(|param| param.annotation.clone());
-    let keyword_variadic_type =
-        params.iter().find(|param| param.keyword_variadic).and_then(|param| {
-            param.annotation.clone()
-        });
     let positional_ok =
         positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
             |(arg_ty, param_ty)| match (arg_ty, param_ty) {
@@ -522,10 +521,8 @@ fn expected_positional_arg_semantic_types_from_params(
         .iter()
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
-    let variadic_type = params
-        .iter()
-        .find(|param| param.variadic)
-        .and_then(|param| param.annotation.clone());
+    let variadic_type =
+        params.iter().find(|param| param.variadic).and_then(|param| param.annotation.clone());
 
     (0..arg_count)
         .map(|index| {
@@ -912,7 +909,8 @@ pub(super) fn resolve_direct_type_alias<'a>(
 
         if let Some(import) = node.declarations.iter().find(|declaration| {
             declaration.kind == DeclarationKind::Import && declaration.name == module_key
-        }) && let Some(import_target) = resolve_imported_symbol_semantic_target_from_declaration(nodes, import)
+        }) && let Some(import_target) =
+            resolve_imported_symbol_semantic_target_from_declaration(nodes, import)
             && let Some(target_node) = import_target.module_target()
             && let Some(target_decl) = target_node.declarations.iter().find(|declaration| {
                 declaration.name == symbol_name
@@ -1222,17 +1220,19 @@ pub(super) fn resolve_contextual_yield_type(
                 diagnostics: result.diagnostics,
             };
         }
-        if let Some(result) = resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
-            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
-            node,
-            nodes,
-            None,
-            Some(yield_site.owner_name.as_str()),
-            yield_site.owner_type_name.as_deref(),
-            yield_site.line,
-            &metadata,
-            Some(expected),
-        ) {
+        if let Some(result) =
+            resolve_contextual_collection_literal_semantic_type_in_scope_with_context(
+                &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+                node,
+                nodes,
+                None,
+                Some(yield_site.owner_name.as_str()),
+                yield_site.owner_type_name.as_deref(),
+                yield_site.line,
+                &metadata,
+                Some(expected),
+            )
+        {
             return ContextualYieldTypeResult {
                 actual_type: Some(result.actual_type),
                 diagnostics: result.diagnostics,
@@ -1551,10 +1551,10 @@ pub(super) fn with_statement_diagnostics(
 ) -> Vec<Diagnostic> {
     node.with_statements
         .iter()
-        .filter_map(|with_site| {
-            resolve_with_target_semantic_type_for_signature(node, nodes, None, with_site)
-                .is_none()
-                .then(|| {
+        .filter(|with_site| {
+            resolve_with_target_semantic_type_for_signature(node, nodes, None, with_site).is_none()
+        })
+        .map(|with_site| {
                 Diagnostic::error(
                     "TPY4001",
                     match (&with_site.owner_type_name, &with_site.owner_name) {
@@ -1578,7 +1578,6 @@ pub(super) fn with_statement_diagnostics(
                         ),
                     },
                 )
-            })
         })
         .collect()
 }

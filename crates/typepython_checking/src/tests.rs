@@ -7,11 +7,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use typepython_binding::{
-    bind, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
+    Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
 };
 use typepython_config::{DiagnosticLevel, ImportFallback};
-use typepython_graph::{build, ModuleGraph, ModuleNode};
-use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
+use typepython_graph::{ModuleGraph, ModuleNode, build};
+use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
 
 static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -10569,7 +10569,7 @@ fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
     .expect("semantic alias substitution should succeed");
 
     assert_eq!(
-        substitutions.types.get("T").as_ref().map(|ty| crate::diagnostic_type_text(*ty)),
+        substitutions.types.get("T").as_ref().map(crate::diagnostic_type_text),
         Some(String::from("tuple[int, str]")),
     );
 }
@@ -20787,8 +20787,10 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered
-        .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
+    assert!(
+        rendered
+            .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`")
+    );
 }
 
 #[test]
