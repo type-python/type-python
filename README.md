@@ -4,11 +4,11 @@
 [![CI](https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg)](https://github.com/type-python/type-python/actions/workflows/rust.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/rust-1.94.0-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-msrv%201.85-orange.svg)](https://www.rust-lang.org/)
 
 **A statically-typed authoring language that compiles to standard Python.**
 
-Write `.tpy` files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits clean `.py` + `.pyi` files that run on any Python 3.10+ interpreter and type-check with mypy or pyright -- no custom runtime, no lock-in.
+Write `.tpy` files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits standard `.py` + `.pyi` artifacts for Python 3.10-3.12, using standard typing constructs and `typing_extensions` backports where needed, so the result can be checked by tools like mypy, pyright, or ty. No custom runtime, no proprietary type forms.
 
 ---
 
@@ -21,6 +21,7 @@ typepython --help
 
 The Python package bridge supports Python 3.9+. Generated TypePython projects currently target Python 3.10, 3.11, or 3.12.
 Published wheels are platform-specific because they bundle the Rust CLI binary. If PyPI does not have a wheel for your platform, `pip` falls back to the source distribution and requires Rust + `cargo`.
+The workspace MSRV is Rust 1.85. `./scripts/bootstrap-rust.sh` installs the pinned Rust 1.94.0 development toolchain used by CI.
 
 Or build from source:
 
@@ -60,45 +61,60 @@ typepython build --project .
 
 The compiler outputs:
 
-| Your code (`.tpy`)                | Compiled output (`.py`)                           |
-| --------------------------------- | ------------------------------------------------- |
-| `sealed class Expr:`              | `class Expr:  # tpy:sealed`                       |
-| `data class Num(Expr):`           | `@dataclass class Num(Expr):`                     |
-| `interface Drawable:`             | `class Drawable(Protocol):`                       |
-| `overload def f(x: int) -> int:`  | `@overload def f(x: int) -> int:`                 |
-| `typealias Pair[T] = tuple[T, T]` | `T = TypeVar("T"); Pair: TypeAlias = tuple[T, T]` |
-| `def first[T](xs: list[T]) -> T:` | `T = TypeVar("T"); def first(xs: list[T]) -> T:`  |
-| `unsafe: eval(expr)`              | `if True: eval(expr)`                             |
+| Your code (`.tpy`)                | Lowered shape (`.py` / `.pyi`)                     |
+| --------------------------------- | -------------------------------------------------- |
+| `sealed class Expr:`              | `class Expr:  # tpy:sealed`                        |
+| `data class Num(Expr):`           | `@dataclass` plus ordinary `class Num(Expr):`      |
+| `interface Drawable:`             | `class Drawable(Protocol):`                        |
+| `overload def f(x: int) -> int:`  | `@overload` plus ordinary `def f(x: int) -> int:`  |
+| `typealias Pair[T] = tuple[T, T]` | `T = TypeVar("T"); Pair: TypeAlias = tuple[T, T]`  |
+| `def first[T](xs: list[T]) -> T:` | Materialized `TypeVar` plus ordinary generic `def` |
+| `unsafe: eval(expr)`              | `if True: eval(expr)`                              |
 
-Emitted `.py` and `.pyi` contain only standard Python typing constructs (PEP 484/544/561/612/613/655). Downstream consumers never need TypePython.
+Emitted `.py` and `.pyi` use standard Python typing constructs plus `typing_extensions` compatibility imports when needed for the configured target version. Downstream consumers never need the TypePython compiler or a TypePython-specific runtime.
 
 ## Why TypePython
 
-**mypy and pyright check your types. TypePython gives you better types to check.**
+**Type checkers like mypy, pyright, and ty verify your annotations. TypePython gives you a better language to write them in.**
 
-|                           | mypy / pyright                    | TypePython                                                  |
-| ------------------------- | --------------------------------- | ----------------------------------------------------------- |
-| **What it does**          | Checks annotations on `.py` files | Compiles `.tpy` to `.py` + `.pyi` with richer type features |
-| **Sealed exhaustiveness** | Limited (via `assert_never`)      | Compiler-proven in `match` statements                       |
-| **`unknown` type**        | Not available                     | Forces narrowing before use (safer than `Any`)              |
-| **`interface` keyword**   | Manual `Protocol` classes         | First-class syntax, same output                             |
-| **`data class` keyword**  | Manual `@dataclass` decorator     | First-class syntax, same output                             |
-| **TypedDict utilities**   | Not available                     | `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`            |
-| **`unsafe` blocks**       | Not available                     | Fences `eval`/`exec`/`setattr` for auditing                 |
-| **Interop**               | Native                            | Full -- output is consumed by mypy/pyright unchanged        |
+Tools like [ty](https://github.com/astral-sh/ty), pyright, and mypy are _checkers_ -- they analyze standard `.py` files and report type errors. TypePython is a _source language_ -- you write `.tpy` files with richer syntax, and the compiler emits the `.py` + `.pyi` that those checkers consume. They are complementary:
 
-TypePython is not a replacement for mypy or pyright. It is a **source language** whose output is checked by those tools.
+```
+you write .tpy  -->  TypePython compiles  -->  .py + .pyi  -->  ty / pyright / mypy checks
+```
+
+### What TypePython adds at the source-language layer
+
+External checkers work on standard Python syntax. TypePython adds an authoring layer on top and lowers it away before those tools run:
+
+| Capability                       | Standard Python + checker                                                                                             | TypePython authoring layer                                                            |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **What it is**                   | Type checker for `.py` / `.pyi`                                                                                       | Source language that compiles `.tpy` to `.py` + `.pyi`                                |
+| **Sealed hierarchies**           | No `sealed class` syntax; exhaustiveness depends on checker rules for plain Python types                              | `sealed class` syntax plus TypePython-enforced same-module sealing and exhaustiveness |
+| **`unknown` as source syntax**   | Some checkers model unknown or partially-known states internally, but there is no portable `unknown` annotation       | First-class `unknown`; must narrow before use                                         |
+| **`interface` keyword**          | Write `Protocol` manually                                                                                             | `interface Foo:` lowers to `Protocol`                                                 |
+| **`data class` keyword**         | Write `@dataclass` manually                                                                                           | `data class Foo:` lowers to ordinary dataclass code                                   |
+| **TypedDict utility transforms** | Field-level features like `ReadOnly` exist, but `Partial` / `Pick` / `Omit` style transforms must be expanded by hand | `Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, `Required_` compile away            |
+| **`unsafe` auditing fence**      | No source-level `unsafe:` block                                                                                       | Explicit boundary around `eval` / `exec` / dynamic mutation                           |
+| **Stub generation**              | Separate tools or hand-maintained `.pyi`                                                                              | Auto-generates authoritative `.pyi` from `.tpy` source                                |
+| **Interop with checkers**        | Consumes standard Python surfaces                                                                                     | Emits standard Python surfaces intended for external checkers                         |
+
+### How TypePython relates to ty
+
+[ty](https://github.com/astral-sh/ty) is Astral's Rust-based type checker with fine-grained incremental analysis, language-server support, and modern type-system features such as intersection types. TypePython's compiled output is designed to be checked by ty, pyright, or mypy without TypePython-specific support.
+
+TypePython is an authoring layer, not a replacement for external checkers. One improves the source language you write; the other validates the emitted standard Python.
 
 ## Features
 
-- **Compiles to Python** -- `.tpy` emits standard `.py` + `.pyi`; runs on CPython 3.10+ ([syntax guide](docs/syntax-guide.md))
+- **Compiles to Python** -- `.tpy` emits standard `.py` + `.pyi` for target Python 3.10-3.12, using `typing_extensions` compatibility imports when needed ([syntax guide](docs/syntax-guide.md))
 - **Rich type system** -- `unknown`, `dynamic`, `Never`, strict nulls, sealed exhaustiveness, generic defaults, TypeVarTuple ([type system](docs/type-system.md))
 - **Syntax extensions** -- `interface`, `data class`, `sealed class`, `overload def`, `typealias`, `unsafe:`, inline type parameters ([syntax guide](docs/syntax-guide.md))
 - **TypedDict utilities** -- `Partial`, `Required_`, `Readonly`, `Mutable`, `Pick`, `Omit` ([type system](docs/type-system.md))
-- **Incremental builds** -- fingerprint-based caching; only rechecks modules whose public API changed ([architecture](docs/architecture.md))
+- **Incremental state and caching** -- fingerprint snapshots, cached artifacts, and LSP rechecks for changed modules plus affected dependents ([architecture](docs/architecture.md))
 - **Full toolchain** -- `init`, `check`, `build`, `watch`, `clean`, `verify`, `migrate` ([CLI reference](docs/cli-reference.md))
 - **LSP server** -- hover, go-to-definition, references, rename, completions, signature help, document symbols, workspace symbols, formatting, code actions, real-time diagnostics ([LSP](docs/lsp.md))
-- **Publication-ready** -- `typepython verify` validates wheel/sdist consistency and public API completeness ([interop](docs/interop.md))
+- **Publication-ready** -- `typepython verify` validates runtime/stub parity, packaged wheel/sdist contents, and optional public API completeness checks ([interop](docs/interop.md))
 - **Bundled stdlib stubs** -- typing data for Python 3.10-3.12 standard library, no external dependencies
 
 ## Examples
@@ -126,7 +142,7 @@ typepython verify  --project .          # Validate for publication
 typepython migrate --project . --report # Migration coverage report
 ```
 
-All commands support `--format text|json`. See [CLI reference](docs/cli-reference.md).
+Project-oriented commands except `clean` support `--format text|json`. `typepython lsp` always speaks JSON-RPC over stdio rather than CLI JSON output. See [CLI reference](docs/cli-reference.md).
 
 ## Configuration
 
@@ -171,7 +187,7 @@ See [configuration reference](docs/configuration.md).
 
 ```bash
 make ci              # format + lint + test + bench-check + package-check
-make test            # run all 833 tests
+make test            # run all 846 tests
 make bench           # run performance benchmarks
 make snapshot-review # review insta snapshot changes
 ```
