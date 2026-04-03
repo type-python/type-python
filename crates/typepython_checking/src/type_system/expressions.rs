@@ -894,14 +894,14 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return None;
     }
 
-    if let Some(exception_type) = resolve_exception_binding_type(
+    if let Some(exception_type) = resolve_exception_binding_semantic_type(
         node,
         current_owner_name,
         current_owner_type_name,
         current_line,
         value_name,
     ) {
-        return Some(lower_type_text_or_name(&exception_type));
+        return Some(exception_type);
     }
 
     if let Some(loop_type) = resolve_for_loop_target_semantic_type(

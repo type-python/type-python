@@ -468,13 +468,13 @@ fn semantic_literal_bool_value(ty: &SemanticType) -> Option<bool> {
     }
 }
 
-pub(super) fn resolve_exception_binding_type(
+pub(super) fn resolve_exception_binding_semantic_type(
     node: &typepython_graph::ModuleNode,
     current_owner_name: Option<&str>,
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let except_site = node.except_handlers.iter().rev().find(|except_site| {
         except_site.binding_name.as_deref() == Some(value_name)
             && except_site.owner_name.as_deref() == current_owner_name
@@ -483,7 +483,9 @@ pub(super) fn resolve_exception_binding_type(
             && current_line <= except_site.end_line
     })?;
 
-    Some(normalize_exception_binding_type(&except_site.exception_type))
+    Some(lower_type_text_or_name(&normalize_exception_binding_type(
+        &except_site.exception_type,
+    )))
 }
 
 pub(super) fn normalize_exception_binding_type(text: &str) -> String {

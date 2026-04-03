@@ -1515,23 +1515,22 @@ pub(super) fn find_owned_writable_member_target<'a>(
     Some(WritableAttributeTarget::NonWritable)
 }
 
-pub(super) fn resolve_writable_member_type(
+pub(super) fn resolve_writable_member_semantic_type(
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,
-    owner_type_name: &str,
+    owner_type: &SemanticType,
 ) -> Option<SemanticType> {
     match declaration.kind {
-        DeclarationKind::Value => resolve_readable_member_semantic_type(
-            node,
-            declaration,
-            &lower_type_text_or_name(owner_type_name),
-        ),
+        DeclarationKind::Value => {
+            resolve_readable_member_semantic_type(node, declaration, owner_type)
+        }
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
+            let owner_type_name = render_semantic_type(owner_type);
             let signature = rewrite_imported_typing_aliases(
                 node,
-                &substitute_self_annotation(&declaration.detail, Some(owner_type_name)),
+                &substitute_self_annotation(&declaration.detail, Some(&owner_type_name)),
             );
             let params = direct_param_types(&signature)?;
             let params = params.into_iter().skip(1).collect::<Vec<_>>();
@@ -1641,7 +1640,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                         ));
                     }
                     let expected =
-                        resolve_writable_member_type(node, declaration, &target_type_rendered)?;
+                        resolve_writable_member_semantic_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -1748,7 +1747,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 }
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
                     let expected =
-                        resolve_writable_member_type(node, declaration, &target_type_rendered)?;
+                        resolve_writable_member_semantic_type(node, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
