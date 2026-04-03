@@ -2,41 +2,6 @@
     clippy::too_many_arguments,
     reason = "member reference resolution needs source metadata and scope context"
 )]
-#[allow(
-    dead_code,
-    reason = "string-returning member helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_direct_member_reference_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    owner_name: &str,
-    member_name: &str,
-    through_instance: bool,
-) -> Option<String> {
-    resolve_direct_member_reference_semantic_type(
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        owner_name,
-        member_name,
-        through_instance,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "member reference resolution needs source metadata and scope context"
-)]
 pub(super) fn resolve_direct_member_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -117,41 +82,6 @@ pub(super) fn is_flag_enum_like_class(
                 is_flag_enum_like_class(nodes, base_node, base_decl)
             })
     })
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "method return resolution needs source metadata and scope context"
-)]
-#[allow(
-    dead_code,
-    reason = "string-returning method helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_direct_method_return_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    owner_name: &str,
-    method_name: &str,
-    through_instance: bool,
-) -> Option<String> {
-    resolve_direct_method_return_semantic_type(
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        owner_name,
-        method_name,
-        through_instance,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 #[expect(

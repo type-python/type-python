@@ -25,12 +25,16 @@ pub(super) fn direct_member_access_diagnostics(
                 });
             }
 
-            let owner_type_name = resolve_member_access_owner_type(node, nodes, access)?;
-            if let Some(branches) = union_branches(&owner_type_name) {
+            let owner_type = resolve_member_access_owner_semantic_type(node, nodes, access)?;
+            let owner_type_name = render_semantic_type(&owner_type);
+            if let Some(branches) = semantic_union_branches(&owner_type) {
                 let available = branches
                     .iter()
-                    .filter(|branch| type_has_readable_member(node, nodes, branch, &access.member))
-                    .cloned()
+                    .filter_map(|branch| {
+                        let branch_name = render_semantic_type(branch);
+                        type_has_readable_member(node, nodes, &branch_name, &access.member)
+                            .then_some(branch_name)
+                    })
                     .collect::<Vec<_>>();
                 if available.len() == branches.len() {
                     return None;

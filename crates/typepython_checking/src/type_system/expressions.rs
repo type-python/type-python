@@ -173,41 +173,6 @@ pub(super) fn join_numeric_result_semantic_type(
     clippy::too_many_arguments,
     reason = "subscript resolution needs the same expression context as other direct expression forms"
 )]
-#[allow(
-    dead_code,
-    reason = "string-returning subscript helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_direct_subscript_reference_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    _exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    target: &typepython_syntax::DirectExprMetadata,
-    string_key: Option<&str>,
-    index_text: Option<&str>,
-) -> Option<String> {
-    resolve_direct_subscript_reference_semantic_type(
-        node,
-        nodes,
-        signature,
-        _exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        target,
-        string_key,
-        index_text,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "subscript resolution needs the same expression context as other direct expression forms"
-)]
 pub(super) fn resolve_direct_subscript_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -754,20 +719,6 @@ pub(super) fn resolve_direct_name_reference_semantic_type_with_context(
     Some(narrowed)
 }
 
-#[allow(
-    dead_code,
-    reason = "string-returning receiver helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_receiver_name_type(
-    node: &typepython_graph::ModuleNode,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    value_name: &str,
-) -> Option<String> {
-    resolve_receiver_name_semantic_type(node, current_owner_name, current_owner_type_name, value_name)
-        .map(|resolved| render_semantic_type(&resolved))
-}
-
 pub(super) fn resolve_receiver_name_semantic_type(
     node: &typepython_graph::ModuleNode,
     current_owner_name: Option<&str>,
@@ -912,15 +863,6 @@ pub(super) fn resolve_readable_member_semantic_type(
         }
         _ => None,
     }
-}
-
-pub(super) fn resolve_member_access_owner_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    access: &typepython_binding::MemberAccessSite,
-) -> Option<String> {
-    resolve_member_access_owner_semantic_type(node, nodes, access)
-        .map(|resolved| render_semantic_type(&resolved))
 }
 
 pub(super) fn resolve_member_access_owner_semantic_type(
