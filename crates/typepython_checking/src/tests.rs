@@ -1222,6 +1222,83 @@ fn semantic_contextual_lambda_resolution_builds_callable_types() {
 }
 
 #[test]
+fn call_diagnostics_resolve_argument_types_through_semantic_path() {
+    let source_text = "async def fetch() -> int:\n    return 1\n";
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let call = typepython_binding::CallSite {
+        callee: String::from("consume"),
+        arg_count: 1,
+        arg_types: vec![String::new()],
+        arg_values: vec![typepython_syntax::DirectExprMetadata {
+            value_type: None,
+            is_awaited: true,
+            value_callee: Some(String::from("fetch")),
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        }],
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    assert_eq!(
+        super::resolved_call_arg_semantic_types(
+            node,
+            &graph.nodes,
+            &call,
+            &[Some(String::from("int"))],
+        )
+        .into_iter()
+        .map(|ty| crate::render_semantic_type(&ty))
+        .collect::<Vec<_>>(),
+        vec![String::from("int")]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_reports_callable_decorator_transform_return_rewrite() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable, cast\n\n",

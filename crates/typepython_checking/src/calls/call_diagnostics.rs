@@ -708,8 +708,20 @@ pub(super) fn resolved_call_arg_types(
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<String> {
+    resolved_call_arg_semantic_types(node, nodes, call, expected_types)
+        .into_iter()
+        .map(|ty| render_semantic_type(&ty))
+        .collect()
+}
+
+pub(super) fn resolved_call_arg_semantic_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+) -> Vec<SemanticType> {
     if call.arg_values.is_empty() {
-        return call.arg_types.clone();
+        return call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.arg_values
         .iter()
@@ -722,13 +734,19 @@ pub(super) fn resolved_call_arg_types(
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .map(|result| result.actual_type)
+            .map(|result| lower_type_text_or_name(&result.actual_type))
             .or_else(|| {
-                resolve_direct_expression_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
                 )
             })
-            .unwrap_or_else(|| call.arg_types.get(index).cloned().unwrap_or_default())
+            .unwrap_or_else(|| {
+                call
+                    .arg_types
+                    .get(index)
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .unwrap_or_else(|| SemanticType::Name(String::new()))
+            })
         })
         .collect()
 }
@@ -739,8 +757,20 @@ pub(super) fn resolved_keyword_arg_types(
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> Vec<String> {
+    resolved_keyword_arg_semantic_types(node, nodes, call, expected_types)
+        .into_iter()
+        .map(|ty| render_semantic_type(&ty))
+        .collect()
+}
+
+pub(super) fn resolved_keyword_arg_semantic_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+) -> Vec<SemanticType> {
     if call.keyword_arg_values.is_empty() {
-        return call.keyword_arg_types.clone();
+        return call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.keyword_arg_values
         .iter()
@@ -753,13 +783,19 @@ pub(super) fn resolved_keyword_arg_types(
                 metadata,
                 expected_types.get(index).and_then(|expected| expected.as_deref()),
             )
-            .map(|result| result.actual_type)
+            .map(|result| lower_type_text_or_name(&result.actual_type))
             .or_else(|| {
-                resolve_direct_expression_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
                 )
             })
-            .unwrap_or_else(|| call.keyword_arg_types.get(index).cloned().unwrap_or_default())
+            .unwrap_or_else(|| {
+                call
+                    .keyword_arg_types
+                    .get(index)
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .unwrap_or_else(|| SemanticType::Name(String::new()))
+            })
         })
         .collect()
 }
@@ -1317,7 +1353,7 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                 call_site.owner_name.as_deref(),
                 call_site.owner_type_name.as_deref(),
             );
-            let callable_type = resolve_direct_name_reference_type(
+            let callable_type = resolve_direct_name_reference_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -1327,7 +1363,8 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                 call_site.line,
                 &call_site.callee,
             )?;
-            let callable_type = rewrite_imported_typing_aliases(node, &callable_type);
+            let callable_type =
+                rewrite_imported_typing_aliases(node, &render_semantic_type(&callable_type));
             if owner_has_paramspec && callable_has_unresolved_paramlist(&callable_type) {
                 return None;
             }
