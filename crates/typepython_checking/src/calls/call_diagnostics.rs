@@ -616,7 +616,8 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .iter()
         .enumerate()
         .flat_map(|(index, metadata)| {
-            resolve_contextual_call_arg_type(
+            resolve_contextual_call_arg_semantic_type_with_context(
+                context,
                 node,
                 nodes,
                 call.line,
@@ -628,7 +629,8 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         })
         .collect::<Vec<_>>();
     diagnostics.extend(call.keyword_arg_values.iter().enumerate().flat_map(|(index, metadata)| {
-        resolve_contextual_call_arg_type(
+        resolve_contextual_call_arg_semantic_type_with_context(
+            context,
             node,
             nodes,
             call.line,
@@ -639,30 +641,40 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .flat_map(|result| result.diagnostics)
     }));
     let resolved_keyword_arg_types =
-        resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
+        resolved_keyword_arg_semantic_types(node, nodes, call, &expected_keyword_arg_types);
     let (expanded_arg_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+        expanded_positional_arg_semantic_types(node, nodes, call, &expected_positional_arg_types);
     let keyword_expansions = resolved_keyword_expansions_with_context(context, node, nodes, call);
     let param_types = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
-        .map(|param| param.annotation.clone().unwrap_or_default())
+        .map(|param| {
+            param
+                .annotation
+                .as_deref()
+                .map(lower_type_text_or_name)
+                .unwrap_or_else(|| SemanticType::Name(String::new()))
+        })
         .collect::<Vec<_>>();
     let param_names = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    let variadic_type =
-        signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.as_deref());
+    let variadic_type = signature
+        .iter()
+        .find(|param| param.variadic)
+        .and_then(|param| param.annotation.as_deref())
+        .map(lower_type_text_or_name);
     let unpack_shape =
         unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
         .and_then(|param| param.annotation.as_deref())
-        .filter(|annotation| !normalize_type_text(annotation).starts_with("Unpack["));
-    diagnostics.extend(positional_and_keyword_type_diagnostics(
+        .filter(|annotation| !normalize_type_text(annotation).starts_with("Unpack["))
+        .map(lower_type_text_or_name);
+    diagnostics.extend(positional_and_keyword_semantic_type_diagnostics(
         node,
         nodes,
         call,
@@ -670,8 +682,8 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         &resolved_keyword_arg_types,
         &param_types,
         &param_names,
-        variadic_type,
-        keyword_variadic_type,
+        variadic_type.as_ref(),
+        keyword_variadic_type.as_ref(),
         unpack_shape.as_ref(),
         &variadic_starred_types,
         &keyword_expansions,
@@ -685,10 +697,29 @@ pub(super) fn expanded_positional_arg_types(
     call: &typepython_binding::CallSite,
     expected_types: &[Option<String>],
 ) -> (Vec<String>, Vec<String>) {
-    let mut positional_types = resolved_call_arg_types(node, nodes, call, expected_types);
+    let (positional_types, variadic_starred_types) =
+        expanded_positional_arg_semantic_types(node, nodes, call, expected_types);
+    let positional_types =
+        positional_types.into_iter().map(|ty| render_semantic_type(&ty)).collect::<Vec<_>>();
+    let variadic_starred_types = variadic_starred_types
+        .into_iter()
+        .map(|ty| render_semantic_type(&ty))
+        .collect::<Vec<_>>();
+    (positional_types, variadic_starred_types)
+}
+
+pub(super) fn expanded_positional_arg_semantic_types(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<String>],
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    let mut positional_types = resolved_call_arg_semantic_types(node, nodes, call, expected_types);
     if positional_types.len() < call.arg_count {
-        positional_types
-            .extend(std::iter::repeat_n(String::new(), call.arg_count - positional_types.len()));
+        positional_types.extend(std::iter::repeat_n(
+            SemanticType::Name(String::new()),
+            call.arg_count - positional_types.len(),
+        ));
     }
     let mut variadic_starred_types = Vec::new();
     for expansion in resolved_starred_positional_expansions(node, nodes, call) {
@@ -696,11 +727,9 @@ pub(super) fn expanded_positional_arg_types(
             PositionalExpansion::Fixed(types) => positional_types.extend(
                 types
                     .into_iter()
-                    .map(|ty| ty.map(|ty| render_semantic_type(&ty)).unwrap_or_default()),
+                    .map(|ty| ty.unwrap_or_else(|| SemanticType::Name(String::new()))),
             ),
-            PositionalExpansion::Variadic(element_type) => {
-                variadic_starred_types.push(render_semantic_type(&element_type))
-            }
+            PositionalExpansion::Variadic(element_type) => variadic_starred_types.push(element_type),
         }
     }
     (positional_types, variadic_starred_types)
@@ -819,30 +848,77 @@ pub(super) fn positional_and_keyword_type_diagnostics(
     variadic_starred_types: &[String],
     keyword_expansions: &[KeywordExpansion],
 ) -> Vec<Diagnostic> {
+    let arg_types = arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>();
+    let keyword_arg_types =
+        keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>();
+    let param_types = param_types.iter().map(|ty| lower_type_text_or_name(ty)).collect::<Vec<_>>();
+    let variadic_type = variadic_type.map(lower_type_text_or_name);
+    let keyword_variadic_type = keyword_variadic_type.map(lower_type_text_or_name);
+    let variadic_starred_types = variadic_starred_types
+        .iter()
+        .map(|ty| lower_type_text_or_name(ty))
+        .collect::<Vec<_>>();
+    positional_and_keyword_semantic_type_diagnostics(
+        node,
+        nodes,
+        call,
+        &arg_types,
+        &keyword_arg_types,
+        &param_types,
+        param_names,
+        variadic_type.as_ref(),
+        keyword_variadic_type.as_ref(),
+        unpack_shape,
+        &variadic_starred_types,
+        keyword_expansions,
+    )
+}
+
+fn semantic_type_missing(ty: &SemanticType) -> bool {
+    matches!(ty, SemanticType::Name(name) if name.is_empty())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn positional_and_keyword_semantic_type_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    arg_types: &[SemanticType],
+    keyword_arg_types: &[SemanticType],
+    param_types: &[SemanticType],
+    param_names: &[String],
+    variadic_type: Option<&SemanticType>,
+    keyword_variadic_type: Option<&SemanticType>,
+    unpack_shape: Option<&TypedDictShape>,
+    variadic_starred_types: &[SemanticType],
+    keyword_expansions: &[KeywordExpansion],
+) -> Vec<Diagnostic> {
     let unpack_extra_items_type = unpack_shape
         .and_then(|shape| shape.extra_items.as_ref())
-        .map(|extra| extra.value_type.as_str());
+        .map(|extra| lower_type_text_or_name(&extra.value_type));
     let mut diagnostics = arg_types
         .iter()
         .take(param_types.len())
         .zip(param_types.iter())
         .filter(|(arg_ty, param_ty)| {
-            !arg_ty.is_empty()
-                && !param_ty.is_empty()
-                && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            !semantic_type_missing(arg_ty)
+                && !semantic_type_missing(param_ty)
+                && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
+            let arg_text = render_semantic_type(arg_ty);
+            let param_text = render_semantic_type(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where parameter expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
-                    param_ty
+                    arg_text,
+                    param_text
                 ),
             );
-            attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty)
+            attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text)
         })
         .collect::<Vec<_>>();
 
@@ -850,21 +926,24 @@ pub(super) fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = variadic_type else {
             break;
         };
-        if !arg_ty.is_empty()
-            && !param_ty.is_empty()
-            && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+        if !semantic_type_missing(arg_ty)
+            && !semantic_type_missing(param_ty)
+            && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
+            let arg_text = render_semantic_type(arg_ty);
+            let param_text = render_semantic_type(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where variadic parameter expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
-                    param_ty
+                    arg_text,
+                    param_text
                 ),
             );
-            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
+            diagnostics
+                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
         }
     }
 
@@ -872,21 +951,24 @@ pub(super) fn positional_and_keyword_type_diagnostics(
         let Some(param_ty) = variadic_type else {
             continue;
         };
-        if !arg_ty.is_empty()
-            && !param_ty.is_empty()
-            && !direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+        if !semantic_type_missing(arg_ty)
+            && !semantic_type_missing(param_ty)
+            && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
+            let arg_text = render_semantic_type(arg_ty);
+            let param_text = render_semantic_type(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` expands `*args` element type `{}` where variadic parameter expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
-                    param_ty
+                    arg_text,
+                    param_text
                 ),
             );
-            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
+            diagnostics
+                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
         }
     }
 
@@ -895,17 +977,23 @@ pub(super) fn positional_and_keyword_type_diagnostics(
             if let Some(shape) = unpack_shape
                 && let Some(field) = shape.fields.get(keyword.as_str())
             {
-                if !arg_ty.is_empty()
+                if !semantic_type_missing(arg_ty)
                     && !field.value_type.is_empty()
-                    && !direct_type_matches(node, nodes, &field.value_type, arg_ty)
+                    && !semantic_type_matches(
+                        node,
+                        nodes,
+                        &lower_type_text_or_name(&field.value_type),
+                        arg_ty,
+                    )
                 {
+                    let arg_text = render_semantic_type(arg_ty);
                     let diagnostic = Diagnostic::error(
                         "TPY4001",
                         format!(
                             "call to `{}` in module `{}` passes `{}` for unpacked keyword `{}` where TypedDict key expects `{}`",
                             call.callee,
                             node.module_path.display(),
-                            arg_ty,
+                            arg_text,
                             keyword,
                             field.value_type
                         ),
@@ -915,53 +1003,63 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                         node,
                         nodes,
                         &field.value_type,
-                        arg_ty,
+                        &arg_text,
                     ));
                 }
                 continue;
             }
-            let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type) else {
+            let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type) else {
                 continue;
             };
-            if !arg_ty.is_empty()
-                && !param_ty.is_empty()
-                && !direct_type_matches(node, nodes, param_ty, arg_ty)
+            if !semantic_type_missing(arg_ty)
+                && !semantic_type_missing(param_ty)
+                && !semantic_type_matches(node, nodes, param_ty, arg_ty)
             {
+                let arg_text = render_semantic_type(arg_ty);
+                let param_text = render_semantic_type(param_ty);
                 let diagnostic = Diagnostic::error(
                     "TPY4001",
                     format!(
                         "call to `{}` in module `{}` passes `{}` for keyword `{}` where variadic keyword parameter expects `{}`",
                         call.callee,
                         node.module_path.display(),
-                        arg_ty,
+                        arg_text,
                         keyword,
-                        param_ty
+                        param_text
                     ),
                 );
-                diagnostics
-                    .push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
+                diagnostics.push(attach_type_mismatch_notes(
+                    diagnostic,
+                    node,
+                    nodes,
+                    &param_text,
+                    &arg_text,
+                ));
             }
             continue;
         };
         let Some(param_ty) = param_types.get(index) else {
             continue;
         };
-        if !arg_ty.is_empty()
-            && !param_ty.is_empty()
-            && !direct_type_matches(node, nodes, param_ty, arg_ty)
+        if !semantic_type_missing(arg_ty)
+            && !semantic_type_missing(param_ty)
+            && !semantic_type_matches(node, nodes, param_ty, arg_ty)
         {
+            let arg_text = render_semantic_type(arg_ty);
+            let param_text = render_semantic_type(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` for keyword `{}` where parameter expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
+                    arg_text,
                     keyword,
-                    param_ty
+                    param_text
                 ),
             );
-            diagnostics.push(attach_type_mismatch_notes(diagnostic, node, nodes, param_ty, arg_ty));
+            diagnostics
+                .push(attach_type_mismatch_notes(diagnostic, node, nodes, &param_text, &arg_text));
         }
     }
 
@@ -972,9 +1070,15 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                     if let Some(index) = param_names.iter().position(|param| param == key) {
                         let param_ty = &param_types[index];
                         if !field.value_type.is_empty()
-                            && !param_ty.is_empty()
-                            && !direct_type_is_assignable(node, nodes, param_ty, &field.value_type)
+                            && !semantic_type_missing(param_ty)
+                            && !semantic_type_is_assignable(
+                                node,
+                                nodes,
+                                param_ty,
+                                &lower_type_text_or_name(&field.value_type),
+                            )
                         {
+                            let param_text = render_semantic_type(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -984,16 +1088,23 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                                     shape.name,
                                     key,
                                     field.value_type,
-                                    param_ty
+                                    param_text
                                 ),
                             ));
                         }
-                    } else if let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type)
+                    } else if let Some(param_ty) =
+                        unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                     {
                         if !field.value_type.is_empty()
-                            && !param_ty.is_empty()
-                            && !direct_type_is_assignable(node, nodes, param_ty, &field.value_type)
+                            && !semantic_type_missing(param_ty)
+                            && !semantic_type_is_assignable(
+                                node,
+                                nodes,
+                                param_ty,
+                                &lower_type_text_or_name(&field.value_type),
+                            )
                         {
+                            let param_text = render_semantic_type(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -1003,23 +1114,25 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                                     shape.name,
                                     key,
                                     field.value_type,
-                                    param_ty
+                                    param_text
                                 ),
                             ));
                         }
                     }
                 }
                 if let Some(extra_items) = &shape.extra_items {
-                    if let Some(param_ty) = unpack_extra_items_type.or(keyword_variadic_type) {
+                    if let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
+                    {
                         if !extra_items.value_type.is_empty()
-                            && !param_ty.is_empty()
-                            && !direct_type_is_assignable(
+                            && !semantic_type_missing(param_ty)
+                            && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &extra_items.value_type,
+                                &lower_type_text_or_name(&extra_items.value_type),
                             )
                         {
+                            let param_text = render_semantic_type(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -1028,7 +1141,7 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                                     node.module_path.display(),
                                     shape.name,
                                     extra_items.value_type,
-                                    param_ty
+                                    param_text
                                 ),
                             ));
                         }
@@ -1037,14 +1150,10 @@ pub(super) fn positional_and_keyword_type_diagnostics(
             }
             KeywordExpansion::Mapping(value_ty) => {
                 if let Some(param_ty) = keyword_variadic_type
-                    && !param_ty.is_empty()
-                    && !semantic_type_is_assignable(
-                        node,
-                        nodes,
-                        &lower_type_text_or_name(param_ty),
-                        value_ty,
-                    )
+                    && !semantic_type_missing(param_ty)
+                    && !semantic_type_is_assignable(node, nodes, param_ty, value_ty)
                 {
+                    let param_text = render_semantic_type(param_ty);
                     diagnostics.push(Diagnostic::error(
                         "TPY4001",
                         format!(
@@ -1052,7 +1161,7 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                             call.callee,
                             node.module_path.display(),
                             render_semantic_type(value_ty),
-                            param_ty
+                            param_text
                         ),
                     ));
                 }
@@ -1237,20 +1346,26 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
     let mut diagnostics = positional_fields
         .iter()
         .take(call.arg_count)
-        .zip(call.arg_types.iter())
+        .zip(call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
         .filter(|(field, arg_ty)| {
-            !arg_ty.is_empty()
+            !semantic_type_missing(arg_ty)
                 && !field.annotation.is_empty()
-                && !direct_type_matches(node, nodes, &field.annotation, arg_ty)
+                && !semantic_type_matches(
+                    node,
+                    nodes,
+                    &lower_type_text_or_name(&field.annotation),
+                    arg_ty,
+                )
         })
         .map(|(field, arg_ty)| {
+            let arg_text = render_semantic_type(&arg_ty);
             Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` where synthesized dataclass-transform field `{}` expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
+                    arg_text,
                     field.name,
                     field.annotation
                 ),
@@ -1258,21 +1373,31 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         })
         .collect::<Vec<_>>();
 
-    for (keyword, arg_ty) in call.keyword_names.iter().zip(&call.keyword_arg_types) {
+    for (keyword, arg_ty) in call
+        .keyword_names
+        .iter()
+        .zip(call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
+    {
         let Some(field) = shape.fields.iter().find(|field| field.keyword_name == *keyword) else {
             continue;
         };
-        if !arg_ty.is_empty()
+        if !semantic_type_missing(&arg_ty)
             && !field.annotation.is_empty()
-            && !direct_type_matches(node, nodes, &field.annotation, arg_ty)
+            && !semantic_type_matches(
+                node,
+                nodes,
+                &lower_type_text_or_name(&field.annotation),
+                &arg_ty,
+            )
         {
+            let arg_text = render_semantic_type(&arg_ty);
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
                     "call to `{}` in module `{}` passes `{}` for synthesized keyword `{}` where field `{}` expects `{}`",
                     call.callee,
                     node.module_path.display(),
-                    arg_ty,
+                    arg_text,
                     keyword,
                     field.name,
                     field.annotation
