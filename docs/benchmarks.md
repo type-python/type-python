@@ -41,6 +41,9 @@ Measures the semantic checker's cache-backed declaration semantics plus
 solver-backed direct-call path using an in-memory module graph with imported
 generic calls, TypeVarTuple expansion, and generic overload specificity.
 
+Checked-in baseline evidence for the current checker suite lives in
+[`docs/benchmarks-checker-baseline.md`](./benchmarks-checker-baseline.md).
+
 | Benchmark                          | Input                                                                                              |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `check_solver_direct_calls_small`  | 8 repetitions of imported generic calls, variadic tuple collection, and generic overload selection |

@@ -171,23 +171,23 @@ fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
     let mut assignments = Vec::with_capacity(repetitions * 3);
     for index in 0..repetitions {
         let base_line = index * 3 + 1;
-        calls.push(call_site("helpers.box_value", vec![String::from("int")], base_line));
+        calls.push(call_site("box_value", vec![String::from("int")], base_line));
         assignments.push(assignment_from_call(
             format!("boxed_{index}"),
             "list[int]",
-            "helpers.box_value",
+            "box_value",
             base_line,
         ));
 
         calls.push(call_site(
-            "helpers.collect",
+            "collect",
             vec![String::from("int"), String::from("str")],
             base_line + 1,
         ));
         assignments.push(assignment_from_call(
             format!("collected_{index}"),
             "tuple[int, str]",
-            "helpers.collect",
+            "collect",
             base_line + 1,
         ));
 
@@ -196,11 +196,11 @@ fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
         } else {
             (String::from("str"), "tuple[str]")
         };
-        calls.push(call_site("helpers.wrap", vec![arg_type], base_line + 2));
+        calls.push(call_site("wrap", vec![arg_type], base_line + 2));
         assignments.push(assignment_from_call(
             format!("wrapped_{index}"),
             expected,
-            "helpers.wrap",
+            "wrap",
             base_line + 2,
         ));
     }
@@ -209,7 +209,11 @@ fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
         module_path: PathBuf::from("<bench/app.tpy>"),
         module_key: String::from("bench.app"),
         module_kind: SourceKind::TypePython,
-        declarations: vec![import_declaration("helpers", "bench.helpers")],
+        declarations: vec![
+            import_declaration("box_value", "bench.helpers.box_value"),
+            import_declaration("collect", "bench.helpers.collect"),
+            import_declaration("wrap", "bench.helpers.wrap"),
+        ],
         calls,
         method_calls: Vec::new(),
         member_accesses: Vec::new(),
@@ -231,7 +235,12 @@ fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
 
 fn bench_checker_small(c: &mut Criterion) {
     let graph = make_checker_bench_graph(8);
-    assert!(!check(&graph).diagnostics.has_errors(), "benchmark graph should type-check");
+    let result = check(&graph);
+    assert!(
+        !result.diagnostics.has_errors(),
+        "benchmark graph should type-check:\n{}",
+        result.diagnostics.as_text()
+    );
     c.bench_function("check_solver_direct_calls_small", |b| {
         b.iter(|| black_box(check(black_box(&graph)).diagnostics.has_errors()))
     });
@@ -239,7 +248,12 @@ fn bench_checker_small(c: &mut Criterion) {
 
 fn bench_checker_medium(c: &mut Criterion) {
     let graph = make_checker_bench_graph(64);
-    assert!(!check(&graph).diagnostics.has_errors(), "benchmark graph should type-check");
+    let result = check(&graph);
+    assert!(
+        !result.diagnostics.has_errors(),
+        "benchmark graph should type-check:\n{}",
+        result.diagnostics.as_text()
+    );
     c.bench_function("check_solver_direct_calls_medium", |b| {
         b.iter(|| black_box(check(black_box(&graph)).diagnostics.has_errors()))
     });
