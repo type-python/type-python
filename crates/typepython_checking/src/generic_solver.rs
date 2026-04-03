@@ -6,15 +6,9 @@ pub(crate) type GenericTypeParamSubstitutions = GenericSolution;
 
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(crate) struct GenericSolution {
-    pub(crate) types: BTreeMap<String, String>,
+    pub(crate) types: BTreeMap<String, SemanticType>,
     pub(crate) param_lists: BTreeMap<String, ParamListBinding>,
     pub(crate) type_packs: BTreeMap<String, TypePackBinding>,
-}
-
-impl GenericSolution {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.param_lists.is_empty() && self.type_packs.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -24,7 +18,7 @@ pub(crate) struct ParamListBinding {
 
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(crate) struct TypePackBinding {
-    pub(crate) types: Vec<String>,
+    pub(crate) types: Vec<SemanticType>,
 }
 
 pub(crate) fn infer_generic_type_param_substitutions(
@@ -84,7 +78,12 @@ pub(crate) fn infer_generic_type_param_substitutions(
                 insert_type_pack_binding(
                     &mut substitutions,
                     &type_pack_name,
-                    TypePackBinding { types: positional_types[positional_index..].to_vec() },
+                    TypePackBinding {
+                        types: positional_types[positional_index..]
+                            .iter()
+                            .map(|ty| lower_type_text_or_name(ty))
+                            .collect(),
+                    },
                 )?;
                 positional_index = positional_types.len();
                 continue;
@@ -181,7 +180,7 @@ pub(crate) fn infer_generic_type_param_substitutions(
                 {
                     substitutions
                         .types
-                        .insert(type_param.name.clone(), normalize_type_text(default));
+                        .insert(type_param.name.clone(), lower_type_text_or_name(default));
                 }
                 let Some(actual) = substitutions.types.get(&type_param.name) else {
                     continue;
@@ -256,7 +255,7 @@ pub(crate) fn instantiate_direct_function_signature(
             instantiated.extend(binding.types.iter().enumerate().map(|(index, element_type)| {
                 typepython_syntax::DirectFunctionParamSite {
                     name: format!("{}{}", param.name, index),
-                    annotation: Some(substitute_generic_type_params(element_type, substitutions)),
+                    annotation: Some(render_semantic_type(element_type)),
                     has_default: false,
                     positional_only: true,
                     keyword_only: false,
@@ -522,19 +521,17 @@ pub(crate) fn generic_type_param_accepts_actual(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     type_param: &typepython_binding::GenericTypeParam,
-    actual: &str,
+    actual: &SemanticType,
 ) -> bool {
-    if actual.is_empty() {
-        return true;
-    }
+    let actual = render_semantic_type(actual);
     if let Some(bound) = &type_param.bound {
-        return direct_type_is_assignable(node, nodes, bound, actual);
+        return direct_type_is_assignable(node, nodes, bound, &actual);
     }
     if !type_param.constraints.is_empty() {
         return type_param
             .constraints
             .iter()
-            .any(|constraint| direct_type_is_assignable(node, nodes, constraint, actual));
+            .any(|constraint| direct_type_is_assignable(node, nodes, constraint, &actual));
     }
     true
 }
@@ -585,40 +582,69 @@ pub(crate) fn infer_generic_type_param_bindings(
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
 ) -> Option<GenericTypeParamSubstitutions> {
-    let annotation = normalize_type_text(annotation);
-    let actual = normalize_type_text(actual);
-    if actual.is_empty() {
+    let annotation = lower_type_text_or_name(annotation);
+    let actual = lower_type_text_or_name(actual);
+    infer_generic_type_param_bindings_full(
+        node,
+        nodes,
+        &annotation,
+        &actual,
+        generic_names,
+        substitutions,
+        type_pack_names,
+    )
+}
+
+fn infer_generic_type_param_bindings_full(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &SemanticType,
+    actual: &SemanticType,
+    generic_names: &BTreeSet<String>,
+    substitutions: &GenericTypeParamSubstitutions,
+    type_pack_names: &BTreeSet<String>,
+) -> Option<GenericTypeParamSubstitutions> {
+    if let SemanticType::Name(name) = &actual
+        && name.is_empty()
+    {
         return Some(GenericTypeParamSubstitutions::default());
     }
 
-    if generic_names.contains(&annotation) {
+    if let SemanticType::Name(name) = &annotation
+        && generic_names.contains(name)
+    {
         let candidate = substitutions
             .types
-            .get(&annotation)
-            .map(|existing| merge_generic_type_candidates(existing, &actual))
-            .unwrap_or(actual);
+            .get(name)
+            .map(|existing| merge_generic_type_candidates(existing, actual))
+            .unwrap_or_else(|| actual.clone());
         let mut inferred = GenericTypeParamSubstitutions::default();
-        inferred.types.insert(annotation, candidate);
+        inferred.types.insert(name.clone(), candidate);
         return Some(inferred);
     }
 
-    if let Some(branches) = union_branches(&actual)
+    if let Some(branches) = semantic_union_branches(actual)
         && branches.len() > 1
     {
         let mut candidates = Vec::new();
         for branch in branches {
-            let candidate = infer_generic_type_param_bindings(
+            let candidate = infer_generic_type_param_bindings_full(
                 node,
                 nodes,
-                &annotation,
+                annotation,
                 &branch,
                 generic_names,
                 substitutions,
                 type_pack_names,
             )?;
             let combined = combine_generic_substitutions(substitutions, &candidate);
-            let substituted_annotation = substitute_generic_type_params(&annotation, &combined);
-            if !direct_type_is_assignable(node, nodes, &substituted_annotation, &branch) {
+            let substituted_annotation = substitute_semantic_type_params(annotation, &combined);
+            if !direct_type_is_assignable(
+                node,
+                nodes,
+                &render_semantic_type(&substituted_annotation),
+                &render_semantic_type(&branch),
+            ) {
                 return None;
             }
             candidates.push(candidate);
@@ -626,46 +652,76 @@ pub(crate) fn infer_generic_type_param_bindings(
         return merge_union_branch_bindings(candidates);
     }
 
-    if let Some(branches) = union_branches(&annotation)
+    if let Some(branches) = semantic_union_branches(annotation)
         && branches.len() > 1
     {
         let candidates = branches
             .into_iter()
             .filter_map(|branch| {
-                let candidate = infer_generic_type_param_bindings(
+                let candidate = infer_generic_type_param_bindings_full(
                     node,
                     nodes,
                     &branch,
-                    &actual,
+                    actual,
                     generic_names,
                     substitutions,
                     type_pack_names,
                 )?;
                 let combined = combine_generic_substitutions(substitutions, &candidate);
-                let substituted_branch = substitute_generic_type_params(&branch, &combined);
-                direct_type_is_assignable(node, nodes, &substituted_branch, &actual)
-                    .then_some(candidate)
+                let substituted_branch = substitute_semantic_type_params(&branch, &combined);
+                direct_type_is_assignable(
+                    node,
+                    nodes,
+                    &render_semantic_type(&substituted_branch),
+                    &render_semantic_type(actual),
+                )
+                .then_some(candidate)
             })
             .collect::<Vec<_>>();
         return select_best_union_branch_binding(candidates);
     }
 
-    match (split_generic_type(&annotation), split_generic_type(&actual)) {
+    infer_generic_type_param_bindings_semantic(
+        node,
+        nodes,
+        annotation,
+        actual,
+        generic_names,
+        substitutions,
+        type_pack_names,
+    )
+}
+
+pub(crate) fn infer_generic_type_param_bindings_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &SemanticType,
+    actual: &SemanticType,
+    generic_names: &BTreeSet<String>,
+    substitutions: &GenericTypeParamSubstitutions,
+    type_pack_names: &BTreeSet<String>,
+) -> Option<GenericTypeParamSubstitutions> {
+    match (annotation.generic_parts(), actual.generic_parts()) {
         (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
             if expected_head == actual_head =>
         {
             infer_generic_type_arg_bindings(
                 node,
                 nodes,
-                &expected_args,
-                &actual_args,
+                expected_args,
+                actual_args,
                 generic_names,
                 substitutions,
                 type_pack_names,
             )
         }
-        _ => direct_type_is_assignable(node, nodes, &annotation, &actual)
-            .then_some(GenericTypeParamSubstitutions::default()),
+        _ => direct_type_is_assignable(
+            node,
+            nodes,
+            &render_semantic_type(annotation),
+            &render_semantic_type(actual),
+        )
+        .then_some(GenericTypeParamSubstitutions::default()),
     }
 }
 
@@ -699,9 +755,10 @@ pub(crate) fn merge_union_branch_bindings(
             match merged.types.get(&name) {
                 Some(existing) if existing == &actual_type => {}
                 Some(existing) => {
-                    merged
-                        .types
-                        .insert(name, join_type_candidates(vec![existing.clone(), actual_type]));
+                    merged.types.insert(
+                        name,
+                        join_semantic_type_candidates(vec![existing.clone(), actual_type]),
+                    );
                 }
                 None => {
                     merged.types.insert(name, actual_type);
@@ -715,168 +772,141 @@ pub(crate) fn merge_union_branch_bindings(
     Some(merged)
 }
 
-pub(crate) fn merge_generic_type_candidates(existing: &str, actual: &str) -> String {
+pub(crate) fn merge_generic_type_candidates(
+    existing: &SemanticType,
+    actual: &SemanticType,
+) -> SemanticType {
     if existing == actual {
-        existing.to_owned()
+        existing.clone()
     } else {
-        join_type_candidates(vec![existing.to_owned(), actual.to_owned()])
+        join_semantic_type_candidates(vec![existing.clone(), actual.clone()])
     }
 }
 
-pub(crate) fn substitute_type_substitutions(
-    annotation: &str,
-    substitutions: &BTreeMap<String, String>,
-) -> String {
-    let mut output = String::new();
-    let mut token = String::new();
-    for character in annotation.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            token.push(character);
-            continue;
+pub(crate) fn substitute_semantic_type_params(
+    annotation: &SemanticType,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> SemanticType {
+    match annotation {
+        SemanticType::Name(name) => substitutions
+            .types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| SemanticType::Name(name.clone())),
+        SemanticType::Generic { head, args } => SemanticType::Generic {
+            head: head.clone(),
+            args: expand_substituted_semantic_generic_args(args, substitutions),
+        },
+        SemanticType::Callable { params, return_type } => SemanticType::Callable {
+            params: substitute_semantic_callable_param_expr(params, substitutions),
+            return_type: Box::new(substitute_semantic_type_params(return_type, substitutions)),
+        },
+        SemanticType::Union(branches) => join_semantic_type_candidates(
+            branches
+                .iter()
+                .map(|branch| substitute_semantic_type_params(branch, substitutions))
+                .collect(),
+        ),
+        SemanticType::Annotated { value, metadata } => SemanticType::Annotated {
+            value: Box::new(substitute_semantic_type_params(value, substitutions)),
+            metadata: metadata.clone(),
+        },
+        SemanticType::Unpack(inner) => {
+            SemanticType::Unpack(Box::new(substitute_semantic_type_params(inner, substitutions)))
         }
-        if !token.is_empty() {
-            output.push_str(substitutions.get(&token).map(String::as_str).unwrap_or(&token));
-            token.clear();
+    }
+}
+
+pub(crate) fn substitute_semantic_callable_param_expr(
+    params: &SemanticCallableParams,
+    substitutions: &GenericTypeParamSubstitutions,
+) -> SemanticCallableParams {
+    match params {
+        SemanticCallableParams::Ellipsis => SemanticCallableParams::Ellipsis,
+        SemanticCallableParams::ParamList(types) => SemanticCallableParams::ParamList(
+            expand_substituted_semantic_generic_args(types, substitutions),
+        ),
+        SemanticCallableParams::Concatenate(types) => {
+            if let Some((tail, prefixes)) = types.split_last()
+                && let SemanticType::Name(name) = tail
+                && let Some(binding) = substitutions.param_lists.get(name.trim())
+            {
+                let mut rendered = prefixes
+                    .iter()
+                    .map(|part| substitute_semantic_type_params(part, substitutions))
+                    .collect::<Vec<_>>();
+                rendered.extend(binding.params.iter().map(param_annotation_semantic_type));
+                SemanticCallableParams::ParamList(rendered)
+            } else {
+                SemanticCallableParams::Concatenate(
+                    types
+                        .iter()
+                        .map(|part| substitute_semantic_type_params(part, substitutions))
+                        .collect(),
+                )
+            }
         }
-        output.push(character);
+        SemanticCallableParams::Single(expr) => {
+            if let SemanticType::Name(name) = expr.as_ref()
+                && let Some(binding) = substitutions.param_lists.get(name.trim())
+            {
+                return SemanticCallableParams::ParamList(
+                    binding.params.iter().map(param_annotation_semantic_type).collect(),
+                );
+            }
+            SemanticCallableParams::Single(Box::new(substitute_semantic_type_params(
+                expr,
+                substitutions,
+            )))
+        }
     }
-    if !token.is_empty() {
-        output.push_str(substitutions.get(&token).map(String::as_str).unwrap_or(&token));
-    }
-    output
+}
+
+pub(crate) fn param_annotation_semantic_type(
+    param: &typepython_syntax::DirectFunctionParamSite,
+) -> SemanticType {
+    param
+        .annotation
+        .as_deref()
+        .map(lower_type_text_or_name)
+        .unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
 }
 
 pub(crate) fn substitute_generic_type_params(
     annotation: &str,
     substitutions: &GenericTypeParamSubstitutions,
 ) -> String {
-    if let Some((params_expr, return_type)) = parse_callable_annotation_parts(annotation) {
-        let substituted_params = substitute_callable_param_expr(&params_expr, substitutions);
-        let substituted_return = substitute_generic_type_params(&return_type, substitutions);
-        return format!("Callable[{substituted_params}, {substituted_return}]");
-    }
-
-    let normalized = normalize_type_text(annotation);
-    if let Some(branches) = union_branches(&normalized) {
-        return join_union_branches(
-            branches
-                .into_iter()
-                .map(|branch| substitute_generic_type_params(&branch, substitutions))
-                .collect(),
-        );
-    }
-    if let Some((head, args)) = split_generic_type(&normalized) {
-        let rendered = expand_substituted_generic_args(&args, substitutions)
-            .into_iter()
-            .map(|arg| substitute_generic_type_params(&arg, substitutions))
-            .collect::<Vec<_>>();
-        return format!("{head}[{}]", rendered.join(", "));
-    }
-
-    substitute_type_substitutions(annotation, &substitutions.types)
+    let annotation = lower_type_text_or_name(annotation);
+    render_semantic_type(&substitute_semantic_type_params(&annotation, substitutions))
 }
 
-pub(crate) fn substitute_callable_param_expr(
-    params_expr: &str,
+pub(crate) fn expand_substituted_semantic_generic_args(
+    args: &[SemanticType],
     substitutions: &GenericTypeParamSubstitutions,
-) -> String {
-    let params_expr = params_expr.trim();
-    if params_expr == "..." || params_expr.is_empty() {
-        return params_expr.to_owned();
-    }
-    if let Some(binding) = substitutions.param_lists.get(params_expr) {
-        return render_param_list_binding_for_callable(binding, substitutions);
-    }
-    if let Some(inner) =
-        params_expr.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        let parts = split_top_level_type_args(inner);
-        if let Some((tail, prefixes)) = parts.split_last()
-            && let Some(binding) = substitutions.param_lists.get(tail.trim())
-        {
-            let mut rendered = prefixes
-                .iter()
-                .map(|part| substitute_generic_type_params(part, substitutions))
-                .collect::<Vec<_>>();
-            rendered.extend(binding.params.iter().map(|param| {
-                param
-                    .annotation
-                    .as_deref()
-                    .map(|annotation| substitute_generic_type_params(annotation, substitutions))
-                    .unwrap_or_else(|| String::from("dynamic"))
-            }));
-            return format!("[{}]", rendered.join(", "));
-        }
-    }
-    if let Some(inner) = params_expr.strip_prefix('[').and_then(|inner| inner.strip_suffix(']')) {
-        let rendered = if inner.trim().is_empty() {
-            Vec::new()
-        } else {
-            expand_substituted_generic_args(
-                &split_top_level_type_args(inner)
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>(),
-                substitutions,
-            )
-            .into_iter()
-            .map(|part| substitute_generic_type_params(&part, substitutions))
-            .collect::<Vec<_>>()
-        };
-        return format!("[{}]", rendered.join(", "));
-    }
-
-    params_expr.to_owned()
-}
-
-pub(crate) fn render_param_list_binding_for_callable(
-    binding: &ParamListBinding,
-    substitutions: &GenericTypeParamSubstitutions,
-) -> String {
-    let rendered = binding
-        .params
-        .iter()
-        .map(|param| {
-            param
-                .annotation
-                .as_deref()
-                .map(|annotation| substitute_generic_type_params(annotation, substitutions))
-                .unwrap_or_else(|| String::from("dynamic"))
-        })
-        .collect::<Vec<_>>();
-    format!("[{}]", rendered.join(", "))
-}
-
-pub(crate) fn expand_substituted_generic_args(
-    args: &[String],
-    substitutions: &GenericTypeParamSubstitutions,
-) -> Vec<String> {
+) -> Vec<SemanticType> {
     let mut rendered = Vec::new();
     for arg in args {
-        if let Some(inner) = unpack_inner(arg) {
-            if let Some(binding) = substitutions.type_packs.get(inner.trim()) {
+        if let Some(inner) = arg.unpacked_inner() {
+            if let SemanticType::Name(name) = inner
+                && let Some(binding) = substitutions.type_packs.get(name.trim())
+            {
                 rendered.extend(binding.types.iter().cloned());
                 continue;
             }
-            if let Some(elements) = unpacked_fixed_tuple_elements(&inner) {
+            if let Some(elements) = unpacked_fixed_tuple_semantic_elements(inner) {
                 rendered.extend(elements);
                 continue;
             }
         }
-        rendered.push(arg.clone());
+        rendered.push(substitute_semantic_type_params(arg, substitutions));
     }
     rendered
 }
 
 pub(crate) fn unpacked_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {
-    let (head, args) = split_generic_type(text)?;
-    if head != "tuple" {
-        return None;
-    }
-    if args.len() == 2 && args[1] == "..." {
-        return None;
-    }
-    Some(args)
+    unpacked_fixed_tuple_semantic_elements(&lower_type_text_or_name(text)).map(|elements| {
+        elements.into_iter().map(|element| render_semantic_type(&element)).collect()
+    })
 }
 
 pub(crate) fn insert_type_pack_binding(
@@ -930,7 +960,9 @@ pub(crate) fn type_pack_binding_from_default(default: &str) -> Option<TypePackBi
         return Some(TypePackBinding::default());
     }
     if let Some(elements) = unpacked_fixed_tuple_elements(&normalized) {
-        return Some(TypePackBinding { types: elements });
+        return Some(TypePackBinding {
+            types: elements.into_iter().map(|element| lower_type_text_or_name(&element)).collect(),
+        });
     }
     None
 }
@@ -942,8 +974,8 @@ pub(crate) fn generic_binding_count(solution: &GenericTypeParamSubstitutions) ->
 pub(crate) fn infer_generic_type_arg_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected_args: &[String],
-    actual_args: &[String],
+    expected_args: &[SemanticType],
+    actual_args: &[SemanticType],
     generic_names: &BTreeSet<String>,
     substitutions: &GenericTypeParamSubstitutions,
     type_pack_names: &BTreeSet<String>,
@@ -963,7 +995,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
         {
             merge_nested_generic_bindings(
                 &mut inferred,
-                infer_generic_type_param_bindings(
+                infer_generic_type_param_bindings_full(
                     node,
                     nodes,
                     expected_arg,
@@ -985,7 +1017,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
         {
             merge_nested_generic_bindings(
                 &mut inferred,
-                infer_generic_type_param_bindings(
+                infer_generic_type_param_bindings_full(
                     node,
                     nodes,
                     expected_arg,
@@ -1005,7 +1037,7 @@ pub(crate) fn infer_generic_type_arg_bindings(
     for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
         merge_nested_generic_bindings(
             &mut inferred,
-            infer_generic_type_param_bindings(
+            infer_generic_type_param_bindings_full(
                 node,
                 nodes,
                 expected_arg,
@@ -1042,15 +1074,14 @@ pub(crate) fn merge_nested_generic_bindings(
 }
 
 pub(crate) fn expand_inferred_generic_args(
-    args: &[String],
+    args: &[SemanticType],
     type_pack_names: &BTreeSet<String>,
-) -> Vec<String> {
+) -> Vec<SemanticType> {
     let mut expanded = Vec::new();
     for arg in args {
-        if let Some(inner) = unpack_inner(arg) {
-            let inner = inner.trim();
-            if !type_pack_names.contains(inner)
-                && let Some(elements) = unpacked_fixed_tuple_elements(inner)
+        if let Some(inner) = arg.unpacked_inner() {
+            if !matches!(inner, SemanticType::Name(name) if type_pack_names.contains(name.trim()))
+                && let Some(elements) = unpacked_fixed_tuple_semantic_elements(inner)
             {
                 expanded.extend(elements);
                 continue;
@@ -1062,14 +1093,17 @@ pub(crate) fn expand_inferred_generic_args(
 }
 
 pub(crate) fn expected_type_pack_index(
-    args: &[String],
+    args: &[SemanticType],
     type_pack_names: &BTreeSet<String>,
 ) -> Option<(usize, String)> {
     let matches = args
         .iter()
         .enumerate()
-        .filter_map(|(index, arg)| {
-            type_pack_name_from_unpack_annotation(arg, type_pack_names).map(|name| (index, name))
+        .filter_map(|(index, arg)| match arg.unpacked_inner() {
+            Some(SemanticType::Name(name)) if type_pack_names.contains(name.trim()) => {
+                Some((index, name.trim().to_owned()))
+            }
+            _ => None,
         })
         .collect::<Vec<_>>();
     match matches.as_slice() {

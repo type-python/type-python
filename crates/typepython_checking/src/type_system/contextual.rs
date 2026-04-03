@@ -1183,27 +1183,6 @@ pub(super) fn normalized_assignment_annotation(annotation: &str) -> Option<&str>
     }
 }
 
-pub(super) fn expand_type_alias_once(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    text: &str,
-) -> Option<String> {
-    let normalized = normalize_type_text(text);
-    let (head, args) = split_generic_type(&normalized)
-        .map(|(head, args)| (head.to_owned(), args))
-        .unwrap_or_else(|| (normalized.clone(), Vec::new()));
-    let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
-    let substitutions = alias_type_param_substitutions(alias_decl, &args)?;
-    let detail = rewrite_imported_typing_aliases(alias_node, &alias_decl.detail);
-    let expanded = if substitutions.is_empty() {
-        detail
-    } else {
-        substitute_generic_type_params(&detail, &substitutions)
-    };
-    let expanded = normalize_type_text(&expanded);
-    (expanded != normalized).then_some(expanded)
-}
-
 pub(super) fn alias_type_param_substitutions(
     alias_decl: &Declaration,
     args: &[String],
@@ -1231,7 +1210,9 @@ pub(super) fn alias_type_param_substitutions(
             if args.get(start).is_some() {
                 start += 1;
             }
-            substitutions.types.insert(type_param.name.clone(), normalize_type_text(&argument));
+            substitutions
+                .types
+                .insert(type_param.name.clone(), lower_type_text_or_name(&argument));
         }
 
         let mut end = args.len();
@@ -1247,12 +1228,15 @@ pub(super) fn alias_type_param_substitutions(
             trailing.push((type_param.name.clone(), normalize_type_text(&argument)));
         }
         for (name, argument) in trailing.into_iter().rev() {
-            substitutions.types.insert(name, argument);
+            substitutions.types.insert(name, lower_type_text_or_name(&argument));
         }
         substitutions.type_packs.insert(
             alias_decl.type_params[type_pack_index].name.clone(),
             TypePackBinding {
-                types: args[start..end].iter().map(|arg| normalize_type_text(arg)).collect(),
+                types: args[start..end]
+                    .iter()
+                    .map(|arg| lower_type_text_or_name(arg))
+                    .collect(),
             },
         );
         return Some(substitutions);
@@ -1267,7 +1251,9 @@ pub(super) fn alias_type_param_substitutions(
             .get(index)
             .cloned()
             .or_else(|| type_param.default.as_ref().map(|default| normalize_type_text(default)))?;
-        substitutions.types.insert(type_param.name.clone(), normalize_type_text(&argument));
+        substitutions
+            .types
+            .insert(type_param.name.clone(), lower_type_text_or_name(&argument));
     }
     Some(substitutions)
 }

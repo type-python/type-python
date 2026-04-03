@@ -8630,7 +8630,10 @@ fn check_infers_generic_function_call_through_union_actual() {
         crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
             .expect("union actual should infer through Optional-like annotation");
 
-    assert_eq!(substitutions.types.get("T").map(String::as_str), Some("int"));
+    assert_eq!(
+        substitutions.types.get("T").map(crate::render_semantic_type).as_deref(),
+        Some("int")
+    );
 }
 
 #[test]
@@ -8701,8 +8704,10 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
             .expect("variadic pack should be inferred from positional arguments");
 
     assert_eq!(
-        substitutions.type_packs.get("Ts").map(|binding| binding.types.as_slice()),
-        Some(&[String::from("int"), String::from("str")][..]),
+        substitutions.type_packs.get("Ts").map(|binding| {
+            binding.types.iter().map(crate::render_semantic_type).collect::<Vec<_>>()
+        }),
+        Some(vec![String::from("int"), String::from("str")]),
     );
 }
 
@@ -8859,8 +8864,10 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
             .expect("tuple unpack should bind type pack");
 
     assert_eq!(
-        substitutions.type_packs.get("Ts").map(|binding| binding.types.as_slice()),
-        Some(&[String::from("int"), String::from("str")][..]),
+        substitutions.type_packs.get("Ts").map(|binding| {
+            binding.types.iter().map(crate::render_semantic_type).collect::<Vec<_>>()
+        }),
+        Some(vec![String::from("int"), String::from("str")]),
     );
 }
 
