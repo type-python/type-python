@@ -298,7 +298,8 @@ pub(super) fn parse_guard_return_kind_semantic(
     callee: &str,
 ) -> Option<(String, SemanticType)> {
     let function = resolve_direct_function(node, nodes, callee)?;
-    let returns = normalized_direct_return_annotation(function.detail.split_once("->")?.1.trim())?;
+    let return_annotation = declaration_signature_return_annotation_text(function)?;
+    let returns = normalized_direct_return_annotation(&return_annotation)?;
     if let Some(inner) =
         returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']'))
     {
@@ -582,10 +583,10 @@ pub(super) fn resolve_with_target_name_semantic_type(
     resolve_with_target_semantic_type_for_signature(node, nodes, signature, with_site)
 }
 
-pub(super) fn resolve_with_owner_signature<'a>(
-    node: &'a typepython_graph::ModuleNode,
+pub(super) fn resolve_with_owner_signature(
+    node: &typepython_graph::ModuleNode,
     with_site: &typepython_binding::WithSite,
-) -> Option<&'a str> {
+) -> Option<String> {
     let owner_name = with_site.owner_name.as_deref()?;
     node.declarations
         .iter()
@@ -598,7 +599,7 @@ pub(super) fn resolve_with_owner_signature<'a>(
                     _ => false,
                 }
         })
-        .map(|declaration| declaration.detail.as_str())
+        .and_then(declaration_signature_text)
 }
 
 pub(super) fn resolve_with_target_semantic_type_for_signature(
@@ -652,7 +653,7 @@ pub(super) fn resolve_with_target_semantic_type_for_signature(
     })?;
     let _ = exit;
 
-    normalized_direct_return_annotation(enter.detail.split_once("->")?.1.trim())
+    normalized_direct_return_annotation(&declaration_signature_return_annotation_text(enter)?)
         .map(lower_type_text_or_name)
 }
 

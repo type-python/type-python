@@ -1,3 +1,5 @@
+use crate::diagnostic_type_text as render_semantic_type;
+
 pub(super) fn direct_call_arity_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -58,63 +60,11 @@ pub(super) fn direct_param_names(signature: &str) -> Option<Vec<String>> {
 }
 
 pub(super) fn direct_param_types(signature: &str) -> Option<Vec<String>> {
-    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
-    if inner.is_empty() {
-        return Some(Vec::new());
-    }
-
     Some(direct_signature_params(signature)?.into_iter().map(|param| param.annotation).collect())
 }
 
 pub(super) fn direct_signature_params(signature: &str) -> Option<Vec<DirectSignatureParam>> {
-    let inner = signature.strip_prefix('(')?.split_once(')')?.0;
-    if inner.is_empty() {
-        return Some(Vec::new());
-    }
-
-    let parts = split_top_level_type_args(inner);
-    let slash_index = parts.iter().position(|part| part.trim() == "/");
-    let star_index = parts.iter().position(|part| part.trim() == "*");
-    let mut params = Vec::new();
-    let mut keyword_only_active = false;
-    for (index, part) in parts.into_iter().enumerate() {
-        let part = part.trim();
-        if part == "/" {
-            continue;
-        }
-        if part == "*" {
-            keyword_only_active = true;
-            continue;
-        }
-
-        let has_default = part.ends_with('=');
-        let part = part.trim_end_matches('=').trim();
-        let (part, variadic, keyword_variadic) = if let Some(part) = part.strip_prefix("**") {
-            (part.trim(), false, true)
-        } else if let Some(part) = part.strip_prefix('*') {
-            keyword_only_active = true;
-            (part.trim(), true, false)
-        } else {
-            (part, false, false)
-        };
-        let (name, annotation) = part
-            .split_once(':')
-            .map(|(name, annotation)| (name.trim(), annotation.trim().to_owned()))
-            .unwrap_or((part, String::new()));
-        params.push(DirectSignatureParam {
-            name: name.to_owned(),
-            annotation,
-            has_default,
-            positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
-            keyword_only: !variadic
-                && !keyword_variadic
-                && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
-            variadic,
-            keyword_variadic,
-        });
-    }
-
-    Some(params)
+    parse_direct_signature_params(signature)
 }
 
 pub(super) fn direct_call_type_diagnostics(
@@ -141,43 +91,52 @@ pub(super) fn direct_call_type_diagnostics(
                     &shape,
                 );
             }
-            if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
-                && let Some(signature) =
-                    resolve_instantiated_direct_function_signature(node, nodes, function, call)
-            {
-                return direct_source_function_type_diagnostics_with_context(
+            if let Some(function) = resolve_direct_function(node, nodes, &call.callee) {
+                match resolve_direct_call_candidate_with_context_detailed(
                     context,
                     node,
                     nodes,
+                    function,
                     call,
-                    &signature,
-                );
-            }
-            if let Some(function) = resolve_direct_function(node, nodes, &call.callee)
-                && function.type_params.iter().any(|type_param| {
-                    matches!(
-                        type_param.kind,
-                        typepython_binding::GenericTypeParamKind::ParamSpec
-                            | typepython_binding::GenericTypeParamKind::TypeVarTuple
-                    )
-                })
-            {
-                return vec![
-                    Diagnostic::error(
-                        "TPY4014",
-                        format!(
-                            "call to `{}` in module `{}` is invalid because generic parameter list of `{}` could not be resolved from this call",
-                            call.callee, node.module_key, call.callee
-                        ),
-                    )
-                    .with_span(Span::new(
-                        node.module_path.display().to_string(),
-                        call.line,
-                        1,
-                        call.line,
-                        1,
-                    )),
-                ];
+                ) {
+                    Ok(candidate) => {
+                        return direct_source_function_type_diagnostics_with_context(
+                            context,
+                            node,
+                            nodes,
+                            call,
+                            &candidate.signature_sites,
+                        );
+                    }
+                    Err(failure)
+                        if function.type_params.iter().any(|type_param| {
+                            matches!(
+                                type_param.kind,
+                                typepython_binding::GenericTypeParamKind::ParamSpec
+                                    | typepython_binding::GenericTypeParamKind::TypeVarTuple
+                            )
+                        }) =>
+                    {
+                        return vec![
+                            Diagnostic::error(
+                                "TPY4014",
+                                format!(
+                                    "call to `{}` in module `{}` is invalid because generic parameter list of `{}` could not be resolved from this call",
+                                    call.callee, node.module_key, call.callee
+                                ),
+                            )
+                            .with_span(Span::new(
+                                node.module_path.display().to_string(),
+                                call.line,
+                                1,
+                                call.line,
+                                1,
+                            ))
+                            .with_note(failure.diagnostic_reason()),
+                        ];
+                    }
+                    Err(_) => {}
+                }
             }
             if let Some(signature) =
                 resolve_direct_callable_signature_sites_with_context(context, node, nodes, &call.callee)
@@ -700,10 +659,10 @@ pub(super) fn expanded_positional_arg_types(
     let (positional_types, variadic_starred_types) =
         expanded_positional_arg_semantic_types(node, nodes, call, expected_types);
     let positional_types =
-        positional_types.into_iter().map(|ty| render_semantic_type(&ty)).collect::<Vec<_>>();
+        positional_types.into_iter().map(|ty| diagnostic_type_text(&ty)).collect::<Vec<_>>();
     let variadic_starred_types = variadic_starred_types
         .into_iter()
-        .map(|ty| render_semantic_type(&ty))
+        .map(|ty| diagnostic_type_text(&ty))
         .collect::<Vec<_>>();
     (positional_types, variadic_starred_types)
 }
@@ -886,8 +845,8 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         })
         .map(|(arg_ty, param_ty)| {
-            let arg_text = render_semantic_type(arg_ty);
-            let param_text = render_semantic_type(param_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
+            let param_text = diagnostic_type_text(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -910,8 +869,8 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             && !semantic_type_missing(param_ty)
             && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
-            let arg_text = render_semantic_type(arg_ty);
-            let param_text = render_semantic_type(param_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
+            let param_text = diagnostic_type_text(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -935,8 +894,8 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             && !semantic_type_missing(param_ty)
             && !semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
         {
-            let arg_text = render_semantic_type(arg_ty);
-            let param_text = render_semantic_type(param_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
+            let param_text = diagnostic_type_text(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -966,7 +925,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                         arg_ty,
                     )
                 {
-                    let arg_text = render_semantic_type(arg_ty);
+                    let arg_text = diagnostic_type_text(arg_ty);
                     let diagnostic = Diagnostic::error(
                         "TPY4001",
                         format!(
@@ -995,8 +954,8 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 && !semantic_type_missing(param_ty)
                 && !semantic_type_matches(node, nodes, param_ty, arg_ty)
             {
-                let arg_text = render_semantic_type(arg_ty);
-                let param_text = render_semantic_type(param_ty);
+                let arg_text = diagnostic_type_text(arg_ty);
+                let param_text = diagnostic_type_text(param_ty);
                 let diagnostic = Diagnostic::error(
                     "TPY4001",
                     format!(
@@ -1025,8 +984,8 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             && !semantic_type_missing(param_ty)
             && !semantic_type_matches(node, nodes, param_ty, arg_ty)
         {
-            let arg_text = render_semantic_type(arg_ty);
-            let param_text = render_semantic_type(param_ty);
+            let arg_text = diagnostic_type_text(arg_ty);
+            let param_text = diagnostic_type_text(param_ty);
             let diagnostic = Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -1058,7 +1017,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                 &lower_type_text_or_name(&field.value_type),
                             )
                         {
-                            let param_text = render_semantic_type(param_ty);
+                            let param_text = diagnostic_type_text(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -1084,7 +1043,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                 &lower_type_text_or_name(&field.value_type),
                             )
                         {
-                            let param_text = render_semantic_type(param_ty);
+                            let param_text = diagnostic_type_text(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -1112,7 +1071,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                 &lower_type_text_or_name(&extra_items.value_type),
                             )
                         {
-                            let param_text = render_semantic_type(param_ty);
+                            let param_text = diagnostic_type_text(param_ty);
                             diagnostics.push(Diagnostic::error(
                                 "TPY4013",
                                 format!(
@@ -1133,7 +1092,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     && !semantic_type_missing(param_ty)
                     && !semantic_type_is_assignable(node, nodes, param_ty, value_ty)
                 {
-                    let param_text = render_semantic_type(param_ty);
+                    let param_text = diagnostic_type_text(param_ty);
                     diagnostics.push(Diagnostic::error(
                         "TPY4001",
                         format!(
@@ -1182,19 +1141,7 @@ pub(super) fn load_direct_init_signatures_with_context(
 pub(super) fn direct_signature_sites_from_detail(
     detail: &str,
 ) -> Vec<typepython_syntax::DirectFunctionParamSite> {
-    direct_signature_params(detail)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|param| typepython_syntax::DirectFunctionParamSite {
-            name: param.name,
-            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
-            has_default: param.has_default,
-            positional_only: param.positional_only,
-            keyword_only: param.keyword_only,
-            variadic: param.variadic,
-            keyword_variadic: param.keyword_variadic,
-        })
-        .collect()
+    parse_direct_callable_declaration(detail).map(|signature| signature.params).unwrap_or_default()
 }
 
 pub(super) fn resolve_direct_callable_signature_sites(
@@ -1212,23 +1159,20 @@ pub(super) fn resolve_direct_callable_signature_sites_with_context(
     nodes: &[typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<Vec<typepython_syntax::DirectFunctionParamSite>> {
-    if let Some(callable_annotation) =
-        resolve_decorated_function_callable_annotation_with_context(context, node, nodes, callee)
+    if let Some(callable_type) = resolve_decorated_function_callable_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        callee,
+    )
     {
-        return direct_function_signature_sites_from_callable_annotation(&callable_annotation);
-    }
-    let direct_function_signatures = context.load_direct_function_signatures(node);
-    if let Some(signature) = direct_function_signatures.get(callee) {
-        return Some(signature.clone());
+        return direct_function_signature_sites_from_semantic_callable(&callable_type);
     }
 
-    let direct_init_signatures = load_direct_init_signatures_with_context(context, node);
-    if let Some(signature) = direct_init_signatures.get(callee) {
-        return Some(signature.clone());
-    }
-
-    if let Some(function) = resolve_direct_function(node, nodes, callee) {
-        return Some(direct_signature_sites_from_detail(&function.detail));
+    if let Some(function) = resolve_direct_function(node, nodes, callee)
+        && let Some(callable) = context.load_declaration_semantics(function).callable
+    {
+        return Some(callable_signature_sites_from_semantics(&callable));
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
@@ -1237,9 +1181,18 @@ pub(super) fn resolve_direct_callable_signature_sites_with_context(
                 && declaration.name == "__init__"
                 && declaration.kind == DeclarationKind::Function
         })?;
-        return Some(
-            direct_signature_sites_from_detail(&init.detail).into_iter().skip(1).collect(),
-        );
+        let callable = context.load_declaration_semantics(init).callable?;
+        return Some(callable_signature_sites_from_semantics(&callable).into_iter().skip(1).collect());
+    }
+
+    let direct_function_signatures = context.load_direct_function_signatures(node);
+    if let Some(signature) = direct_function_signatures.get(callee) {
+        return Some(signature.clone());
+    }
+
+    let direct_init_signatures = load_direct_init_signatures_with_context(context, node);
+    if let Some(signature) = direct_init_signatures.get(callee) {
+        return Some(signature.clone());
     }
 
     resolve_typing_callable_signature(callee).map(direct_signature_sites_from_detail)
@@ -1251,7 +1204,7 @@ pub(super) fn direct_param_names_from_signature(
     callee: &str,
 ) -> Option<Vec<String>> {
     if let Some(local) = resolve_direct_function(node, nodes, callee) {
-        return direct_param_names(&local.detail);
+        return declaration_signature_param_names(local);
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
@@ -1263,7 +1216,7 @@ pub(super) fn direct_param_names_from_signature(
                 })
         })?;
 
-        return direct_param_names(&init.detail).map(|names| names.into_iter().skip(1).collect());
+        return declaration_signature_param_names(init).map(|names| names.into_iter().skip(1).collect());
     }
 
     None
@@ -1338,7 +1291,7 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
                 )
         })
         .map(|(field, arg_ty)| {
-            let arg_text = render_semantic_type(&arg_ty);
+            let arg_text = diagnostic_type_text(&arg_ty);
             Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -1370,7 +1323,7 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
                 &arg_ty,
             )
         {
-            let arg_text = render_semantic_type(&arg_ty);
+            let arg_text = diagnostic_type_text(&arg_ty);
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 format!(
@@ -1469,7 +1422,7 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
             let callable_type = resolve_direct_name_reference_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 None,
                 call_site.owner_name.as_deref(),
                 call_site.owner_type_name.as_deref(),
@@ -1477,7 +1430,7 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
                 &call_site.callee,
             )?;
             let callable_type =
-                rewrite_imported_typing_aliases(node, &render_semantic_type(&callable_type));
+                rewrite_imported_typing_aliases(node, &diagnostic_type_text(&callable_type));
             if owner_has_paramspec && callable_has_unresolved_paramlist(&callable_type) {
                 return None;
             }

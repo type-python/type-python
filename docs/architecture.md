@@ -190,11 +190,25 @@ Builds the module dependency graph from all binding tables.
 
 The core type-checking engine. Runs multiple diagnostic rule categories against the module graph. The table below is representative, not exhaustive.
 
+**Current checker architecture:**
+
+- Bound `Declaration.detail` strings are normalized once into checker-owned `SemanticDeclarationFacts` and cached by declaration content in the semantic helper layer itself. Callable signatures, type-alias bodies, import targets, and value annotations now enter the active checker path through the same cache-backed helper surface rather than repeated ad hoc string splitting.
+- Generic inference is organized as an explicit solver: the checker collects TypeVar, ParamSpec, and TypeVarTuple constraints, solves them in a separate phase, and preserves structured failure reasons (`GenericSolveFailure`) for diagnostic use.
+- Direct overload and callable resolution flow through solver-backed resolved candidates (`ResolvedDirectCallCandidate`) that carry instantiated params, return type, and substitutions. Applicability and specificity use this instantiated information instead of comparing raw declaration text first.
+- The active call-diagnostic path keeps structured failure information long enough to explain `TPY4014` and related unresolved generic-call failures with reason notes instead of collapsing directly to `None`.
+- Touched semantic/call/assignment diagnostics now render semantic types through a shared exit path (`diagnostic_type_text`) so the checker does not maintain multiple independent formatting behaviors in its active direct-call path.
+
+**TypeStore decision (implemented narrowly in the main path):**
+
+`TypeStore` is now part of the active checker declaration-semantic path rather than only a localized helper. The shared declaration semantic cache interns declaration-derived semantic types (callable returns, value annotations, alias bodies) into `TypeStore` and materializes semantic facts from those stored IDs. The checker still passes `SemanticType` values through solver state and final diagnostics for clarity, but the declaration-driven hot path no longer rebuilds those semantic types from raw text on every access.
+
+The new `typepython_checking` Criterion suite remains the benchmark baseline for deciding whether a deeper ID-threaded `TypeStore` rollout is justified. If those benches or follow-up profiles show declaration-fact interning is not enough and semantic-type cloning/rendering still dominates, the next step would be pushing Type IDs further into solver/candidate/diagnostic boundaries.
+
 **Checker naming conventions:**
 
 | Prefix / term    | Meaning                                                                                                                                                                |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `direct_*`       | Operates on the directly bound module surface from `typepython_binding` (calls, returns, assignments, member accesses, declaration details) before secondary synthesis |
+| `direct_*`       | Operates on the directly bound module surface from `typepython_binding` (calls, returns, assignments, member accesses, declaration facts) before secondary synthesis |
 | `contextual_*`   | Re-types a local expression using an expected type from the surrounding assignment, call, yield, or return site                                                        |
 | `imported_*`     | Consults imported-module information instead of only the current module's direct sites                                                                                 |
 | `instantiated_*` | Applies generic substitutions before validating a callable or signature                                                                                                |

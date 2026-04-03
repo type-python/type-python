@@ -281,7 +281,7 @@ pub(super) fn resolve_nominal_getitem_return_semantic_type(
     let return_text = rewrite_imported_typing_aliases(
         node,
         &substitute_self_annotation(
-            getitem.detail.split_once("->")?.1.trim(),
+            &declaration_signature_return_annotation_text(getitem)?,
             Some(&owner_type_name),
         ),
     );
@@ -745,7 +745,10 @@ pub(super) fn resolve_readable_member_semantic_type(
         DeclarationKind::Value => {
             let detail = rewrite_imported_typing_aliases(
                 node,
-                &substitute_self_annotation(&declaration.detail, Some(&owner_type_name)),
+                &substitute_self_annotation(
+                    &declaration_value_annotation_text(declaration)?,
+                    Some(&owner_type_name),
+                ),
             );
             normalized_direct_return_annotation(&detail).map(lower_type_text_or_name).or_else(|| {
                 declaration.value_type.as_deref().map(|value| {
@@ -762,7 +765,7 @@ pub(super) fn resolve_readable_member_semantic_type(
             let return_text = rewrite_imported_typing_aliases(
                 node,
                 &substitute_self_annotation(
-                    declaration.detail.split_once("->")?.1.trim(),
+                    &declaration_signature_return_annotation_text(declaration)?,
                     Some(&owner_type_name),
                 ),
             );
@@ -956,11 +959,14 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         declaration.kind == DeclarationKind::Value
             && declaration.owner.is_none()
             && declaration.name == value_name
-            && !declaration.detail.is_empty()
+            && declaration_value_annotation_text(declaration).is_some()
     }) {
         let detail = rewrite_imported_typing_aliases(
             node,
-            &substitute_self_annotation(&local_value.detail, current_owner_type_name),
+            &substitute_self_annotation(
+                &declaration_value_annotation_text(local_value)?,
+                current_owner_type_name,
+            ),
         );
         return normalized_direct_return_annotation(&detail).map(lower_type_text_or_name);
     }
@@ -973,7 +979,7 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         {
             return Some(lower_type_text_or_name(&callable_annotation));
         }
-        let param_types = direct_signature_sites_from_detail(&function.detail)
+        let param_types = declaration_signature_sites(function)
             .into_iter()
             .map(|param| {
                 lower_type_text_or_name(

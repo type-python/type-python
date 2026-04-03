@@ -1,3 +1,68 @@
+pub(crate) fn diagnostic_type_text(ty: &SemanticType) -> String {
+    crate::render_semantic_type(ty)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SemanticTypeAssignabilityFailure {
+    pub(crate) expected: String,
+    pub(crate) actual: String,
+    pub(crate) mismatch_path: Vec<String>,
+    pub(crate) detail: Option<String>,
+}
+
+impl SemanticTypeAssignabilityFailure {
+    pub(crate) fn primary_reason_note(&self) -> String {
+        format!(
+            "reason: `{}` is not assignable to `{}` under semantic type checking",
+            self.actual, self.expected
+        )
+    }
+
+    pub(crate) fn attach_notes(self, diagnostic: Diagnostic) -> Diagnostic {
+        let mut diagnostic = diagnostic.with_note(self.primary_reason_note());
+        if !type_supports_mismatch_path(&self.expected)
+            && !type_supports_mismatch_path(&self.actual)
+        {
+            return diagnostic;
+        }
+
+        diagnostic = diagnostic
+            .with_note(format!("source: `{}`", self.actual))
+            .with_note(format!("target: `{}`", self.expected));
+        if !self.mismatch_path.is_empty() {
+            diagnostic = diagnostic.with_note(format!(
+                "mismatch at: {}",
+                self.mismatch_path
+                    .iter()
+                    .map(|segment| format!("-> {segment}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+        if let Some(detail) = self.detail {
+            diagnostic = diagnostic.with_note(detail);
+        }
+        diagnostic
+    }
+}
+
+pub(crate) fn semantic_type_assignability_failure(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> Option<SemanticTypeAssignabilityFailure> {
+    if semantic_type_is_assignable(node, nodes, expected, actual) {
+        return None;
+    }
+
+    let expected = diagnostic_type_text(expected);
+    let actual = diagnostic_type_text(actual);
+    let mut mismatch_path = Vec::new();
+    let detail = first_type_mismatch_detail(node, nodes, &expected, &actual, &mut mismatch_path, 8);
+    Some(SemanticTypeAssignabilityFailure { expected, actual, mismatch_path, detail })
+}
+
 pub(super) fn unresolved_import_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -12,25 +77,16 @@ pub(super) fn unresolved_import_diagnostics(
         .iter()
         .filter(|declaration| declaration.kind == DeclarationKind::Import)
         .filter_map(|declaration| {
-            let root = declaration.detail.split('.').next()?;
+            let import_target =
+                resolve_imported_symbol_semantic_target_from_declaration(nodes, declaration)?;
+            let raw_target = declaration_import_target_ref(declaration)?.raw_target;
+            let root = import_target.provider_node.module_key.split('.').next()?;
             if !project_roots.contains(root) {
                 return None;
             }
 
-            let resolves = nodes.iter().any(|candidate| candidate.module_key == declaration.detail)
-                || declaration
-                    .detail
-                    .rsplit_once('.')
-                    .and_then(|(module_key, symbol_name)| {
-                        nodes.iter().find(|candidate| candidate.module_key == module_key).map(
-                            |target| {
-                                target.declarations.iter().any(|declaration| {
-                                    declaration.owner.is_none() && declaration.name == symbol_name
-                                })
-                            },
-                        )
-                    })
-                    .unwrap_or(false);
+            let resolves = import_target.module_target().is_some()
+                || import_target.declaration_target().is_some();
 
             (!resolves).then(|| {
                 Diagnostic::error(
@@ -38,7 +94,7 @@ pub(super) fn unresolved_import_diagnostics(
                     format!(
                         "module `{}` imports unresolved same-project target `{}`",
                         node.module_path.display(),
-                        declaration.detail
+                        raw_target
                     ),
                 )
             })
@@ -182,27 +238,14 @@ pub(super) fn attach_type_mismatch_notes(
     expected: &str,
     actual: &str,
 ) -> Diagnostic {
-    let expected = normalize_type_text(expected);
-    let actual = normalize_type_text(actual);
-    if !type_supports_mismatch_path(&expected) && !type_supports_mismatch_path(&actual) {
-        return diagnostic;
-    }
-
-    let mut diagnostic = diagnostic
-        .with_note(format!("source: `{actual}`"))
-        .with_note(format!("target: `{expected}`"));
-    let mut path = Vec::new();
-    if let Some(detail) = first_type_mismatch_detail(node, nodes, &expected, &actual, &mut path, 8)
-    {
-        if !path.is_empty() {
-            diagnostic = diagnostic.with_note(format!(
-                "mismatch at: {}",
-                path.iter().map(|segment| format!("-> {segment}")).collect::<Vec<_>>().join(" ")
-            ));
-        }
-        diagnostic = diagnostic.with_note(detail);
-    }
-    diagnostic
+    semantic_type_assignability_failure(
+        node,
+        nodes,
+        &lower_type_text_or_name(expected),
+        &lower_type_text_or_name(actual),
+    )
+    .map(|failure| failure.attach_notes(diagnostic.clone()))
+    .unwrap_or(diagnostic)
 }
 
 pub(super) fn first_type_mismatch_detail(
@@ -434,9 +477,9 @@ pub(super) fn inferred_return_type_for_owner(
     }
 
     Some(if trace_types.len() > 1 {
-        render_semantic_type(&join_semantic_type_candidates(trace_types))
+        diagnostic_type_text(&join_semantic_type_candidates(trace_types))
     } else {
-        render_semantic_type(trace_types.first().expect("single return type should exist"))
+        diagnostic_type_text(trace_types.first().expect("single return type should exist"))
     })
 }
 
@@ -473,7 +516,7 @@ pub(super) fn attach_return_inference_trace(
             "line {}: {} -> {}",
             candidate.line,
             describe_return_trace_expression(candidate),
-            render_semantic_type(&candidate_type)
+            diagnostic_type_text(&candidate_type)
         ));
     }
 

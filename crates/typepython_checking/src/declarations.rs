@@ -1,5 +1,51 @@
 use super::*;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum OverrideCompatibilityFailure {
+    MethodKindMismatch,
+    ParameterCountMismatch { child_count: usize, base_count: usize },
+    SpecialContextManagerArityMismatch { child_count: Option<usize>, base_count: Option<usize> },
+    ParameterModifierMismatch { parameter_name: String },
+    ParameterNameMismatch { child_name: String, base_name: String },
+    ParameterTypeMismatch { parameter_name: String, reason: SemanticTypeAssignabilityFailure },
+    ReturnTypeMismatch { reason: SemanticTypeAssignabilityFailure },
+}
+
+impl OverrideCompatibilityFailure {
+    pub(super) fn diagnostic_note(&self) -> String {
+        match self {
+            Self::MethodKindMismatch => {
+                String::from("reason: overriding member changes method kind (instance/class/static/property)")
+            }
+            Self::ParameterCountMismatch { child_count, base_count } => format!(
+                "reason: overriding member declares {} parameter(s) but the base member declares {}",
+                child_count, base_count
+            ),
+            Self::SpecialContextManagerArityMismatch { child_count, base_count } => format!(
+                "reason: special ContextManager override keeps only arity compatibility here, but child count {:?} does not match base count {:?}",
+                child_count, base_count
+            ),
+            Self::ParameterModifierMismatch { parameter_name } => format!(
+                "reason: parameter `{}` changes positional/keyword/default/variadic modifiers",
+                parameter_name
+            ),
+            Self::ParameterNameMismatch { child_name, base_name } => format!(
+                "reason: overriding parameter name `{}` does not match base parameter `{}`",
+                child_name, base_name
+            ),
+            Self::ParameterTypeMismatch { parameter_name, reason } => format!(
+                "reason: parameter `{}` is not contravariant with the base declaration; {}",
+                parameter_name,
+                reason.primary_reason_note()
+            ),
+            Self::ReturnTypeMismatch { reason } => format!(
+                "reason: return type is not covariant with the base declaration; {}",
+                reason.primary_reason_note()
+            ),
+        }
+    }
+}
+
 pub(super) fn override_compatibility_diagnostics<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
@@ -20,17 +66,17 @@ pub(super) fn override_compatibility_diagnostics<'a>(
                             && declaration.name == member.name
                             && declaration.kind == member.kind
                     }) {
-                        if !methods_are_compatible_for_override(node, nodes, member, base_member) {
+                        if let Some(reason) = method_override_incompatibility(node, nodes, member, base_member) {
                             diagnostics.push(Diagnostic::error(
-                            "TPY4005",
-                            format!(
-                                "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
-                                class_declaration.name,
-                                node.module_path.display(),
-                                member.name,
-                                base_decl.name
-                            ),
-                        ));
+                             "TPY4005",
+                             format!(
+                                 "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
+                                 class_declaration.name,
+                                 node.module_path.display(),
+                                 member.name,
+                                 base_decl.name
+                             ),
+                         ).with_note(reason.diagnostic_note()));
                         }
                     }
                 }
@@ -47,8 +93,17 @@ pub(super) fn methods_are_compatible_for_override(
     member: &Declaration,
     base_member: &Declaration,
 ) -> bool {
+    method_override_incompatibility(node, nodes, member, base_member).is_none()
+}
+
+pub(super) fn method_override_incompatibility(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    member: &Declaration,
+    base_member: &Declaration,
+) -> Option<OverrideCompatibilityFailure> {
     if base_member.detail == member.detail && base_member.method_kind == member.method_kind {
-        return true;
+        return None;
     }
 
     if matches!(member.name.as_str(), "__enter__" | "__exit__")
@@ -58,54 +113,71 @@ pub(super) fn methods_are_compatible_for_override(
         && member.method_kind == Some(typepython_syntax::MethodKind::Instance)
         && base_member.method_kind == Some(typepython_syntax::MethodKind::Instance)
     {
-        return direct_param_count(&member.detail) == direct_param_count(&base_member.detail);
+        return (declaration_signature_param_count(member)
+            != declaration_signature_param_count(base_member))
+            .then(|| OverrideCompatibilityFailure::SpecialContextManagerArityMismatch {
+                child_count: declaration_signature_param_count(member),
+                base_count: declaration_signature_param_count(base_member),
+            });
     }
 
     if member.method_kind != base_member.method_kind {
-        return false;
+        return Some(OverrideCompatibilityFailure::MethodKindMismatch);
     }
 
-    let Some(member_params) = direct_signature_params(&member.detail) else {
-        return false;
-    };
-    let Some(base_params) = direct_signature_params(&base_member.detail) else {
-        return false;
-    };
+    let member_params = direct_signature_params_from_sites(&declaration_signature_sites(member));
+    let base_params = direct_signature_params_from_sites(&declaration_signature_sites(base_member));
     if member_params.len() != base_params.len() {
-        return false;
+        return Some(OverrideCompatibilityFailure::ParameterCountMismatch {
+            child_count: member_params.len(),
+            base_count: base_params.len(),
+        });
     }
 
-    let params_compatible = member_params.iter().zip(base_params.iter()).all(|(child, base)| {
-        child.positional_only == base.positional_only
-            && child.keyword_only == base.keyword_only
-            && child.variadic == base.variadic
-            && child.keyword_variadic == base.keyword_variadic
-            && child.has_default == base.has_default
-            && child.name == base.name
-            && (child.annotation.is_empty()
-                || base.annotation.is_empty()
-                || semantic_type_is_assignable(
-                    node,
-                    nodes,
-                    &lower_type_text_or_name(&child.annotation),
-                    &lower_type_text_or_name(&base.annotation),
-                ))
-    });
-    if !params_compatible {
-        return false;
+    for (child, base) in member_params.iter().zip(base_params.iter()) {
+        if child.positional_only != base.positional_only
+            || child.keyword_only != base.keyword_only
+            || child.variadic != base.variadic
+            || child.keyword_variadic != base.keyword_variadic
+            || child.has_default != base.has_default
+        {
+            return Some(OverrideCompatibilityFailure::ParameterModifierMismatch {
+                parameter_name: child.name.clone(),
+            });
+        }
+        if child.name != base.name {
+            return Some(OverrideCompatibilityFailure::ParameterNameMismatch {
+                child_name: child.name.clone(),
+                base_name: base.name.clone(),
+            });
+        }
+        if !child.annotation.is_empty() && !base.annotation.is_empty()
+            && let Some(reason) = semantic_type_assignability_failure(
+                node,
+                nodes,
+                &lower_type_text_or_name(&child.annotation),
+                &lower_type_text_or_name(&base.annotation),
+            )
+        {
+            return Some(OverrideCompatibilityFailure::ParameterTypeMismatch {
+                parameter_name: child.name.clone(),
+                reason,
+            });
+        }
     }
 
-    let child_return = member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
-    let base_return =
-        base_member.detail.split_once("->").map(|(_, right)| right.trim()).unwrap_or("");
-    child_return.is_empty()
-        || base_return.is_empty()
-        || semantic_type_is_assignable(
-            node,
-            nodes,
-            &lower_type_text_or_name(base_return),
-            &lower_type_text_or_name(child_return),
-        )
+    let child_return = declaration_signature_return_annotation_text(member).unwrap_or_default();
+    let base_return = declaration_signature_return_annotation_text(base_member).unwrap_or_default();
+    if child_return.is_empty() || base_return.is_empty() {
+        return None;
+    }
+    semantic_type_assignability_failure(
+        node,
+        nodes,
+        &lower_type_text_or_name(&base_return),
+        &lower_type_text_or_name(&child_return),
+    )
+    .map(|reason| OverrideCompatibilityFailure::ReturnTypeMismatch { reason })
 }
 
 pub(super) fn missing_override_diagnostics<'a>(
@@ -219,15 +291,15 @@ pub(super) fn final_decorator_diagnostics<'a>(
                             && declaration.is_final_decorator
                     }) {
                         diagnostics.push(Diagnostic::error(
-                        "TPY4005",
-                        format!(
+                            "TPY4005",
+                            format!(
                             "type `{}` in module `{}` overrides final member `{}` from base `{}`",
                             class_declaration.name,
                             node.module_path.display(),
                             member.name,
                             base_decl.name
                         ),
-                    ));
+                        ));
                     }
                 }
             }
@@ -420,17 +492,7 @@ pub(super) fn resolve_direct_base<'a>(
         return Some((node, local));
     }
 
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == base_name
-    })?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    let target_decl = target_node.declarations.iter().find(|declaration| {
-        declaration.name == symbol_name
-            && declaration.owner.is_none()
-            && declaration.kind == DeclarationKind::Class
-    })?;
-    Some((target_node, target_decl))
+    resolve_imported_symbol_semantic_target(node, nodes, base_name)?.class_provider()
 }
 
 pub(super) fn sealed_match_exhaustiveness_diagnostics(
@@ -682,13 +744,13 @@ pub(super) fn resolve_match_subject_semantic_type(
                         _ => false,
                     }
             })
-            .map(|declaration| declaration.detail.as_str())
+            .and_then(declaration_signature_text)
     });
 
     resolve_direct_expression_semantic_type(
         node,
         nodes,
-        signature,
+        signature.as_deref(),
         None,
         match_site.owner_name.as_deref(),
         match_site.owner_type_name.as_deref(),
@@ -1237,8 +1299,8 @@ pub(super) fn property_setter_compatibility_diagnostics(
                 decl.kind == DeclarationKind::Function
                     && decl.method_kind == Some(typepython_syntax::MethodKind::PropertySetter)
             })?;
-            let getter_type = lower_type_text_or_name(getter.detail.split_once("->")?.1.trim());
-            let setter_params = direct_param_types(&setter.detail)?;
+            let getter_type = declaration_signature_return_semantic_type(getter)?;
+            let setter_params = declaration_signature_param_types(setter)?;
             let setter_type = lower_type_text_or_name(setter_params.get(1)?);
             (getter_type != setter_type).then(|| {
                 Diagnostic::error(

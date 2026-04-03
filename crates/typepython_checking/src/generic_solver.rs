@@ -4,6 +4,51 @@ use super::*;
 
 pub(crate) type GenericTypeParamSubstitutions = GenericSolution;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum GenericSolveFailure {
+    UnsupportedStarredTypeVarTupleInference { param_name: String },
+    ParamSpecInferenceFailed { annotation: SemanticType, actual: SemanticType },
+    TypeBindingInferenceFailed { annotation: SemanticType, actual: SemanticType },
+    ParamSpecBindingConflict { param_name: String },
+    TypeVarTupleBindingConflict { param_name: String },
+    ConstraintViolation { param_name: String, actual: SemanticType, requirement: String },
+}
+
+impl GenericSolveFailure {
+    pub(crate) fn diagnostic_reason(&self) -> String {
+        match self {
+            Self::UnsupportedStarredTypeVarTupleInference { param_name } => format!(
+                "reason: `*{}` cannot be inferred from starred iterable arguments with unknown fixed length",
+                param_name
+            ),
+            Self::ParamSpecInferenceFailed { annotation, actual } => format!(
+                "reason: could not infer callable parameter list from expected `{}` against actual `{}`",
+                diagnostic_type_text(annotation),
+                diagnostic_type_text(actual)
+            ),
+            Self::TypeBindingInferenceFailed { annotation, actual } => format!(
+                "reason: could not infer generic bindings from expected `{}` against actual `{}`",
+                diagnostic_type_text(annotation),
+                diagnostic_type_text(actual)
+            ),
+            Self::ParamSpecBindingConflict { param_name } => format!(
+                "reason: inferred callable parameter list for `{}` was inconsistent across this call",
+                param_name
+            ),
+            Self::TypeVarTupleBindingConflict { param_name } => format!(
+                "reason: inferred tuple pack for `{}` was inconsistent across this call",
+                param_name
+            ),
+            Self::ConstraintViolation { param_name, actual, requirement } => format!(
+                "reason: inferred `{}` as `{}` but it does not satisfy {}",
+                param_name,
+                diagnostic_type_text(actual),
+                requirement
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(crate) struct GenericSolution {
     pub(crate) types: BTreeMap<String, SemanticType>,
@@ -21,6 +66,297 @@ pub(crate) struct TypePackBinding {
     pub(crate) types: Vec<SemanticType>,
 }
 
+#[derive(Debug, Clone)]
+struct GenericSolverParam {
+    kind: typepython_binding::GenericTypeParamKind,
+    name: String,
+    bound: Option<String>,
+    constraints: Vec<String>,
+    default: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GenericSolverMetadata {
+    params: Vec<GenericSolverParam>,
+    type_names: BTreeSet<String>,
+    param_spec_names: BTreeSet<String>,
+    type_pack_names: BTreeSet<String>,
+}
+
+impl GenericSolverMetadata {
+    fn from_function(function: &Declaration) -> Self {
+        Self {
+            params: function
+                .type_params
+                .iter()
+                .map(|type_param| GenericSolverParam {
+                    kind: type_param.kind.clone(),
+                    name: type_param.name.clone(),
+                    bound: type_param.bound.clone(),
+                    constraints: type_param.constraints.clone(),
+                    default: type_param.default.clone(),
+                })
+                .collect(),
+            type_names: function
+                .type_params
+                .iter()
+                .filter(|type_param| {
+                    type_param.kind == typepython_binding::GenericTypeParamKind::TypeVar
+                })
+                .map(|type_param| type_param.name.clone())
+                .collect(),
+            param_spec_names: function
+                .type_params
+                .iter()
+                .filter(|type_param| {
+                    type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec
+                })
+                .map(|type_param| type_param.name.clone())
+                .collect(),
+            type_pack_names: function
+                .type_params
+                .iter()
+                .filter(|type_param| {
+                    type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple
+                })
+                .map(|type_param| type_param.name.clone())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct TypeVarConstraint {
+    name: String,
+    candidate: SemanticType,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ParamSpecConstraint {
+    name: String,
+    binding: ParamListBinding,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct TypeVarTupleConstraint {
+    name: String,
+    binding: TypePackBinding,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum GenericConstraint {
+    TypeVar(TypeVarConstraint),
+    ParamSpec(ParamSpecConstraint),
+    TypeVarTuple(TypeVarTupleConstraint),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+struct GenericConstraintSet {
+    constraints: Vec<GenericConstraint>,
+}
+
+impl GenericConstraintSet {
+    fn extend_bindings(&mut self, bindings: GenericSolution) {
+        for (name, candidate) in bindings.types {
+            self.constraints
+                .push(GenericConstraint::TypeVar(TypeVarConstraint { name, candidate }));
+        }
+        for (name, binding) in bindings.param_lists {
+            self.constraints
+                .push(GenericConstraint::ParamSpec(ParamSpecConstraint { name, binding }));
+        }
+        for (name, binding) in bindings.type_packs {
+            self.constraints
+                .push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint { name, binding }));
+        }
+    }
+
+    fn push_type_pack_binding(&mut self, name: &str, binding: TypePackBinding) {
+        self.constraints.push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint {
+            name: name.to_owned(),
+            binding,
+        }));
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GenericSolverState {
+    metadata: GenericSolverMetadata,
+    constraints: GenericConstraintSet,
+}
+
+impl GenericSolverState {
+    fn new(function: &Declaration) -> Self {
+        Self {
+            metadata: GenericSolverMetadata::from_function(function),
+            constraints: GenericConstraintSet::default(),
+        }
+    }
+
+    fn current_bindings_detailed(&self) -> Result<GenericSolution, GenericSolveFailure> {
+        solve_collected_generic_constraints_detailed(&self.constraints)
+    }
+
+    fn record_bindings(&mut self, bindings: GenericSolution) {
+        self.constraints.extend_bindings(bindings);
+    }
+
+    fn record_type_pack_binding(&mut self, name: &str, binding: TypePackBinding) {
+        self.constraints.push_type_pack_binding(name, binding);
+    }
+
+    fn finish_detailed(
+        &self,
+        node: &typepython_graph::ModuleNode,
+        nodes: &[typepython_graph::ModuleNode],
+    ) -> Result<GenericSolution, GenericSolveFailure> {
+        finalize_generic_solution_detailed(node, nodes, &self.metadata, &self.constraints)
+    }
+}
+
+fn solve_collected_generic_constraints_detailed(
+    constraints: &GenericConstraintSet,
+) -> Result<GenericSolution, GenericSolveFailure> {
+    let mut solution = GenericSolution::default();
+    for constraint in &constraints.constraints {
+        match constraint {
+            GenericConstraint::TypeVar(constraint) => match solution.types.get(&constraint.name) {
+                Some(existing) if existing != &constraint.candidate => {
+                    solution.types.insert(
+                        constraint.name.clone(),
+                        merge_generic_type_candidates(existing, &constraint.candidate),
+                    );
+                }
+                Some(_) => {}
+                None => {
+                    solution
+                        .types
+                        .insert(constraint.name.clone(), constraint.candidate.clone());
+                }
+            },
+            GenericConstraint::ParamSpec(constraint) => {
+                insert_param_spec_binding(
+                    &mut solution,
+                    &constraint.name,
+                    constraint.binding.clone(),
+                )
+                .ok_or_else(|| GenericSolveFailure::ParamSpecBindingConflict {
+                    param_name: constraint.name.clone(),
+                })?;
+            }
+            GenericConstraint::TypeVarTuple(constraint) => {
+                insert_type_pack_binding(&mut solution, &constraint.name, constraint.binding.clone())
+                    .ok_or_else(|| GenericSolveFailure::TypeVarTupleBindingConflict {
+                        param_name: constraint.name.clone(),
+                    })?;
+            }
+        }
+    }
+    Ok(solution)
+}
+
+fn generic_type_param_requirement(type_param: &GenericSolverParam) -> String {
+    if let Some(bound) = &type_param.bound {
+        format!("bound `{}`", normalize_type_text(bound))
+    } else if !type_param.constraints.is_empty() {
+        format!(
+            "constraint list `{}`",
+            type_param
+                .constraints
+                .iter()
+                .map(|constraint| normalize_type_text(constraint))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )
+    } else {
+        String::from("its declared constraints")
+    }
+}
+
+fn finalize_generic_solution_detailed(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    metadata: &GenericSolverMetadata,
+    constraints: &GenericConstraintSet,
+) -> Result<GenericSolution, GenericSolveFailure> {
+    let mut substitutions = solve_collected_generic_constraints_detailed(constraints)?;
+
+    for type_param in &metadata.params {
+        match type_param.kind {
+            typepython_binding::GenericTypeParamKind::TypeVar => {
+                if !substitutions.types.contains_key(&type_param.name)
+                    && let Some(default) = &type_param.default
+                {
+                    substitutions
+                        .types
+                        .insert(type_param.name.clone(), lower_type_text_or_name(default));
+                }
+                let Some(actual) = substitutions.types.get(&type_param.name) else {
+                    continue;
+                };
+                if !generic_type_param_accepts_actual(
+                    node,
+                    nodes,
+                    &typepython_binding::GenericTypeParam {
+                        kind: type_param.kind.clone(),
+                        name: type_param.name.clone(),
+                        bound: type_param.bound.clone(),
+                        constraints: type_param.constraints.clone(),
+                        default: type_param.default.clone(),
+                    },
+                    actual,
+                ) {
+                    return Err(GenericSolveFailure::ConstraintViolation {
+                        param_name: type_param.name.clone(),
+                        actual: actual.clone(),
+                        requirement: generic_type_param_requirement(type_param),
+                    });
+                }
+            }
+            typepython_binding::GenericTypeParamKind::ParamSpec => {
+                if substitutions.param_lists.contains_key(&type_param.name) {
+                    continue;
+                }
+                let Some(default) = &type_param.default else {
+                    continue;
+                };
+                substitutions
+                    .param_lists
+                    .insert(
+                        type_param.name.clone(),
+                        param_list_binding_from_default(default).ok_or_else(|| {
+                            GenericSolveFailure::ParamSpecInferenceFailed {
+                                annotation: SemanticType::Name(type_param.name.clone()),
+                                actual: lower_type_text_or_name(default),
+                            }
+                        })?,
+                    );
+            }
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
+                if substitutions.type_packs.contains_key(&type_param.name) {
+                    continue;
+                }
+                let Some(default) = &type_param.default else {
+                    continue;
+                };
+                substitutions
+                    .type_packs
+                    .insert(
+                        type_param.name.clone(),
+                        type_pack_binding_from_default(default).ok_or_else(|| {
+                            GenericSolveFailure::TypeVarTupleBindingConflict {
+                                param_name: type_param.name.clone(),
+                            }
+                        })?,
+                    );
+            }
+        }
+    }
+
+    Ok(substitutions)
+}
+
+#[allow(dead_code)]
 pub(crate) fn infer_generic_type_param_substitutions(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -28,27 +364,17 @@ pub(crate) fn infer_generic_type_param_substitutions(
     signature: &[typepython_syntax::DirectFunctionParamSite],
     call: &typepython_binding::CallSite,
 ) -> Option<GenericTypeParamSubstitutions> {
-    let type_names = function
-        .type_params
-        .iter()
-        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVar)
-        .map(|type_param| type_param.name.clone())
-        .collect::<BTreeSet<_>>();
-    let param_spec_names = function
-        .type_params
-        .iter()
-        .filter(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::ParamSpec)
-        .map(|type_param| type_param.name.clone())
-        .collect::<BTreeSet<_>>();
-    let type_pack_names = function
-        .type_params
-        .iter()
-        .filter(|type_param| {
-            type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple
-        })
-        .map(|type_param| type_param.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut substitutions = GenericTypeParamSubstitutions::default();
+    infer_generic_type_param_substitutions_detailed(node, nodes, function, signature, call).ok()
+}
+
+pub(crate) fn infer_generic_type_param_substitutions_detailed(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    function: &Declaration,
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    call: &typepython_binding::CallSite,
+) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
+    let mut solver = GenericSolverState::new(function);
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
@@ -71,13 +397,14 @@ pub(crate) fn infer_generic_type_param_substitutions(
                 continue;
             }
             if let Some(type_pack_name) =
-                type_pack_name_from_unpack_semantic_annotation(&annotation, &type_pack_names)
+                type_pack_name_from_unpack_semantic_annotation(&annotation, &solver.metadata.type_pack_names)
             {
                 if !variadic_starred_types.is_empty() {
-                    return None;
+                    return Err(GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
+                        param_name: type_pack_name,
+                    });
                 }
-                insert_type_pack_binding(
-                    &mut substitutions,
+                solver.record_type_pack_binding(
                     &type_pack_name,
                     TypePackBinding {
                         types: positional_types[positional_index..]
@@ -85,20 +412,27 @@ pub(crate) fn infer_generic_type_param_substitutions(
                             .map(|ty| lower_type_text_or_name(ty))
                             .collect(),
                     },
-                )?;
+                );
                 positional_index = positional_types.len();
                 continue;
             }
+            let existing = solver.current_bindings_detailed()?;
             for actual in positional_types.iter().skip(positional_index) {
-                bind_generic_type_params(
+                let actual_type = lower_type_text_or_name(actual);
+                let bindings = infer_generic_type_param_bindings(
                     node,
                     nodes,
                     &annotation,
-                    &lower_type_text_or_name(actual),
-                    &type_names,
-                    &type_pack_names,
-                    &mut substitutions,
-                )?;
+                    &actual_type,
+                    &solver.metadata.type_names,
+                    &existing,
+                    &solver.metadata.type_pack_names,
+                )
+                .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+                    annotation: annotation.clone(),
+                    actual: actual_type,
+                })?;
+                solver.record_bindings(bindings);
             }
             positional_index = positional_types.len();
             continue;
@@ -108,31 +442,44 @@ pub(crate) fn infer_generic_type_param_substitutions(
         };
         let annotation_mentions_param_spec =
             annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(params, &param_spec_names)
+                callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
             });
-        bind_callable_param_spec_type_params(
+        let existing = solver.current_bindings_detailed()?;
+        let actual_type = lower_type_text_or_name(actual);
+        let bindings = infer_callable_param_spec_bindings(
             node,
             nodes,
             &annotation,
-            &lower_type_text_or_name(actual),
+            &actual_type,
             call.arg_values.get(positional_index),
-            &type_names,
-            &param_spec_names,
-            &mut substitutions,
-        )?;
+            &solver.metadata.type_names,
+            &solver.metadata.param_spec_names,
+            &existing,
+        )
+        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type.clone(),
+        })?;
+        solver.record_bindings(bindings);
         if annotation_mentions_param_spec {
             positional_index += 1;
             continue;
         }
-        bind_generic_type_params(
+        let existing = solver.current_bindings_detailed()?;
+        let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
             &annotation,
-            &lower_type_text_or_name(actual),
-            &type_names,
-            &type_pack_names,
-            &mut substitutions,
-        )?;
+            &actual_type,
+            &solver.metadata.type_names,
+            &existing,
+            &solver.metadata.type_pack_names,
+        )
+        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type,
+        })?;
+        solver.record_bindings(bindings);
         positional_index += 1;
     }
 
@@ -148,75 +495,46 @@ pub(crate) fn infer_generic_type_param_substitutions(
         let annotation = lower_type_text_or_name(annotation_text);
         let annotation_mentions_param_spec =
             annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(params, &param_spec_names)
+                callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
             });
-        bind_callable_param_spec_type_params(
+        let existing = solver.current_bindings_detailed()?;
+        let actual_type = lower_type_text_or_name(actual);
+        let bindings = infer_callable_param_spec_bindings(
             node,
             nodes,
             &annotation,
-            &lower_type_text_or_name(actual),
+            &actual_type,
             call.keyword_arg_values.get(index),
-            &type_names,
-            &param_spec_names,
-            &mut substitutions,
-        )?;
+            &solver.metadata.type_names,
+            &solver.metadata.param_spec_names,
+            &existing,
+        )
+        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type.clone(),
+        })?;
+        solver.record_bindings(bindings);
         if annotation_mentions_param_spec {
             continue;
         }
-        bind_generic_type_params(
+        let existing = solver.current_bindings_detailed()?;
+        let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
             &annotation,
-            &lower_type_text_or_name(actual),
-            &type_names,
-            &type_pack_names,
-            &mut substitutions,
-        )?;
+            &actual_type,
+            &solver.metadata.type_names,
+            &existing,
+            &solver.metadata.type_pack_names,
+        )
+        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type,
+        })?;
+        solver.record_bindings(bindings);
     }
 
-    for type_param in &function.type_params {
-        match type_param.kind {
-            typepython_binding::GenericTypeParamKind::TypeVar => {
-                if !substitutions.types.contains_key(&type_param.name)
-                    && let Some(default) = &type_param.default
-                {
-                    substitutions
-                        .types
-                        .insert(type_param.name.clone(), lower_type_text_or_name(default));
-                }
-                let Some(actual) = substitutions.types.get(&type_param.name) else {
-                    continue;
-                };
-                if !generic_type_param_accepts_actual(node, nodes, type_param, actual) {
-                    return None;
-                }
-            }
-            typepython_binding::GenericTypeParamKind::ParamSpec => {
-                if substitutions.param_lists.contains_key(&type_param.name) {
-                    continue;
-                }
-                let Some(default) = &type_param.default else {
-                    continue;
-                };
-                substitutions
-                    .param_lists
-                    .insert(type_param.name.clone(), param_list_binding_from_default(default)?);
-            }
-            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
-                if substitutions.type_packs.contains_key(&type_param.name) {
-                    continue;
-                }
-                let Some(default) = &type_param.default else {
-                    continue;
-                };
-                substitutions
-                    .type_packs
-                    .insert(type_param.name.clone(), type_pack_binding_from_default(default)?);
-            }
-        }
-    }
-
-    Some(substitutions)
+    solver.finish_detailed(node, nodes)
 }
 
 pub(crate) fn instantiate_direct_function_signature(
@@ -300,7 +618,7 @@ pub(crate) fn instantiate_semantic_annotation(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn bind_callable_param_spec_type_params(
+pub(crate) fn infer_callable_param_spec_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
@@ -308,39 +626,44 @@ pub(crate) fn bind_callable_param_spec_type_params(
     actual_value: Option<&typepython_syntax::DirectExprMetadata>,
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
-    substitutions: &mut GenericTypeParamSubstitutions,
-) -> Option<()> {
+    existing: &GenericTypeParamSubstitutions,
+) -> Option<GenericTypeParamSubstitutions> {
     if param_spec_names.is_empty() {
-        return Some(());
+        return Some(GenericTypeParamSubstitutions::default());
     }
 
     let Some((expected_params_expr, expected_return)) = annotation.callable_parts() else {
-        return Some(());
+        return Some(GenericTypeParamSubstitutions::default());
     };
     if !callable_param_expr_mentions_param_spec_semantic(expected_params_expr, param_spec_names) {
-        return Some(());
+        return Some(GenericTypeParamSubstitutions::default());
     }
 
     let (actual_binding, actual_return) =
         resolve_callable_shape_from_actual(node, nodes, actual, actual_value)?;
-    bind_callable_param_expr(
+    let mut bindings = infer_callable_param_expr_bindings(
         node,
         nodes,
         expected_params_expr,
         &actual_binding,
         type_names,
         param_spec_names,
-        substitutions,
+        existing,
     )?;
-    bind_generic_type_params(
-        node,
-        nodes,
-        expected_return,
-        &actual_return,
-        type_names,
-        &BTreeSet::new(),
-        substitutions,
-    )
+    let combined = combine_generic_substitutions(existing, &bindings);
+    merge_nested_generic_bindings(
+        &mut bindings,
+        infer_generic_type_param_bindings(
+            node,
+            nodes,
+            expected_return,
+            &actual_return,
+            type_names,
+            &combined,
+            &BTreeSet::new(),
+        )?,
+    )?;
+    Some(bindings)
 }
 
 pub(crate) fn callable_param_expr_mentions_param_spec_semantic(
@@ -358,25 +681,23 @@ pub(crate) fn callable_param_expr_mentions_param_spec_semantic(
     }
 }
 
-pub(crate) fn bind_callable_param_expr(
+pub(crate) fn infer_callable_param_expr_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     expected_params_expr: &SemanticCallableParams,
     actual_binding: &ParamListBinding,
     type_names: &BTreeSet<String>,
     param_spec_names: &BTreeSet<String>,
-    substitutions: &mut GenericTypeParamSubstitutions,
-) -> Option<()> {
+    existing: &GenericTypeParamSubstitutions,
+) -> Option<GenericTypeParamSubstitutions> {
     match expected_params_expr {
         SemanticCallableParams::Single(expr) => {
             if let SemanticType::Name(name) = expr.as_ref()
                 && param_spec_names.contains(name.trim())
             {
-                return insert_param_spec_binding(
-                    substitutions,
-                    name.trim(),
-                    actual_binding.clone(),
-                );
+                let mut bindings = GenericTypeParamSubstitutions::default();
+                insert_param_spec_binding(&mut bindings, name.trim(), actual_binding.clone())?;
+                return Some(bindings);
             }
         }
         SemanticCallableParams::Concatenate(parts) => {
@@ -389,28 +710,34 @@ pub(crate) fn bind_callable_param_expr(
             {
                 return None;
             }
+            let mut bindings = GenericTypeParamSubstitutions::default();
             for (expected_prefix, actual_param) in prefixes.iter().zip(actual_binding.params.iter())
             {
-                bind_generic_type_params(
-                    node,
-                    nodes,
-                    expected_prefix,
-                    &param_annotation_semantic_type(actual_param),
-                    type_names,
-                    &BTreeSet::new(),
-                    substitutions,
+                let combined = combine_generic_substitutions(existing, &bindings);
+                merge_nested_generic_bindings(
+                    &mut bindings,
+                    infer_generic_type_param_bindings(
+                        node,
+                        nodes,
+                        expected_prefix,
+                        &param_annotation_semantic_type(actual_param),
+                        type_names,
+                        &combined,
+                        &BTreeSet::new(),
+                    )?,
                 )?;
             }
-            return insert_param_spec_binding(
-                substitutions,
+            insert_param_spec_binding(
+                &mut bindings,
                 tail.trim(),
                 ParamListBinding { params: actual_binding.params[prefixes.len()..].to_vec() },
-            );
+            )?;
+            return Some(bindings);
         }
         _ => {}
     }
 
-    Some(())
+    Some(GenericTypeParamSubstitutions::default())
 }
 
 pub(crate) fn insert_param_spec_binding(
@@ -482,23 +809,24 @@ pub(crate) fn resolve_callable_shape_from_metadata(
     }
 
     let function_name = actual_value.value_name.as_deref()?;
-    if let Some(callable_annotation) =
-        resolve_decorated_function_callable_annotation(node, nodes, function_name)
+    if let Some(callable_type) = resolve_decorated_function_callable_semantic_type_with_context(
+        &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+        node,
+        nodes,
+        function_name,
+    )
     {
-        let signature =
-            direct_function_signature_sites_from_callable_annotation(&callable_annotation)?;
-        let return_type =
-            decorated_function_return_type_from_callable_annotation(&callable_annotation)?;
+        let signature = direct_function_signature_sites_from_semantic_callable(&callable_type)?;
+        let return_type = decorated_function_return_semantic_type_from_semantic_callable(&callable_type)?;
         return Some((
             ParamListBinding { params: signature },
-            lower_type_text_or_name(&return_type),
+            return_type,
         ));
     }
     let function = resolve_direct_function(node, nodes, function_name)?;
-    let return_type = function.detail.split_once("->")?.1.trim().to_owned();
     Some((
-        ParamListBinding { params: direct_signature_sites_from_detail(&function.detail) },
-        lower_type_text_or_name(&return_type),
+        ParamListBinding { params: declaration_signature_sites(function) },
+        declaration_signature_return_semantic_type(function)?,
     ))
 }
 
@@ -590,43 +918,6 @@ pub(crate) fn generic_type_param_accepts_actual(
             .any(|constraint| semantic_type_is_assignable(node, nodes, &constraint, actual));
     }
     true
-}
-
-pub(crate) fn bind_generic_type_params(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    annotation: &SemanticType,
-    actual: &SemanticType,
-    generic_names: &BTreeSet<String>,
-    type_pack_names: &BTreeSet<String>,
-    substitutions: &mut GenericTypeParamSubstitutions,
-) -> Option<()> {
-    let inferred = infer_generic_type_param_bindings(
-        node,
-        nodes,
-        annotation,
-        actual,
-        generic_names,
-        substitutions,
-        type_pack_names,
-    )?;
-    for (name, actual_type) in inferred.types {
-        match substitutions.types.get(&name) {
-            Some(existing) if existing != &actual_type => {
-                substitutions
-                    .types
-                    .insert(name, merge_generic_type_candidates(existing, &actual_type));
-            }
-            Some(_) => {}
-            None => {
-                substitutions.types.insert(name, actual_type);
-            }
-        }
-    }
-    for (name, binding) in inferred.type_packs {
-        insert_type_pack_binding(substitutions, &name, binding)?;
-    }
-    Some(())
 }
 
 pub(crate) fn infer_generic_type_param_bindings(

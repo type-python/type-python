@@ -456,27 +456,24 @@ pub(super) fn resolve_dataclass_transform_provider_with_context<'a>(
     }
 
     if let Some((module_alias, symbol_name)) = name.rsplit_once('.') {
-        if let Some(import) = node.declarations.iter().find(|declaration| {
-            declaration.kind == DeclarationKind::Import && declaration.name == module_alias
-        }) {
-            if let Some(target_node) =
-                nodes.iter().find(|candidate| candidate.module_key == import.detail)
-            {
-                return load_dataclass_transform_module_info_with_context(context, target_node)?
-                    .providers
-                    .into_iter()
-                    .find(|provider| provider.name == symbol_name);
-            }
+        if let Some(import_target) = resolve_imported_symbol_semantic_target(node, nodes, module_alias)
+            && let Some(target_node) = import_target.module_target()
+        {
+            return load_dataclass_transform_module_info_with_context(context, target_node)?
+                .providers
+                .into_iter()
+                .find(|provider| provider.name == symbol_name);
         }
     }
 
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == name
-    })?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
+    let import_target = resolve_imported_symbol_semantic_target(node, nodes, name)?;
+    let target_node = import_target.provider_node;
     load_dataclass_transform_module_info_with_context(context, target_node)?
         .providers
         .into_iter()
-        .find(|provider| provider.name == symbol_name)
+        .find(|provider| {
+            import_target
+                .declaration_target()
+                .is_some_and(|declaration| provider.name == declaration.name)
+        })
 }

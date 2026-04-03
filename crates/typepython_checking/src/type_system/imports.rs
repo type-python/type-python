@@ -1,14 +1,140 @@
+pub(super) struct ImportedSymbolSemanticTarget<'a> {
+    pub(super) import: &'a Declaration,
+    pub(super) provider_node: &'a typepython_graph::ModuleNode,
+    pub(super) target_declaration: Option<&'a Declaration>,
+}
+
+impl<'a> ImportedSymbolSemanticTarget<'a> {
+    pub(super) fn module_target(&self) -> Option<&'a typepython_graph::ModuleNode> {
+        self.target_declaration.is_none().then_some(self.provider_node)
+    }
+
+    pub(super) fn declaration_target(&self) -> Option<&'a Declaration> {
+        self.target_declaration
+    }
+
+    pub(super) fn function_provider(
+        &self,
+    ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+        let declaration = self.target_declaration?;
+        (declaration.owner.is_none() && declaration.kind == DeclarationKind::Function)
+            .then_some((self.provider_node, declaration))
+    }
+
+    pub(super) fn type_alias_provider(
+        &self,
+    ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+        let declaration = self.target_declaration?;
+        (declaration.owner.is_none() && declaration.kind == DeclarationKind::TypeAlias)
+            .then_some((self.provider_node, declaration))
+    }
+
+    pub(super) fn class_provider(
+        &self,
+    ) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration)> {
+        let declaration = self.target_declaration?;
+        (declaration.owner.is_none() && declaration.kind == DeclarationKind::Class)
+            .then_some((self.provider_node, declaration))
+    }
+
+    pub(super) fn overload_declarations(&self) -> Vec<&'a Declaration> {
+        let Some(target) = self.target_declaration else {
+            return Vec::new();
+        };
+        self.provider_node
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.owner.is_none()
+                    && declaration.kind == DeclarationKind::Overload
+                    && declaration.name == target.name
+            })
+            .collect()
+    }
+
+    pub(super) fn semantic_type(
+        &self,
+        request_node: &typepython_graph::ModuleNode,
+    ) -> Option<SemanticType> {
+        let declaration = self.target_declaration?;
+        match declaration.kind {
+            DeclarationKind::Value => {
+                let detail = rewrite_imported_typing_aliases(
+                    request_node,
+                    &declaration_value_annotation_text(declaration)?,
+                );
+                normalized_direct_return_annotation(&detail).map(lower_type_text_or_name)
+            }
+            DeclarationKind::Function => {
+                let callable = declaration_callable_semantics(declaration)?;
+                Some(SemanticType::Callable {
+                    params: SemanticCallableParams::ParamList(
+                        callable
+                            .params
+                            .iter()
+                            .map(|param| {
+                                lower_type_text_or_name(
+                                    param.annotation.as_deref().unwrap_or("dynamic"),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    return_type: Box::new(callable.return_type?),
+                })
+            }
+            DeclarationKind::Class => Some(SemanticType::Name(declaration.name.clone())),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn resolve_imported_symbol_semantic_target_from_declaration<'a>(
+    nodes: &'a [typepython_graph::ModuleNode],
+    declaration: &'a Declaration,
+) -> Option<ImportedSymbolSemanticTarget<'a>> {
+    let import_target = declaration_import_target_ref(declaration)?;
+    if let Some(module_node) =
+        nodes.iter().find(|candidate| candidate.module_key == import_target.module_target)
+    {
+        return Some(ImportedSymbolSemanticTarget {
+            import: declaration,
+            provider_node: module_node,
+            target_declaration: None,
+        });
+    }
+
+    let symbol_target = import_target.symbol_target?;
+    let provider_node =
+        nodes.iter().find(|candidate| candidate.module_key == symbol_target.module_key)?;
+    let target_declaration = provider_node
+        .declarations
+        .iter()
+        .find(|target| target.owner.is_none() && target.name == symbol_target.symbol_name)?;
+    Some(ImportedSymbolSemanticTarget {
+        import: declaration,
+        provider_node,
+        target_declaration: Some(target_declaration),
+    })
+}
+
+pub(super) fn resolve_imported_symbol_semantic_target<'a>(
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    local_name: &str,
+) -> Option<ImportedSymbolSemanticTarget<'a>> {
+    let import = node.declarations.iter().find(|declaration| {
+        declaration.kind == DeclarationKind::Import && declaration.name == local_name
+    })?;
+    resolve_imported_symbol_semantic_target_from_declaration(nodes, import)
+}
+
 pub(super) fn resolve_import_target<'a>(
     _node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
     declaration: &'a Declaration,
 ) -> Option<&'a Declaration> {
-    let (module_key, symbol_name) = declaration.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    target_node
-        .declarations
-        .iter()
-        .find(|target| target.owner.is_none() && target.name == symbol_name)
+    resolve_imported_symbol_semantic_target_from_declaration(nodes, declaration)?
+        .declaration_target()
 }
 
 pub(super) fn resolve_imported_module_target<'a>(
@@ -16,10 +142,7 @@ pub(super) fn resolve_imported_module_target<'a>(
     nodes: &'a [typepython_graph::ModuleNode],
     local_name: &str,
 ) -> Option<&'a typepython_graph::ModuleNode> {
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == local_name
-    })?;
-    nodes.iter().find(|candidate| candidate.module_key == import.detail)
+    resolve_imported_symbol_semantic_target(node, nodes, local_name)?.module_target()
 }
 
 pub(super) fn resolve_imported_module_member_reference_semantic_type(
@@ -28,34 +151,18 @@ pub(super) fn resolve_imported_module_member_reference_semantic_type(
     owner_name: &str,
     member_name: &str,
 ) -> Option<SemanticType> {
-    let module_node = resolve_imported_module_target(node, nodes, owner_name)?;
-    let declaration = module_node
+    let module_target = resolve_imported_symbol_semantic_target(node, nodes, owner_name)?;
+    let declaration = module_target
+        .module_target()?
         .declarations
         .iter()
         .find(|declaration| declaration.owner.is_none() && declaration.name == member_name)?;
-    match declaration.kind {
-        DeclarationKind::Value => {
-            let detail = rewrite_imported_typing_aliases(node, &declaration.detail);
-            normalized_direct_return_annotation(&detail).map(lower_type_text_or_name)
-        }
-        DeclarationKind::Function => {
-            let param_types = direct_signature_sites_from_detail(&declaration.detail)
-                .into_iter()
-                .map(|param| {
-                    lower_type_text_or_name(
-                        &param.annotation.unwrap_or_else(|| String::from("dynamic")),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let return_type =
-                lower_type_text_or_name(declaration.detail.split_once("->")?.1.trim());
-            Some(SemanticType::Callable {
-                params: SemanticCallableParams::ParamList(param_types),
-                return_type: Box::new(return_type),
-            })
-        }
-        _ => None,
+    ImportedSymbolSemanticTarget {
+        import: module_target.import,
+        provider_node: module_target.provider_node,
+        target_declaration: Some(declaration),
     }
+    .semantic_type(node)
 }
 
 pub(super) fn resolve_imported_module_method_return_semantic_type(
@@ -75,33 +182,39 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                 && matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
         })
         .collect::<Vec<_>>();
-    let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
-    {
-        let call = node.method_calls.iter().find(|call| {
-            call.owner_name == owner_name
-                && call.method == method_name
-                && !call.through_instance
-                && call.line == current_line
-        })?;
-        let call = imported_module_method_call_site(module_node, call);
-        let applicable = methods
-            .iter()
-            .copied()
-            .filter(|declaration| {
-                overload_is_applicable_with_context(node, nodes, &call, declaration)
-            })
-            .collect::<Vec<_>>();
-        if applicable.len() == 1 {
-            applicable[0]
+    let method_return =
+        if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload) {
+            let call = node.method_calls.iter().find(|call| {
+                call.owner_name == owner_name
+                    && call.method == method_name
+                    && !call.through_instance
+                    && call.line == current_line
+            })?;
+            let call = imported_module_method_call_site(module_node, call);
+            let overloads = methods
+                .iter()
+                .copied()
+                .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+                .collect::<Vec<_>>();
+            let applicable =
+                resolve_applicable_direct_overload_candidates(node, nodes, &call, &overloads);
+            select_most_specific_overload(node, nodes, &applicable)?.return_type.clone()
         } else {
-            return None;
-        }
-    } else {
-        *methods.first()?
-    };
-    let return_text =
-        rewrite_imported_typing_aliases(node, method.detail.split_once("->")?.1.trim());
-    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+            let call = node.method_calls.iter().find(|call| {
+                call.owner_name == owner_name
+                    && call.method == method_name
+                    && !call.through_instance
+                    && call.line == current_line
+            })?;
+            let call = imported_module_method_call_site(module_node, call);
+            resolve_direct_call_candidate(node, nodes, *methods.first()?, &call)?.return_type
+        };
+    method_return.map(|return_type| {
+        lower_type_text_or_name(&rewrite_imported_typing_aliases(
+            node,
+            &render_semantic_type(&return_type),
+        ))
+    })
 }
 
 pub(super) fn imported_module_method_call_site(
@@ -167,14 +280,11 @@ pub(super) fn imported_module_method_call_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Overload)
         .collect::<Vec<_>>();
     if !overloads.is_empty() {
-        let applicable = overloads
-            .iter()
-            .copied()
-            .filter(|declaration| {
-                overload_is_applicable_with_context(node, nodes, &direct_call, declaration)
-            })
-            .collect::<Vec<_>>();
-        if applicable.len() >= 2 {
+        let applicable =
+            resolve_applicable_direct_overload_candidates(node, nodes, &direct_call, &overloads);
+        if applicable.len() >= 2
+            && select_most_specific_overload(node, nodes, &applicable).is_none()
+        {
             diagnostics.push(Diagnostic::error(
                 "TPY4012",
                 format!(
@@ -187,8 +297,8 @@ pub(super) fn imported_module_method_call_diagnostics(
             ));
             return Some(diagnostics);
         }
-        if let Some(applicable) = applicable.first().copied() {
-            let signature = direct_signature_sites_from_detail(&applicable.detail);
+        if let Some(applicable) = select_most_specific_overload(node, nodes, &applicable) {
+            let signature = applicable.signature_sites.clone();
             if let Some(diagnostic) =
                 direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
             {
@@ -210,7 +320,10 @@ pub(super) fn imported_module_method_call_diagnostics(
         }
     }
 
-    let signature = direct_signature_sites_from_detail(&callable_candidates[0].detail);
+    let signature =
+        resolve_direct_call_candidate(node, nodes, callable_candidates[0], &direct_call)
+            .map(|candidate| candidate.signature_sites)
+            .unwrap_or_else(|| declaration_signature_sites(callable_candidates[0]));
     if let Some(diagnostic) =
         direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
     {

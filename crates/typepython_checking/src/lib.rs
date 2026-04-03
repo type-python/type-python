@@ -27,6 +27,7 @@ use typepython_graph::ModuleGraph;
 use typepython_syntax::SourceKind;
 mod assignments;
 mod calls;
+mod declaration_semantics;
 mod declarations;
 mod generic_solver;
 mod semantic;
@@ -37,6 +38,7 @@ mod type_system;
 
 pub(crate) use self::assignments::*;
 pub(crate) use self::calls::*;
+pub(crate) use self::declaration_semantics::*;
 pub(crate) use self::declarations::*;
 pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
@@ -175,7 +177,11 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         source_overrides: Option<&'a BTreeMap<String, String>>,
         bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
     ) -> Self {
-        Self { bound_surface_facts, modules: RefCell::new(BTreeMap::new()), source_overrides }
+        Self {
+            bound_surface_facts,
+            modules: RefCell::new(BTreeMap::new()),
+            source_overrides,
+        }
     }
 
     fn with_module_facts<T>(
@@ -194,6 +200,10 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         node: &typepython_graph::ModuleNode,
     ) -> Option<&typepython_binding::ModuleSurfaceFacts> {
         self.bound_surface_facts.and_then(|facts| facts.get(&node.module_key))
+    }
+
+    fn declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
+        declaration_semantic_facts(declaration)
     }
 
     fn typed_dict_class_metadata(
@@ -409,6 +419,10 @@ impl<'a> CheckerContext<'a> {
         node: &typepython_graph::ModuleNode,
     ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
         self.source_facts.dataclass_transform_module_info(node)
+    }
+
+    fn load_declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
+        self.source_facts.declaration_semantics(declaration)
     }
 }
 

@@ -143,7 +143,6 @@ pub(super) fn direct_method_call_diagnostics(
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let direct_method_signatures = context.load_direct_method_signatures(node);
 
     for call in &node.method_calls {
         if !call.through_instance
@@ -185,24 +184,18 @@ pub(super) fn direct_method_call_diagnostics(
 
         let overloads = candidates
             .iter()
-            .copied()
             .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+            .map(|declaration| (*declaration, context.load_declaration_semantics(declaration).callable))
             .collect::<Vec<_>>();
         if !overloads.is_empty() {
-            let applicable = overloads
-                .iter()
-                .copied()
-                .filter(|declaration| {
-                    method_overload_is_applicable(
-                        node,
-                        nodes,
-                        &direct_call,
-                        declaration,
-                        &owner_type_name,
-                    )
-                })
-                .collect::<Vec<_>>();
-            if applicable.len() >= 2 {
+            let applicable = resolve_applicable_method_overload_candidates(
+                node,
+                nodes,
+                &direct_call,
+                &owner_type_name,
+                &overloads,
+            );
+            if applicable.len() >= 2 && select_most_specific_overload(node, nodes, &applicable).is_none() {
                 diagnostics.push(Diagnostic::error(
                     "TPY4012",
                     format!(
@@ -215,8 +208,8 @@ pub(super) fn direct_method_call_diagnostics(
                 ));
                 continue;
             }
-            if let Some(applicable) = applicable.first().copied() {
-                let signature = direct_method_signature_sites(applicable, &owner_type_name);
+            if let Some(applicable) = select_most_specific_overload(node, nodes, &applicable) {
+                let signature = applicable.signature_sites.clone();
                 if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
                     context,
                     node,
@@ -244,15 +237,21 @@ pub(super) fn direct_method_call_diagnostics(
             }
         }
 
-        if let Some(signature) =
-            direct_method_signatures.get(&(class_decl.name.clone(), call.method.clone()))
-        {
+        let target_callable = context.load_declaration_semantics(target).callable;
+        if let Ok(resolved) = resolve_method_call_candidate_detailed(
+            node,
+            nodes,
+            target,
+            &direct_call,
+            &owner_type_name,
+            target_callable.as_ref(),
+        ) {
             if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
                 context,
                 node,
                 nodes,
                 &direct_call,
-                signature,
+                &resolved.signature_sites,
             ) {
                 diagnostics.push(diagnostic);
             }
@@ -261,43 +260,22 @@ pub(super) fn direct_method_call_diagnostics(
                 node,
                 nodes,
                 &direct_call,
-                signature,
+                &resolved.signature_sites,
             ));
             diagnostics.extend(direct_source_function_type_diagnostics_with_context(
                 context,
                 node,
                 nodes,
                 &direct_call,
-                signature,
+                &resolved.signature_sites,
             ));
             continue;
         }
 
-        let method_signature = substitute_self_annotation(&target.detail, Some(&class_decl.name));
-        let fallback_signature = direct_signature_params(&method_signature)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|param| typepython_syntax::DirectFunctionParamSite {
-                name: param.name,
-                annotation: (!param.annotation.is_empty()).then_some(param.annotation),
-                has_default: param.has_default,
-                positional_only: param.positional_only,
-                keyword_only: param.keyword_only,
-                variadic: param.variadic,
-                keyword_variadic: param.keyword_variadic,
-            })
-            .collect::<Vec<_>>();
-        let fallback_signature =
-            match target.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                    fallback_signature
-                }
-                typepython_syntax::MethodKind::Instance
-                | typepython_syntax::MethodKind::Class
-                | typepython_syntax::MethodKind::PropertySetter => {
-                    fallback_signature.into_iter().skip(1).collect()
-                }
-            };
+        let fallback_signature = target_callable
+            .as_ref()
+            .map(|callable| method_signature_sites_from_semantics(target, callable, &class_decl.name))
+            .unwrap_or_default();
         if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
             context,
             node,
@@ -324,51 +302,6 @@ pub(super) fn direct_method_call_diagnostics(
     }
 
     diagnostics
-}
-
-pub(super) fn direct_method_signature_sites(
-    declaration: &Declaration,
-    owner_type_name: &str,
-) -> Vec<typepython_syntax::DirectFunctionParamSite> {
-    let method_signature = substitute_self_annotation(&declaration.detail, Some(owner_type_name));
-    let params = direct_signature_params(&method_signature).unwrap_or_default();
-    let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-        typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
-        typepython_syntax::MethodKind::Instance
-        | typepython_syntax::MethodKind::Class
-        | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
-    };
-
-    params
-        .into_iter()
-        .map(|param| typepython_syntax::DirectFunctionParamSite {
-            name: param.name,
-            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
-            has_default: param.has_default,
-            positional_only: param.positional_only,
-            keyword_only: param.keyword_only,
-            variadic: param.variadic,
-            keyword_variadic: param.keyword_variadic,
-        })
-        .collect()
-}
-
-pub(super) fn method_overload_is_applicable(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    call: &typepython_binding::CallSite,
-    declaration: &Declaration,
-    owner_type_name: &str,
-) -> bool {
-    let method_signature = substitute_self_annotation(&declaration.detail, Some(owner_type_name));
-    let params = direct_signature_params(&method_signature).unwrap_or_default();
-    let params = match declaration.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
-        typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => params,
-        typepython_syntax::MethodKind::Instance
-        | typepython_syntax::MethodKind::Class
-        | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
-    };
-    call_signature_params_are_applicable(node, nodes, call, &params)
 }
 
 pub(super) fn resolve_method_call_owner_type(

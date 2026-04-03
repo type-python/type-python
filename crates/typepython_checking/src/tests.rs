@@ -7,11 +7,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use typepython_binding::{
-    Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
+    bind, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
 };
 use typepython_config::{DiagnosticLevel, ImportFallback};
-use typepython_graph::{ModuleGraph, ModuleNode, build};
-use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
+use typepython_graph::{build, ModuleGraph, ModuleNode};
+use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
 
 static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -798,6 +798,18 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
         instantiated_semantic_return.map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("Callable[[int], str]"))
     );
+    let base_semantic_callable = crate::lower_type_text_or_name("Callable[[int], int]");
+    assert_eq!(
+        super::apply_named_callable_decorator_transform_semantic(
+            decorator_node,
+            &graph.nodes,
+            &decorator.name,
+            &base_semantic_callable,
+        )
+        .as_ref()
+        .map(crate::diagnostic_type_text),
+        Some(String::from("Callable[[int], str]"))
+    );
     assert_eq!(
         super::apply_named_callable_decorator_transform(
             decorator_node,
@@ -808,6 +820,18 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
         Some(String::from("Callable[[int], str]"))
     );
 
+    let context = super::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    assert_eq!(
+        super::resolve_decorated_function_callable_semantic_type_with_context(
+            &context,
+            node,
+            &graph.nodes,
+            "count",
+        )
+        .as_ref()
+        .map(crate::diagnostic_type_text),
+        Some(String::from("Callable[[int], str]"))
+    );
     assert_eq!(
         super::resolve_decorated_function_callable_annotation(node, &graph.nodes, "count"),
         Some(String::from("Callable[[int], str]"))
@@ -2520,6 +2544,26 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
 }
 
 #[test]
+fn check_accepts_imported_generic_callable_resolution_through_module_member() {
+    let result = check_temp_project_sources(&[
+        (
+            "helpers.tpy",
+            "helpers",
+            SourceKind::TypePython,
+            "def box_value[T](value: T) -> list[T]:\n    return [value]\n",
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            "import helpers\n\nvalue: list[int] = helpers.box_value(1)\n",
+        ),
+    ]);
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_reports_non_applicable_overload_as_call_incompatibility() {
     let result = check_temp_typepython_source(
         "overload def parse(value: int) -> str: ...\noverload def parse(value: str) -> int: ...\ndef parse(value: int) -> str:\n    return \"x\"\n\nparse(None)\n",
@@ -2930,6 +2974,291 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
 
     assert!(crate::overload_is_applicable(&call, &str_declaration));
     assert!(!crate::overload_is_applicable(&call, &int_declaration));
+}
+
+#[test]
+fn overload_specificity_uses_instantiated_generic_candidate() {
+    let generic_overload = Declaration {
+        name: String::from("wrap"),
+        kind: DeclarationKind::Overload,
+        detail: String::from("(value:T)->tuple[T]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVar,
+            name: String::from("T"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let object_overload = Declaration {
+        name: String::from("wrap"),
+        kind: DeclarationKind::Overload,
+        detail: String::from("(value:object)->tuple[object]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-overload>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: vec![generic_overload.clone(), object_overload.clone()],
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let call = typepython_binding::CallSite {
+        callee: String::from("wrap"),
+        arg_count: 1,
+        arg_types: vec![String::from("int")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+    let overloads = vec![&generic_overload, &object_overload];
+
+    let applicable =
+        super::resolve_applicable_direct_overload_candidates(&node, &[], &call, &overloads);
+    let selected =
+        super::select_most_specific_overload(&node, &[], &applicable).expect("selected overload");
+
+    assert!(std::ptr::eq(selected.declaration, overloads[0]));
+    assert_eq!(
+        selected
+            .signature_sites
+            .iter()
+            .map(|param| param.annotation.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["int"],
+    );
+    assert_eq!(
+        selected.return_type.as_ref().map(crate::render_semantic_type),
+        Some(String::from("tuple[int]")),
+    );
+}
+
+#[test]
+fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
+    let function = Declaration {
+        name: String::from("build_pair"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:int)->tuple[int, str]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    let alias = Declaration {
+        name: String::from("Pair"),
+        kind: DeclarationKind::TypeAlias,
+        detail: String::from("tuple[int, str]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    let value = Declaration {
+        name: String::from("pair"),
+        kind: DeclarationKind::Value,
+        detail: String::from("tuple[int, str]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+
+    let function_ids = crate::declaration_semantic_type_ids(&function);
+    let function_clone_ids = crate::declaration_semantic_type_ids(&function.clone());
+    let alias_ids = crate::declaration_semantic_type_ids(&alias);
+    let value_ids = crate::declaration_semantic_type_ids(&value);
+
+    assert_eq!(function_ids, function_clone_ids);
+    assert_eq!(function_ids.callable_return, alias_ids.type_alias_body);
+    assert_eq!(function_ids.callable_return, value_ids.value_annotation);
+    assert_eq!(
+        crate::declaration_callable_semantics(&function)
+            .and_then(|callable| callable.return_type)
+            .as_ref()
+            .map(crate::render_semantic_type),
+        Some(String::from("tuple[int, str]"))
+    );
+}
+
+#[test]
+fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<resolved-call>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        name: String::from("box_value"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:T)->list[T]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVar,
+            name: String::from("T"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let call = typepython_binding::CallSite {
+        callee: String::from("box_value"),
+        arg_count: 1,
+        arg_types: vec![String::from("int")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let resolved =
+        super::resolve_direct_call_candidate(&node, &[], &function, &call).expect("resolved call");
+
+    assert_eq!(
+        resolved
+            .signature_sites
+            .iter()
+            .map(|param| param.annotation.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["int"],
+    );
+    assert_eq!(
+        resolved.return_type.as_ref().map(crate::diagnostic_type_text),
+        Some(String::from("list[int]")),
+    );
+    assert_eq!(
+        resolved.substitutions.types.get("T").map(crate::diagnostic_type_text).as_deref(),
+        Some("int"),
+    );
+}
+
+#[test]
+fn diagnostic_type_text_renders_callable_types_stably() {
+    let ty = crate::SemanticType::Callable {
+        params: crate::SemanticCallableParams::ParamList(vec![crate::SemanticType::Name(
+            String::from("int"),
+        )]),
+        return_type: Box::new(crate::SemanticType::Name(String::from("str"))),
+    };
+
+    assert_eq!(crate::diagnostic_type_text(&ty), "Callable[[int], str]");
+}
+
+#[test]
+fn check_reports_ambiguous_generic_overload_resolution() {
+    let result = check_temp_typepython_source(
+        "overload def echo[T](value: T) -> T: ...\noverload def echo[U](value: U) -> U: ...\ndef echo(value: object) -> object:\n    return value\n\necho(1)\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4012"), "{rendered}");
+    assert!(rendered.contains("ambiguous"), "{rendered}");
 }
 
 #[test]
@@ -3366,6 +3695,234 @@ fn check_accepts_stub_overloaded_method_return_type() {
     let rendered = result.diagnostics.as_text();
     assert!(!rendered.contains("assigns `int` where `value` expects `str`"), "{rendered}");
     assert!(!result.diagnostics.has_errors(), "{rendered}");
+}
+
+#[test]
+fn check_accepts_generic_method_overload_specificity() {
+    let result = check(&ModuleGraph {
+        nodes: vec![
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/pkg/util.pyi"),
+                module_key: String::from("pkg.util"),
+                module_kind: SourceKind::Stub,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("User"),
+                        kind: DeclarationKind::Class,
+                        detail: String::new(),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: Some(DeclarationOwnerKind::Class),
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(self,value:T)->tuple[T]"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("User"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: vec![typepython_binding::GenericTypeParam {
+                            kind: typepython_binding::GenericTypeParamKind::TypeVar,
+                            name: String::from("T"),
+                            bound: None,
+                            constraints: Vec::new(),
+                            default: None,
+                        }],
+                    },
+                    Declaration {
+                        name: String::from("parse"),
+                        kind: DeclarationKind::Overload,
+                        detail: String::from("(self,value:object)->tuple[object]"),
+                        value_type: None,
+                        method_kind: Some(typepython_syntax::MethodKind::Instance),
+                        class_kind: None,
+                        owner: Some(DeclarationOwner {
+                            name: String::from("User"),
+                            kind: DeclarationOwnerKind::Class,
+                        }),
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: 1,
+            },
+            ModuleNode {
+                module_path: PathBuf::from("/tmp/app.tpy"),
+                module_key: String::from("app"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![
+                    Declaration {
+                        name: String::from("User"),
+                        kind: DeclarationKind::Import,
+                        detail: String::from("pkg.util.User"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("user"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("User"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                    Declaration {
+                        name: String::from("result"),
+                        kind: DeclarationKind::Value,
+                        detail: String::from("tuple[int]"),
+                        value_type: None,
+                        method_kind: None,
+                        class_kind: None,
+                        owner: None,
+                        is_async: false,
+                        is_override: false,
+                        is_abstract_method: false,
+                        is_final_decorator: false,
+                        is_deprecated: false,
+                        deprecation_message: None,
+                        is_final: false,
+                        is_class_var: false,
+                        bases: Vec::new(),
+                        type_params: Vec::new(),
+                    },
+                ],
+                calls: Vec::new(),
+                method_calls: vec![typepython_binding::MethodCallSite {
+                    owner_name: String::from("user"),
+                    method: String::from("parse"),
+                    through_instance: false,
+                    arg_count: 1,
+                    arg_types: vec![String::from("int")],
+                    arg_values: Vec::new(),
+                    starred_arg_types: Vec::new(),
+                    starred_arg_values: Vec::new(),
+                    keyword_names: Vec::new(),
+                    keyword_arg_types: Vec::new(),
+                    keyword_arg_values: Vec::new(),
+                    keyword_expansion_types: Vec::new(),
+                    keyword_expansion_values: Vec::new(),
+                    line: 1,
+                }],
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: vec![typepython_binding::AssignmentSite {
+                    name: String::from("result"),
+                    destructuring_target_names: None,
+                    destructuring_index: None,
+                    annotation: Some(String::from("tuple[int]")),
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: Some(String::from("user")),
+                    value_method_name: Some(String::from("parse")),
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                    owner_name: None,
+                    owner_type_name: None,
+                    line: 1,
+                }],
+                summary_fingerprint: 1,
+            },
+        ],
+    });
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
@@ -9119,7 +9676,7 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
             default: None,
         }],
     };
-    let signature = super::direct_signature_sites_from_detail(&function.detail);
+    let signature = super::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 2,
@@ -9144,6 +9701,85 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
             binding.types.iter().map(crate::render_semantic_type).collect::<Vec<_>>()
         }),
         Some(vec![String::from("int"), String::from("str")]),
+    );
+}
+
+#[test]
+fn check_infers_paramspec_from_callable_argument() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-inference>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        name: String::from("wrap"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(cb:Callable[P, int])->Callable[P, int]"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::ParamSpec,
+            name: String::from("P"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+        }],
+    };
+    let signature = super::declaration_signature_sites(&function);
+    let call = typepython_binding::CallSite {
+        callee: String::from("wrap"),
+        arg_count: 1,
+        arg_types: vec![String::from("Callable[[str], int]")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let substitutions =
+        crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
+            .expect("callable argument should infer ParamSpec bindings");
+
+    assert_eq!(
+        substitutions.param_lists.get("P").map(|binding| {
+            binding
+                .params
+                .iter()
+                .map(|param| param.annotation.as_deref().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>()
+        }),
+        Some(vec![String::from("str")]),
     );
 }
 
@@ -9279,7 +9915,7 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
             default: None,
         }],
     };
-    let signature = super::direct_signature_sites_from_detail(&function.detail);
+    let signature = super::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 1,
@@ -9325,6 +9961,7 @@ fn check_reports_unresolved_source_authored_typevartuple_call() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4014"), "{rendered}");
     assert!(rendered.contains("generic parameter list of `collect` could not be resolved"));
+    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
 }
 
 #[test]
@@ -9332,6 +9969,27 @@ fn check_accepts_source_authored_typevartuple_alias_roundtrip() {
     let result = check_temp_typepython_source(
         "typealias Pack[*Ts] = tuple[*Ts]\n\nvalue: Pack[int, str] = (1, \"x\")\n",
     );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_imported_semantic_type_alias_expansion() {
+    let result = check_temp_project_sources(&[
+        ("base.tpy", "base", SourceKind::TypePython, "typealias Seq[T] = list[T]\n"),
+        (
+            "aliases.tpy",
+            "aliases",
+            SourceKind::TypePython,
+            "from base import Seq\n\ntypealias Items[T] = Seq[T]\n",
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            "from aliases import Items\n\nvalue: Items[int] = [1, 2, 3]\n",
+        ),
+    ]);
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
@@ -10647,11 +11305,8 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered.contains(
-            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
-        )
-    );
+    assert!(rendered
+        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
 }
 
 #[test]
@@ -11147,11 +11802,8 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered.contains(
-            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
-        )
-    );
+    assert!(rendered
+        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
 }
 
 #[test]
@@ -11439,11 +12091,8 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered.contains(
-            "assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"
-        )
-    );
+    assert!(rendered
+        .contains("assigns callable `(str)->str` where `handler` expects `Callable[[int], str]`"));
 }
 
 #[test]
@@ -19554,10 +20203,8 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered
-            .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`")
-    );
+    assert!(rendered
+        .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
 }
 
 #[test]

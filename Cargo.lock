@@ -1789,6 +1789,7 @@ dependencies = [
 name = "typepython-checking"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "typepython-binding",
  "typepython-config",
  "typepython-diagnostics",

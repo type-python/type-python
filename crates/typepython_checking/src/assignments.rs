@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::diagnostic_type_text as render_semantic_type;
+
 pub(super) fn annotated_assignment_type_diagnostics(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -118,7 +120,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
 
         let signature = resolve_assignment_owner_signature(node, assignment);
         let Some(actual) =
-            resolve_assignment_site_semantic_type(node, nodes, signature, assignment)
+            resolve_assignment_site_semantic_type(node, nodes, signature.as_deref(), assignment)
         else {
             continue;
         };
@@ -214,7 +216,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
             let expected = resolve_current_augmented_assignment_target_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
@@ -223,12 +225,12 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
             let actual = resolve_augmented_assignment_result_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 assignment.value_binop_operator.as_deref(),
-                &render_semantic_type(&expected),
+                &diagnostic_type_text(&expected),
                 assignment.value_binop_right.as_deref()?,
             )?;
             (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
@@ -503,7 +505,7 @@ pub(super) fn typed_dict_literal_diagnostics(
             site.line,
             &site.entries,
             &target_shape,
-            signature,
+            signature.as_deref(),
             site.owner_name.as_deref(),
             site.owner_type_name.as_deref(),
         ));
@@ -548,7 +550,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 ));
                 continue;
             };
-            let expansion_type_rendered = render_semantic_type(&expansion_type);
+            let expansion_type_rendered = diagnostic_type_text(&expansion_type);
 
             let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type_with_context(
                 context,
@@ -834,13 +836,13 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
             let owner_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
                 site.line,
                 &site.target,
             )?;
-            let owner_type_rendered = render_semantic_type(&owner_type);
+            let owner_type_rendered = diagnostic_type_text(&owner_type);
             let key = site.key.as_deref()?;
             let target_shape = resolve_known_typed_dict_shape_from_type_with_context(
                 context,
@@ -949,7 +951,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                     let actual = resolve_assignment_expression_semantic_type(
                         node,
                         nodes,
-                        signature,
+                        signature.as_deref(),
                         site.owner_name.as_deref(),
                         site.owner_type_name.as_deref(),
                         site.line,
@@ -985,7 +987,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                     let actual = resolve_augmented_assignment_result_semantic_type(
                         node,
                         nodes,
-                        signature,
+                        signature.as_deref(),
                         site.owner_name.as_deref(),
                         site.owner_type_name.as_deref(),
                         site.line,
@@ -1053,11 +1055,12 @@ pub(super) fn resolve_writable_subscript_signature(
     if let Some(setitem) =
         find_owned_callable_declaration(nodes, class_node, class_decl, "__setitem__")
     {
-        let signature = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(&setitem.detail, Some(&normalized)),
-        );
-        let params = direct_param_types(&signature)?;
+        let params = declaration_signature_sites_with_self(setitem, &normalized)?
+            .into_iter()
+            .map(|param| {
+                param.annotation.map(|annotation| rewrite_imported_typing_aliases(node, &annotation)).unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
         let params = match setitem.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
             typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
                 params
@@ -1104,13 +1107,13 @@ pub(super) fn subscript_assignment_type_diagnostics(
             let owner_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
                 site.line,
                 &site.target,
             )?;
-            let owner_type_rendered = render_semantic_type(&owner_type);
+            let owner_type_rendered = diagnostic_type_text(&owner_type);
 
             if resolve_known_typed_dict_shape_from_type_with_context(
                 context,
@@ -1145,7 +1148,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                     let actual_key = resolve_assignment_expression_semantic_type(
                         node,
                         nodes,
-                        signature,
+                        signature.as_deref(),
                         site.owner_name.as_deref(),
                         site.owner_type_name.as_deref(),
                         site.line,
@@ -1182,7 +1185,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&render_semantic_type(&value_type)),
+                                Some(&diagnostic_type_text(&value_type)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
@@ -1220,7 +1223,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                             let actual_value = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
@@ -1278,12 +1281,12 @@ pub(super) fn subscript_assignment_type_diagnostics(
                             let actual_value = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &render_semantic_type(&readable_type),
+                                &diagnostic_type_text(&readable_type),
                                 value,
                             )?;
                             if !semantic_type_is_assignable(node, nodes, &value_type, &actual_value)
@@ -1343,13 +1346,13 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
             let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
                 site.line,
                 &site.target,
             )?;
-            let target_type_rendered = render_semantic_type(&target_type);
+            let target_type_rendered = diagnostic_type_text(&target_type);
             let shape = resolve_known_dataclass_transform_shape_from_type_with_context(
                 context,
                 node,
@@ -1422,13 +1425,13 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
             let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
                 site.line,
                 &site.target,
             )?;
-            let target_type_rendered = render_semantic_type(&target_type);
+            let target_type_rendered = diagnostic_type_text(&target_type);
             let shape =
                 resolve_known_plain_dataclass_shape_from_type_with_context(
                     context,
@@ -1527,12 +1530,13 @@ pub(super) fn resolve_writable_member_semantic_type(
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
-            let owner_type_name = render_semantic_type(owner_type);
-            let signature = rewrite_imported_typing_aliases(
-                node,
-                &substitute_self_annotation(&declaration.detail, Some(&owner_type_name)),
-            );
-            let params = direct_param_types(&signature)?;
+            let owner_type_name = diagnostic_type_text(owner_type);
+            let params = declaration_signature_sites_with_self(declaration, &owner_type_name)?
+                .into_iter()
+                .map(|param| {
+                    param.annotation.map(|annotation| rewrite_imported_typing_aliases(node, &annotation)).unwrap_or_default()
+                })
+                .collect::<Vec<_>>();
             let params = params.into_iter().skip(1).collect::<Vec<_>>();
             (params.len() == 1).then(|| lower_type_text_or_name(&params[0]))
         }
@@ -1610,13 +1614,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
             let target_type = resolve_assignment_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 site.owner_name.as_deref(),
                 site.owner_type_name.as_deref(),
                 site.line,
                 &site.target,
             )?;
-            let target_type_rendered = render_semantic_type(&target_type);
+            let target_type_rendered = diagnostic_type_text(&target_type);
 
             if should_defer_attribute_assignment_to_frozen_checks(
                 context,
@@ -1650,7 +1654,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&render_semantic_type(&expected)),
+                                Some(&diagnostic_type_text(&expected)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
@@ -1682,7 +1686,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             let actual = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
@@ -1713,12 +1717,12 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             let actual = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &render_semantic_type(&expected),
+                                &diagnostic_type_text(&expected),
                                 value,
                             )?;
                             (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
@@ -1757,7 +1761,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 nodes,
                                 site.line,
                                 value,
-                                Some(&render_semantic_type(&expected)),
+                                Some(&diagnostic_type_text(&expected)),
                             );
                             if let Some(mut result) = contextual {
                                 if let Some(diagnostic) = result.diagnostics.pop() {
@@ -1789,7 +1793,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             let actual = resolve_assignment_expression_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
@@ -1847,12 +1851,12 @@ pub(super) fn attribute_assignment_type_diagnostics(
                             let actual = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,
-                                signature,
+                                signature.as_deref(),
                                 site.owner_name.as_deref(),
                                 site.owner_type_name.as_deref(),
                                 site.line,
                                 site.operator.as_deref(),
-                                &render_semantic_type(&readable_type),
+                                &diagnostic_type_text(&readable_type),
                                 value,
                             )?;
                             (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {

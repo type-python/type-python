@@ -136,7 +136,10 @@ pub(super) fn resolve_direct_method_return_semantic_type(
     let owner_type_name = render_semantic_type(&owner_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
-    let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
+    if methods.is_empty() {
+        return None;
+    }
+    if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
     {
         let call = node.method_calls.iter().find(|call| {
             call.owner_name == owner_name
@@ -158,29 +161,63 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             keyword_expansion_values: call.keyword_expansion_values.clone(),
             line: 1,
         };
-        let applicable = methods
+        let overloads = methods
             .iter()
-            .copied()
-            .filter(|declaration| {
-                method_overload_is_applicable(node, nodes, &call, declaration, &owner_type_name)
-            })
+            .filter(|declaration| declaration.kind == DeclarationKind::Overload)
+            .map(|declaration| (*declaration, declaration_callable_semantics(declaration)))
             .collect::<Vec<_>>();
-        if applicable.len() == 1 {
-            applicable[0]
-        } else {
-            return None;
-        }
+        let applicable = resolve_applicable_method_overload_candidates(
+            node,
+            nodes,
+            &call,
+            &owner_type_name,
+            &overloads,
+        );
+        return select_most_specific_overload(node, nodes, &applicable)?.return_type.clone();
     } else {
-        *methods.first()?
-    };
-    let return_text = rewrite_imported_typing_aliases(
-        node,
-        &substitute_self_annotation(
-            method.detail.split_once("->")?.1.trim(),
-            Some(&owner_type_name),
-        ),
-    );
-    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+        let method = *methods.first()?;
+        if let Some(call) = node.method_calls.iter().find(|call| {
+            call.owner_name == owner_name
+                && call.method == method_name
+                && call.through_instance == through_instance
+                && call.line == current_line
+        }) {
+            let call = typepython_binding::CallSite {
+                callee: format!("{}.{}", class_decl.name, method_name),
+                arg_count: call.arg_count,
+                arg_types: call.arg_types.clone(),
+                arg_values: call.arg_values.clone(),
+                starred_arg_types: call.starred_arg_types.clone(),
+                starred_arg_values: call.starred_arg_values.clone(),
+                keyword_names: call.keyword_names.clone(),
+                keyword_arg_types: call.keyword_arg_types.clone(),
+                keyword_arg_values: call.keyword_arg_values.clone(),
+                keyword_expansion_types: call.keyword_expansion_types.clone(),
+                keyword_expansion_values: call.keyword_expansion_values.clone(),
+                line: 1,
+            };
+            if let Some(return_type) = resolve_method_call_candidate_detailed(
+                node,
+                nodes,
+                method,
+                &call,
+                &owner_type_name,
+                declaration_callable_semantics(method).as_ref(),
+            )
+            .ok()
+            .and_then(|resolved| resolved.return_type)
+            {
+                return Some(return_type);
+            }
+        }
+
+        let callable = declaration_callable_semantics(method)?;
+        let return_text = rewrite_imported_typing_aliases(
+            node,
+            &callable_return_annotation_text_with_self_from_semantics(&callable, &owner_type_name)?,
+        );
+        normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+    }
 }
 
 pub(super) fn unwrap_awaitable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {

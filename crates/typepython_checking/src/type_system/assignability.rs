@@ -348,8 +348,12 @@ pub(super) fn actual_member_satisfies_requirement(
         DeclarationKind::Value => {
             find_apparent_value_declaration(nodes, actual_node, actual_decl, &requirement.name)
                 .is_some_and(|member| {
-                    let expected = normalize_type_text(requirement.declaration.detail.as_str());
-                    let actual = normalize_type_text(member.detail.as_str());
+                    let expected = declaration_value_annotation_text(&requirement.declaration)
+                        .map(|text| normalize_type_text(&text))
+                        .unwrap_or_default();
+                    let actual = declaration_value_annotation_text(member)
+                        .map(|text| normalize_type_text(&text))
+                        .unwrap_or_default();
                     expected.is_empty()
                         || actual.is_empty()
                         || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
@@ -714,9 +718,26 @@ fn expand_semantic_type_alias_once(
         .unwrap_or_else(|| (render_semantic_type(stripped), Vec::new()));
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
     let substitutions = alias_type_param_substitutions(alias_decl, &args)?;
-    let detail = rewrite_imported_typing_aliases(alias_node, &alias_decl.detail);
+    let alias = declaration_type_alias_semantics(alias_decl)?;
+    let detail = rewrite_imported_typing_aliases(alias_node, &render_semantic_type(&alias.body));
     let expanded = substitute_semantic_type_params(&lower_type_text_or_name(&detail), &substitutions);
+    let expanded = expand_semantic_type_aliases_in_provider_context(alias_node, nodes, expanded);
     (expanded != *stripped).then_some(expanded)
+}
+
+fn expand_semantic_type_aliases_in_provider_context(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    mut ty: SemanticType,
+) -> SemanticType {
+    let mut seen = BTreeSet::new();
+    while seen.insert(ty.clone()) {
+        let Some(next) = expand_semantic_type_alias_once(node, nodes, &ty) else {
+            break;
+        };
+        ty = next;
+    }
+    ty
 }
 
 pub(super) fn type_alias_eventually_mentions(
@@ -734,12 +755,16 @@ pub(super) fn type_alias_eventually_mentions(
         return alias_decl.name == target;
     }
 
-    let result =
-        type_expr_mentions_alias(alias_node, nodes, alias_decl.detail.as_str(), target, visiting);
+    let alias = match declaration_type_alias_semantics(alias_decl) {
+        Some(alias) => alias,
+        None => return false,
+    };
+    let result = semantic_type_mentions_alias(alias_node, nodes, &alias.body, target, visiting);
     visiting.remove(&key);
     result
 }
 
+#[allow(dead_code)]
 pub(super) fn type_expr_mentions_alias(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

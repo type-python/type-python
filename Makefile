@@ -23,7 +23,7 @@ test:
 	$(CARGO) test --workspace
 
 bench:
-	$(CARGO) bench --workspace --bench parse --bench lower --bench graph
+	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
 
 bench-check:
 	$(CARGO) bench --workspace --no-run
@@ -34,10 +34,10 @@ package-check:
 	$(PYTHON) -m twine check dist/*
 
 bench-baseline:
-	$(CARGO) bench --workspace --bench parse --bench lower --bench graph -- --save-baseline v0.1.0
+	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker -- --save-baseline v0.1.0
 
 bench-compare:
-	$(CARGO) bench --workspace --bench parse --bench lower --bench graph -- --baseline v0.1.0
+	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker -- --baseline v0.1.0
 
 snapshot-review:
 	$(CARGO) insta review

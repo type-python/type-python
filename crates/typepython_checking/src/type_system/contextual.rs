@@ -154,12 +154,15 @@ pub(super) fn collect_typed_dict_fields(
     for declaration in class_node.declarations.iter().filter(|declaration| {
         declaration.kind == DeclarationKind::Value
             && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
-            && !declaration.detail.is_empty()
+            && declaration_value_annotation_text(declaration).is_some()
     }) {
         fields.insert(
             declaration.name.clone(),
             parse_typed_dict_field_shape(
-                &rewrite_imported_typing_aliases(class_node, &declaration.detail),
+                &rewrite_imported_typing_aliases(
+                    class_node,
+                    &declaration_value_annotation_text(declaration).unwrap_or_default(),
+                ),
                 total_default,
             ),
         );
@@ -381,7 +384,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
 
     if let Some(value_name) = assignment.value_name.as_deref() {
         let function = resolve_direct_function(node, nodes, value_name)?;
-        let actual_params = direct_param_types(&function.detail)
+        let actual_params = declaration_signature_param_types(function)
             .unwrap_or_default()
             .into_iter()
             .map(|param| lower_type_text_or_name(&param))
@@ -442,32 +445,37 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
             matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
         })?;
 
-    let (actual_params, actual_return) = if let Some(callable_annotation) =
-        resolve_decorated_callable_annotation_for_declaration(class_node, nodes, method)
+    let (actual_params, actual_return) = if let Some(callable_type) =
+        resolve_decorated_callable_semantic_type_for_declaration_with_context(
+            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+            class_node,
+            nodes,
+            method,
+        )
     {
-        let (params, return_type) = parse_callable_annotation(&callable_annotation)?;
+        let (params, return_type) = callable_type.callable_parts()?;
+        let SemanticCallableParams::ParamList(params) = params else {
+            return None;
+        };
         (
-            params
-                .unwrap_or_default()
-                .into_iter()
-                .map(|param| lower_type_text_or_name(&param))
-                .collect(),
-            lower_type_text_or_name(&return_type),
+            params.clone(),
+            return_type.clone(),
         )
     } else {
-        let method_signature = rewrite_imported_typing_aliases(
-            node,
-            &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
-        );
-        let actual_params = direct_param_types(&method_signature)
+        let actual_params = declaration_signature_sites_with_self(method, &owner_type_name)
             .unwrap_or_default()
             .into_iter()
-            .map(|param| lower_type_text_or_name(&param))
+            .map(|param| {
+                lower_type_text_or_name(&rewrite_imported_typing_aliases(
+                    node,
+                    param.annotation.as_deref().unwrap_or("dynamic"),
+                ))
+            })
             .collect::<Vec<_>>();
         let return_text = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(
-                method.detail.split_once("->")?.1.trim(),
+                &declaration_signature_return_annotation_text(method)?,
                 Some(&owner_type_name),
             ),
         );
@@ -569,10 +577,6 @@ pub(super) fn resolve_contextual_lambda_callable_semantic_type(
         params: SemanticCallableParams::ParamList(param_types),
         return_type: Box::new(return_type),
     })
-}
-
-pub(super) fn format_callable_annotation(param_types: &[String], return_type: &str) -> String {
-    normalize_type_text(&format!("Callable[[{}], {}]", param_types.join(", "), return_type))
 }
 
 pub(super) struct ContextualTypedDictLiteralSemanticResult {
@@ -894,7 +898,7 @@ pub(super) fn resolve_contextual_named_callable_semantic_type(
     parse_callable_annotation_parts(expected?)?;
     let function_name = metadata.value_name.as_deref()?;
     let function = resolve_direct_function(node, nodes, function_name)?;
-    let param_types = direct_signature_sites_from_detail(&function.detail)
+    let param_types = declaration_signature_sites(function)
         .into_iter()
         .map(|param| {
             lower_type_text_or_name(param.annotation.as_deref().unwrap_or("dynamic"))
@@ -993,10 +997,10 @@ pub(super) fn expected_keyword_arg_types_from_signature_sites(
         .collect()
 }
 
-pub(super) fn resolve_assignment_owner_signature<'a>(
-    node: &'a typepython_graph::ModuleNode,
+pub(super) fn resolve_assignment_owner_signature(
+    node: &typepython_graph::ModuleNode,
     assignment: &typepython_binding::AssignmentSite,
-) -> Option<&'a str> {
+) -> Option<String> {
     resolve_scope_owner_signature(
         node,
         assignment.owner_name.as_deref(),
@@ -1004,13 +1008,12 @@ pub(super) fn resolve_assignment_owner_signature<'a>(
     )
 }
 
-pub(super) fn resolve_scope_owner_signature<'a>(
-    node: &'a typepython_graph::ModuleNode,
+pub(super) fn resolve_scope_owner_signature(
+    node: &typepython_graph::ModuleNode,
     owner_name: Option<&str>,
     owner_type_name: Option<&str>,
-) -> Option<&'a str> {
-    resolve_scope_owner_declaration(node, owner_name, owner_type_name)
-        .map(|declaration| declaration.detail.as_str())
+) -> Option<String> {
+    resolve_scope_owner_declaration(node, owner_name, owner_type_name).and_then(declaration_signature_text)
 }
 
 pub(super) fn resolve_scope_owner_declaration<'a>(
@@ -1030,10 +1033,10 @@ pub(super) fn resolve_scope_owner_declaration<'a>(
     })
 }
 
-pub(super) fn resolve_for_owner_signature<'a>(
-    node: &'a typepython_graph::ModuleNode,
+pub(super) fn resolve_for_owner_signature(
+    node: &typepython_graph::ModuleNode,
     for_loop: &typepython_binding::ForSite,
-) -> Option<&'a str> {
+) -> Option<String> {
     let owner_name = for_loop.owner_name.as_deref()?;
     node.declarations
         .iter()
@@ -1046,7 +1049,7 @@ pub(super) fn resolve_for_owner_signature<'a>(
                     _ => false,
                 }
         })
-        .map(|declaration| declaration.detail.as_str())
+        .and_then(declaration_signature_text)
 }
 
 pub(super) fn normalized_direct_return_annotation(annotation: &str) -> Option<&str> {
@@ -1119,12 +1122,18 @@ pub(super) fn rewrite_imported_typing_token(
         return token.to_owned();
     };
 
-    let Some((module_name, symbol_name)) = import_decl.detail.rsplit_once('.') else {
+    let Some(import_target) = declaration_import_target_ref(import_decl) else {
         return token.to_owned();
     };
-    if matches!(module_name, "typing" | "typing_extensions" | "collections.abc")
+    let Some(symbol_target) = import_target.symbol_target else {
+        return token.to_owned();
+    };
+    if matches!(
+        symbol_target.module_key.as_str(),
+        "typing" | "typing_extensions" | "collections.abc"
+    )
         && matches!(
-            symbol_name,
+            symbol_target.symbol_name.as_str(),
             "Annotated"
                 | "Any"
                 | "Awaitable"
@@ -1152,7 +1161,7 @@ pub(super) fn rewrite_imported_typing_token(
                 | "Unpack"
         )
     {
-        return symbol_name.to_owned();
+        return symbol_target.symbol_name;
     }
 
     token.to_owned()

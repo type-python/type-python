@@ -35,12 +35,23 @@ Measures construction of the module dependency graph from binding tables.
 | `build_50_module_graph`      | 50 modules in a single package        |
 | `build_nested_package_graph` | 20 modules across nested sub-packages |
 
+### checker (`typepython_checking`)
+
+Measures the semantic checker's cache-backed declaration semantics plus
+solver-backed direct-call path using an in-memory module graph with imported
+generic calls, TypeVarTuple expansion, and generic overload specificity.
+
+| Benchmark                          | Input                                                                                              |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `check_solver_direct_calls_small`  | 8 repetitions of imported generic calls, variadic tuple collection, and generic overload selection |
+| `check_solver_direct_calls_medium` | 64 repetitions of the same semantic-solver/direct-call mix                                         |
+
 ## Running benchmarks
 
 Run all benchmark suites:
 
 ```sh
-cargo bench --workspace --bench parse --bench lower --bench graph
+cargo bench --workspace --bench parse --bench lower --bench graph --bench checker
 ```
 
 Compile-check benchmarks without running them (used in CI):
@@ -54,7 +65,7 @@ cargo bench --workspace --no-run
 ### Compare against the saved baseline
 
 ```sh
-cargo bench --workspace --bench parse --bench lower --bench graph -- --baseline v0.1.0
+cargo bench --workspace --bench parse --bench lower --bench graph --bench checker -- --baseline v0.1.0
 ```
 
 Criterion will print a comparison showing whether each benchmark regressed,
@@ -65,14 +76,14 @@ improved, or stayed within noise.
 After intentional performance changes, update the stored baseline:
 
 ```sh
-cargo bench --workspace --bench parse --bench lower --bench graph -- --save-baseline v0.1.0
+cargo bench --workspace --bench parse --bench lower --bench graph --bench checker -- --save-baseline v0.1.0
 ```
 
 ### Makefile targets
 
-| Target                | Description                                             |
-| --------------------- | ------------------------------------------------------- |
-| `make bench`          | Run all benchmark suites                                |
-| `make bench-check`    | Compile benchmarks without running                      |
-| `make bench-baseline` | Save the v0.1.0 baseline                                |
-| `make bench-compare`  | Compare current performance against the v0.1.0 baseline |
+| Target                | Description                                                     |
+| --------------------- | --------------------------------------------------------------- |
+| `make bench`          | Run all benchmark suites, including the checker solver baseline |
+| `make bench-check`    | Compile benchmarks without running                              |
+| `make bench-baseline` | Save the v0.1.0 baseline                                        |
+| `make bench-compare`  | Compare current performance against the v0.1.0 baseline         |

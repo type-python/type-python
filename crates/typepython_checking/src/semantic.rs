@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::diagnostic_type_text as render_semantic_type;
+
 pub(super) fn unsafe_boundary_diagnostics(
     node: &typepython_graph::ModuleNode,
     strict: bool,
@@ -64,12 +66,7 @@ pub(super) fn ambiguous_overload_call_diagnostics(
                 return None;
             }
 
-            let applicable = overloads
-                .into_iter()
-                .filter(|declaration| {
-                    overload_is_applicable_with_context(node, nodes, call, declaration)
-                })
-                .collect::<Vec<_>>();
+            let applicable = resolve_applicable_direct_overload_candidates(node, nodes, call, &overloads);
             if applicable.len() < 2 || select_most_specific_overload(node, nodes, &applicable).is_some() {
                 return None;
             }
@@ -105,23 +102,18 @@ pub(super) fn resolve_direct_overloads<'a>(
         return local;
     }
 
-    let Some(import) = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == callee
-    }) else {
+    let Some(import_target) = resolve_imported_symbol_semantic_target(node, nodes, callee) else {
         return Vec::new();
     };
-    let Some((module_key, symbol_name)) = import.detail.rsplit_once('.') else {
+    let Some(target) = import_target.declaration_target() else {
         return Vec::new();
     };
-    let Some(target_node) = nodes.iter().find(|candidate| candidate.module_key == module_key)
-    else {
-        return Vec::new();
-    };
+    let target_node = import_target.provider_node;
     target_node
         .declarations
         .iter()
         .filter(|declaration| {
-            declaration.name == symbol_name
+            declaration.name == target.name
                 && declaration.owner.is_none()
                 && declaration.kind == DeclarationKind::Overload
         })
@@ -131,15 +123,11 @@ pub(super) fn resolve_direct_overloads<'a>(
 pub(super) fn overload_is_more_specific(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    candidate: &Declaration,
-    baseline: &Declaration,
+    candidate: &ResolvedDirectCallCandidate<'_>,
+    baseline: &ResolvedDirectCallCandidate<'_>,
 ) -> bool {
-    let Some(candidate_params) = direct_signature_params(&candidate.detail) else {
-        return false;
-    };
-    let Some(baseline_params) = direct_signature_params(&baseline.detail) else {
-        return false;
-    };
+    let candidate_params = &candidate.signature_params;
+    let baseline_params = &baseline.signature_params;
     if candidate_params.len() != baseline_params.len() {
         return false;
     }
@@ -161,11 +149,11 @@ pub(super) fn overload_is_more_specific(
             }
             continue;
         }
-        if !direct_type_is_assignable(
+        if !semantic_type_is_assignable(
             node,
             nodes,
-            &baseline_param.annotation,
-            &candidate_param.annotation,
+            &lower_type_text_or_name(&baseline_param.annotation),
+            &lower_type_text_or_name(&candidate_param.annotation),
         ) {
             return false;
         }
@@ -182,24 +170,23 @@ pub(super) fn overload_is_more_specific(
 pub(super) fn select_most_specific_overload<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    applicable: &[&'a Declaration],
-) -> Option<&'a Declaration> {
+    applicable: &'a [ResolvedDirectCallCandidate<'a>],
+) -> Option<&'a ResolvedDirectCallCandidate<'a>> {
     if applicable.len() == 1 {
-        return applicable.first().copied();
+        return applicable.first();
     }
 
     let best = applicable
         .iter()
-        .copied()
         .filter(|candidate| {
-            applicable.iter().copied().all(|other| {
-                std::ptr::eq::<Declaration>(*candidate, other)
+            applicable.iter().all(|other| {
+                std::ptr::eq::<Declaration>(candidate.declaration, other.declaration)
                     || overload_is_more_specific(node, nodes, candidate, other)
             })
         })
         .collect::<Vec<_>>();
 
-    if best.len() == 1 { Some(best[0]) } else { None }
+    if best.len() == 1 { best.into_iter().next() } else { None }
 }
 
 #[cfg(test)]
@@ -231,14 +218,16 @@ pub(super) fn overload_is_applicable(
     overload_is_applicable_with_context(&node, &[], call, declaration)
 }
 
+#[allow(dead_code)]
 pub(super) fn overload_is_applicable_with_context(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
     declaration: &Declaration,
 ) -> bool {
-    let params = direct_signature_params(&declaration.detail).unwrap_or_default();
-    call_signature_params_are_applicable(node, nodes, call, &params)
+    resolve_direct_call_candidate(node, nodes, declaration, call).is_some_and(|candidate| {
+        call_signature_params_are_applicable(node, nodes, call, &candidate.signature_params)
+    })
 }
 
 pub(super) fn call_signature_params_are_applicable(
@@ -506,7 +495,7 @@ pub(super) fn resolved_starred_positional_expansions(
 }
 
 pub(super) fn parse_positional_expansion(value_type: &SemanticType) -> Option<PositionalExpansion> {
-    let normalized = render_semantic_type(value_type);
+    let normalized = diagnostic_type_text(value_type);
     if normalized == "tuple[()]" {
         return Some(PositionalExpansion::Fixed(Vec::new()));
     }
@@ -574,7 +563,7 @@ pub(super) fn parse_keyword_expansion(
     nodes: &[typepython_graph::ModuleNode],
     value_type: &SemanticType,
 ) -> Option<KeywordExpansion> {
-    let normalized = render_semantic_type(value_type);
+    let normalized = diagnostic_type_text(value_type);
     if let Some(shape) =
         resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &normalized)
     {
@@ -589,17 +578,6 @@ pub(super) fn parse_keyword_expansion(
         }
         _ => None,
     }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct DirectSignatureParam {
-    pub(super) name: String,
-    pub(super) annotation: String,
-    pub(super) has_default: bool,
-    pub(super) positional_only: bool,
-    pub(super) keyword_only: bool,
-    pub(super) variadic: bool,
-    pub(super) keyword_variadic: bool,
 }
 
 pub(super) fn direct_unknown_operation_diagnostics(
@@ -824,8 +802,8 @@ pub(super) fn resolve_direct_type_alias<'a>(
 
         if let Some(import) = node.declarations.iter().find(|declaration| {
             declaration.kind == DeclarationKind::Import && declaration.name == module_key
-        }) && let Some(target_node) =
-            nodes.iter().find(|candidate| candidate.module_key == import.detail)
+        }) && let Some(import_target) = resolve_imported_symbol_semantic_target_from_declaration(nodes, import)
+            && let Some(target_node) = import_target.module_target()
             && let Some(target_decl) = target_node.declarations.iter().find(|declaration| {
                 declaration.name == symbol_name
                     && declaration.owner.is_none()
@@ -836,17 +814,7 @@ pub(super) fn resolve_direct_type_alias<'a>(
         }
     }
 
-    let import = node.declarations.iter().find(|declaration| {
-        declaration.kind == DeclarationKind::Import && declaration.name == name
-    })?;
-    let (module_key, symbol_name) = import.detail.rsplit_once('.')?;
-    let target_node = nodes.iter().find(|candidate| candidate.module_key == module_key)?;
-    let target_decl = target_node.declarations.iter().find(|declaration| {
-        declaration.name == symbol_name
-            && declaration.owner.is_none()
-            && declaration.kind == DeclarationKind::TypeAlias
-    })?;
-    Some((target_node, target_decl))
+    resolve_imported_symbol_semantic_target(node, nodes, name)?.type_alias_provider()
 }
 
 pub(super) fn direct_return_type_diagnostics(
@@ -871,7 +839,7 @@ pub(super) fn direct_return_type_diagnostics(
         let expected_text = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(
-                target.detail.split_once("->").map(|(_, annotation)| annotation).unwrap_or(""),
+                &declaration_signature_return_annotation_text(target).unwrap_or_default(),
                 return_site.owner_type_name.as_deref(),
             ),
         );
@@ -888,7 +856,7 @@ pub(super) fn direct_return_type_diagnostics(
             continue;
         };
         let expected_type = lower_type_text_or_name(&expected);
-        let actual_text = render_semantic_type(&actual);
+        let actual_text = diagnostic_type_text(&actual);
 
         if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
             let diagnostic = Diagnostic::error(
@@ -1252,10 +1220,10 @@ pub(super) fn direct_yield_type_diagnostics(
             continue;
         };
 
-        let Some((_, returns)) = target.detail.split_once("->") else {
+        let Some(returns) = declaration_signature_return_annotation_text(target) else {
             continue;
         };
-        let Some(expected) = unwrap_generator_yield_type(returns.trim()) else {
+        let Some(expected) = unwrap_generator_yield_type(&returns) else {
             continue;
         };
         let contextual =
@@ -1271,7 +1239,7 @@ pub(super) fn direct_yield_type_diagnostics(
             actual
         };
         let expected_type = lower_type_text_or_name(&expected);
-        let actual_text = render_semantic_type(&actual);
+        let actual_text = diagnostic_type_text(&actual);
 
         if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
             diagnostics.push(Diagnostic::error(
@@ -1317,10 +1285,11 @@ pub(super) fn for_loop_target_diagnostics(
         .iter()
         .filter(|for_loop| !for_loop.target_names.is_empty())
         .filter_map(|for_loop| {
+            let signature = resolve_for_owner_signature(node, for_loop);
             let iter_type = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
-                resolve_for_owner_signature(node, for_loop),
+                signature.as_deref(),
                 None,
                 for_loop.owner_name.as_deref(),
                 for_loop.owner_type_name.as_deref(),
@@ -1401,7 +1370,7 @@ pub(super) fn destructuring_assignment_diagnostics(
             let actual = resolve_direct_expression_semantic_type(
                 node,
                 nodes,
-                signature,
+                signature.as_deref(),
                 Some(assignment.name.as_str()),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
@@ -1475,7 +1444,7 @@ pub(super) fn with_statement_diagnostics(
         .iter()
         .filter_map(|with_site| {
             let signature = resolve_with_owner_signature(node, with_site);
-            resolve_with_target_semantic_type_for_signature(node, nodes, signature, with_site)
+            resolve_with_target_semantic_type_for_signature(node, nodes, signature.as_deref(), with_site)
                 .is_none()
                 .then(|| {
                 Diagnostic::error(
