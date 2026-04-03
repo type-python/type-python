@@ -31,6 +31,7 @@ mod declarations;
 mod generic_solver;
 mod semantic;
 mod stubs;
+mod type_core;
 mod type_expr;
 mod type_system;
 
@@ -40,6 +41,7 @@ pub(crate) use self::declarations::*;
 pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
 pub use self::stubs::{collect_effective_callable_stub_overrides, collect_synthetic_method_stubs};
+pub(crate) use self::type_core::*;
 pub(crate) use self::type_expr::*;
 pub(crate) use self::type_system::*;
 
