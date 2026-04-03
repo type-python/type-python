@@ -42,7 +42,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
-    let owner_type_name = render_semantic_type(&owner_type);
+    let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let member =
         find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
@@ -133,7 +133,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
         .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
-    let owner_type_name = render_semantic_type(&owner_type);
+    let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
     if methods.is_empty() {
@@ -166,14 +166,16 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             .filter(|declaration| declaration.kind == DeclarationKind::Overload)
             .map(|declaration| (*declaration, declaration_callable_semantics(declaration)))
             .collect::<Vec<_>>();
-        let applicable = resolve_applicable_method_overload_candidates(
+        return match resolve_method_overload_selection(
             node,
             nodes,
             &call,
             &owner_type_name,
             &overloads,
-        );
-        return select_most_specific_overload(node, nodes, &applicable)?.return_type.clone();
+        ) {
+            ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
+            _ => None,
+        };
     } else {
         let method = *methods.first()?;
         if let Some(call) = node.method_calls.iter().find(|call| {
@@ -211,12 +213,10 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             }
         }
 
-        let callable = declaration_callable_semantics(method)?;
-        let return_text = rewrite_imported_typing_aliases(
+        Some(rewrite_imported_typing_semantic_type(
             node,
-            &callable_return_annotation_text_with_self_from_semantics(&callable, &owner_type_name)?,
-        );
-        normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
+            &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
+        ))
     }
 }
 
@@ -242,11 +242,18 @@ pub(super) fn unwrap_awaitable_semantic_type(ty: &SemanticType) -> Option<Semant
     }
 }
 
-pub(super) fn unwrap_generator_yield_type(text: &str) -> Option<String> {
-    let text = normalize_type_text(text);
-    let inner = text.strip_prefix("Generator[").and_then(|inner| inner.strip_suffix(']'))?;
-    let args = split_top_level_type_args(inner);
-    args.first().map(|arg| normalize_type_text(arg))
+pub(super) fn unwrap_generator_yield_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
+    match ty.strip_annotated() {
+        SemanticType::Generic { head, args }
+            if matches!(
+                head.as_str(),
+                "Generator" | "typing.Generator" | "collections.abc.Generator"
+            ) && !args.is_empty() =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn unwrap_yield_from_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
@@ -348,14 +355,11 @@ pub(super) fn attach_missing_none_return_suggestion(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     return_site: &typepython_binding::ReturnSite,
-    expected_text: &str,
     expected: &str,
     actual: &str,
-    signature: &str,
 ) -> Diagnostic {
-    let inferred_actual =
-        inferred_return_type_for_owner(node, nodes, return_site, expected, signature)
-            .unwrap_or_else(|| normalize_type_text(actual));
+    let inferred_actual = inferred_return_type_for_owner(node, nodes, return_site, expected)
+        .unwrap_or_else(|| normalize_type_text(actual));
     if union_branches(expected)
         .is_some_and(|branches| branches.iter().any(|branch| branch == "None"))
         || !union_branches(&inferred_actual)
@@ -386,7 +390,7 @@ pub(super) fn attach_missing_none_return_suggestion(
     diagnostic.with_suggestion(
         "Add `| None` to the declared return type",
         span,
-        format!("{} | None", expected_text.trim()),
+        format!("{} | None", expected.trim()),
         SuggestionApplicability::MachineApplicable,
     )
 }

@@ -37,21 +37,6 @@ impl<'a> ImportedSymbolSemanticTarget<'a> {
             .then_some((self.provider_node, declaration))
     }
 
-    pub(super) fn overload_declarations(&self) -> Vec<&'a Declaration> {
-        let Some(target) = self.target_declaration else {
-            return Vec::new();
-        };
-        self.provider_node
-            .declarations
-            .iter()
-            .filter(|declaration| {
-                declaration.owner.is_none()
-                    && declaration.kind == DeclarationKind::Overload
-                    && declaration.name == target.name
-            })
-            .collect()
-    }
-
     pub(super) fn semantic_type(
         &self,
         request_node: &typepython_graph::ModuleNode,
@@ -70,13 +55,9 @@ impl<'a> ImportedSymbolSemanticTarget<'a> {
                 Some(SemanticType::Callable {
                     params: SemanticCallableParams::ParamList(
                         callable
-                            .params
+                            .semantic_params
                             .iter()
-                            .map(|param| {
-                                lower_type_text_or_name(
-                                    param.annotation.as_deref().unwrap_or("dynamic"),
-                                )
-                            })
+                            .map(SemanticCallableParam::annotation_or_dynamic)
                             .collect(),
                     ),
                     return_type: Box::new(callable.return_type?),
@@ -196,9 +177,10 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
                 .copied()
                 .filter(|declaration| declaration.kind == DeclarationKind::Overload)
                 .collect::<Vec<_>>();
-            let applicable =
-                resolve_applicable_direct_overload_candidates(node, nodes, &call, &overloads);
-            select_most_specific_overload(node, nodes, &applicable)?.return_type.clone()
+            match resolve_direct_overload_selection(node, nodes, &call, &overloads) {
+                ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
+                _ => None,
+            }
         } else {
             let call = node.method_calls.iter().find(|call| {
                 call.owner_name == owner_name
@@ -209,12 +191,7 @@ pub(super) fn resolve_imported_module_method_return_semantic_type(
             let call = imported_module_method_call_site(module_node, call);
             resolve_direct_call_candidate(node, nodes, *methods.first()?, &call)?.return_type
         };
-    method_return.map(|return_type| {
-        lower_type_text_or_name(&rewrite_imported_typing_aliases(
-            node,
-            &render_semantic_type(&return_type),
-        ))
-    })
+    method_return.map(|return_type| rewrite_imported_typing_semantic_type(node, &return_type))
 }
 
 pub(super) fn imported_module_method_call_site(
@@ -280,50 +257,85 @@ pub(super) fn imported_module_method_call_diagnostics(
         .filter(|declaration| declaration.kind == DeclarationKind::Overload)
         .collect::<Vec<_>>();
     if !overloads.is_empty() {
-        let applicable =
-            resolve_applicable_direct_overload_candidates(node, nodes, &direct_call, &overloads);
-        if applicable.len() >= 2
-            && select_most_specific_overload(node, nodes, &applicable).is_none()
-        {
-            diagnostics.push(Diagnostic::error(
-                "TPY4012",
-                format!(
-                    "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
-                    module_node.module_key,
-                    call.method,
-                    node.module_path.display(),
-                    applicable.len()
-                ),
-            ));
-            return Some(diagnostics);
-        }
-        if let Some(applicable) = select_most_specific_overload(node, nodes, &applicable) {
-            let signature = applicable.signature_sites.clone();
-            if let Some(diagnostic) =
-                direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
-            {
-                diagnostics.push(diagnostic);
+        match resolve_direct_overload_selection(node, nodes, &direct_call, &overloads) {
+            ResolvedOverloadSelection::Selected(candidate) => {
+                let signature = candidate.signature_sites;
+                if let Some(diagnostic) =
+                    direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
+                {
+                    diagnostics.push(diagnostic);
+                }
+                diagnostics.extend(direct_source_function_keyword_diagnostics(
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                ));
+                diagnostics.extend(direct_source_function_type_diagnostics(
+                    node,
+                    nodes,
+                    &direct_call,
+                    &signature,
+                ));
+                return Some(diagnostics);
             }
-            diagnostics.extend(direct_source_function_keyword_diagnostics(
-                node,
-                nodes,
-                &direct_call,
-                &signature,
-            ));
-            diagnostics.extend(direct_source_function_type_diagnostics(
-                node,
-                nodes,
-                &direct_call,
-                &signature,
-            ));
-            return Some(diagnostics);
+            ResolvedOverloadSelection::Ambiguous { applicable_count } => {
+                diagnostics.push(Diagnostic::error(
+                    "TPY4012",
+                    format!(
+                        "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                        module_node.module_key,
+                        call.method,
+                        node.module_path.display(),
+                        applicable_count
+                    ),
+                ));
+                return Some(diagnostics);
+            }
+            ResolvedOverloadSelection::NotApplicable { runtime_generic_failures } => {
+                if let Some((_declaration, failure)) = runtime_generic_failures.first() {
+                    diagnostics.push(unresolved_generic_call_diagnostic(
+                        node,
+                        call.line,
+                        &format!("{}.{}", module_node.module_key, call.method),
+                        failure,
+                    ));
+                    return Some(diagnostics);
+                }
+            }
         }
     }
 
-    let signature =
-        resolve_direct_call_candidate(node, nodes, callable_candidates[0], &direct_call)
-            .map(|candidate| candidate.signature_sites)
-            .unwrap_or_else(|| declaration_signature_sites(callable_candidates[0]));
+    if let Some(failure) =
+        direct_call_unresolved_typepack_failure(node, nodes, callable_candidates[0], &direct_call)
+    {
+        diagnostics.push(unresolved_generic_call_diagnostic(
+            node,
+            call.line,
+            &format!("{}.{}", module_node.module_key, call.method),
+            &failure,
+        ));
+        return Some(diagnostics);
+    }
+
+    let signature = match resolve_direct_call_candidate_detailed(
+        node,
+        nodes,
+        callable_candidates[0],
+        &direct_call,
+    ) {
+        Ok(candidate) => candidate.signature_sites,
+        Err(failure) if declaration_has_runtime_generic_paramlist(callable_candidates[0]) => {
+            diagnostics.push(unresolved_generic_call_diagnostic(
+                node,
+                call.line,
+                &format!("{}.{}", module_node.module_key, call.method),
+                &failure,
+            ));
+            return Some(diagnostics);
+        }
+        Err(_) => declaration_signature_sites(callable_candidates[0]),
+    };
     if let Some(diagnostic) =
         direct_source_function_arity_diagnostic(node, nodes, &direct_call, &signature)
     {

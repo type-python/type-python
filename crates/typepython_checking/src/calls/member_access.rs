@@ -26,12 +26,11 @@ pub(super) fn direct_member_access_diagnostics(
             }
 
             let owner_type = resolve_member_access_owner_semantic_type(node, nodes, access)?;
-            let owner_type_name = render_semantic_type(&owner_type);
             if let Some(branches) = semantic_union_branches(&owner_type) {
                 let available = branches
                     .iter()
                     .filter_map(|branch| {
-                        let branch_name = render_semantic_type(branch);
+                        let branch_name = semantic_nominal_owner_name(branch)?;
                         type_has_readable_member(node, nodes, &branch_name, &access.member)
                             .then_some(branch_name)
                     })
@@ -43,7 +42,7 @@ pub(super) fn direct_member_access_diagnostics(
                     "TPY4002",
                     format!(
                         "type `{}` in module `{}` has no member `{}` on every union branch",
-                        owner_type_name,
+                        diagnostic_type_text(&owner_type),
                         node.module_path.display(),
                         access.member
                     ),
@@ -63,6 +62,7 @@ pub(super) fn direct_member_access_diagnostics(
                 }
                 return Some(diagnostic);
             }
+            let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
             let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
             let has_member = find_owned_readable_member_declaration(
                 nodes,
@@ -188,34 +188,84 @@ pub(super) fn direct_method_call_diagnostics(
             .map(|declaration| (*declaration, context.load_declaration_semantics(declaration).callable))
             .collect::<Vec<_>>();
         if !overloads.is_empty() {
-            let applicable = resolve_applicable_method_overload_candidates(
+            match resolve_method_overload_selection(
                 node,
                 nodes,
                 &direct_call,
                 &owner_type_name,
                 &overloads,
-            );
-            if applicable.len() >= 2 && select_most_specific_overload(node, nodes, &applicable).is_none() {
-                diagnostics.push(Diagnostic::error(
-                    "TPY4012",
-                    format!(
-                        "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
-                        class_decl.name,
-                        call.method,
-                        node.module_path.display(),
-                        applicable.len()
-                    ),
-                ));
-                continue;
+            ) {
+                ResolvedOverloadSelection::Selected(candidate) => {
+                    let signature = candidate.signature_sites;
+                    if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &signature,
+                    ) {
+                        diagnostics.push(diagnostic);
+                    }
+                    diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &signature,
+                    ));
+                    diagnostics.extend(direct_source_function_type_diagnostics_with_context(
+                        context,
+                        node,
+                        nodes,
+                        &direct_call,
+                        &signature,
+                    ));
+                    continue;
+                }
+                ResolvedOverloadSelection::Ambiguous { applicable_count } => {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY4012",
+                        format!(
+                            "call to `{}.{}` in module `{}` is ambiguous across {} overloads after applicability filtering",
+                            class_decl.name,
+                            call.method,
+                            node.module_path.display(),
+                            applicable_count
+                        ),
+                    ));
+                    continue;
+                }
+                ResolvedOverloadSelection::NotApplicable { runtime_generic_failures } => {
+                    if let Some((_declaration, failure)) = runtime_generic_failures.first() {
+                        let callee = format!("{}.{}", class_decl.name, call.method);
+                        diagnostics.push(unresolved_generic_call_diagnostic(
+                            node,
+                            call.line,
+                            &callee,
+                            failure,
+                        ));
+                        continue;
+                    }
+                }
             }
-            if let Some(applicable) = select_most_specific_overload(node, nodes, &applicable) {
-                let signature = applicable.signature_sites.clone();
+        }
+
+        let target_callable = context.load_declaration_semantics(target).callable;
+        match resolve_method_call_candidate_detailed(
+            node,
+            nodes,
+            target,
+            &direct_call,
+            &owner_type_name,
+            target_callable.as_ref(),
+        ) {
+            Ok(resolved) => {
                 if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
                     context,
                     node,
                     nodes,
                     &direct_call,
-                    &signature,
+                    &resolved.signature_sites,
                 ) {
                     diagnostics.push(diagnostic);
                 }
@@ -224,52 +274,28 @@ pub(super) fn direct_method_call_diagnostics(
                     node,
                     nodes,
                     &direct_call,
-                    &signature,
+                    &resolved.signature_sites,
                 ));
                 diagnostics.extend(direct_source_function_type_diagnostics_with_context(
                     context,
                     node,
                     nodes,
                     &direct_call,
-                    &signature,
+                    &resolved.signature_sites,
                 ));
                 continue;
             }
-        }
-
-        let target_callable = context.load_declaration_semantics(target).callable;
-        if let Ok(resolved) = resolve_method_call_candidate_detailed(
-            node,
-            nodes,
-            target,
-            &direct_call,
-            &owner_type_name,
-            target_callable.as_ref(),
-        ) {
-            if let Some(diagnostic) = direct_source_function_arity_diagnostic_with_context(
-                context,
-                node,
-                nodes,
-                &direct_call,
-                &resolved.signature_sites,
-            ) {
-                diagnostics.push(diagnostic);
+            Err(failure) if declaration_has_runtime_generic_paramlist(target) => {
+                let callee = format!("{}.{}", class_decl.name, call.method);
+                diagnostics.push(unresolved_generic_call_diagnostic(
+                    node,
+                    call.line,
+                    &callee,
+                    &failure,
+                ));
+                continue;
             }
-            diagnostics.extend(direct_source_function_keyword_diagnostics_with_context(
-                context,
-                node,
-                nodes,
-                &direct_call,
-                &resolved.signature_sites,
-            ));
-            diagnostics.extend(direct_source_function_type_diagnostics_with_context(
-                context,
-                node,
-                nodes,
-                &direct_call,
-                &resolved.signature_sites,
-            ));
-            continue;
+            Err(_) => {}
         }
 
         let fallback_signature = target_callable
@@ -312,7 +338,7 @@ pub(super) fn resolve_method_call_owner_type(
 ) -> Option<String> {
     if call.through_instance {
         return resolve_direct_callable_return_semantic_type(node, nodes, &call.owner_name)
-            .map(|return_type| render_semantic_type(&return_type))
+            .and_then(|return_type| semantic_nominal_owner_name(&return_type))
             .or_else(|| Some(call.owner_name.clone()));
     }
 
@@ -327,6 +353,6 @@ pub(super) fn resolve_method_call_owner_type(
         call.line,
         &call.owner_name,
     )
-    .map(|resolved| render_semantic_type(&resolved))
+    .and_then(|resolved| semantic_nominal_owner_name(&resolved))
     .or_else(|| Some(call.owner_name.clone()))
 }
