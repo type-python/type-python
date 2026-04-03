@@ -134,32 +134,6 @@ pub(super) fn resolve_direct_boolop_semantic_type(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_direct_binop_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    left: Option<&typepython_syntax::DirectExprMetadata>,
-    right: Option<&typepython_syntax::DirectExprMetadata>,
-    operator: Option<&str>,
-) -> Option<String> {
-    resolve_direct_binop_semantic_type(
-        node,
-        nodes,
-        signature,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        left,
-        right,
-        operator,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_direct_binop_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -682,7 +656,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
             )
         })
         .or_else(|| {
-            resolve_direct_binop_type(
+            resolve_direct_binop_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -693,7 +667,6 @@ pub(super) fn resolve_direct_expression_semantic_type(
                 value_binop_right,
                 value_binop_operator,
             )
-            .map(|resolved| lower_type_text_or_name(&resolved))
         })?;
 
     if is_awaited {
