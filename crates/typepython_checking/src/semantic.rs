@@ -284,7 +284,10 @@ pub(super) fn call_signature_params_are_applicable(
     let resolved_keyword_arg_types =
         resolved_keyword_arg_types(node, nodes, call, &expected_keyword_arg_types);
     let mut positional_types =
-        resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types);
+        resolved_call_arg_types(node, nodes, call, &expected_positional_arg_types)
+            .into_iter()
+            .map(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(&ty)))
+            .collect::<Vec<_>>();
     let mut variadic_starred_types = Vec::new();
     for expansion in &starred_positional {
         match expansion {
@@ -365,49 +368,61 @@ pub(super) fn call_signature_params_are_applicable(
         return false;
     }
 
-    let param_types = params.iter().map(|param| param.annotation.clone()).collect::<Vec<_>>();
-    let variadic_type =
-        params.iter().find(|param| param.variadic).map(|param| param.annotation.as_str());
+    let param_types = params
+        .iter()
+        .map(|param| {
+            (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
+        })
+        .collect::<Vec<_>>();
+    let variadic_type = params.iter().find(|param| param.variadic).and_then(|param| {
+        (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
+    });
     let keyword_variadic_type =
-        params.iter().find(|param| param.keyword_variadic).map(|param| param.annotation.as_str());
+        params.iter().find(|param| param.keyword_variadic).and_then(|param| {
+            (!param.annotation.is_empty()).then(|| lower_type_text_or_name(&param.annotation))
+        });
+    let resolved_keyword_arg_types = resolved_keyword_arg_types
+        .into_iter()
+        .map(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(&ty)))
+        .collect::<Vec<_>>();
     let positional_ok =
         positional_types.iter().take(positional_params.len()).zip(param_types.iter()).all(
-            |(arg_ty, param_ty)| {
-                if arg_ty.is_empty() || param_ty.is_empty() {
-                    true
-                } else {
-                    direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            |(arg_ty, param_ty)| match (arg_ty, param_ty) {
+                (Some(arg_ty), Some(param_ty)) => {
+                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
                 }
+                _ => true,
             },
         ) && positional_types.iter().skip(positional_params.len()).all(|arg_ty| {
-            let Some(param_ty) = variadic_type else {
+            let Some(param_ty) = variadic_type.as_ref() else {
                 return false;
             };
-            arg_ty.is_empty()
-                || param_ty.is_empty()
-                || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            arg_ty
+                .as_ref()
+                .is_none_or(|arg_ty| semantic_type_is_assignable(node, nodes, param_ty, arg_ty))
         }) && variadic_starred_types.iter().all(|arg_ty| {
-            let Some(param_ty) = variadic_type else {
+            let Some(param_ty) = variadic_type.as_ref() else {
                 return false;
             };
-            arg_ty.is_empty()
-                || param_ty.is_empty()
-                || direct_type_matches(node, nodes, param_ty, arg_ty)
+            semantic_type_matches(node, nodes, param_ty, arg_ty)
         });
     let keyword_ok =
         call.keyword_names.iter().zip(&resolved_keyword_arg_types).all(|(keyword, arg_ty)| {
             let Some(index) = params.iter().position(|param| param.name == *keyword) else {
-                let Some(param_ty) = keyword_variadic_type else {
+                let Some(param_ty) = keyword_variadic_type.as_ref() else {
                     return false;
                 };
-                return arg_ty.is_empty()
-                    || param_ty.is_empty()
-                    || direct_type_is_assignable(node, nodes, param_ty, arg_ty);
+                return arg_ty.as_ref().is_none_or(|arg_ty| {
+                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                });
             };
-            let param_ty = &param_types[index];
-            arg_ty.is_empty()
-                || param_ty.is_empty()
-                || direct_type_is_assignable(node, nodes, param_ty, arg_ty)
+            let param_ty = param_types[index].as_ref();
+            match (arg_ty.as_ref(), param_ty) {
+                (Some(arg_ty), Some(param_ty)) => {
+                    semantic_type_is_assignable(node, nodes, param_ty, arg_ty)
+                }
+                _ => true,
+            }
         }) && keyword_expansions.iter().all(|expansion| match expansion {
             KeywordExpansion::TypedDict(shape) => shape.fields.iter().all(|(key, field)| {
                 if let Some(index) = params.iter().position(|param| param.name == *key) {
@@ -418,25 +433,30 @@ pub(super) fn call_signature_params_are_applicable(
                     if !field.required && !param.has_default {
                         return false;
                     }
-                    let param_ty = &param_types[index];
-                    return field.value_type.is_empty()
-                        || param_ty.is_empty()
-                        || direct_type_matches(node, nodes, param_ty, &field.value_type);
+                    let param_ty = param_types[index].as_ref();
+                    let field_ty = (!field.value_type.is_empty())
+                        .then(|| lower_type_text_or_name(&field.value_type));
+                    return match (param_ty, field_ty.as_ref()) {
+                        (Some(param_ty), Some(field_ty)) => {
+                            semantic_type_matches(node, nodes, param_ty, field_ty)
+                        }
+                        _ => true,
+                    };
                 }
-                let Some(param_ty) = keyword_variadic_type else {
+                let Some(param_ty) = keyword_variadic_type.as_ref() else {
                     return false;
                 };
-                field.value_type.is_empty()
-                    || param_ty.is_empty()
-                    || direct_type_matches(node, nodes, param_ty, &field.value_type)
+                let field_ty = (!field.value_type.is_empty())
+                    .then(|| lower_type_text_or_name(&field.value_type));
+                field_ty
+                    .as_ref()
+                    .is_none_or(|field_ty| semantic_type_matches(node, nodes, param_ty, field_ty))
             }),
             KeywordExpansion::Mapping(value_ty) => {
-                let Some(param_ty) = keyword_variadic_type else {
+                let Some(param_ty) = keyword_variadic_type.as_ref() else {
                     return false;
                 };
-                value_ty.is_empty()
-                    || param_ty.is_empty()
-                    || direct_type_matches(node, nodes, param_ty, value_ty)
+                semantic_type_matches(node, nodes, param_ty, value_ty)
             }
         });
 
@@ -445,14 +465,14 @@ pub(super) fn call_signature_params_are_applicable(
 
 #[derive(Debug, Clone)]
 pub(super) enum PositionalExpansion {
-    Fixed(Vec<String>),
-    Variadic(String),
+    Fixed(Vec<Option<SemanticType>>),
+    Variadic(SemanticType),
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum KeywordExpansion {
     TypedDict(TypedDictShape),
-    Mapping(String),
+    Mapping(SemanticType),
 }
 
 pub(super) fn resolved_starred_positional_expansions(
@@ -467,29 +487,37 @@ pub(super) fn resolved_starred_positional_expansions(
             .starred_arg_values
             .get(index)
             .and_then(|metadata| {
-                resolve_direct_expression_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
                 )
             })
-            .unwrap_or_else(|| call.starred_arg_types.get(index).cloned().unwrap_or_default());
-        if let Some(expansion) = parse_positional_expansion(&value_type) {
+            .or_else(|| {
+                call.starred_arg_types
+                    .get(index)
+                    .and_then(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(ty)))
+            });
+        if let Some(expansion) = value_type.as_ref().and_then(parse_positional_expansion) {
             expansions.push(expansion);
         }
     }
     expansions
 }
 
-pub(super) fn parse_positional_expansion(value_type: &str) -> Option<PositionalExpansion> {
-    let normalized = normalize_type_text(value_type);
+pub(super) fn parse_positional_expansion(value_type: &SemanticType) -> Option<PositionalExpansion> {
+    let normalized = render_semantic_type(value_type);
     if normalized == "tuple[()]" {
         return Some(PositionalExpansion::Fixed(Vec::new()));
     }
-    let (head, args) = split_generic_type(&normalized)?;
+    let (head, args) = value_type.generic_parts()?;
     match head {
-        "tuple" if args.len() == 2 && args[1] == "..." => {
+        "tuple"
+            if args.len() == 2 && matches!(&args[1], SemanticType::Name(name) if name == "...") =>
+        {
             Some(PositionalExpansion::Variadic(args[0].clone()))
         }
-        "tuple" => Some(PositionalExpansion::Fixed(args)),
+        "tuple" => Some(PositionalExpansion::Fixed(
+            expanded_tuple_shape_semantic_args(args).into_iter().map(Some).collect(),
+        )),
         "list" | "Sequence" if args.len() == 1 => {
             Some(PositionalExpansion::Variadic(args[0].clone()))
         }
@@ -519,14 +547,19 @@ pub(super) fn resolved_keyword_expansions_with_context(
             .keyword_expansion_values
             .get(index)
             .and_then(|metadata| {
-                resolve_direct_expression_type_from_metadata(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node, nodes, None, None, None, call.line, metadata,
                 )
             })
-            .unwrap_or_else(|| {
-                call.keyword_expansion_types.get(index).cloned().unwrap_or_default()
+            .or_else(|| {
+                call.keyword_expansion_types
+                    .get(index)
+                    .and_then(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(ty)))
             });
-        if let Some(expansion) = parse_keyword_expansion(context, node, nodes, &value_type) {
+        if let Some(expansion) = value_type
+            .as_ref()
+            .and_then(|value_type| parse_keyword_expansion(context, node, nodes, value_type))
+        {
             expansions.push(expansion);
         }
     }
@@ -537,17 +570,19 @@ pub(super) fn parse_keyword_expansion(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    value_type: &str,
+    value_type: &SemanticType,
 ) -> Option<KeywordExpansion> {
-    let normalized = normalize_type_text(value_type);
+    let normalized = render_semantic_type(value_type);
     if let Some(shape) =
         resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &normalized)
     {
         return Some(KeywordExpansion::TypedDict(shape));
     }
-    let (head, args) = split_generic_type(&normalized)?;
+    let (head, args) = value_type.generic_parts()?;
     match head {
-        "dict" if args.len() == 2 && args[0] == "str" => {
+        "dict"
+            if args.len() == 2 && matches!(&args[0], SemanticType::Name(name) if name == "str") =>
+        {
             Some(KeywordExpansion::Mapping(args[1].clone()))
         }
         _ => None,

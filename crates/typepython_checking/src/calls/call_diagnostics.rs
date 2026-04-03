@@ -567,7 +567,7 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
                     "call to `{}` in module `{}` cannot expand `**dict[str, {}]` without `**kwargs`",
                     call.callee,
                     node.module_path.display(),
-                    value_ty
+                    render_semantic_type(&value_ty)
                 ),
             )
         }).into_iter().collect(),
@@ -693,9 +693,13 @@ pub(super) fn expanded_positional_arg_types(
     let mut variadic_starred_types = Vec::new();
     for expansion in resolved_starred_positional_expansions(node, nodes, call) {
         match expansion {
-            PositionalExpansion::Fixed(types) => positional_types.extend(types),
+            PositionalExpansion::Fixed(types) => positional_types.extend(
+                types
+                    .into_iter()
+                    .map(|ty| ty.map(|ty| render_semantic_type(&ty)).unwrap_or_default()),
+            ),
             PositionalExpansion::Variadic(element_type) => {
-                variadic_starred_types.push(element_type)
+                variadic_starred_types.push(render_semantic_type(&element_type))
             }
         }
     }
@@ -1033,9 +1037,13 @@ pub(super) fn positional_and_keyword_type_diagnostics(
             }
             KeywordExpansion::Mapping(value_ty) => {
                 if let Some(param_ty) = keyword_variadic_type
-                    && !value_ty.is_empty()
                     && !param_ty.is_empty()
-                    && !direct_type_is_assignable(node, nodes, param_ty, value_ty)
+                    && !semantic_type_is_assignable(
+                        node,
+                        nodes,
+                        &lower_type_text_or_name(param_ty),
+                        value_ty,
+                    )
                 {
                     diagnostics.push(Diagnostic::error(
                         "TPY4001",
@@ -1043,7 +1051,7 @@ pub(super) fn positional_and_keyword_type_diagnostics(
                             "call to `{}` in module `{}` expands `**dict[str, {}]` where `**kwargs` expects `{}`",
                             call.callee,
                             node.module_path.display(),
-                            value_ty,
+                            render_semantic_type(value_ty),
                             param_ty
                         ),
                     ));
