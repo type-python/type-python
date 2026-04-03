@@ -795,11 +795,6 @@ pub(super) fn variances_for_generic_head(head: &str, arity: usize) -> Vec<Generi
     }
 }
 
-pub(super) fn enum_member_owner_name(text: &str) -> Option<String> {
-    let ty = lower_type_text_or_name(text);
-    semantic_enum_member_owner_name(&ty)
-}
-
 fn semantic_enum_member_owner_name(ty: &SemanticType) -> Option<String> {
     let SemanticType::Generic { head, args } = ty.strip_annotated() else {
         return None;

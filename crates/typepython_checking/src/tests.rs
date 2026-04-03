@@ -872,40 +872,6 @@ fn direct_expression_semantic_type_unwraps_awaited_call_results() {
         .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("int"))
     );
-    assert_eq!(
-        super::resolve_direct_expression_type(
-            node,
-            &graph.nodes,
-            None,
-            None,
-            None,
-            None,
-            1,
-            None,
-            true,
-            Some("fetch"),
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        Some(String::from("int"))
-    );
-
     let _ = fs::remove_dir_all(&root);
 }
 

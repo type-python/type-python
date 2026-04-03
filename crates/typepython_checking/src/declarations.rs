@@ -448,8 +448,9 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            let subject_type = resolve_match_subject_type(node, nodes, match_site)?;
-            let (sealed_node, sealed_decl) = resolve_sealed_root(nodes, node, &subject_type)?;
+            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let (sealed_node, sealed_decl) =
+                resolve_sealed_root(nodes, node, &render_semantic_type(&subject_type))?;
             let sealed_closure = collect_sealed_descendants(sealed_node, &sealed_decl.name);
             if sealed_closure.is_empty() {
                 return None;
@@ -520,9 +521,8 @@ pub(super) fn enum_match_exhaustiveness_diagnostics(
                 return None;
             }
 
-            let subject_type =
-                normalize_type_text(&resolve_match_subject_type(node, nodes, match_site)?);
-            let enum_type = enum_member_owner_name(&subject_type).unwrap_or(subject_type);
+            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let enum_type = resolve_match_subject_enum_type(&subject_type);
             let (enum_node, enum_decl) = resolve_direct_base(nodes, node, &enum_type)?;
             if !is_enum_like_class(nodes, enum_node, enum_decl)
                 || is_flag_enum_like_class(nodes, enum_node, enum_decl)
@@ -665,11 +665,11 @@ pub(super) fn leading_space_count(line: &str) -> usize {
     line.chars().take_while(|character| *character == ' ').count()
 }
 
-pub(super) fn resolve_match_subject_type(
+pub(super) fn resolve_match_subject_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     match_site: &typepython_binding::MatchSite,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let signature = match_site.owner_name.as_deref().and_then(|owner_name| {
         node.declarations
             .iter()
@@ -685,7 +685,7 @@ pub(super) fn resolve_match_subject_type(
             .map(|declaration| declaration.detail.as_str())
     });
 
-    resolve_direct_expression_type(
+    resolve_direct_expression_semantic_type(
         node,
         nodes,
         signature,
@@ -715,6 +715,22 @@ pub(super) fn resolve_match_subject_type(
         None,
         None,
     )
+}
+
+pub(super) fn resolve_match_subject_enum_type(subject_type: &SemanticType) -> String {
+    let subject_type = subject_type.strip_annotated();
+    let SemanticType::Generic { head, args } = subject_type else {
+        return render_semantic_type(subject_type);
+    };
+    if head != "Literal" || args.len() != 1 {
+        return render_semantic_type(subject_type);
+    }
+    let SemanticType::Name(name) = &args[0] else {
+        return render_semantic_type(subject_type);
+    };
+    name.rsplit_once('.')
+        .map(|(owner, _)| normalize_type_text(owner))
+        .unwrap_or_else(|| render_semantic_type(subject_type))
 }
 
 pub(super) fn resolve_sealed_root<'a>(
