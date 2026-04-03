@@ -145,8 +145,34 @@ pub(super) fn resolve_direct_binop_type(
     right: Option<&typepython_syntax::DirectExprMetadata>,
     operator: Option<&str>,
 ) -> Option<String> {
+    resolve_direct_binop_semantic_type(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        left,
+        right,
+        operator,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_direct_binop_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    left: Option<&typepython_syntax::DirectExprMetadata>,
+    right: Option<&typepython_syntax::DirectExprMetadata>,
+    operator: Option<&str>,
+) -> Option<SemanticType> {
     let operator = operator?;
-    let left_type = resolve_direct_expression_type_from_metadata(
+    let left_type = resolve_direct_expression_semantic_type_from_metadata(
         node,
         nodes,
         signature,
@@ -155,7 +181,7 @@ pub(super) fn resolve_direct_binop_type(
         current_line,
         left?,
     )?;
-    let right_type = resolve_direct_expression_type_from_metadata(
+    let right_type = resolve_direct_expression_semantic_type_from_metadata(
         node,
         nodes,
         signature,
@@ -164,53 +190,75 @@ pub(super) fn resolve_direct_binop_type(
         current_line,
         right?,
     )?;
-    match operator.trim() {
-        "+" => resolve_plus_result_type(&left_type, &right_type),
-        "-" | "*" | "/" | "//" | "%"
-            if is_numeric_type(&left_type) && is_numeric_type(&right_type) =>
-        {
-            Some(join_numeric_result_type(&left_type, &right_type))
-        }
-        _ => None,
-    }
+    resolve_binop_result_semantic_type(&left_type, &right_type, operator)
 }
 
-pub(super) fn resolve_plus_result_type(left: &str, right: &str) -> Option<String> {
-    if left == "str" && right == "str" {
-        return Some(String::from("str"));
+pub(super) fn resolve_plus_result_semantic_type(
+    left: &SemanticType,
+    right: &SemanticType,
+) -> Option<SemanticType> {
+    if matches!(left.strip_annotated(), SemanticType::Name(name) if name == "str")
+        && matches!(right.strip_annotated(), SemanticType::Name(name) if name == "str")
+    {
+        return Some(SemanticType::Name(String::from("str")));
     }
-    if is_numeric_type(left) && is_numeric_type(right) {
-        return Some(join_numeric_result_type(left, right));
+    if is_numeric_semantic_type(left) && is_numeric_semantic_type(right) {
+        return Some(join_numeric_result_semantic_type(left, right));
     }
-    let (left_head, left_args) = split_generic_type(left)?;
-    let (right_head, right_args) = split_generic_type(right)?;
+    let (left_head, left_args) = left.generic_parts()?;
+    let (right_head, right_args) = right.generic_parts()?;
     match (left_head, right_head) {
-        ("list", "list") if left_args.len() == 1 && right_args.len() == 1 => Some(format!(
-            "list[{}]",
-            join_type_candidates(vec![left_args[0].clone(), right_args[0].clone()])
-        )),
+        ("list", "list") if left_args.len() == 1 && right_args.len() == 1 => {
+            Some(SemanticType::Generic {
+                head: String::from("list"),
+                args: vec![join_semantic_type_candidates(vec![
+                    left_args[0].clone(),
+                    right_args[0].clone(),
+                ])],
+            })
+        }
         ("tuple", "tuple") => {
-            let mut args = left_args;
-            args.extend(right_args);
-            Some(format!("tuple[{}]", args.join(", ")))
+            let mut args = left_args.to_vec();
+            args.extend(right_args.iter().cloned());
+            Some(SemanticType::Generic { head: String::from("tuple"), args })
         }
         _ => None,
     }
 }
 
-pub(super) fn is_numeric_type(text: &str) -> bool {
-    matches!(normalize_type_text(text).as_str(), "int" | "float" | "complex")
+pub(super) fn resolve_binop_result_semantic_type(
+    left: &SemanticType,
+    right: &SemanticType,
+    operator: &str,
+) -> Option<SemanticType> {
+    match operator.trim() {
+        "+" => resolve_plus_result_semantic_type(left, right),
+        "-" | "*" | "/" | "//" | "%" if is_numeric_semantic_type(left) && is_numeric_semantic_type(right) => {
+            Some(join_numeric_result_semantic_type(left, right))
+        }
+        _ => None,
+    }
 }
 
-pub(super) fn join_numeric_result_type(left: &str, right: &str) -> String {
-    let left = normalize_type_text(left);
-    let right = normalize_type_text(right);
+pub(super) fn is_numeric_semantic_type(ty: &SemanticType) -> bool {
+    matches!(
+        ty.strip_annotated(),
+        SemanticType::Name(name) if matches!(name.as_str(), "int" | "float" | "complex")
+    )
+}
+
+pub(super) fn join_numeric_result_semantic_type(
+    left: &SemanticType,
+    right: &SemanticType,
+) -> SemanticType {
+    let left = render_semantic_type(left);
+    let right = render_semantic_type(right);
     if left == "complex" || right == "complex" {
-        String::from("complex")
+        SemanticType::Name(String::from("complex"))
     } else if left == "float" || right == "float" || left == "/" || right == "/" {
-        String::from("float")
+        SemanticType::Name(String::from("float"))
     } else {
-        String::from("int")
+        SemanticType::Name(String::from("int"))
     }
 }
 

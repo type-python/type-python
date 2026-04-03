@@ -1296,16 +1296,9 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
             right,
             local_bindings,
         )?;
-        let left_text = render_semantic_type(&left_type);
-        let right_text = render_semantic_type(&right_type);
-        if let Some(result) = match operator {
-            "+" => resolve_plus_result_type(&left_text, &right_text),
-            "-" | "*" | "/" | "//" | "%" if is_numeric_type(&left_text) && is_numeric_type(&right_text) => {
-                Some(join_numeric_result_type(&left_text, &right_text))
-            }
-            _ => None,
-        } {
-            return Some(lower_type_text_or_name(&result));
+        if let Some(result) = resolve_binop_result_semantic_type(&left_type, &right_type, operator)
+        {
+            return Some(result);
         }
     }
 
