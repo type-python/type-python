@@ -596,7 +596,7 @@ pub(super) fn resolve_with_target_type_for_signature(
         .map(normalize_type_text)
 }
 
-pub(super) fn resolve_local_assignment_reference_type(
+pub(super) fn resolve_local_assignment_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -604,7 +604,7 @@ pub(super) fn resolve_local_assignment_reference_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let owner_name = current_owner_name?;
     let deleted_after_line = latest_delete_invalidation_line(
         node,
@@ -613,7 +613,7 @@ pub(super) fn resolve_local_assignment_reference_type(
         current_line,
         value_name,
     );
-    if let Some(joined) = resolve_post_if_joined_assignment_type(
+    if let Some(joined) = resolve_post_if_joined_assignment_semantic_type(
         node,
         nodes,
         signature,
@@ -633,19 +633,19 @@ pub(super) fn resolve_local_assignment_reference_type(
             && assignment.line < current_line
             && deleted_after_line.is_none_or(|deleted_line| assignment.line > deleted_line)
     })?;
-    resolve_assignment_site_type(node, nodes, signature, assignment)
+    resolve_assignment_site_semantic_type(node, nodes, signature, assignment)
 }
 
-pub(super) fn resolve_module_level_assignment_reference_type(
+pub(super) fn resolve_module_level_assignment_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let deleted_after_line =
         latest_delete_invalidation_line(node, None, None, current_line, value_name);
-    if let Some(joined) = resolve_post_if_joined_assignment_type(
+    if let Some(joined) = resolve_post_if_joined_assignment_semantic_type(
         node,
         nodes,
         signature,
@@ -664,17 +664,18 @@ pub(super) fn resolve_module_level_assignment_reference_type(
             && assignment.line < current_line
             && deleted_after_line.is_none_or(|deleted_line| assignment.line > deleted_line)
     })?;
-    resolve_assignment_site_type(node, nodes, signature, assignment)
+    resolve_assignment_site_semantic_type(node, nodes, signature, assignment)
 }
 
-pub(super) fn resolve_assignment_site_type(
+pub(super) fn resolve_assignment_site_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
     assignment: &typepython_binding::AssignmentSite,
-) -> Option<String> {
+) -> Option<SemanticType> {
     if let Some(index) = assignment.destructuring_index {
-        let tuple_elements = unwrap_fixed_tuple_elements(&resolve_direct_expression_type(
+        let tuple_elements = unpacked_fixed_tuple_semantic_elements(
+            &resolve_direct_expression_semantic_type(
             node,
             nodes,
             signature,
@@ -703,7 +704,8 @@ pub(super) fn resolve_assignment_site_type(
             assignment.value_binop_left.as_deref(),
             assignment.value_binop_right.as_deref(),
             assignment.value_binop_operator.as_deref(),
-        )?)?;
+        )?,
+        )?;
         let target_names = assignment.destructuring_target_names.as_ref()?;
         if tuple_elements.len() == target_names.len() {
             return tuple_elements.get(index).cloned();
@@ -720,7 +722,8 @@ pub(super) fn resolve_assignment_site_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            ),
+            )
+            .map(|resolved| lower_type_text_or_name(&resolved)),
             typepython_syntax::ComprehensionKind::Set => resolve_set_comprehension_type(
                 node,
                 nodes,
@@ -729,7 +732,8 @@ pub(super) fn resolve_assignment_site_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            ),
+            )
+            .map(|resolved| lower_type_text_or_name(&resolved)),
             typepython_syntax::ComprehensionKind::Dict => resolve_dict_comprehension_type(
                 node,
                 nodes,
@@ -738,7 +742,8 @@ pub(super) fn resolve_assignment_site_type(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 comprehension,
-            ),
+            )
+            .map(|resolved| lower_type_text_or_name(&resolved)),
             typepython_syntax::ComprehensionKind::Generator => {
                 resolve_generator_comprehension_type(
                     node,
@@ -749,6 +754,7 @@ pub(super) fn resolve_assignment_site_type(
                     assignment.line,
                     comprehension,
                 )
+                .map(|resolved| lower_type_text_or_name(&resolved))
             }
         };
     }
@@ -761,10 +767,11 @@ pub(super) fn resolve_assignment_site_type(
             assignment.owner_type_name.as_deref(),
             assignment.line,
             comprehension,
-        );
+        )
+        .map(|resolved| lower_type_text_or_name(&resolved));
     }
 
-    resolve_direct_expression_type(
+    resolve_direct_expression_semantic_type(
         node,
         nodes,
         signature,
@@ -1572,7 +1579,7 @@ pub(super) fn guard_to_site(
     }
 }
 
-pub(super) fn resolve_post_if_joined_assignment_type(
+pub(super) fn resolve_post_if_joined_assignment_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -1580,7 +1587,7 @@ pub(super) fn resolve_post_if_joined_assignment_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let mut guards = node
         .if_guards
         .iter()
@@ -1626,9 +1633,11 @@ pub(super) fn resolve_post_if_joined_assignment_type(
             guard.false_start_line?,
             guard.false_end_line?,
         )?;
-        let true_type = resolve_assignment_site_type(node, nodes, signature, true_assignment)?;
-        let false_type = resolve_assignment_site_type(node, nodes, signature, false_assignment)?;
-        return Some(join_branch_types(vec![true_type, false_type]));
+        let true_type =
+            resolve_assignment_site_semantic_type(node, nodes, signature, true_assignment)?;
+        let false_type =
+            resolve_assignment_site_semantic_type(node, nodes, signature, false_assignment)?;
+        return Some(join_semantic_type_candidates(vec![true_type, false_type]));
     }
 
     None

@@ -446,6 +446,14 @@ pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str)
         })
 }
 
+pub(super) fn resolve_direct_return_name_semantic_type(
+    signature: &str,
+    value_name: &str,
+) -> Option<SemanticType> {
+    resolve_direct_return_name_type(signature, value_name)
+        .map(|param_type| lower_type_text_or_name(&param_type))
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "semantic expression resolution mirrors the direct expression metadata shape"
@@ -1176,8 +1184,8 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
             node,
             &substitute_self_annotation(signature, current_owner_type_name),
         );
-        if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
-            return Some(lower_type_text_or_name(&param_type));
+        if let Some(param_type) = resolve_direct_return_name_semantic_type(&signature, value_name) {
+            return Some(param_type);
         }
     }
 
@@ -1219,7 +1227,7 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return Some(lower_type_text_or_name(&with_type));
     }
 
-    if let Some(local_type) = resolve_local_assignment_reference_type(
+    if let Some(local_type) = resolve_local_assignment_reference_semantic_type(
         node,
         nodes,
         signature,
@@ -1228,18 +1236,18 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         current_line,
         value_name,
     ) {
-        return Some(lower_type_text_or_name(&local_type));
+        return Some(local_type);
     }
 
     if current_owner_name.is_none() {
-        if let Some(module_type) = resolve_module_level_assignment_reference_type(
+        if let Some(module_type) = resolve_module_level_assignment_reference_semantic_type(
             node,
             nodes,
             signature,
             current_line,
             value_name,
         ) {
-            return Some(lower_type_text_or_name(&module_type));
+            return Some(module_type);
         }
     }
 

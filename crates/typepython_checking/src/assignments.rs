@@ -35,7 +35,9 @@ pub(super) fn annotated_assignment_type_diagnostics(
             Some(&expected),
         ) {
             diagnostics.extend(result.diagnostics);
-            if !direct_type_is_assignable(node, nodes, &expected, &result.actual_type) {
+            let expected_type = lower_type_text_or_name(&expected);
+            let actual_type = lower_type_text_or_name(&result.actual_type);
+            if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -43,7 +45,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                             "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
                             owner_type_name,
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             owner_name,
                             expected
@@ -52,14 +54,14 @@ pub(super) fn annotated_assignment_type_diagnostics(
                             "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
                             owner_name,
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             expected
                         ),
                         _ => format!(
                             "module `{}` assigns `{}` where `{}` expects `{}`",
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             expected
                         ),
@@ -78,7 +80,9 @@ pub(super) fn annotated_assignment_type_diagnostics(
             Some(&expected),
         ) {
             diagnostics.extend(result.diagnostics);
-            if !direct_type_is_assignable(node, nodes, &expected, &result.actual_type) {
+            let expected_type = lower_type_text_or_name(&expected);
+            let actual_type = lower_type_text_or_name(&result.actual_type);
+            if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -86,7 +90,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                             "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
                             owner_type_name,
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             owner_name,
                             expected
@@ -95,14 +99,14 @@ pub(super) fn annotated_assignment_type_diagnostics(
                             "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
                             owner_name,
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             expected
                         ),
                         _ => format!(
                             "module `{}` assigns `{}` where `{}` expects `{}`",
                             node.module_path.display(),
-                            result.actual_type,
+                            render_semantic_type(&actual_type),
                             assignment.name,
                             expected
                         ),
@@ -113,10 +117,13 @@ pub(super) fn annotated_assignment_type_diagnostics(
         }
 
         let signature = resolve_assignment_owner_signature(node, assignment);
-        let Some(actual) = resolve_assignment_site_type(node, nodes, signature, assignment) else {
+        let Some(actual) =
+            resolve_assignment_site_semantic_type(node, nodes, signature, assignment)
+        else {
             continue;
         };
-        if !direct_type_is_assignable(node, nodes, &expected, &actual) {
+        let expected_type = lower_type_text_or_name(&expected);
+        if !semantic_type_is_assignable(node, nodes, &expected_type, &actual) {
             diagnostics.push(Diagnostic::error(
                 "TPY4001",
                 match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -124,7 +131,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
                         "type `{}` in module `{}` assigns `{}` where local `{}` in `{}` expects `{}`",
                         owner_type_name,
                         node.module_path.display(),
-                        actual,
+                        render_semantic_type(&actual),
                         assignment.name,
                         owner_name,
                         expected
@@ -133,14 +140,14 @@ pub(super) fn annotated_assignment_type_diagnostics(
                         "function `{}` in module `{}` assigns `{}` where local `{}` expects `{}`",
                         owner_name,
                         node.module_path.display(),
-                        actual,
+                        render_semantic_type(&actual),
                         assignment.name,
                         expected
                     ),
                     _ => format!(
                         "module `{}` assigns `{}` where `{}` expects `{}`",
                         node.module_path.display(),
-                        actual,
+                        render_semantic_type(&actual),
                         assignment.name,
                         expected
                     ),
@@ -204,7 +211,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 ));
             }
             let signature = resolve_assignment_owner_signature(node, assignment);
-            let expected = resolve_current_augmented_assignment_target_type(
+            let expected = resolve_current_augmented_assignment_target_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -213,7 +220,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 assignment.line,
                 &assignment.name,
             )?;
-            let actual = resolve_augmented_assignment_result_type(
+            let actual = resolve_augmented_assignment_result_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -221,10 +228,10 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
                 assignment.value_binop_operator.as_deref(),
-                &expected,
+                &render_semantic_type(&expected),
                 assignment.value_binop_right.as_deref()?,
             )?;
-            (!direct_type_matches(node, nodes, &expected, &actual)).then(|| {
+            (!semantic_type_matches(node, nodes, &expected, &actual)).then(|| {
                 Diagnostic::error(
                     "TPY4001",
                     match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -232,25 +239,25 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
                             "type `{}` in module `{}` augmented-assigns `{}` where local `{}` in `{}` expects `{}`",
                             owner_type_name,
                             node.module_path.display(),
-                            actual,
+                            render_semantic_type(&actual),
                             assignment.name,
                             owner_name,
-                            expected
+                            render_semantic_type(&expected)
                         ),
                         (None, Some(owner_name)) => format!(
                             "function `{}` in module `{}` augmented-assigns `{}` where local `{}` expects `{}`",
                             owner_name,
                             node.module_path.display(),
-                            actual,
+                            render_semantic_type(&actual),
                             assignment.name,
-                            expected
+                            render_semantic_type(&expected)
                         ),
                         _ => format!(
                             "module `{}` augmented-assigns `{}` where `{}` expects `{}`",
                             node.module_path.display(),
-                            actual,
+                            render_semantic_type(&actual),
                             assignment.name,
-                            expected
+                            render_semantic_type(&expected)
                         ),
                     },
                 )
@@ -307,7 +314,7 @@ pub(super) fn is_final_annotation_text(annotation: &str) -> bool {
         || annotation.starts_with("typing.Final[")
 }
 
-pub(super) fn resolve_current_augmented_assignment_target_type(
+pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -315,19 +322,19 @@ pub(super) fn resolve_current_augmented_assignment_target_type(
     current_owner_type_name: Option<&str>,
     current_line: usize,
     value_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     if let Some(signature) = signature {
         let signature = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(signature, current_owner_type_name),
         );
-        if let Some(param_type) = resolve_direct_return_name_type(&signature, value_name) {
+        if let Some(param_type) = resolve_direct_return_name_semantic_type(&signature, value_name) {
             return Some(param_type);
         }
     }
 
     match current_owner_name {
-        Some(owner_name) => resolve_local_assignment_reference_type(
+        Some(owner_name) => resolve_local_assignment_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -336,7 +343,7 @@ pub(super) fn resolve_current_augmented_assignment_target_type(
             current_line,
             value_name,
         ),
-        None => resolve_module_level_assignment_reference_type(
+        None => resolve_module_level_assignment_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -768,32 +775,6 @@ fn resolve_assignment_expression_semantic_type(
 
 fn contextual_result_semantic_type(result: &ContextualCallArgResult) -> SemanticType {
     lower_type_text_or_name(&result.actual_type)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_augmented_assignment_result_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    owner_name: Option<&str>,
-    owner_type_name: Option<&str>,
-    current_line: usize,
-    operator: Option<&str>,
-    left_type: &str,
-    value: &typepython_syntax::DirectExprMetadata,
-) -> Option<String> {
-    resolve_augmented_assignment_result_semantic_type(
-        node,
-        nodes,
-        signature,
-        owner_name,
-        owner_type_name,
-        current_line,
-        operator,
-        left_type,
-        value,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 #[allow(clippy::too_many_arguments)]
