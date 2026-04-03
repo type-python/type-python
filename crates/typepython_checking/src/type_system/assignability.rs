@@ -191,6 +191,18 @@ fn direct_semantic_type_is_assignable(
                     direct_semantic_type_is_assignable(node, nodes, &branch, &actual, visiting)
                 })
             }
+        } else if let (Some((expected_params, expected_return)), Some((actual_params, actual_return))) =
+            (expected.callable_parts(), actual.callable_parts())
+        {
+            callable_semantic_annotation_assignable(
+                node,
+                nodes,
+                expected_params,
+                expected_return,
+                actual_params,
+                actual_return,
+            )
+            .unwrap_or(false)
         } else {
             let enum_match =
                 semantic_enum_member_owner_name(&actual).is_some_and(|owner| owner == expected_rendered);
@@ -546,9 +558,12 @@ fn same_head_semantic_generic_assignable(
     actual_args: &[SemanticType],
 ) -> Option<bool> {
     if head == "Callable" {
-        let expected = expected_args.iter().map(render_semantic_type).collect::<Vec<_>>();
-        let actual = actual_args.iter().map(render_semantic_type).collect::<Vec<_>>();
-        return callable_annotation_assignable(node, nodes, &expected, &actual);
+        return callable_semantic_annotation_assignable_from_generic_args(
+            node,
+            nodes,
+            expected_args,
+            actual_args,
+        );
     }
 
     let variances = variances_for_generic_head(head, expected_args.len());
@@ -585,28 +600,106 @@ pub(crate) fn expanded_tuple_shape_args(args: &[String]) -> Vec<String> {
     .collect()
 }
 
-pub(super) fn callable_annotation_assignable(
+fn callable_param_semantic_assignable(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
-    expected_args: &[String],
-    actual_args: &[String],
+    expected: &SemanticType,
+    actual: &SemanticType,
+) -> bool {
+    semantic_type_is_assignable(node, nodes, actual, expected)
+}
+
+fn callable_structural_params_assignable(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected_params: &SemanticCallableParams,
+    actual_params: &SemanticCallableParams,
 ) -> Option<bool> {
-    let expected = lower_type_text_or_name(&format!("Callable[{}]", expected_args.join(", ")));
-    let actual = lower_type_text_or_name(&format!("Callable[{}]", actual_args.join(", ")));
-    match (&expected, &actual) {
+    match (expected_params, actual_params) {
+        (SemanticCallableParams::Ellipsis, _) | (_, SemanticCallableParams::Ellipsis) => Some(true),
+        (SemanticCallableParams::ParamList(expected), SemanticCallableParams::ParamList(actual)) => {
+            if expected.len() != actual.len() {
+                return Some(false);
+            }
+            Some(
+                expected
+                    .iter()
+                    .zip(actual.iter())
+                    .all(|(expected_param, actual_param)| {
+                        callable_param_semantic_assignable(
+                            node,
+                            nodes,
+                            expected_param,
+                            actual_param,
+                        )
+                    }),
+            )
+        }
+        (SemanticCallableParams::Single(expected), SemanticCallableParams::Single(actual)) => {
+            Some(semantic_type_matches(node, nodes, expected, actual))
+        }
         (
-            SemanticType::Callable { params: expected_params, return_type: expected_return },
-            SemanticType::Callable { params: actual_params, return_type: actual_return },
-        ) => callable_semantic_annotation_assignable(
-            node,
-            nodes,
-            expected_params,
-            expected_return,
-            actual_params,
-            actual_return,
-        ),
+            SemanticCallableParams::Concatenate(expected),
+            SemanticCallableParams::Concatenate(actual),
+        ) => {
+            let (expected_tail, expected_prefixes) = expected.split_last()?;
+            let (actual_tail, actual_prefixes) = actual.split_last()?;
+            if expected_prefixes.len() != actual_prefixes.len() {
+                return Some(false);
+            }
+            Some(
+                expected_prefixes
+                    .iter()
+                    .zip(actual_prefixes.iter())
+                    .all(|(expected_param, actual_param)| {
+                        callable_param_semantic_assignable(
+                            node,
+                            nodes,
+                            expected_param,
+                            actual_param,
+                        )
+                    })
+                    && semantic_type_matches(node, nodes, expected_tail, actual_tail),
+            )
+        }
         _ => None,
     }
+}
+
+fn callable_semantic_annotation_assignable_from_generic_args(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    expected_args: &[SemanticType],
+    actual_args: &[SemanticType],
+) -> Option<bool> {
+    let [expected_params, expected_return] = expected_args else {
+        return None;
+    };
+    let [actual_params, actual_return] = actual_args else {
+        return None;
+    };
+    let expected_params = match expected_params {
+        SemanticType::Name(name) if name == "..." => SemanticCallableParams::Ellipsis,
+        SemanticType::Generic { head, args } if head == "Concatenate" => {
+            SemanticCallableParams::Concatenate(args.clone())
+        }
+        _ => SemanticCallableParams::Single(Box::new(expected_params.clone())),
+    };
+    let actual_params = match actual_params {
+        SemanticType::Name(name) if name == "..." => SemanticCallableParams::Ellipsis,
+        SemanticType::Generic { head, args } if head == "Concatenate" => {
+            SemanticCallableParams::Concatenate(args.clone())
+        }
+        _ => SemanticCallableParams::Single(Box::new(actual_params.clone())),
+    };
+    callable_semantic_annotation_assignable(
+        node,
+        nodes,
+        &expected_params,
+        expected_return,
+        &actual_params,
+        actual_return,
+    )
 }
 
 fn callable_semantic_annotation_assignable(
@@ -617,59 +710,11 @@ fn callable_semantic_annotation_assignable(
     actual_params: &SemanticCallableParams,
     actual_return: &SemanticType,
 ) -> Option<bool> {
-    if !direct_type_is_assignable(
-        node,
-        nodes,
-        &render_semantic_type(expected_return),
-        &render_semantic_type(actual_return),
-    ) {
+    if !semantic_type_is_assignable(node, nodes, expected_return, actual_return) {
         return Some(false);
     }
 
-    match (expected_params, actual_params) {
-        (SemanticCallableParams::Ellipsis, _) | (_, SemanticCallableParams::Ellipsis) => Some(true),
-        (SemanticCallableParams::ParamList(expected), SemanticCallableParams::ParamList(actual)) => {
-            if expected.len() != actual.len() {
-                return Some(false);
-            }
-            Some(expected.iter().zip(actual.iter()).all(|(expected_param, actual_param)| {
-                direct_type_is_assignable(
-                    node,
-                    nodes,
-                    &render_semantic_type(actual_param),
-                    &render_semantic_type(expected_param),
-                )
-            }))
-        }
-        _ => {
-            let expected = render_semantic_callable_params(expected_params);
-            let actual = render_semantic_callable_params(actual_params);
-            let expected = normalize_callable_param_expr(&expected);
-            let actual = normalize_callable_param_expr(&actual);
-            if expected == "..." || actual == "..." {
-                return Some(true);
-            }
-            let expected = expected.strip_prefix('[')?.strip_suffix(']')?;
-            let actual = actual.strip_prefix('[')?.strip_suffix(']')?;
-            let expected = if expected.trim().is_empty() {
-                Vec::new()
-            } else {
-                split_top_level_type_args(expected)
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            };
-            let actual = if actual.trim().is_empty() {
-                Vec::new()
-            } else {
-                split_top_level_type_args(actual)
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            };
-            callable_annotation_assignable(node, nodes, &expected, &actual)
-        }
-    }
+    callable_structural_params_assignable(node, nodes, expected_params, actual_params)
 }
 
 pub(super) fn invariant_type_matches(
@@ -712,15 +757,18 @@ fn expand_semantic_type_alias_once(
     ty: &SemanticType,
 ) -> Option<SemanticType> {
     let stripped = ty.strip_annotated();
-    let (head, args) = stripped
-        .generic_parts()
-        .map(|(head, args)| (head.to_owned(), args.iter().map(render_semantic_type).collect()))
-        .unwrap_or_else(|| (render_semantic_type(stripped), Vec::new()));
+    let (head, args) = match stripped {
+        SemanticType::Name(name) => (name.clone(), Vec::new()),
+        SemanticType::Generic { head, args } => (head.clone(), args.clone()),
+        _ => (render_semantic_type(stripped), Vec::new()),
+    };
     let (alias_node, alias_decl) = resolve_direct_type_alias(nodes, node, &head)?;
-    let substitutions = alias_type_param_substitutions(alias_decl, &args)?;
+    let substitutions = alias_type_param_substitutions_semantic(alias_decl, &args)?;
     let alias = declaration_type_alias_semantics(alias_decl)?;
-    let detail = rewrite_imported_typing_aliases(alias_node, &render_semantic_type(&alias.body));
-    let expanded = substitute_semantic_type_params(&lower_type_text_or_name(&detail), &substitutions);
+    let expanded = substitute_semantic_type_params(
+        &rewrite_imported_typing_semantic_type(alias_node, &alias.body),
+        &substitutions,
+    );
     let expanded = expand_semantic_type_aliases_in_provider_context(alias_node, nodes, expanded);
     (expanded != *stripped).then_some(expanded)
 }
