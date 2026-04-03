@@ -15,10 +15,14 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
     through_instance: bool,
 ) -> Option<SemanticType> {
     if !through_instance
-        && let Some(reference_type) =
-            resolve_imported_module_member_reference_type(node, nodes, owner_name, member_name)
+        && let Some(reference_type) = resolve_imported_module_member_reference_semantic_type(
+            node,
+            nodes,
+            owner_name,
+            member_name,
+        )
     {
-        return Some(lower_type_text_or_name(&reference_type));
+        return Some(reference_type);
     }
 
     let owner_type = if through_instance {
@@ -101,7 +105,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
     through_instance: bool,
 ) -> Option<SemanticType> {
     if !through_instance
-        && let Some(return_type) = resolve_imported_module_method_return_type(
+        && let Some(return_type) = resolve_imported_module_method_return_semantic_type(
             node,
             nodes,
             current_line,
@@ -109,7 +113,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             method_name,
         )
     {
-        return Some(lower_type_text_or_name(&return_type));
+        return Some(return_type);
     }
 
     let owner_type = if through_instance {

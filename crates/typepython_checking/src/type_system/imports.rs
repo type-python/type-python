@@ -22,12 +22,12 @@ pub(super) fn resolve_imported_module_target<'a>(
     nodes.iter().find(|candidate| candidate.module_key == import.detail)
 }
 
-pub(super) fn resolve_imported_module_member_reference_type(
+pub(super) fn resolve_imported_module_member_reference_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     owner_name: &str,
     member_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let module_node = resolve_imported_module_target(node, nodes, owner_name)?;
     let declaration = module_node
         .declarations
@@ -36,27 +36,35 @@ pub(super) fn resolve_imported_module_member_reference_type(
     match declaration.kind {
         DeclarationKind::Value => {
             let detail = rewrite_imported_typing_aliases(node, &declaration.detail);
-            normalized_direct_return_annotation(&detail).map(normalize_type_text)
+            normalized_direct_return_annotation(&detail).map(lower_type_text_or_name)
         }
         DeclarationKind::Function => {
             let param_types = direct_signature_sites_from_detail(&declaration.detail)
                 .into_iter()
-                .map(|param| param.annotation.unwrap_or_else(|| String::from("dynamic")))
+                .map(|param| {
+                    lower_type_text_or_name(
+                        &param.annotation.unwrap_or_else(|| String::from("dynamic")),
+                    )
+                })
                 .collect::<Vec<_>>();
-            let return_type = declaration.detail.split_once("->")?.1.trim();
-            Some(format_callable_annotation(&param_types, return_type))
+            let return_type =
+                lower_type_text_or_name(declaration.detail.split_once("->")?.1.trim());
+            Some(SemanticType::Callable {
+                params: SemanticCallableParams::ParamList(param_types),
+                return_type: Box::new(return_type),
+            })
         }
         _ => None,
     }
 }
 
-pub(super) fn resolve_imported_module_method_return_type(
+pub(super) fn resolve_imported_module_method_return_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_line: usize,
     owner_name: &str,
     method_name: &str,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let module_node = resolve_imported_module_target(node, nodes, owner_name)?;
     let methods = module_node
         .declarations
@@ -93,7 +101,7 @@ pub(super) fn resolve_imported_module_method_return_type(
     };
     let return_text =
         rewrite_imported_typing_aliases(node, method.detail.split_once("->")?.1.trim());
-    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
 }
 
 pub(super) fn imported_module_method_call_site(

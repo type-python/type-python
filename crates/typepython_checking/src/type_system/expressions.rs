@@ -288,7 +288,10 @@ pub(super) fn resolve_nominal_getitem_return_semantic_type(
     normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
 }
 
-pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
+pub(super) fn resolve_direct_return_name_semantic_type(
+    signature: &str,
+    value_name: &str,
+) -> Option<SemanticType> {
     direct_signature_params(signature)?.into_iter().find_map(|param| {
         if param.name != value_name {
             return None;
@@ -296,30 +299,43 @@ pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str)
         let annotation = normalize_type_text(&param.annotation);
         Some(if param.variadic {
             if annotation.is_empty() {
-                String::from("tuple[dynamic, ...]")
+                SemanticType::Generic {
+                    head: String::from("tuple"),
+                    args: vec![SemanticType::Name(String::from("dynamic")), SemanticType::Name(String::from("..."))],
+                }
             } else if annotation.starts_with("Unpack[") {
-                format!("tuple[{annotation}]")
+                SemanticType::Generic {
+                    head: String::from("tuple"),
+                    args: vec![lower_type_text_or_name(&annotation)],
+                }
             } else {
-                format!("tuple[{annotation}, ...]")
+                SemanticType::Generic {
+                    head: String::from("tuple"),
+                    args: vec![lower_type_text_or_name(&annotation), SemanticType::Name(String::from("..."))],
+                }
             }
         } else if param.keyword_variadic {
             if annotation.is_empty() {
-                String::from("dict[str, dynamic]")
+                SemanticType::Generic {
+                    head: String::from("dict"),
+                    args: vec![
+                        SemanticType::Name(String::from("str")),
+                        SemanticType::Name(String::from("dynamic")),
+                    ],
+                }
             } else {
-                format!("dict[str, {annotation}]")
+                SemanticType::Generic {
+                    head: String::from("dict"),
+                    args: vec![
+                        SemanticType::Name(String::from("str")),
+                        lower_type_text_or_name(&annotation),
+                    ],
+                }
             }
         } else {
-            annotation
+            lower_type_text_or_name(&annotation)
         })
-        })
-}
-
-pub(super) fn resolve_direct_return_name_semantic_type(
-    signature: &str,
-    value_name: &str,
-) -> Option<SemanticType> {
-    resolve_direct_return_name_type(signature, value_name)
-        .map(|param_type| lower_type_text_or_name(&param_type))
+    })
 }
 
 #[expect(
