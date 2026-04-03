@@ -2,6 +2,10 @@
     clippy::too_many_arguments,
     reason = "member reference resolution needs source metadata and scope context"
 )]
+#[allow(
+    dead_code,
+    reason = "string-returning member helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_direct_member_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -14,17 +18,47 @@ pub(super) fn resolve_direct_member_reference_type(
     member_name: &str,
     through_instance: bool,
 ) -> Option<String> {
+    resolve_direct_member_reference_semantic_type(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        member_name,
+        through_instance,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "member reference resolution needs source metadata and scope context"
+)]
+pub(super) fn resolve_direct_member_reference_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    member_name: &str,
+    through_instance: bool,
+) -> Option<SemanticType> {
     if !through_instance
         && let Some(reference_type) =
             resolve_imported_module_member_reference_type(node, nodes, owner_name, member_name)
     {
-        return Some(reference_type);
+        return Some(lower_type_text_or_name(&reference_type));
     }
 
-    let owner_type_name = if through_instance {
-        resolve_direct_callable_return_type(node, nodes, owner_name)
-            .map(|return_type| normalize_type_text(&return_type))
-            .or_else(|| Some(owner_name.to_owned()))
+    let owner_type = if through_instance {
+        resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
+            .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
         resolve_direct_name_reference_type(
             node,
@@ -36,16 +70,18 @@ pub(super) fn resolve_direct_member_reference_type(
             current_line,
             owner_name,
         )
-        .or_else(|| Some(owner_name.to_owned()))
+        .map(|resolved| lower_type_text_or_name(&resolved))
+        .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
+    let owner_type_name = render_semantic_type(&owner_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let member =
         find_owned_readable_member_declaration(nodes, class_node, class_decl, member_name)?;
     if is_enum_like_class(nodes, class_node, class_decl) {
-        return Some(format!("Literal[{}.{}]", class_decl.name, member_name));
+        return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
-    resolve_readable_member_type(node, member, &owner_type_name)
+    resolve_readable_member_semantic_type(node, member, &owner_type)
 }
 
 pub(super) fn is_enum_like_class(
@@ -88,6 +124,10 @@ pub(super) fn is_flag_enum_like_class(
     clippy::too_many_arguments,
     reason = "method return resolution needs source metadata and scope context"
 )]
+#[allow(
+    dead_code,
+    reason = "string-returning method helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_direct_method_return_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -100,6 +140,37 @@ pub(super) fn resolve_direct_method_return_type(
     method_name: &str,
     through_instance: bool,
 ) -> Option<String> {
+    resolve_direct_method_return_semantic_type(
+        node,
+        nodes,
+        signature,
+        exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        owner_name,
+        method_name,
+        through_instance,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "method return resolution needs source metadata and scope context"
+)]
+pub(super) fn resolve_direct_method_return_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    owner_name: &str,
+    method_name: &str,
+    through_instance: bool,
+) -> Option<SemanticType> {
     if !through_instance
         && let Some(return_type) = resolve_imported_module_method_return_type(
             node,
@@ -109,13 +180,12 @@ pub(super) fn resolve_direct_method_return_type(
             method_name,
         )
     {
-        return Some(return_type);
+        return Some(lower_type_text_or_name(&return_type));
     }
 
-    let owner_type_name = if through_instance {
-        resolve_direct_callable_return_type(node, nodes, owner_name)
-            .map(|return_type| normalize_type_text(&return_type))
-            .or_else(|| Some(owner_name.to_owned()))
+    let owner_type = if through_instance {
+        resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
+            .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     } else {
         resolve_direct_name_reference_type(
             node,
@@ -127,9 +197,11 @@ pub(super) fn resolve_direct_method_return_type(
             current_line,
             owner_name,
         )
-        .or_else(|| Some(owner_name.to_owned()))
+        .map(|resolved| lower_type_text_or_name(&resolved))
+        .or_else(|| Some(SemanticType::Name(owner_name.to_owned())))
     }?;
 
+    let owner_type_name = render_semantic_type(&owner_type);
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
     let method = if methods.iter().any(|declaration| declaration.kind == DeclarationKind::Overload)
@@ -176,7 +248,7 @@ pub(super) fn resolve_direct_method_return_type(
             Some(&owner_type_name),
         ),
     );
-    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
 }
 
 pub(super) fn unwrap_awaitable_type(text: &str) -> Option<String> {

@@ -213,6 +213,10 @@ pub(super) fn join_numeric_result_type(left: &str, right: &str) -> String {
     clippy::too_many_arguments,
     reason = "subscript resolution needs the same expression context as other direct expression forms"
 )]
+#[allow(
+    dead_code,
+    reason = "string-returning subscript helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_direct_subscript_reference_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -225,7 +229,38 @@ pub(super) fn resolve_direct_subscript_reference_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<String> {
-    let target_type = resolve_direct_expression_type_from_metadata(
+    resolve_direct_subscript_reference_semantic_type(
+        node,
+        nodes,
+        signature,
+        _exclude_name,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        target,
+        string_key,
+        index_text,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "subscript resolution needs the same expression context as other direct expression forms"
+)]
+pub(super) fn resolve_direct_subscript_reference_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    _exclude_name: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    target: &typepython_syntax::DirectExprMetadata,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<SemanticType> {
+    let target_type = lower_type_text_or_name(&resolve_direct_expression_type_from_metadata(
         node,
         nodes,
         signature,
@@ -233,8 +268,8 @@ pub(super) fn resolve_direct_subscript_reference_type(
         current_owner_type_name,
         current_line,
         target,
-    )?;
-    resolve_subscript_type_from_target_type(node, nodes, &target_type, string_key, index_text)
+    )?);
+    resolve_subscript_type_from_target_semantic_type(node, nodes, &target_type, string_key, index_text)
 }
 
 pub(super) fn resolve_subscript_type_from_target_type(
@@ -244,8 +279,25 @@ pub(super) fn resolve_subscript_type_from_target_type(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<String> {
+    resolve_subscript_type_from_target_semantic_type(
+        node,
+        nodes,
+        &lower_type_text_or_name(target_type),
+        string_key,
+        index_text,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_subscript_type_from_target_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &SemanticType,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_subscript_type_from_target_type_with_context(
+    resolve_subscript_type_from_target_semantic_type_with_context(
         &context,
         node,
         nodes,
@@ -255,6 +307,10 @@ pub(super) fn resolve_subscript_type_from_target_type(
     )
 }
 
+#[allow(
+    dead_code,
+    reason = "string-returning contextual subscript helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_subscript_type_from_target_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -263,16 +319,39 @@ pub(super) fn resolve_subscript_type_from_target_type_with_context(
     string_key: Option<&str>,
     index_text: Option<&str>,
 ) -> Option<String> {
+    resolve_subscript_type_from_target_semantic_type_with_context(
+        context,
+        node,
+        nodes,
+        &lower_type_text_or_name(target_type),
+        string_key,
+        index_text,
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_subscript_type_from_target_semantic_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    target_type: &SemanticType,
+    string_key: Option<&str>,
+    index_text: Option<&str>,
+) -> Option<SemanticType> {
     if let Some(key) = string_key
-        && let Some(shape) =
-            resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, target_type)
+        && let Some(shape) = resolve_known_typed_dict_shape_from_type_with_context(
+            context,
+            node,
+            nodes,
+            &render_semantic_type(target_type),
+        )
     {
         return typed_dict_known_or_extra_field(&shape, key)
-            .map(|field| field.value_type().to_owned());
+            .map(|field| lower_type_text_or_name(field.value_type()));
     }
 
-    let normalized_target = normalize_type_text(target_type);
-    if let Some((head, args)) = split_generic_type(&normalized_target) {
+    if let Some((head, args)) = target_type.generic_parts() {
+        let expanded_args = expanded_tuple_shape_semantic_args(args);
         return match head {
             "dict" | "Mapping" | "typing.Mapping" | "collections.abc.Mapping"
                 if args.len() == 2 =>
@@ -284,40 +363,61 @@ pub(super) fn resolve_subscript_type_from_target_type_with_context(
             {
                 Some(args[0].clone())
             }
-            "tuple" if !args.is_empty() => {
-                if args.len() == 2 && args[1] == "..." {
+            "tuple" if !expanded_args.is_empty() => {
+                if args.len() == 2
+                    && matches!(&args[1], SemanticType::Name(name) if name == "...")
+                {
                     return Some(args[0].clone());
                 }
                 index_text
                     .and_then(|index| index.parse::<usize>().ok())
-                    .and_then(|index| args.get(index).cloned())
-                    .or_else(|| Some(join_type_candidates(args)))
+                    .and_then(|index| expanded_args.get(index).cloned())
+                    .or_else(|| Some(join_semantic_type_candidates(expanded_args)))
             }
-            _ => resolve_nominal_getitem_return_type(node, nodes, &normalized_target),
+            _ => resolve_nominal_getitem_return_semantic_type(node, nodes, target_type),
         };
     }
 
-    resolve_nominal_getitem_return_type(node, nodes, &normalized_target)
+    resolve_nominal_getitem_return_semantic_type(node, nodes, target_type)
 }
 
+#[allow(
+    dead_code,
+    reason = "string-returning nominal getitem helpers remain as compatibility bridges during semantic migration"
+)]
 pub(super) fn resolve_nominal_getitem_return_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     owner_type_name: &str,
 ) -> Option<String> {
-    let nominal_owner_name = split_generic_type(owner_type_name)
+    resolve_nominal_getitem_return_semantic_type(
+        node,
+        nodes,
+        &lower_type_text_or_name(owner_type_name),
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_nominal_getitem_return_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    owner_type: &SemanticType,
+) -> Option<SemanticType> {
+    let owner_type_name = render_semantic_type(owner_type);
+    let nominal_owner_name = owner_type
+        .generic_parts()
         .map(|(head, _)| head.to_owned())
-        .unwrap_or_else(|| owner_type_name.to_owned());
+        .unwrap_or_else(|| owner_type_name.clone());
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &nominal_owner_name)?;
     let getitem = find_owned_callable_declaration(nodes, class_node, class_decl, "__getitem__")?;
     let return_text = rewrite_imported_typing_aliases(
         node,
         &substitute_self_annotation(
             getitem.detail.split_once("->")?.1.trim(),
-            Some(owner_type_name),
+            Some(&owner_type_name),
         ),
     );
-    normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+    normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
 }
 
 pub(super) fn resolve_direct_return_name_type(signature: &str, value_name: &str) -> Option<String> {
@@ -413,7 +513,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
         .or_else(|| {
             value_method_owner_name.and_then(|owner_name| {
                 value_method_name.and_then(|method_name| {
-                    resolve_direct_method_return_type(
+                    resolve_direct_method_return_semantic_type(
                         node,
                         nodes,
                         signature,
@@ -425,14 +525,13 @@ pub(super) fn resolve_direct_expression_semantic_type(
                         method_name,
                         value_method_through_instance,
                     )
-                    .map(|resolved| lower_type_text_or_name(&resolved))
                 })
             })
         })
         .or_else(|| {
             value_member_owner_name.and_then(|owner_name| {
                 value_member_name.and_then(|member_name| {
-                    resolve_direct_member_reference_type(
+                    resolve_direct_member_reference_semantic_type(
                         node,
                         nodes,
                         signature,
@@ -444,13 +543,12 @@ pub(super) fn resolve_direct_expression_semantic_type(
                         member_name,
                         value_member_through_instance,
                     )
-                    .map(|resolved| lower_type_text_or_name(&resolved))
                 })
             })
         })
         .or_else(|| {
             value_subscript_target.and_then(|target| {
-                resolve_direct_subscript_reference_type(
+                resolve_direct_subscript_reference_semantic_type(
                     node,
                     nodes,
                     signature,
@@ -462,7 +560,6 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     value_subscript_string_key,
                     value_subscript_index,
                 )
-                .map(|resolved| lower_type_text_or_name(&resolved))
             })
         })
         .or_else(|| {
@@ -822,17 +919,31 @@ pub(super) fn resolve_readable_member_type(
     declaration: &Declaration,
     owner_type_name: &str,
 ) -> Option<String> {
+    resolve_readable_member_semantic_type(
+        node,
+        declaration,
+        &lower_type_text_or_name(owner_type_name),
+    )
+    .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_readable_member_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    owner_type: &SemanticType,
+) -> Option<SemanticType> {
+    let owner_type_name = render_semantic_type(owner_type);
     match declaration.kind {
         DeclarationKind::Value => {
             let detail = rewrite_imported_typing_aliases(
                 node,
-                &substitute_self_annotation(&declaration.detail, Some(owner_type_name)),
+                &substitute_self_annotation(&declaration.detail, Some(&owner_type_name)),
             );
-            normalized_direct_return_annotation(&detail).map(normalize_type_text).or_else(|| {
+            normalized_direct_return_annotation(&detail).map(lower_type_text_or_name).or_else(|| {
                 declaration.value_type.as_deref().map(|value| {
-                    normalize_type_text(&rewrite_imported_typing_aliases(
+                    lower_type_text_or_name(&rewrite_imported_typing_aliases(
                         node,
-                        &substitute_self_annotation(value, Some(owner_type_name)),
+                        &substitute_self_annotation(value, Some(&owner_type_name)),
                     ))
                 })
             })
@@ -844,10 +955,10 @@ pub(super) fn resolve_readable_member_type(
                 node,
                 &substitute_self_annotation(
                     declaration.detail.split_once("->")?.1.trim(),
-                    Some(owner_type_name),
+                    Some(&owner_type_name),
                 ),
             );
-            normalized_direct_return_annotation(&return_text).map(normalize_type_text)
+            normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
         }
         _ => None,
     }
@@ -858,10 +969,18 @@ pub(super) fn resolve_member_access_owner_type(
     nodes: &[typepython_graph::ModuleNode],
     access: &typepython_binding::MemberAccessSite,
 ) -> Option<String> {
+    resolve_member_access_owner_semantic_type(node, nodes, access)
+        .map(|resolved| render_semantic_type(&resolved))
+}
+
+pub(super) fn resolve_member_access_owner_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    access: &typepython_binding::MemberAccessSite,
+) -> Option<SemanticType> {
     if access.through_instance {
-        resolve_direct_callable_return_type(node, nodes, &access.owner_name)
-            .map(|return_type| normalize_type_text(&return_type))
-            .or_else(|| Some(access.owner_name.clone()))
+        resolve_direct_callable_return_semantic_type(node, nodes, &access.owner_name)
+            .or_else(|| Some(SemanticType::Name(access.owner_name.clone())))
     } else {
         resolve_direct_name_reference_type(
             node,
@@ -873,7 +992,8 @@ pub(super) fn resolve_member_access_owner_type(
             access.line,
             &access.owner_name,
         )
-        .or_else(|| Some(access.owner_name.clone()))
+        .map(|resolved| lower_type_text_or_name(&resolved))
+        .or_else(|| Some(SemanticType::Name(access.owner_name.clone())))
     }
 }
 
