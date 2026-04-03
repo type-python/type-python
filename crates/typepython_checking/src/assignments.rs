@@ -786,7 +786,7 @@ fn resolve_augmented_assignment_result_semantic_type(
     value: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
     let left = direct_expr_metadata_for_known_type(left_type);
-    resolve_direct_binop_type(
+    resolve_direct_binop_semantic_type(
         node,
         nodes,
         signature,
@@ -797,7 +797,6 @@ fn resolve_augmented_assignment_result_semantic_type(
         Some(value),
         operator.filter(|operator| !operator.is_empty()),
     )
-    .map(|resolved| lower_type_text_or_name(&resolved))
     .or_else(|| {
         resolve_assignment_expression_semantic_type(
             node,
