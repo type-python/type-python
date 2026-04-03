@@ -313,23 +313,27 @@ pub(super) fn callable_assignment_result(
     expected: &str,
 ) -> Option<Option<Diagnostic>> {
     let (expected_params, expected_return) = parse_callable_annotation(expected)?;
+    let expected_params = expected_params.map(|params| {
+        params.into_iter().map(|param| lower_type_text_or_name(&param)).collect::<Vec<_>>()
+    });
+    let expected_return = lower_type_text_or_name(&expected_return);
     let (actual_params, actual_return) =
-        resolve_callable_assignment_signature(node, nodes, assignment)?;
+        resolve_callable_assignment_semantic_signature(node, nodes, assignment)?;
 
     let params_match = expected_params.as_ref().is_none_or(|expected_params| {
         expected_params.len() == actual_params.len()
             && expected_params.iter().zip(actual_params.iter()).all(
                 |(expected_param, actual_param)| {
-                    direct_type_is_assignable(node, nodes, expected_param, actual_param)
+                    semantic_type_is_assignable(node, nodes, expected_param, actual_param)
                 },
             )
     });
 
-    let matches =
-        params_match && direct_type_is_assignable(node, nodes, &expected_return, &actual_return);
+    let matches = params_match
+        && semantic_type_is_assignable(node, nodes, &expected_return, &actual_return);
 
     Some((!matches).then(|| {
-        let actual_signature = format!("({})->{}", actual_params.join(","), actual_return);
+        let actual_signature = format_semantic_assignment_signature(&actual_params, &actual_return);
         Diagnostic::error(
             "TPY4001",
             match (&assignment.owner_type_name, &assignment.owner_name) {
@@ -362,14 +366,29 @@ pub(super) fn callable_assignment_result(
     }))
 }
 
-pub(super) fn resolve_callable_assignment_signature(
+fn format_semantic_assignment_signature(
+    param_types: &[SemanticType],
+    return_type: &SemanticType,
+) -> String {
+    format!(
+        "({})->{}",
+        param_types
+            .iter()
+            .map(render_semantic_type)
+            .collect::<Vec<_>>()
+            .join(","),
+        render_semantic_type(return_type)
+    )
+}
+
+pub(super) fn resolve_callable_assignment_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     assignment: &typepython_binding::AssignmentSite,
-) -> Option<(Vec<String>, String)> {
+) -> Option<(Vec<SemanticType>, SemanticType)> {
     if let Some(lambda) = assignment.value_lambda.as_deref() {
         let expected = normalized_assignment_annotation(assignment.annotation.as_deref()?)?;
-        return resolve_contextual_lambda_callable_signature(
+        return resolve_contextual_lambda_callable_semantic_signature(
             node,
             nodes,
             assignment.owner_name.as_deref(),
@@ -383,14 +402,18 @@ pub(super) fn resolve_callable_assignment_signature(
 
     if let Some(value_name) = assignment.value_name.as_deref() {
         let function = resolve_direct_function(node, nodes, value_name)?;
-        let actual_params = direct_param_types(&function.detail).unwrap_or_default();
-        let actual_return = resolve_direct_callable_return_type(node, nodes, value_name)?;
+        let actual_params = direct_param_types(&function.detail)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|param| lower_type_text_or_name(&param))
+            .collect::<Vec<_>>();
+        let actual_return = resolve_direct_callable_return_semantic_type(node, nodes, value_name)?;
         return Some((actual_params, actual_return));
     }
 
     let owner_name = assignment.value_member_owner_name.as_deref()?;
     let member_name = assignment.value_member_name.as_deref()?;
-    resolve_direct_member_callable_signature(
+    resolve_direct_member_callable_semantic_signature(
         node,
         nodes,
         assignment.owner_name.as_deref(),
@@ -406,7 +429,7 @@ pub(super) fn resolve_callable_assignment_signature(
     clippy::too_many_arguments,
     reason = "member callable resolution needs the current scope and member context"
 )]
-pub(super) fn resolve_direct_member_callable_signature(
+pub(super) fn resolve_direct_member_callable_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     current_owner_name: Option<&str>,
@@ -415,13 +438,12 @@ pub(super) fn resolve_direct_member_callable_signature(
     owner_name: &str,
     member_name: &str,
     through_instance: bool,
-) -> Option<(Vec<String>, String)> {
-    let owner_type_name = if through_instance {
-        resolve_direct_callable_return_type(node, nodes, owner_name)
-            .map(|return_type| normalize_type_text(&return_type))
-            .or_else(|| Some(owner_name.to_owned()))
+) -> Option<(Vec<SemanticType>, SemanticType)> {
+    let owner_type = if through_instance {
+        resolve_direct_callable_return_semantic_type(node, nodes, owner_name)
+            .or_else(|| Some(lower_type_text_or_name(owner_name)))
     } else {
-        resolve_direct_name_reference_type(
+        resolve_direct_name_reference_semantic_type(
             node,
             nodes,
             None,
@@ -431,8 +453,9 @@ pub(super) fn resolve_direct_member_callable_signature(
             current_line,
             owner_name,
         )
-        .or_else(|| Some(owner_name.to_owned()))
+        .or_else(|| Some(lower_type_text_or_name(owner_name)))
     }?;
+    let owner_type_name = render_semantic_type(&owner_type);
 
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
     let method =
@@ -444,13 +467,24 @@ pub(super) fn resolve_direct_member_callable_signature(
         resolve_decorated_callable_annotation_for_declaration(class_node, nodes, method)
     {
         let (params, return_type) = parse_callable_annotation(&callable_annotation)?;
-        (params.unwrap_or_default(), return_type)
+        (
+            params
+                .unwrap_or_default()
+                .into_iter()
+                .map(|param| lower_type_text_or_name(&param))
+                .collect(),
+            lower_type_text_or_name(&return_type),
+        )
     } else {
         let method_signature = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(&method.detail, Some(&owner_type_name)),
         );
-        let actual_params = direct_param_types(&method_signature).unwrap_or_default();
+        let actual_params = direct_param_types(&method_signature)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|param| lower_type_text_or_name(&param))
+            .collect::<Vec<_>>();
         let return_text = rewrite_imported_typing_aliases(
             node,
             &substitute_self_annotation(
@@ -458,8 +492,8 @@ pub(super) fn resolve_direct_member_callable_signature(
                 Some(&owner_type_name),
             ),
         );
-        let actual_return =
-            normalized_direct_return_annotation(&return_text).map(normalize_type_text)?;
+        let actual_return = normalized_direct_return_annotation(&return_text)
+            .map(lower_type_text_or_name)?;
         (actual_params, actual_return)
     };
     let bound_params = match method.method_kind.unwrap_or(typepython_syntax::MethodKind::Instance) {
