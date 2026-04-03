@@ -436,32 +436,6 @@ pub(super) fn resolve_instantiated_callable_return_semantic_type_from_declaratio
     ))
 }
 
-#[allow(dead_code)]
-pub(super) fn resolve_instantiated_callable_return_type_id_from_declaration(
-    store: &mut TypeStore,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    declaration: &Declaration,
-    call: &typepython_binding::CallSite,
-) -> Option<TypeId> {
-    resolve_instantiated_callable_return_semantic_type_from_declaration(node, nodes, declaration, call)
-        .map(|return_type| store.intern(return_type))
-}
-
-#[allow(
-    dead_code,
-    reason = "string-returning callable return helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_direct_callable_return_type_for_line(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    callee: &str,
-    line: usize,
-) -> Option<String> {
-    resolve_direct_callable_return_semantic_type_for_line(node, nodes, callee, line)
-        .map(|return_type| render_semantic_type(&return_type))
-}
-
 pub(super) fn resolve_direct_callable_return_semantic_type_for_line(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

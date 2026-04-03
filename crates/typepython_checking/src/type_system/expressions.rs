@@ -215,29 +215,6 @@ pub(super) fn resolve_subscript_type_from_target_semantic_type(
     )
 }
 
-#[allow(
-    dead_code,
-    reason = "string-returning contextual subscript helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_subscript_type_from_target_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    target_type: &str,
-    string_key: Option<&str>,
-    index_text: Option<&str>,
-) -> Option<String> {
-    resolve_subscript_type_from_target_semantic_type_with_context(
-        context,
-        node,
-        nodes,
-        &lower_type_text_or_name(target_type),
-        string_key,
-        index_text,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
 pub(super) fn resolve_subscript_type_from_target_semantic_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -287,23 +264,6 @@ pub(super) fn resolve_subscript_type_from_target_semantic_type_with_context(
     }
 
     resolve_nominal_getitem_return_semantic_type(node, nodes, target_type)
-}
-
-#[allow(
-    dead_code,
-    reason = "string-returning nominal getitem helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_nominal_getitem_return_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    owner_type_name: &str,
-) -> Option<String> {
-    resolve_nominal_getitem_return_semantic_type(
-        node,
-        nodes,
-        &lower_type_text_or_name(owner_type_name),
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 pub(super) fn resolve_nominal_getitem_return_semantic_type(
@@ -956,39 +916,6 @@ pub(super) fn find_owned_callable_declarations_with_visited<'a>(
     }
 
     Vec::new()
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "unnarrowed name resolution needs scope and source-position context"
-)]
-#[allow(
-    dead_code,
-    reason = "string-returning unnarrowed name helpers remain as compatibility bridges during semantic migration"
-)]
-pub(super) fn resolve_unnarrowed_name_reference_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    value_name: &str,
-) -> Option<String> {
-    resolve_unnarrowed_name_reference_semantic_type_with_context(
-        context,
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        value_name,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 #[expect(
