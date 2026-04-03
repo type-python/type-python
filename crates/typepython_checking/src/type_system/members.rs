@@ -319,19 +319,8 @@ pub(super) fn unwrap_yield_from_type(text: &str) -> Option<String> {
     None
 }
 
-pub(super) fn unwrap_for_iterable_type(text: &str) -> Option<String> {
-    let text = normalize_type_text(text);
-
-    if text == "range" {
-        return Some(String::from("int"));
-    }
-
-    unwrap_yield_from_type(&text)
-}
-
-pub(super) fn unwrap_for_iterable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
+pub(super) fn unwrap_yield_from_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
     match ty.strip_annotated() {
-        SemanticType::Name(name) if name == "range" => Some(SemanticType::Name(String::from("int"))),
         SemanticType::Generic { head, args }
             if matches!(
                 head.as_str(),
@@ -359,8 +348,27 @@ pub(super) fn unwrap_for_iterable_semantic_type(ty: &SemanticType) -> Option<Sem
             }
             expanded.first().cloned()
         }
-        _ => unwrap_for_iterable_type(&render_semantic_type(ty))
+        _ => unwrap_yield_from_type(&render_semantic_type(ty))
             .map(|inner| lower_type_text_or_name(&inner)),
+    }
+}
+
+pub(super) fn unwrap_for_iterable_type(text: &str) -> Option<String> {
+    let text = normalize_type_text(text);
+
+    if text == "range" {
+        return Some(String::from("int"));
+    }
+
+    unwrap_yield_from_type(&text)
+}
+
+pub(super) fn unwrap_for_iterable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
+    match ty.strip_annotated() {
+        SemanticType::Name(name) if name == "range" => Some(SemanticType::Name(String::from("int"))),
+        _ => unwrap_yield_from_semantic_type(ty)
+            .or_else(|| unwrap_for_iterable_type(&render_semantic_type(ty))
+                .map(|inner| lower_type_text_or_name(&inner))),
     }
 }
 

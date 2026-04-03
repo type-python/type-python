@@ -1254,9 +1254,7 @@ pub(super) fn direct_yield_type_diagnostics(
         };
 
         let actual = if yield_site.is_yield_from {
-            unwrap_yield_from_type(&render_semantic_type(&actual))
-                .map(|resolved| lower_type_text_or_name(&resolved))
-                .unwrap_or(actual)
+            unwrap_yield_from_semantic_type(&actual).unwrap_or(actual)
         } else {
             actual
         };
@@ -1337,8 +1335,7 @@ pub(super) fn for_loop_target_diagnostics(
                 None,
                 None,
             )?;
-            let element_type =
-                lower_type_text_or_name(&unwrap_for_iterable_type(&render_semantic_type(&iter_type))?);
+            let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
             let tuple_elements = unpacked_fixed_tuple_semantic_elements(&element_type)?;
 
             (tuple_elements.len() != for_loop.target_names.len()).then(|| {
