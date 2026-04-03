@@ -603,7 +603,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
                 ]));
             }
             Some(join_semantic_type_candidates(vec![
-                resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node,
                     nodes,
                     signature,
@@ -611,9 +611,8 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     current_owner_type_name,
                     current_line,
                     true_branch,
-                    &BTreeMap::new(),
                 )?,
-                resolve_direct_expression_semantic_type_from_metadata_with_bindings(
+                resolve_direct_expression_semantic_type_from_metadata(
                     node,
                     nodes,
                     signature,
@@ -621,7 +620,6 @@ pub(super) fn resolve_direct_expression_semantic_type(
                     current_owner_type_name,
                     current_line,
                     false_branch,
-                    &BTreeMap::new(),
                 )?,
             ]))
         })
