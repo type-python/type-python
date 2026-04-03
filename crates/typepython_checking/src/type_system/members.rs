@@ -183,34 +183,25 @@ pub(super) fn resolve_direct_method_return_semantic_type(
     normalized_direct_return_annotation(&return_text).map(lower_type_text_or_name)
 }
 
-pub(super) fn unwrap_awaitable_type(text: &str) -> Option<String> {
-    let text = normalize_type_text(text);
-    if let Some(inner) = text.strip_prefix("Awaitable[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(normalize_type_text(inner));
-    }
-    if let Some(inner) = text.strip_prefix("Coroutine[").and_then(|inner| inner.strip_suffix(']')) {
-        let args = split_top_level_type_args(inner);
-        if args.len() == 3 {
-            return Some(normalize_type_text(args[2]));
-        }
-    }
-    None
-}
-
 pub(super) fn unwrap_awaitable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
     match ty.strip_annotated() {
         SemanticType::Generic { head, args }
-            if matches!(head.as_str(), "Awaitable" | "typing.Awaitable") && args.len() == 1 =>
+            if matches!(
+                head.as_str(),
+                "Awaitable" | "typing.Awaitable" | "collections.abc.Awaitable"
+            ) && args.len() == 1 =>
         {
             Some(args[0].clone())
         }
         SemanticType::Generic { head, args }
-            if matches!(head.as_str(), "Coroutine" | "typing.Coroutine") && args.len() == 3 =>
+            if matches!(
+                head.as_str(),
+                "Coroutine" | "typing.Coroutine" | "collections.abc.Coroutine"
+            ) && args.len() == 3 =>
         {
             Some(args[2].clone())
         }
-        _ => unwrap_awaitable_type(&render_semantic_type(ty))
-            .map(|inner| lower_type_text_or_name(&inner)),
+        _ => None,
     }
 }
 
@@ -221,38 +212,6 @@ pub(super) fn unwrap_generator_yield_type(text: &str) -> Option<String> {
     args.first().map(|arg| normalize_type_text(arg))
 }
 
-pub(super) fn unwrap_yield_from_type(text: &str) -> Option<String> {
-    let text = normalize_type_text(text);
-
-    if let Some(inner) = text.strip_prefix("Generator[").and_then(|inner| inner.strip_suffix(']')) {
-        let args = split_top_level_type_args(inner);
-        return args.first().map(|arg| normalize_type_text(arg));
-    }
-
-    if let Some(inner) = text.strip_prefix("Iterator[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(normalize_type_text(inner));
-    }
-
-    if let Some(inner) = text.strip_prefix("Iterable[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(normalize_type_text(inner));
-    }
-
-    if let Some(inner) = text.strip_prefix("Sequence[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some(normalize_type_text(inner));
-    }
-
-    for head in ["list", "tuple", "set", "frozenset"] {
-        if let Some(inner) =
-            text.strip_prefix(&format!("{head}[")).and_then(|inner| inner.strip_suffix(']'))
-        {
-            let args = split_top_level_type_args(inner);
-            return args.first().map(|arg| normalize_type_text(arg));
-        }
-    }
-
-    None
-}
-
 pub(super) fn unwrap_yield_from_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
     match ty.strip_annotated() {
         SemanticType::Generic { head, args }
@@ -260,12 +219,16 @@ pub(super) fn unwrap_yield_from_semantic_type(ty: &SemanticType) -> Option<Seman
                 head.as_str(),
                 "Generator"
                     | "typing.Generator"
+                    | "collections.abc.Generator"
                     | "Iterator"
                     | "typing.Iterator"
+                    | "collections.abc.Iterator"
                     | "Iterable"
                     | "typing.Iterable"
+                    | "collections.abc.Iterable"
                     | "Sequence"
                     | "typing.Sequence"
+                    | "collections.abc.Sequence"
                     | "list"
                     | "set"
                     | "frozenset"
@@ -282,27 +245,14 @@ pub(super) fn unwrap_yield_from_semantic_type(ty: &SemanticType) -> Option<Seman
             }
             expanded.first().cloned()
         }
-        _ => unwrap_yield_from_type(&render_semantic_type(ty))
-            .map(|inner| lower_type_text_or_name(&inner)),
+        _ => None,
     }
-}
-
-pub(super) fn unwrap_for_iterable_type(text: &str) -> Option<String> {
-    let text = normalize_type_text(text);
-
-    if text == "range" {
-        return Some(String::from("int"));
-    }
-
-    unwrap_yield_from_type(&text)
 }
 
 pub(super) fn unwrap_for_iterable_semantic_type(ty: &SemanticType) -> Option<SemanticType> {
     match ty.strip_annotated() {
         SemanticType::Name(name) if name == "range" => Some(SemanticType::Name(String::from("int"))),
-        _ => unwrap_yield_from_semantic_type(ty)
-            .or_else(|| unwrap_for_iterable_type(&render_semantic_type(ty))
-                .map(|inner| lower_type_text_or_name(&inner))),
+        _ => unwrap_yield_from_semantic_type(ty),
     }
 }
 
