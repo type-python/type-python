@@ -371,15 +371,6 @@ pub(super) fn decorated_function_return_type_from_callable_annotation(
     parse_callable_annotation(callable_annotation).map(|(_, return_type)| return_type)
 }
 
-pub(super) fn resolve_direct_callable_return_type<'a>(
-    node: &'a typepython_graph::ModuleNode,
-    nodes: &'a [typepython_graph::ModuleNode],
-    callee: &str,
-) -> Option<String> {
-    resolve_direct_callable_return_semantic_type(node, nodes, callee)
-        .map(|return_type| render_semantic_type(&return_type))
-}
-
 pub(super) fn resolve_direct_callable_return_semantic_type<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],

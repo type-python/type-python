@@ -777,35 +777,6 @@ pub(super) fn resolve_direct_name_reference_semantic_type(
     clippy::too_many_arguments,
     reason = "name reference resolution needs scope and source-position context"
 )]
-pub(super) fn resolve_direct_name_reference_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    value_name: &str,
-) -> Option<String> {
-    resolve_direct_name_reference_semantic_type_with_context(
-        context,
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        value_name,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "name reference resolution needs scope and source-position context"
-)]
 pub(super) fn resolve_direct_name_reference_semantic_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,

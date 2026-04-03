@@ -374,12 +374,12 @@ pub(super) fn resolve_method_call_owner_type(
     call: &typepython_binding::MethodCallSite,
 ) -> Option<String> {
     if call.through_instance {
-        return resolve_direct_callable_return_type(node, nodes, &call.owner_name)
-            .map(|return_type| normalize_type_text(&return_type))
+        return resolve_direct_callable_return_semantic_type(node, nodes, &call.owner_name)
+            .map(|return_type| render_semantic_type(&return_type))
             .or_else(|| Some(call.owner_name.clone()));
     }
 
-    resolve_direct_name_reference_type_with_context(
+    resolve_direct_name_reference_semantic_type_with_context(
         context,
         node,
         nodes,
@@ -390,6 +390,6 @@ pub(super) fn resolve_method_call_owner_type(
         call.line,
         &call.owner_name,
     )
+    .map(|resolved| render_semantic_type(&resolved))
     .or_else(|| Some(call.owner_name.clone()))
 }
-

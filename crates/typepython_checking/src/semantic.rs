@@ -748,7 +748,7 @@ pub(super) fn name_is_unknown_boundary(
         return false;
     }
 
-    if resolve_direct_name_reference_type_with_context(
+    if resolve_direct_name_reference_semantic_type_with_context(
         context,
         node,
         nodes,
@@ -759,7 +759,9 @@ pub(super) fn name_is_unknown_boundary(
         usize::MAX,
         name,
     )
-    .is_some_and(|resolved| normalize_type_text(&resolved) == "unknown")
+    .is_some_and(|resolved| {
+        matches!(resolved.strip_annotated(), SemanticType::Name(name) if name == "unknown")
+    })
     {
         return true;
     }
