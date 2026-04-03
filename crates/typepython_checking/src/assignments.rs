@@ -26,7 +26,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
         }
 
         let assignment_metadata = direct_expr_metadata_from_assignment_site(assignment);
-        if let Some(result) = resolve_contextual_typed_dict_literal_type_with_context(
+        if let Some(result) = resolve_contextual_typed_dict_literal_semantic_type_with_context(
             context,
             node,
             nodes,
@@ -36,7 +36,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
         ) {
             diagnostics.extend(result.diagnostics);
             let expected_type = lower_type_text_or_name(&expected);
-            let actual_type = lower_type_text_or_name(&result.actual_type);
+            let actual_type = result.actual_type;
             if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
@@ -71,7 +71,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         }
 
-        if let Some(result) = resolve_contextual_collection_literal_type_with_context(
+        if let Some(result) = resolve_contextual_collection_literal_semantic_type_with_context(
             context,
             node,
             nodes,
@@ -81,7 +81,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
         ) {
             diagnostics.extend(result.diagnostics);
             let expected_type = lower_type_text_or_name(&expected);
-            let actual_type = lower_type_text_or_name(&result.actual_type);
+            let actual_type = result.actual_type;
             if !semantic_type_is_assignable(node, nodes, &expected_type, &actual_type) {
                 diagnostics.push(Diagnostic::error(
                     "TPY4001",
@@ -773,10 +773,6 @@ fn resolve_assignment_expression_semantic_type(
     )
 }
 
-fn contextual_result_semantic_type(result: &ContextualCallArgResult) -> SemanticType {
-    lower_type_text_or_name(&result.actual_type)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn resolve_augmented_assignment_result_semantic_type(
     node: &typepython_graph::ModuleNode,
@@ -911,7 +907,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
             match site.kind {
                 typepython_syntax::TypedDictMutationKind::Assignment => {
                     let value = site.value.as_ref()?;
-                    let contextual = resolve_contextual_call_arg_type_with_context(
+                    let contextual = resolve_contextual_call_arg_semantic_type_with_context(
                         context,
                         node,
                         nodes,
@@ -924,7 +920,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                             return Some(diagnostic);
                         }
                         let expected = lower_type_text_or_name(field.value_type());
-                        let actual = contextual_result_semantic_type(&result);
+                        let actual = result.actual_type;
                         if !semantic_type_matches(node, nodes, &expected, &actual) {
                             return Some(
                                 Diagnostic::error(
@@ -1181,7 +1177,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::TypedDictMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type_with_context(
+                            let contextual = resolve_contextual_call_arg_semantic_type_with_context(
                                 context,
                                 node,
                                 nodes,
@@ -1193,7 +1189,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual_value = contextual_result_semantic_type(&result);
+                                let actual_value = result.actual_type;
                                 if !semantic_type_is_assignable(
                                     node,
                                     nodes,
@@ -1650,7 +1646,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type_with_context(
+                            let contextual = resolve_contextual_call_arg_semantic_type_with_context(
                                 context,
                                 node,
                                 nodes,
@@ -1662,7 +1658,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual = contextual_result_semantic_type(&result);
+                                let actual = result.actual_type;
                                 return (!semantic_type_matches(node, nodes, &expected, &actual))
                                     .then(|| {
                                     Diagnostic::error(
@@ -1757,7 +1753,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type_with_context(
+                            let contextual = resolve_contextual_call_arg_semantic_type_with_context(
                                 context,
                                 node,
                                 nodes,
@@ -1769,7 +1765,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 if let Some(diagnostic) = result.diagnostics.pop() {
                                     return Some(diagnostic);
                                 }
-                                let actual = contextual_result_semantic_type(&result);
+                                let actual = result.actual_type;
                                 return (!semantic_type_matches(node, nodes, &expected, &actual))
                                     .then(|| {
                                     Diagnostic::error(

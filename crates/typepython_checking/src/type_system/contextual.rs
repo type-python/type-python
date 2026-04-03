@@ -692,28 +692,6 @@ pub(super) fn resolve_contextual_typed_dict_literal_type(
     })
 }
 
-pub(super) fn resolve_contextual_typed_dict_literal_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-    expected: Option<&str>,
-) -> Option<ContextualTypedDictLiteralResult> {
-    resolve_contextual_typed_dict_literal_semantic_type_with_context(
-        context,
-        node,
-        nodes,
-        current_line,
-        metadata,
-        expected,
-    )
-    .map(|result| ContextualTypedDictLiteralResult {
-        actual_type: render_semantic_type(&result.actual_type),
-        diagnostics: result.diagnostics,
-    })
-}
-
 pub(super) fn resolve_contextual_typed_dict_literal_semantic_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -755,28 +733,6 @@ pub(super) fn resolve_contextual_collection_literal_type(
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_contextual_collection_literal_semantic_type_with_context(
         &context,
-        node,
-        nodes,
-        current_line,
-        metadata,
-        expected,
-    )
-    .map(|result| ContextualCallArgResult {
-        actual_type: render_semantic_type(&result.actual_type),
-        diagnostics: result.diagnostics,
-    })
-}
-
-pub(super) fn resolve_contextual_collection_literal_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-    expected: Option<&str>,
-) -> Option<ContextualCallArgResult> {
-    resolve_contextual_collection_literal_semantic_type_with_context(
-        context,
         node,
         nodes,
         current_line,
@@ -1020,28 +976,6 @@ pub(super) fn resolve_contextual_call_arg_type(
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     resolve_contextual_call_arg_semantic_type_with_context(
         &context,
-        node,
-        nodes,
-        current_line,
-        metadata,
-        expected,
-    )
-    .map(|result| ContextualCallArgResult {
-        actual_type: render_semantic_type(&result.actual_type),
-        diagnostics: result.diagnostics,
-    })
-}
-
-pub(super) fn resolve_contextual_call_arg_type_with_context(
-    context: &CheckerContext<'_>,
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-    expected: Option<&str>,
-) -> Option<ContextualCallArgResult> {
-    resolve_contextual_call_arg_semantic_type_with_context(
-        context,
         node,
         nodes,
         current_line,
