@@ -509,39 +509,6 @@ pub(super) fn resolve_direct_member_callable_semantic_signature(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_contextual_lambda_callable_signature(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    lambda: &typepython_syntax::LambdaMetadata,
-    expected: Option<&str>,
-    outer_bindings: Option<&BTreeMap<String, String>>,
-) -> Option<(Vec<String>, String)> {
-    let semantic_outer_bindings = outer_bindings.map(|bindings| {
-        bindings
-            .iter()
-            .map(|(name, ty)| (name.clone(), lower_type_text_or_name(ty)))
-            .collect::<BTreeMap<_, _>>()
-    });
-    let (param_types, return_type) = resolve_contextual_lambda_callable_semantic_signature(
-        node,
-        nodes,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        lambda,
-        expected,
-        semantic_outer_bindings.as_ref(),
-    )?;
-    Some((
-        param_types.into_iter().map(|ty| render_semantic_type(&ty)).collect(),
-        render_semantic_type(&return_type),
-    ))
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_contextual_lambda_callable_semantic_signature(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

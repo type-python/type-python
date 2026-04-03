@@ -173,93 +173,6 @@ pub(super) fn latest_delete_invalidation_line(
         .map(|site| site.line)
 }
 
-pub(super) fn apply_guard_condition(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    base_type: &str,
-    value_name: &str,
-    guard: &typepython_binding::GuardConditionSite,
-    branch_true: bool,
-) -> String {
-    match guard {
-        typepython_binding::GuardConditionSite::IsNone { name, negated } if name == value_name => {
-            match (branch_true, negated) {
-                (true, false) | (false, true) => String::from("None"),
-                (false, false) | (true, true) => {
-                    remove_none_branch(base_type).unwrap_or_else(|| normalize_type_text(base_type))
-                }
-            }
-        }
-        typepython_binding::GuardConditionSite::IsInstance { name, types }
-            if name == value_name =>
-        {
-            if branch_true {
-                narrow_to_instance_types(base_type, types)
-            } else {
-                remove_instance_types(base_type, types)
-            }
-        }
-        typepython_binding::GuardConditionSite::PredicateCall { name, callee }
-            if name == value_name =>
-        {
-            apply_predicate_guard(node, nodes, base_type, callee, branch_true)
-        }
-        typepython_binding::GuardConditionSite::TruthyName { name } if name == value_name => {
-            apply_truthy_narrowing(base_type, branch_true)
-        }
-        typepython_binding::GuardConditionSite::Not(inner) => {
-            apply_guard_condition(node, nodes, base_type, value_name, inner, !branch_true)
-        }
-        typepython_binding::GuardConditionSite::And(parts) => {
-            if branch_true {
-                parts.iter().fold(normalize_type_text(base_type), |current, part| {
-                    apply_guard_condition(node, nodes, &current, value_name, part, true)
-                })
-            } else {
-                let mut joined = Vec::new();
-                let mut current_true = normalize_type_text(base_type);
-                for part in parts {
-                    joined.push(apply_guard_condition(
-                        node,
-                        nodes,
-                        &current_true,
-                        value_name,
-                        part,
-                        false,
-                    ));
-                    current_true =
-                        apply_guard_condition(node, nodes, &current_true, value_name, part, true);
-                }
-                join_type_candidates(joined)
-            }
-        }
-        typepython_binding::GuardConditionSite::Or(parts) => {
-            if branch_true {
-                let mut joined = Vec::new();
-                let mut current_false = normalize_type_text(base_type);
-                for part in parts {
-                    joined.push(apply_guard_condition(
-                        node,
-                        nodes,
-                        &current_false,
-                        value_name,
-                        part,
-                        true,
-                    ));
-                    current_false =
-                        apply_guard_condition(node, nodes, &current_false, value_name, part, false);
-                }
-                join_type_candidates(joined)
-            } else {
-                parts.iter().fold(normalize_type_text(base_type), |current, part| {
-                    apply_guard_condition(node, nodes, &current, value_name, part, false)
-                })
-            }
-        }
-        _ => normalize_type_text(base_type),
-    }
-}
-
 pub(super) fn apply_guard_condition_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -360,25 +273,6 @@ pub(super) fn apply_guard_condition_semantic(
     }
 }
 
-pub(super) fn apply_predicate_guard(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    base_type: &str,
-    callee: &str,
-    branch_true: bool,
-) -> String {
-    let Some((kind, guarded_type)) = parse_guard_return_kind(node, nodes, callee) else {
-        return normalize_type_text(base_type);
-    };
-    match (kind.as_str(), branch_true) {
-        ("TypeGuard", true) | ("TypeIs", true) => {
-            narrow_to_instance_types(base_type, &[guarded_type])
-        }
-        ("TypeIs", false) => remove_instance_types(base_type, &[guarded_type]),
-        _ => normalize_type_text(base_type),
-    }
-}
-
 pub(super) fn apply_predicate_guard_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -398,24 +292,6 @@ pub(super) fn apply_predicate_guard_semantic(
     }
 }
 
-pub(super) fn parse_guard_return_kind(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    callee: &str,
-) -> Option<(String, String)> {
-    let function = resolve_direct_function(node, nodes, callee)?;
-    let returns = normalized_direct_return_annotation(function.detail.split_once("->")?.1.trim())?;
-    if let Some(inner) =
-        returns.strip_prefix("TypeGuard[").and_then(|inner| inner.strip_suffix(']'))
-    {
-        return Some((String::from("TypeGuard"), normalize_type_text(inner)));
-    }
-    if let Some(inner) = returns.strip_prefix("TypeIs[").and_then(|inner| inner.strip_suffix(']')) {
-        return Some((String::from("TypeIs"), normalize_type_text(inner)));
-    }
-    None
-}
-
 pub(super) fn parse_guard_return_kind_semantic(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -432,22 +308,6 @@ pub(super) fn parse_guard_return_kind_semantic(
         return Some((String::from("TypeIs"), lower_type_text_or_name(inner)));
     }
     None
-}
-
-pub(super) fn narrow_to_instance_types(base_type: &str, types: &[String]) -> String {
-    let normalized_types = types.iter().map(|ty| normalize_type_text(ty)).collect::<Vec<_>>();
-    if let Some(branches) = union_branches(base_type) {
-        let kept = branches
-            .into_iter()
-            .filter(|branch| {
-                normalized_types.iter().any(|ty| direct_type_matches_normalized_plain(ty, branch))
-            })
-            .collect::<Vec<_>>();
-        if !kept.is_empty() {
-            return join_union_branches(kept);
-        }
-    }
-    join_union_branches(normalized_types)
 }
 
 pub(super) fn narrow_to_instance_semantic_types(
@@ -470,21 +330,6 @@ pub(super) fn narrow_to_instance_semantic_types(
         }
     }
     join_semantic_type_candidates(types.to_vec())
-}
-
-pub(super) fn remove_instance_types(base_type: &str, types: &[String]) -> String {
-    let normalized = normalize_type_text(base_type);
-    let Some(branches) = union_branches(&normalized) else {
-        return normalized;
-    };
-    let normalized_types = types.iter().map(|ty| normalize_type_text(ty)).collect::<Vec<_>>();
-    let kept = branches
-        .into_iter()
-        .filter(|branch| {
-            !normalized_types.iter().any(|ty| direct_type_matches_normalized_plain(ty, branch))
-        })
-        .collect::<Vec<_>>();
-    if kept.is_empty() { normalized } else { join_union_branches(kept) }
 }
 
 pub(super) fn remove_instance_semantic_types(
@@ -547,32 +392,6 @@ pub(super) fn join_type_candidates(candidates: Vec<String>) -> String {
     join_union_branches(branches)
 }
 
-pub(super) fn apply_truthy_narrowing(base_type: &str, branch_true: bool) -> String {
-    let normalized = normalize_type_text(base_type);
-    if normalized == "Literal[True]" {
-        return if branch_true { normalized } else { String::from("Literal[False]") };
-    }
-    if normalized == "Literal[False]" {
-        return if branch_true { String::from("Literal[True]") } else { normalized };
-    }
-    if normalized == "bool" {
-        return normalized;
-    }
-
-    let Some(branches) = union_branches(&normalized) else {
-        return normalized;
-    };
-    let non_none =
-        branches.iter().filter(|branch| branch.as_str() != "None").cloned().collect::<Vec<_>>();
-    if branches.iter().any(|branch| branch == "None")
-        && non_none.iter().all(|branch| is_definitely_truthy_branch(branch))
-    {
-        return if branch_true { join_union_branches(non_none) } else { String::from("None") };
-    }
-
-    normalized
-}
-
 pub(super) fn apply_truthy_semantic_narrowing(
     base_type: &SemanticType,
     branch_true: bool,
@@ -616,22 +435,6 @@ pub(super) fn apply_truthy_semantic_narrowing(
     }
 
     base_type.clone()
-}
-
-pub(super) fn is_definitely_truthy_branch(branch: &str) -> bool {
-    let normalized = normalize_type_text(branch);
-    if normalized == "Literal[True]" {
-        return true;
-    }
-    if normalized == "Literal[False]" || normalized == "None" || normalized == "bool" {
-        return false;
-    }
-    matches!(
-        normalized.as_str(),
-        "bytes" | "str" | "int" | "float" | "complex" | "list" | "dict" | "set" | "tuple"
-    )
-    .then_some(false)
-    .unwrap_or(true)
 }
 
 pub(super) fn semantic_is_definitely_truthy_branch(branch: &SemanticType) -> bool {
@@ -1268,27 +1071,6 @@ pub(super) fn collect_guard_binding_names(
     }
 }
 
-pub(super) fn apply_guard_to_local_bindings(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    local_bindings: &BTreeMap<String, String>,
-    guard: &typepython_binding::GuardConditionSite,
-    branch_true: bool,
-) -> BTreeMap<String, String> {
-    let mut narrowed = local_bindings.clone();
-    let mut names = BTreeSet::new();
-    collect_guard_binding_names(guard, &mut names);
-    for name in names {
-        if let Some(base_type) = local_bindings.get(&name) {
-            narrowed.insert(
-                name.clone(),
-                apply_guard_condition(node, nodes, base_type, &name, guard, branch_true),
-            );
-        }
-    }
-    narrowed
-}
-
 pub(super) fn apply_guard_to_local_semantic_bindings(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -1308,37 +1090,6 @@ pub(super) fn apply_guard_to_local_semantic_bindings(
         }
     }
     narrowed
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_guard_scope_bindings(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    guard: &typepython_binding::GuardConditionSite,
-) -> BTreeMap<String, String> {
-    let mut bindings = BTreeMap::new();
-    let mut names = BTreeSet::new();
-    collect_guard_binding_names(guard, &mut names);
-    for name in names {
-        if let Some(base_type) = resolve_direct_name_reference_type(
-            node,
-            nodes,
-            signature,
-            exclude_name,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            &name,
-        ) {
-            bindings.insert(name, base_type);
-        }
-    }
-    bindings
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1370,204 +1121,6 @@ pub(super) fn resolve_guard_scope_semantic_bindings(
         }
     }
     bindings
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_direct_expression_type_from_metadata_with_bindings(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    metadata: &typepython_syntax::DirectExprMetadata,
-    local_bindings: &BTreeMap<String, String>,
-) -> Option<String> {
-    if let Some(lambda) = metadata.value_lambda.as_deref() {
-        let (param_types, return_type) = resolve_contextual_lambda_callable_signature(
-            node,
-            nodes,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            lambda,
-            signature,
-            Some(local_bindings),
-        )?;
-        return Some(format_callable_annotation(&param_types, &return_type));
-    }
-    if let Some(value_name) = metadata.value_name.as_deref()
-        && let Some(bound_type) = local_bindings.get(value_name)
-    {
-        return Some(bound_type.clone());
-    }
-    if let Some(target) = metadata.value_subscript_target.as_deref() {
-        let target_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            target,
-            local_bindings,
-        )?;
-        return resolve_subscript_type_from_target_type(
-            node,
-            nodes,
-            &target_type,
-            metadata.value_subscript_string_key.as_deref(),
-            metadata.value_subscript_index.as_deref(),
-        );
-    }
-    if let (Some(true_branch), Some(false_branch)) =
-        (metadata.value_if_true.as_deref(), metadata.value_if_false.as_deref())
-    {
-        if let Some(guard) = metadata.value_if_guard.as_ref() {
-            let guard = guard_to_site(guard);
-            let true_bindings =
-                apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, true);
-            let false_bindings =
-                apply_guard_to_local_bindings(node, nodes, local_bindings, &guard, false);
-            let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                true_branch,
-                &true_bindings,
-            )?;
-            let false_type = resolve_direct_expression_type_from_metadata_with_bindings(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                false_branch,
-                &false_bindings,
-            )?;
-            return Some(join_branch_types(vec![true_type, false_type]));
-        }
-        let true_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            true_branch,
-            local_bindings,
-        )?;
-        let false_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            false_branch,
-            local_bindings,
-        )?;
-        return Some(join_branch_types(vec![true_type, false_type]));
-    }
-    if let (Some(left), Some(right), Some(operator)) = (
-        metadata.value_bool_left.as_deref(),
-        metadata.value_bool_right.as_deref(),
-        metadata.value_binop_operator.as_deref(),
-    ) && (operator == "and" || operator == "or")
-    {
-        let left_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            left,
-            local_bindings,
-        )?;
-        let right_type = if let Some(guard) = metadata.value_if_guard.as_ref() {
-            let narrowed_bindings = apply_guard_to_local_bindings(
-                node,
-                nodes,
-                local_bindings,
-                &guard_to_site(guard),
-                operator == "and",
-            );
-            resolve_direct_expression_type_from_metadata_with_bindings(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                right,
-                &narrowed_bindings,
-            )?
-        } else {
-            resolve_direct_expression_type_from_metadata_with_bindings(
-                node,
-                nodes,
-                signature,
-                current_owner_name,
-                current_owner_type_name,
-                current_line,
-                right,
-                local_bindings,
-            )?
-        };
-        return Some(join_branch_types(vec![left_type, right_type]));
-    }
-    if let (Some(left), Some(right), Some(operator)) = (
-        metadata.value_binop_left.as_deref(),
-        metadata.value_binop_right.as_deref(),
-        metadata.value_binop_operator.as_deref(),
-    ) {
-        let left_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            left,
-            local_bindings,
-        )?;
-        let right_type = resolve_direct_expression_type_from_metadata_with_bindings(
-            node,
-            nodes,
-            signature,
-            current_owner_name,
-            current_owner_type_name,
-            current_line,
-            right,
-            local_bindings,
-        )?;
-        if let Some(result) = match operator {
-            "+" => resolve_plus_result_type(&left_type, &right_type),
-            "-" | "*" | "/" | "//" | "%"
-                if is_numeric_type(&left_type) && is_numeric_type(&right_type) =>
-            {
-                Some(join_numeric_result_type(&left_type, &right_type))
-            }
-            _ => None,
-        } {
-            return Some(result);
-        }
-    }
-
-    resolve_direct_expression_type_from_metadata(
-        node,
-        nodes,
-        signature,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        metadata,
-    )
 }
 
 #[allow(clippy::too_many_arguments)]

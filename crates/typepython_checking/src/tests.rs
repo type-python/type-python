@@ -1013,19 +1013,6 @@ fn semantic_name_resolution_preserves_callable_shapes() {
         .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("Callable[[str], int]"))
     );
-    assert_eq!(
-        super::resolve_direct_name_reference_type(
-            node,
-            &graph.nodes,
-            None,
-            None,
-            None,
-            None,
-            1,
-            "greet",
-        ),
-        Some(String::from("Callable[[str], int]"))
-    );
 
     let _ = fs::remove_dir_all(&root);
 }

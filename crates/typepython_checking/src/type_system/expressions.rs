@@ -66,7 +66,7 @@ pub(super) fn resolve_direct_expression_type(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn resolve_direct_boolop_type(
+pub(super) fn resolve_direct_boolop_semantic_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
@@ -77,12 +77,12 @@ pub(super) fn resolve_direct_boolop_type(
     right: Option<&typepython_syntax::DirectExprMetadata>,
     guard: Option<&typepython_binding::GuardConditionSite>,
     operator: Option<&str>,
-) -> Option<String> {
+) -> Option<SemanticType> {
     let operator = operator?;
     if operator != "and" && operator != "or" {
         return None;
     }
-    let left_type = resolve_direct_expression_type_from_metadata(
+    let left_type = resolve_direct_expression_semantic_type_from_metadata(
         node,
         nodes,
         signature,
@@ -92,7 +92,7 @@ pub(super) fn resolve_direct_boolop_type(
         left?,
     )?;
     let right_type = if let Some(guard) = guard {
-        let base_bindings = resolve_guard_scope_bindings(
+        let base_bindings = resolve_guard_scope_semantic_bindings(
             node,
             nodes,
             signature,
@@ -102,9 +102,14 @@ pub(super) fn resolve_direct_boolop_type(
             current_line,
             guard,
         );
-        let narrowed_bindings =
-            apply_guard_to_local_bindings(node, nodes, &base_bindings, guard, operator == "and");
-        resolve_direct_expression_type_from_metadata_with_bindings(
+        let narrowed_bindings = apply_guard_to_local_semantic_bindings(
+            node,
+            nodes,
+            &base_bindings,
+            guard,
+            operator == "and",
+        );
+        resolve_direct_expression_semantic_type_from_metadata_with_bindings(
             node,
             nodes,
             signature,
@@ -115,7 +120,7 @@ pub(super) fn resolve_direct_boolop_type(
             &narrowed_bindings,
         )?
     } else {
-        resolve_direct_expression_type_from_metadata(
+        resolve_direct_expression_semantic_type_from_metadata(
             node,
             nodes,
             signature,
@@ -125,7 +130,7 @@ pub(super) fn resolve_direct_boolop_type(
             right?,
         )?
     };
-    Some(join_branch_types(vec![left_type, right_type]))
+    Some(join_semantic_type_candidates(vec![left_type, right_type]))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -270,23 +275,6 @@ pub(super) fn resolve_direct_subscript_reference_semantic_type(
         target,
     )?);
     resolve_subscript_type_from_target_semantic_type(node, nodes, &target_type, string_key, index_text)
-}
-
-pub(super) fn resolve_subscript_type_from_target_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    target_type: &str,
-    string_key: Option<&str>,
-    index_text: Option<&str>,
-) -> Option<String> {
-    resolve_subscript_type_from_target_semantic_type(
-        node,
-        nodes,
-        &lower_type_text_or_name(target_type),
-        string_key,
-        index_text,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 pub(super) fn resolve_subscript_type_from_target_semantic_type(
@@ -632,7 +620,7 @@ pub(super) fn resolve_direct_expression_semantic_type(
             ]))
         })
         .or_else(|| {
-            resolve_direct_boolop_type(
+            resolve_direct_boolop_semantic_type(
                 node,
                 nodes,
                 signature,
@@ -644,7 +632,6 @@ pub(super) fn resolve_direct_expression_semantic_type(
                 value_if_guard,
                 value_binop_operator,
             )
-            .map(|resolved| lower_type_text_or_name(&resolved))
         })
         .or_else(|| {
             resolve_direct_binop_type(
@@ -735,33 +722,6 @@ pub(super) fn resolve_direct_expression_type_id(
         value_binop_operator,
     )
     .map(|ty| store.intern(ty))
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "name reference resolution needs scope and source-position context"
-)]
-pub(super) fn resolve_direct_name_reference_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    signature: Option<&str>,
-    exclude_name: Option<&str>,
-    current_owner_name: Option<&str>,
-    current_owner_type_name: Option<&str>,
-    current_line: usize,
-    value_name: &str,
-) -> Option<String> {
-    resolve_direct_name_reference_semantic_type(
-        node,
-        nodes,
-        signature,
-        exclude_name,
-        current_owner_name,
-        current_owner_type_name,
-        current_line,
-        value_name,
-    )
-    .map(|resolved| render_semantic_type(&resolved))
 }
 
 #[expect(

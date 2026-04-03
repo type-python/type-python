@@ -34,12 +34,6 @@ pub(super) fn direct_type_is_assignable(
     )
 }
 
-pub(super) fn direct_type_matches_normalized_plain(expected: &str, actual: &str) -> bool {
-    let expected = lower_type_text_or_name(expected);
-    let actual = lower_type_text_or_name(actual);
-    direct_semantic_type_matches_plain(&expected, &actual)
-}
-
 pub(super) fn semantic_type_matches(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -147,49 +141,6 @@ fn direct_semantic_type_matches(
 
     visiting.remove(&key);
     result
-}
-
-fn direct_semantic_type_matches_plain(expected: &SemanticType, actual: &SemanticType) -> bool {
-    let expected = expected.strip_annotated();
-    let actual = actual.strip_annotated();
-
-    if expected == actual || is_any_semantic_type(expected) || is_any_semantic_type(actual) {
-        return true;
-    }
-
-    if let Some(branches) = semantic_union_branches(expected) {
-        if let Some(actual_branches) = semantic_union_branches(actual) {
-            return actual_branches.iter().all(|actual_branch| {
-                branches.iter().any(|expected_branch| {
-                    direct_semantic_type_matches_plain(expected_branch, actual_branch)
-                })
-            }) && branches.iter().all(|expected_branch| {
-                actual_branches.iter().any(|actual_branch| {
-                    direct_semantic_type_matches_plain(expected_branch, actual_branch)
-                })
-            });
-        }
-        return branches
-            .into_iter()
-            .any(|branch| direct_semantic_type_matches_plain(&branch, actual));
-    }
-
-    if semantic_enum_member_owner_name(actual)
-        .is_some_and(|owner| owner == render_semantic_type(expected))
-    {
-        return true;
-    }
-
-    match (expected.generic_parts(), actual.generic_parts()) {
-        (Some((expected_head, expected_args)), Some((actual_head, actual_args)))
-            if expected_head == actual_head && expected_args.len() == actual_args.len() =>
-        {
-            expected_args.iter().zip(actual_args.iter()).all(|(expected_arg, actual_arg)| {
-                direct_semantic_type_matches_plain(expected_arg, actual_arg)
-            })
-        }
-        _ => false,
-    }
 }
 
 fn direct_semantic_type_is_assignable(
