@@ -20,7 +20,7 @@ use std::{
     fs,
 };
 
-use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind};
+use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::{DiagnosticLevel, ImportFallback};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
@@ -128,7 +128,7 @@ type DirectMethodSignaturesByName =
     BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>;
 
 #[derive(Debug, Default)]
-struct ModuleSourceFacts {
+struct FallbackModuleSourceFacts {
     source_loaded: bool,
     source_text: Option<String>,
     typed_dict_class_metadata: Option<BTreeMap<String, typepython_syntax::TypedDictClassMetadata>>,
@@ -142,7 +142,7 @@ struct ModuleSourceFacts {
         Option<Option<typepython_syntax::DataclassTransformModuleInfo>>,
 }
 
-impl ModuleSourceFacts {
+impl FallbackModuleSourceFacts {
     fn source_text<'a>(
         &'a mut self,
         node: &typepython_graph::ModuleNode,
@@ -163,19 +163,23 @@ impl ModuleSourceFacts {
 
 #[derive(Debug, Default)]
 struct CheckerSourceFactsProvider<'a> {
-    modules: RefCell<BTreeMap<String, ModuleSourceFacts>>,
+    bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+    modules: RefCell<BTreeMap<String, FallbackModuleSourceFacts>>,
     source_overrides: Option<&'a BTreeMap<String, String>>,
 }
 
 impl<'a> CheckerSourceFactsProvider<'a> {
-    fn new(source_overrides: Option<&'a BTreeMap<String, String>>) -> Self {
-        Self { modules: RefCell::new(BTreeMap::new()), source_overrides }
+    fn new(
+        source_overrides: Option<&'a BTreeMap<String, String>>,
+        bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+    ) -> Self {
+        Self { bound_surface_facts, modules: RefCell::new(BTreeMap::new()), source_overrides }
     }
 
     fn with_module_facts<T>(
         &self,
         node: &typepython_graph::ModuleNode,
-        action: impl FnOnce(&mut ModuleSourceFacts) -> T,
+        action: impl FnOnce(&mut FallbackModuleSourceFacts) -> T,
     ) -> T {
         let cache_key = node.module_path.display().to_string();
         let mut modules = self.modules.borrow_mut();
@@ -183,10 +187,20 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         action(facts)
     }
 
+    fn bound_surface_facts(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<&typepython_binding::ModuleSurfaceFacts> {
+        self.bound_surface_facts.and_then(|facts| facts.get(&node.module_key))
+    }
+
     fn typed_dict_class_metadata(
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> TypedDictClassMetadataByName {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return bound.typed_dict_class_metadata.clone();
+        }
         if node.module_path.to_string_lossy().starts_with('<') {
             return BTreeMap::new();
         }
@@ -212,6 +226,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> DirectFunctionSignaturesByName {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return bound.direct_function_signatures.clone();
+        }
         if node.module_path.to_string_lossy().starts_with('<') {
             return BTreeMap::new();
         }
@@ -237,6 +254,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> DirectMethodSignaturesByName {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return bound.direct_method_signatures.clone();
+        }
         if node.module_path.to_string_lossy().starts_with('<') {
             return BTreeMap::new();
         }
@@ -273,6 +293,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return Some(bound.decorator_transform_module_info.clone());
+        }
         if node.module_path.to_string_lossy().starts_with('<') {
             return None;
         }
@@ -294,6 +317,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         &self,
         node: &typepython_graph::ModuleNode,
     ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return Some(bound.dataclass_transform_module_info.clone());
+        }
         if node.module_path.to_string_lossy().starts_with('<') {
             return None;
         }
@@ -325,10 +351,19 @@ impl<'a> CheckerContext<'a> {
         import_fallback: ImportFallback,
         source_overrides: Option<&'a BTreeMap<String, String>>,
     ) -> Self {
+        Self::new_with_bound_surface_facts(nodes, import_fallback, source_overrides, None)
+    }
+
+    fn new_with_bound_surface_facts(
+        nodes: &'a [typepython_graph::ModuleNode],
+        import_fallback: ImportFallback,
+        source_overrides: Option<&'a BTreeMap<String, String>>,
+        bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+    ) -> Self {
         Self {
             nodes,
             import_fallback,
-            source_facts: CheckerSourceFactsProvider::new(source_overrides),
+            source_facts: CheckerSourceFactsProvider::new(source_overrides, bound_surface_facts),
         }
     }
 
@@ -375,6 +410,15 @@ impl<'a> CheckerContext<'a> {
     }
 }
 
+fn binding_surface_facts_by_module(
+    bindings: &[BindingTable],
+) -> BTreeMap<String, typepython_binding::ModuleSurfaceFacts> {
+    bindings
+        .iter()
+        .map(|binding| (binding.module_key.clone(), binding.surface_facts.clone()))
+        .collect()
+}
+
 /// Runs the checker over the module graph.
 #[must_use]
 pub fn check(graph: &ModuleGraph) -> CheckResult {
@@ -414,6 +458,39 @@ pub fn check_with_options(
 #[must_use]
 #[expect(
     clippy::too_many_arguments,
+    reason = "mirrors the public checker option surface while threading binding metadata"
+)]
+pub fn check_with_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> CheckResult {
+    let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
+    let diagnostics = check_modules_with_binding_metadata(
+        graph,
+        bindings,
+        &module_keys,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+    .diagnostics();
+    CheckResult { diagnostics }
+}
+
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while adding LSP source overrides"
 )]
 pub fn check_with_source_overrides(
@@ -427,8 +504,9 @@ pub fn check_with_source_overrides(
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> CheckResult {
     let module_keys = graph.nodes.iter().map(|node| node.module_key.clone()).collect();
-    let diagnostics = check_modules_with_source_overrides(
+    let diagnostics = check_modules_internal(
         graph,
+        None,
         &module_keys,
         require_explicit_overrides,
         enable_sealed_exhaustiveness,
@@ -458,7 +536,74 @@ pub fn check_modules_with_source_overrides(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> ModuleCheckResult {
-    let context = CheckerContext::new(&graph.nodes, import_fallback, source_overrides);
+    check_modules_internal(
+        graph,
+        None,
+        module_keys,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+}
+
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors the public checker option surface while threading binding metadata and subset recheck inputs"
+)]
+pub fn check_modules_with_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    module_keys: &BTreeSet<String>,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> ModuleCheckResult {
+    let bound_surface_facts = binding_surface_facts_by_module(bindings);
+    check_modules_internal(
+        graph,
+        Some(&bound_surface_facts),
+        module_keys,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shared implementation for checker option surfaces with optional bound metadata"
+)]
+fn check_modules_internal(
+    graph: &ModuleGraph,
+    bound_surface_facts: Option<&BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+    module_keys: &BTreeSet<String>,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> ModuleCheckResult {
+    let context = CheckerContext::new_with_bound_surface_facts(
+        &graph.nodes,
+        import_fallback,
+        source_overrides,
+        bound_surface_facts,
+    );
     let mut diagnostics_by_module = BTreeMap::new();
     let options = CheckerPassOptions {
         require_explicit_overrides,
@@ -549,7 +694,10 @@ fn collect_node_assignment_diagnostics(
     diagnostics: &mut DiagnosticReport,
     node: &typepython_graph::ModuleNode,
 ) {
-    push_diagnostics(diagnostics, annotated_assignment_type_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        annotated_assignment_type_diagnostics(context, node, context.nodes),
+    );
     push_diagnostics(
         diagnostics,
         simple_name_augmented_assignment_diagnostics(node, context.nodes),
@@ -568,10 +716,16 @@ fn collect_node_assignment_diagnostics(
     );
     push_diagnostics(
         diagnostics,
-        frozen_dataclass_transform_mutation_diagnostics(node, context.nodes),
+        frozen_dataclass_transform_mutation_diagnostics(context, node, context.nodes),
     );
-    push_diagnostics(diagnostics, frozen_plain_dataclass_mutation_diagnostics(node, context.nodes));
-    push_diagnostics(diagnostics, attribute_assignment_type_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        frozen_plain_dataclass_mutation_diagnostics(context, node, context.nodes),
+    );
+    push_diagnostics(
+        diagnostics,
+        attribute_assignment_type_diagnostics(context, node, context.nodes),
+    );
 }
 
 fn collect_node_declaration_diagnostics(

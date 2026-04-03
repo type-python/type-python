@@ -1,6 +1,6 @@
 //! Symbol binding boundary for TypePython.
 
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use typepython_syntax::{MethodKind, SourceKind, SyntaxStatement, SyntaxTree};
 
@@ -10,6 +10,7 @@ pub struct BindingTable {
     pub module_path: PathBuf,
     pub module_key: String,
     pub module_kind: SourceKind,
+    pub surface_facts: ModuleSurfaceFacts,
     pub declarations: Vec<Declaration>,
     pub calls: Vec<CallSite>,
     pub method_calls: Vec<MethodCallSite>,
@@ -32,6 +33,7 @@ impl Default for BindingTable {
             module_path: PathBuf::new(),
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: Vec::new(),
             calls: Vec::new(),
             method_calls: Vec::new(),
@@ -48,6 +50,18 @@ impl Default for BindingTable {
             assignments: Vec::new(),
         }
     }
+}
+
+/// Source-derived module facts reused by later phases without reopening files.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleSurfaceFacts {
+    pub typed_dict_class_metadata: BTreeMap<String, typepython_syntax::TypedDictClassMetadata>,
+    pub direct_function_signatures:
+        BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>,
+    pub direct_method_signatures:
+        BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>,
+    pub decorator_transform_module_info: typepython_syntax::DecoratorTransformModuleInfo,
+    pub dataclass_transform_module_info: typepython_syntax::DataclassTransformModuleInfo,
 }
 
 /// Direct function call captured from a bound module.
@@ -414,6 +428,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
         module_path: tree.source.path.clone(),
         module_key: tree.source.logical_module.clone(),
         module_kind: tree.source.kind,
+        surface_facts: bind_module_surface_facts(tree),
         declarations: tree.statements.iter().flat_map(bind_statement).collect(),
         calls: tree
             .statements
@@ -763,6 +778,41 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 _ => Vec::new(),
             })
             .collect(),
+    }
+}
+
+fn bind_module_surface_facts(tree: &SyntaxTree) -> ModuleSurfaceFacts {
+    let collected = typepython_syntax::collect_module_surface_metadata(&tree.source.text);
+    let typed_dict_class_metadata = collected
+        .typed_dict_classes
+        .into_iter()
+        .map(|metadata| (metadata.name.clone(), metadata))
+        .collect();
+    let direct_function_signatures = collected
+        .direct_function_signatures
+        .into_iter()
+        .map(|signature| (signature.name, signature.params))
+        .collect();
+    let direct_method_signatures = collected
+        .direct_method_signatures
+        .into_iter()
+        .map(|signature| {
+            let params = match signature.method_kind {
+                MethodKind::Static | MethodKind::Property => signature.params,
+                MethodKind::Instance | MethodKind::Class | MethodKind::PropertySetter => {
+                    signature.params.into_iter().skip(1).collect()
+                }
+            };
+            ((signature.owner_type_name, signature.name), params)
+        })
+        .collect();
+
+    ModuleSurfaceFacts {
+        typed_dict_class_metadata,
+        direct_function_signatures,
+        direct_method_signatures,
+        decorator_transform_module_info: collected.decorator_transform,
+        dataclass_transform_module_info: collected.dataclass_transform,
     }
 }
 

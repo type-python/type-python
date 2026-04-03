@@ -6,7 +6,12 @@ pub(super) fn direct_call_arity_diagnostics(
     node.calls
         .iter()
         .filter_map(|call| {
-            if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
+            if let Some(shape) = resolve_synthesized_dataclass_class_shape_with_context(
+                context,
+                node,
+                nodes,
+                &call.callee,
+            )
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_arity_diagnostic(node, call, &shape);
@@ -121,7 +126,12 @@ pub(super) fn direct_call_type_diagnostics(
         .iter()
         .flat_map(|call| {
             if let Some(shape) =
-                resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
+                resolve_synthesized_dataclass_class_shape_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &call.callee,
+                )
                 && !shape.has_explicit_init
             {
                 return dataclass_transform_constructor_type_diagnostics(
@@ -212,7 +222,12 @@ pub(super) fn direct_call_keyword_diagnostics(
     let mut diagnostics = Vec::new();
 
     for call in &node.calls {
-        if let Some(shape) = resolve_synthesized_dataclass_class_shape(node, nodes, &call.callee)
+        if let Some(shape) = resolve_synthesized_dataclass_class_shape_with_context(
+            context,
+            node,
+            nodes,
+            &call.callee,
+        )
             && !shape.has_explicit_init
         {
             diagnostics
@@ -1370,4 +1385,3 @@ pub(super) fn callable_params_are_unresolved(params: &str) -> bool {
 
     true
 }
-

@@ -3,7 +3,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
+    process::{Command as ProcessCommand, ExitCode},
 };
 
 use anyhow::{Context, Result};
@@ -20,9 +20,10 @@ use zip::ZipArchive;
 
 use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
+use crate::pipeline::run_pipeline;
 use crate::{
-    RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
-    resolve_python_executable,
+    CommandSummary, RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
+    exit_code, load_project, print_summary, resolve_python_executable,
 };
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,57 @@ pub(crate) fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerify
             .map(|path| SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path }),
     );
     artifacts
+}
+
+pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
+    let config = load_project(args.run.project.as_ref())?;
+    let snapshot = run_pipeline(&config)?;
+    let diagnostics = if snapshot.diagnostics.has_errors() {
+        snapshot.diagnostics.clone()
+    } else {
+        let mut diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+        if !diagnostics.has_errors() {
+            diagnostics.diagnostics.extend(
+                verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
+            );
+        }
+        if !diagnostics.has_errors() {
+            diagnostics.diagnostics.extend(
+                verify_packaged_artifacts(
+                    &config,
+                    &snapshot.emit_plan,
+                    &supplied_verify_artifacts(&args),
+                )
+                .diagnostics,
+            );
+        }
+        diagnostics
+    };
+
+    let supplied_artifact_count = args.wheels.len() + args.sdists.len();
+    let mut notes = vec![String::from(
+        "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
+    )];
+    if supplied_artifact_count > 0 {
+        notes.push(format!(
+            "verified {} supplied wheel/sdist artifact(s) against the authoritative build tree",
+            supplied_artifact_count
+        ));
+    }
+
+    let summary = CommandSummary {
+        command: String::from("verify"),
+        config_path: config.config_path.display().to_string(),
+        config_source: config.source,
+        discovered_sources: snapshot.discovered_sources,
+        lowered_modules: snapshot.lowered_modules.len(),
+        planned_artifacts: snapshot.emit_plan.len(),
+        tracked_modules: snapshot.tracked_modules,
+        notes,
+    };
+
+    print_summary(args.run.format, &summary, &diagnostics)?;
+    Ok(exit_code(&diagnostics))
 }
 
 pub(crate) fn verify_build_artifacts(

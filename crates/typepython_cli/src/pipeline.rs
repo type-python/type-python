@@ -9,7 +9,8 @@ use anyhow::{Context, Result};
 use notify::RecursiveMode;
 use typepython_binding::bind;
 use typepython_checking::{
-    check_with_options, collect_effective_callable_stub_overrides, collect_synthetic_method_stubs,
+    check_with_binding_metadata, collect_effective_callable_stub_overrides,
+    collect_synthetic_method_stubs,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -23,15 +24,12 @@ use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_sna
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
-use crate::cli::{CleanArgs, OutputFormat, RunArgs, VerifyArgs};
+use crate::cli::{CleanArgs, OutputFormat, RunArgs};
 use crate::discovery::{
     DiscoveredSource, bundled_stdlib_snapshot_identity, bundled_stdlib_sources,
     collect_source_paths, external_resolution_sources,
 };
-use crate::verification::{
-    public_surface_completeness_diagnostics, supplied_verify_artifacts, verify_build_artifacts,
-    verify_packaged_artifacts, verify_runtime_public_name_parity,
-};
+use crate::verification::{public_surface_completeness_diagnostics, verify_build_artifacts};
 use crate::{
     CommandSummary, bytecode_path_for, exit_code, load_project, print_summary,
     remove_dir_if_exists, resolve_python_executable,
@@ -95,57 +93,6 @@ pub(crate) fn run_lsp(args: RunArgs) -> Result<ExitCode> {
     }
     typepython_lsp::serve(&config)?;
     Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
-    let config = load_project(args.run.project.as_ref())?;
-    let snapshot = run_pipeline(&config)?;
-    let diagnostics = if snapshot.diagnostics.has_errors() {
-        snapshot.diagnostics.clone()
-    } else {
-        let mut diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
-        if !diagnostics.has_errors() {
-            diagnostics.diagnostics.extend(
-                verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
-            );
-        }
-        if !diagnostics.has_errors() {
-            diagnostics.diagnostics.extend(
-                verify_packaged_artifacts(
-                    &config,
-                    &snapshot.emit_plan,
-                    &supplied_verify_artifacts(&args),
-                )
-                .diagnostics,
-            );
-        }
-        diagnostics
-    };
-
-    let supplied_artifact_count = args.wheels.len() + args.sdists.len();
-    let mut notes = vec![String::from(
-        "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
-    )];
-    if supplied_artifact_count > 0 {
-        notes.push(format!(
-            "verified {} supplied wheel/sdist artifact(s) against the authoritative build tree",
-            supplied_artifact_count
-        ));
-    }
-
-    let summary = CommandSummary {
-        command: String::from("verify"),
-        config_path: config.config_path.display().to_string(),
-        config_source: config.source,
-        discovered_sources: snapshot.discovered_sources,
-        lowered_modules: snapshot.lowered_modules.len(),
-        planned_artifacts: snapshot.emit_plan.len(),
-        tracked_modules: snapshot.tracked_modules,
-        notes,
-    };
-
-    print_summary(args.run.format, &summary, &diagnostics)?;
-    Ok(exit_code(&diagnostics))
 }
 
 pub(crate) fn run_build_like_command(
@@ -634,14 +581,16 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
 
     let bindings: Vec<_> = all_syntax_trees.iter().map(bind).collect();
     let graph = build(&bindings);
-    let mut diagnostics = check_with_options(
+    let mut diagnostics = check_with_binding_metadata(
         &graph,
+        &bindings,
         config.config.typing.require_explicit_overrides,
         config.config.typing.enable_sealed_exhaustiveness,
         config.config.typing.report_deprecated,
         config.config.typing.strict,
         config.config.typing.warn_unsafe,
         config.config.typing.imports,
+        None,
     )
     .diagnostics;
     diagnostics = filter_project_diagnostics(&diagnostics, &source_paths);

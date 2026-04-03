@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
+use typepython_binding::{
+    BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind, ModuleSurfaceFacts,
+};
 use typepython_graph::build;
 use typepython_syntax::SourceKind;
 
@@ -10,6 +12,7 @@ fn make_binding(index: usize, package: &str) -> BindingTable {
         module_path: PathBuf::from(format!("src/{package}/mod_{index}.tpy")),
         module_key: format!("{package}.mod_{index}"),
         module_kind: SourceKind::TypePython,
+        surface_facts: ModuleSurfaceFacts::default(),
         declarations: vec![
             Declaration {
                 name: format!("Func{index}"),

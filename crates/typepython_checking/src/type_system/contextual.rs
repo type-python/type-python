@@ -53,15 +53,6 @@ pub(super) fn resolve_direct_expression_type_from_metadata(
     )
 }
 
-pub(super) fn resolve_known_typed_dict_shape_from_type(
-    node: &typepython_graph::ModuleNode,
-    nodes: &[typepython_graph::ModuleNode],
-    type_name: &str,
-) -> Option<TypedDictShape> {
-    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-    resolve_known_typed_dict_shape_from_type_with_context(&context, node, nodes, type_name)
-}
-
 pub(super) fn resolve_known_typed_dict_shape_from_type_with_context(
     context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
@@ -240,12 +231,6 @@ pub(super) fn load_typed_dict_class_metadata(
     node: &typepython_graph::ModuleNode,
 ) -> BTreeMap<String, typepython_syntax::TypedDictClassMetadata> {
     context.load_typed_dict_class_metadata(node)
-}
-
-pub(super) fn load_dataclass_transform_module_info(
-    node: &typepython_graph::ModuleNode,
-) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
-    load_dataclass_transform_module_info_uncached(node)
 }
 
 pub(super) fn parse_typed_dict_extra_items(
@@ -589,6 +574,7 @@ pub(super) fn resolve_contextual_typed_dict_literal_type_with_context(
     let target_shape =
         resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, &actual_type)?;
     let diagnostics = typed_dict_literal_entry_diagnostics(
+        context,
         node,
         nodes,
         current_line,
@@ -608,6 +594,25 @@ pub(super) fn resolve_contextual_collection_literal_type(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_contextual_collection_literal_type_with_context(
+        &context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+pub(super) fn resolve_contextual_collection_literal_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgResult> {
     let expected = normalize_type_text(expected?);
     let (head, args) = split_generic_type(&expected)?;
     match head {
@@ -616,7 +621,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type(
+                    resolve_contextual_call_arg_type_with_context(
+                        context,
                         node,
                         nodes,
                         current_line,
@@ -633,7 +639,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type(
+                        resolve_contextual_call_arg_type_with_context(
+                            context,
                             node,
                             nodes,
                             current_line,
@@ -666,7 +673,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
             let diagnostics = elements
                 .iter()
                 .flat_map(|element| {
-                    resolve_contextual_call_arg_type(
+                    resolve_contextual_call_arg_type_with_context(
+                        context,
                         node,
                         nodes,
                         current_line,
@@ -683,7 +691,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                 elements
                     .iter()
                     .map(|element| {
-                        resolve_contextual_call_arg_type(
+                        resolve_contextual_call_arg_type_with_context(
+                            context,
                             node,
                             nodes,
                             current_line,
@@ -723,7 +732,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                         .key_value
                         .as_deref()
                         .and_then(|key| {
-                            resolve_contextual_call_arg_type(
+                            resolve_contextual_call_arg_type_with_context(
+                                context,
                                 node,
                                 nodes,
                                 current_line,
@@ -733,7 +743,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                         })
                         .into_iter()
                         .flat_map(|result| result.diagnostics);
-                    let value_diagnostics = resolve_contextual_call_arg_type(
+                    let value_diagnostics = resolve_contextual_call_arg_type_with_context(
+                        context,
                         node,
                         nodes,
                         current_line,
@@ -755,7 +766,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                             .key_value
                             .as_deref()
                             .and_then(|key| {
-                                resolve_contextual_call_arg_type(
+                                resolve_contextual_call_arg_type_with_context(
+                                    context,
                                     node,
                                     nodes,
                                     current_line,
@@ -787,7 +799,8 @@ pub(super) fn resolve_contextual_collection_literal_type(
                 entries
                     .iter()
                     .map(|entry| {
-                        resolve_contextual_call_arg_type(
+                        resolve_contextual_call_arg_type_with_context(
+                            context,
                             node,
                             nodes,
                             current_line,
@@ -830,6 +843,25 @@ pub(super) fn resolve_contextual_call_arg_type(
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgResult> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    resolve_contextual_call_arg_type_with_context(
+        &context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
+}
+
+pub(super) fn resolve_contextual_call_arg_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: Option<&str>,
+) -> Option<ContextualCallArgResult> {
     if let Some(actual_type) =
         resolve_contextual_lambda_callable_type(node, nodes, current_line, metadata, expected)
     {
@@ -840,15 +872,27 @@ pub(super) fn resolve_contextual_call_arg_type(
     {
         return Some(ContextualCallArgResult { actual_type, diagnostics: Vec::new() });
     }
-    if let Some(result) =
-        resolve_contextual_typed_dict_literal_type(node, nodes, current_line, metadata, expected)
-    {
+    if let Some(result) = resolve_contextual_typed_dict_literal_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    ) {
         return Some(ContextualCallArgResult {
             actual_type: result.actual_type,
             diagnostics: result.diagnostics,
         });
     }
-    resolve_contextual_collection_literal_type(node, nodes, current_line, metadata, expected)
+    resolve_contextual_collection_literal_type_with_context(
+        context,
+        node,
+        nodes,
+        current_line,
+        metadata,
+        expected,
+    )
 }
 
 pub(super) fn resolve_contextual_named_callable_type(

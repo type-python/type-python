@@ -1,4 +1,4 @@
-use super::{check, check_with_options};
+use super::{check, check_with_binding_metadata, check_with_options};
 use std::{
     fs,
     io::ErrorKind,
@@ -107,6 +107,97 @@ fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> sup
 
     let _ = fs::remove_dir_all(&root);
     result
+}
+
+fn check_virtual_binding_metadata_source(source_text: &str) -> super::CheckResult {
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    let graph = build(std::slice::from_ref(&binding));
+
+    check_with_binding_metadata(
+        &graph,
+        &[binding],
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        None,
+    )
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_typed_dict_facts_without_reading_source_file() {
+    let source_text = "from typing import TypedDict\nclass Config(TypedDict, total=False):\n    name: str\nconfig: Config = {}\n";
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    assert_eq!(
+        binding
+            .surface_facts
+            .typed_dict_class_metadata
+            .get("Config")
+            .and_then(|metadata| metadata.total),
+        Some(false),
+        "binding should preserve TypedDict(total=False) metadata"
+    );
+    let graph = build(std::slice::from_ref(&binding));
+
+    let result = check_with_binding_metadata(
+        &graph,
+        &[binding],
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve TypedDict(total=False) behavior without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_typed_dict_facts_in_contextual_collections() {
+    let result = check_virtual_binding_metadata_source(
+        "from typing import TypedDict\nclass Config(TypedDict, total=False):\n    name: str\nitems: list[Config] = [{}]\n",
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve nested TypedDict(total=False) behavior without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_dataclass_transform_facts_without_reading_source_file() {
+    let result = check_virtual_binding_metadata_source(
+        "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve dataclass-transform constructor facts without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
 }
 
 fn type_relation_node_with_base_child() -> ModuleNode {

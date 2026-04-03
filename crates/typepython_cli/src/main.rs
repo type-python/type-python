@@ -27,8 +27,9 @@ use crate::cli::{Cli, Command, InitArgs, OutputFormat, RunArgs};
 use crate::migration::run_migrate;
 use crate::pipeline::{
     clean_project, collect_watch_event_paths, format_watch_rebuild_note, run_build_like_command,
-    run_lsp, run_verify, run_with_pipeline, watch_targets,
+    run_lsp, run_with_pipeline, watch_targets,
 };
+use crate::verification::run_verify;
 
 const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));

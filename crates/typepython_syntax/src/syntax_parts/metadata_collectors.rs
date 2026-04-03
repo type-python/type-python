@@ -142,27 +142,133 @@ pub fn collect_typed_dict_mutation_sites(source: &str) -> Vec<TypedDictMutationS
 
 #[must_use]
 pub fn collect_typed_dict_class_metadata(source: &str) -> Vec<TypedDictClassMetadata> {
+    collect_module_surface_metadata(source).typed_dict_classes
+}
+
+#[must_use]
+pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
     let normalized = normalize_annotated_lambda_source_lossy(source);
     with_source_line_index(&normalized, || {
         let Ok(parsed) = parse_module(&normalized) else {
-            return Vec::new();
+            return ModuleSurfaceMetadata::default();
         };
 
-        parsed
-            .suite()
-            .iter()
-            .filter_map(|stmt| match stmt {
-                Stmt::ClassDef(class_def) => Some(TypedDictClassMetadata {
-                    name: class_def.name.as_str().to_owned(),
-                    total: class_keyword_static_bool(class_def, "total"),
-                    closed: class_keyword_static_bool(class_def, "closed"),
-                    extra_items: class_keyword_source(&normalized, class_def, "extra_items")
-                        .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
-                    line: offset_to_line_column(&normalized, class_def.range.start().to_usize()).0,
-                }),
-                _ => None,
-            })
-            .collect()
+        let import_bindings = collect_import_bindings(parsed.suite());
+        let mut typed_dict_classes = Vec::new();
+        let mut dataclass_transform_providers = Vec::new();
+        let mut dataclass_transform_classes = Vec::new();
+        let mut direct_function_signatures = Vec::new();
+        let mut direct_method_signatures = Vec::new();
+
+        for stmt in parsed.suite() {
+            match stmt {
+                Stmt::FunctionDef(function) => {
+                    if let Some(metadata) = dataclass_transform_metadata(
+                        &normalized,
+                        &function.decorator_list,
+                        &import_bindings,
+                    ) {
+                        dataclass_transform_providers.push(DataclassTransformProviderSite {
+                            name: function.name.as_str().to_owned(),
+                            metadata,
+                            line: offset_to_line_column(
+                                &normalized,
+                                function.range.start().to_usize(),
+                            )
+                            .0,
+                        });
+                    }
+                    direct_function_signatures.push(DirectFunctionSignatureSite {
+                        name: function.name.as_str().to_owned(),
+                        params: collect_direct_function_param_sites(&normalized, &function.parameters),
+                        line: offset_to_line_column(
+                            &normalized,
+                            function.range.start().to_usize(),
+                        )
+                        .0,
+                    });
+                }
+                Stmt::ClassDef(class_def) => {
+                    typed_dict_classes.push(TypedDictClassMetadata {
+                        name: class_def.name.as_str().to_owned(),
+                        total: class_keyword_static_bool(class_def, "total"),
+                        closed: class_keyword_static_bool(class_def, "closed"),
+                        extra_items: class_keyword_source(&normalized, class_def, "extra_items")
+                            .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
+                        line: offset_to_line_column(
+                            &normalized,
+                            class_def.range.start().to_usize(),
+                        )
+                        .0,
+                    });
+                    if let Some(metadata) = dataclass_transform_metadata(
+                        &normalized,
+                        &class_def.decorator_list,
+                        &import_bindings,
+                    ) {
+                        dataclass_transform_providers.push(DataclassTransformProviderSite {
+                            name: class_def.name.as_str().to_owned(),
+                            metadata,
+                            line: offset_to_line_column(
+                                &normalized,
+                                class_def.range.start().to_usize(),
+                            )
+                            .0,
+                        });
+                    }
+                    dataclass_transform_classes.push(collect_dataclass_transform_class_site(
+                        &normalized,
+                        class_def,
+                        &import_bindings,
+                    ));
+                    direct_method_signatures.extend(
+                        class_def
+                            .body
+                            .iter()
+                            .filter_map(|member| match member {
+                                Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
+                                    owner_type_name: class_def.name.as_str().to_owned(),
+                                    name: function.name.as_str().to_owned(),
+                                    method_kind: method_kind_from_decorators(
+                                        &function.decorator_list,
+                                    ),
+                                    params: collect_direct_function_param_sites(
+                                        &normalized,
+                                        &function.parameters,
+                                    ),
+                                    line: offset_to_line_column(
+                                        &normalized,
+                                        function.range.start().to_usize(),
+                                    )
+                                    .0,
+                                }),
+                                _ => None,
+                            }),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        let mut decorated_callables = Vec::new();
+        collect_decorated_callable_sites(
+            &normalized,
+            parsed.suite(),
+            None,
+            &import_bindings,
+            &mut decorated_callables,
+        );
+
+        ModuleSurfaceMetadata {
+            typed_dict_classes,
+            dataclass_transform: DataclassTransformModuleInfo {
+                providers: dataclass_transform_providers,
+                classes: dataclass_transform_classes,
+            },
+            decorator_transform: DecoratorTransformModuleInfo { callables: decorated_callables },
+            direct_function_signatures,
+            direct_method_signatures,
+        }
     })
 }
 
@@ -213,145 +319,22 @@ pub fn collect_conditional_return_sites(source: &str) -> Vec<ConditionalReturnSi
 
 #[must_use]
 pub fn collect_dataclass_transform_module_info(source: &str) -> DataclassTransformModuleInfo {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
-    with_source_line_index(&normalized, || {
-        let Ok(parsed) = parse_module(&normalized) else {
-            return DataclassTransformModuleInfo::default();
-        };
-
-        let import_bindings = collect_import_bindings(parsed.suite());
-        let mut providers = Vec::new();
-        let mut classes = Vec::new();
-        for stmt in parsed.suite() {
-            match stmt {
-                Stmt::FunctionDef(function) => {
-                    if let Some(metadata) = dataclass_transform_metadata(
-                        &normalized,
-                        &function.decorator_list,
-                        &import_bindings,
-                    ) {
-                        providers.push(DataclassTransformProviderSite {
-                            name: function.name.as_str().to_owned(),
-                            metadata,
-                            line: offset_to_line_column(
-                                &normalized,
-                                function.range.start().to_usize(),
-                            )
-                            .0,
-                        });
-                    }
-                }
-                Stmt::ClassDef(class_def) => {
-                    if let Some(metadata) = dataclass_transform_metadata(
-                        &normalized,
-                        &class_def.decorator_list,
-                        &import_bindings,
-                    ) {
-                        providers.push(DataclassTransformProviderSite {
-                            name: class_def.name.as_str().to_owned(),
-                            metadata,
-                            line: offset_to_line_column(
-                                &normalized,
-                                class_def.range.start().to_usize(),
-                            )
-                            .0,
-                        });
-                    }
-                    classes.push(collect_dataclass_transform_class_site(
-                        &normalized,
-                        class_def,
-                        &import_bindings,
-                    ));
-                }
-                _ => {}
-            }
-        }
-
-        DataclassTransformModuleInfo { providers, classes }
-    })
+    collect_module_surface_metadata(source).dataclass_transform
 }
 
 #[must_use]
 pub fn collect_decorator_transform_module_info(source: &str) -> DecoratorTransformModuleInfo {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
-    with_source_line_index(&normalized, || {
-        let Ok(parsed) = parse_module(&normalized) else {
-            return DecoratorTransformModuleInfo::default();
-        };
-
-        let import_bindings = collect_import_bindings(parsed.suite());
-        let mut callables = Vec::new();
-        collect_decorated_callable_sites(
-            &normalized,
-            parsed.suite(),
-            None,
-            &import_bindings,
-            &mut callables,
-        );
-        DecoratorTransformModuleInfo { callables }
-    })
+    collect_module_surface_metadata(source).decorator_transform
 }
 
 #[must_use]
 pub fn collect_direct_function_signature_sites(source: &str) -> Vec<DirectFunctionSignatureSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
-    with_source_line_index(&normalized, || {
-        let Ok(parsed) = parse_module(&normalized) else {
-            return Vec::new();
-        };
-
-        parsed
-            .suite()
-            .iter()
-            .filter_map(|stmt| match stmt {
-                Stmt::FunctionDef(function) => Some(DirectFunctionSignatureSite {
-                    name: function.name.as_str().to_owned(),
-                    params: collect_direct_function_param_sites(&normalized, &function.parameters),
-                    line: offset_to_line_column(&normalized, function.range.start().to_usize()).0,
-                }),
-                _ => None,
-            })
-            .collect()
-    })
+    collect_module_surface_metadata(source).direct_function_signatures
 }
 
 #[must_use]
 pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSignatureSite> {
-    let normalized = normalize_annotated_lambda_source_lossy(source);
-    with_source_line_index(&normalized, || {
-        let Ok(parsed) = parse_module(&normalized) else {
-            return Vec::new();
-        };
-
-        parsed
-            .suite()
-            .iter()
-            .flat_map(|stmt| match stmt {
-                Stmt::ClassDef(class_def) => class_def
-                    .body
-                    .iter()
-                    .filter_map(|member| match member {
-                        Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
-                            owner_type_name: class_def.name.as_str().to_owned(),
-                            name: function.name.as_str().to_owned(),
-                            method_kind: method_kind_from_decorators(&function.decorator_list),
-                            params: collect_direct_function_param_sites(
-                                &normalized,
-                                &function.parameters,
-                            ),
-                            line: offset_to_line_column(
-                                &normalized,
-                                function.range.start().to_usize(),
-                            )
-                            .0,
-                        }),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>(),
-                _ => Vec::new(),
-            })
-            .collect()
-    })
+    collect_module_surface_metadata(source).direct_method_signatures
 }
 
 fn collect_direct_function_param_sites(

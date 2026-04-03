@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn annotated_assignment_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -25,7 +26,8 @@ pub(super) fn annotated_assignment_type_diagnostics(
         }
 
         let assignment_metadata = direct_expr_metadata_from_assignment_site(assignment);
-        if let Some(result) = resolve_contextual_typed_dict_literal_type(
+        if let Some(result) = resolve_contextual_typed_dict_literal_type_with_context(
+            context,
             node,
             nodes,
             assignment.line,
@@ -67,7 +69,8 @@ pub(super) fn annotated_assignment_type_diagnostics(
             continue;
         }
 
-        if let Some(result) = resolve_contextual_collection_literal_type(
+        if let Some(result) = resolve_contextual_collection_literal_type_with_context(
+            context,
             node,
             nodes,
             assignment.line,
@@ -487,6 +490,7 @@ pub(super) fn typed_dict_literal_diagnostics(
             site.owner_type_name.as_deref(),
         );
         diagnostics.extend(typed_dict_literal_entry_diagnostics(
+            context,
             node,
             nodes,
             site.line,
@@ -503,6 +507,7 @@ pub(super) fn typed_dict_literal_diagnostics(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn typed_dict_literal_entry_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     line: usize,
@@ -537,9 +542,12 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 continue;
             };
 
-            let Some(expansion_shape) =
-                resolve_known_typed_dict_shape_from_type(node, nodes, &expansion_type)
-            else {
+            let Some(expansion_shape) = resolve_known_typed_dict_shape_from_type_with_context(
+                context,
+                node,
+                nodes,
+                &expansion_type,
+            ) else {
                 diagnostics.push(typed_dict_literal_diagnostic(
                     node,
                     line,
@@ -861,7 +869,8 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
             match site.kind {
                 typepython_syntax::TypedDictMutationKind::Assignment => {
                     let value = site.value.as_ref()?;
-                    let contextual = resolve_contextual_call_arg_type(
+                    let contextual = resolve_contextual_call_arg_type_with_context(
+                        context,
                         node,
                         nodes,
                         site.line,
@@ -1121,7 +1130,8 @@ pub(super) fn subscript_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::TypedDictMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type(
+                            let contextual = resolve_contextual_call_arg_type_with_context(
+                                context,
                                 node,
                                 nodes,
                                 site.line,
@@ -1257,6 +1267,7 @@ pub(super) fn subscript_assignment_type_diagnostics(
 }
 
 pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1285,7 +1296,12 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
-            let shape = resolve_known_dataclass_transform_shape_from_type(node, nodes, &target_type)?;
+            let shape = resolve_known_dataclass_transform_shape_from_type_with_context(
+                context,
+                node,
+                nodes,
+                &target_type,
+            )?;
             if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
                 return None;
             }
@@ -1329,6 +1345,7 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
 }
 
 pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1357,7 +1374,13 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
                 site.line,
                 &site.target,
             )?;
-            let shape = resolve_known_plain_dataclass_shape_from_type(node, nodes, &target_type)?;
+            let shape =
+                resolve_known_plain_dataclass_shape_from_type_with_context(
+                    context,
+                    node,
+                    nodes,
+                    &target_type,
+                )?;
             if !shape.frozen || !shape.fields.iter().any(|field| field.name == site.field_name) {
                 return None;
             }
@@ -1460,13 +1483,18 @@ pub(super) fn resolve_writable_member_type(
 }
 
 pub(super) fn should_defer_attribute_assignment_to_frozen_checks(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     site: &typepython_syntax::FrozenFieldMutationSite,
     target_type: &str,
 ) -> bool {
-    if let Some(shape) = resolve_known_dataclass_transform_shape_from_type(node, nodes, target_type)
-        && shape.frozen
+    if let Some(shape) = resolve_known_dataclass_transform_shape_from_type_with_context(
+        context,
+        node,
+        nodes,
+        target_type,
+    ) && shape.frozen
         && shape.fields.iter().any(|field| field.name == site.field_name)
     {
         let in_initializer = site.owner_name.as_deref() == Some("__init__")
@@ -1474,8 +1502,12 @@ pub(super) fn should_defer_attribute_assignment_to_frozen_checks(
             && site.target.value_name.as_deref() == Some("self");
         return !in_initializer;
     }
-    if let Some(shape) = resolve_known_plain_dataclass_shape_from_type(node, nodes, target_type)
-        && shape.frozen
+    if let Some(shape) = resolve_known_plain_dataclass_shape_from_type_with_context(
+        context,
+        node,
+        nodes,
+        target_type,
+    ) && shape.frozen
         && shape.fields.iter().any(|field| field.name == site.field_name)
     {
         let in_initializer = site.owner_name.as_deref() == Some("__init__")
@@ -1487,6 +1519,7 @@ pub(super) fn should_defer_attribute_assignment_to_frozen_checks(
 }
 
 pub(super) fn attribute_assignment_type_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
@@ -1526,7 +1559,13 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 &site.target,
             )?;
 
-            if should_defer_attribute_assignment_to_frozen_checks(node, nodes, &site, &target_type) {
+            if should_defer_attribute_assignment_to_frozen_checks(
+                context,
+                node,
+                nodes,
+                &site,
+                &target_type,
+            ) {
                 return None;
             }
 
@@ -1544,7 +1583,8 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type(
+                            let contextual = resolve_contextual_call_arg_type_with_context(
+                                context,
                                 node,
                                 nodes,
                                 site.line,
@@ -1649,7 +1689,8 @@ pub(super) fn attribute_assignment_type_diagnostics(
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
-                            let contextual = resolve_contextual_call_arg_type(
+                            let contextual = resolve_contextual_call_arg_type_with_context(
+                                context,
                                 node,
                                 nodes,
                                 site.line,

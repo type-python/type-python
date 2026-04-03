@@ -678,6 +678,16 @@ pub struct TypedDictClassMetadata {
     pub line: usize,
 }
 
+/// Source-derived metadata summary reused by later binding/checking phases.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct ModuleSurfaceMetadata {
+    pub typed_dict_classes: Vec<TypedDictClassMetadata>,
+    pub dataclass_transform: DataclassTransformModuleInfo,
+    pub decorator_transform: DecoratorTransformModuleInfo,
+    pub direct_function_signatures: Vec<DirectFunctionSignatureSite>,
+    pub direct_method_signatures: Vec<DirectMethodSignatureSite>,
+}
+
 /// Conditional-return rule site collected from source.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConditionalReturnSite {

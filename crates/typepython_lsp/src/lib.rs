@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use typepython_binding::{BindingTable, bind};
-use typepython_checking::check_modules_with_source_overrides;
+use typepython_checking::check_modules_with_binding_metadata;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
 use typepython_graph::{ModuleGraph, ModuleNode, build};

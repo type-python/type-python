@@ -291,8 +291,9 @@ impl IncrementalWorkspace {
         if !has_parse_errors {
             let source_overrides = self.active_source_overrides();
             if force_full_check || self.parse_blocked {
-                self.check_diagnostics_by_module = check_modules_with_source_overrides(
+                self.check_diagnostics_by_module = check_modules_with_binding_metadata(
                     &graph,
+                    &bindings,
                     &current_module_keys,
                     self.config.config.typing.require_explicit_overrides,
                     self.config.config.typing.enable_sealed_exhaustiveness,
@@ -315,8 +316,9 @@ impl IncrementalWorkspace {
                     .filter(|module_key| current_module_keys.contains(module_key))
                     .collect::<BTreeSet<_>>();
                 if !rechecked_modules.is_empty() {
-                    let module_result = check_modules_with_source_overrides(
+                    let module_result = check_modules_with_binding_metadata(
                         &graph,
+                        &bindings,
                         &rechecked_modules,
                         self.config.config.typing.require_explicit_overrides,
                         self.config.config.typing.enable_sealed_exhaustiveness,
@@ -550,4 +552,3 @@ impl IncrementalWorkspace {
         }
     }
 }
-

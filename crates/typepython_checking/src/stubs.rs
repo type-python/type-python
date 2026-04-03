@@ -1,4 +1,18 @@
-use super::*;
+use std::collections::BTreeSet;
+
+use typepython_config::ImportFallback;
+use typepython_graph::ModuleGraph;
+use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
+
+use crate::{
+    CheckerContext, EffectiveCallableStubOverride, SyntheticMethodStub,
+    decorated_function_return_type_from_callable_annotation,
+    direct_function_signature_sites_from_callable_annotation,
+    resolve_dataclass_transform_class_shape_from_decl_with_context,
+    resolve_decorated_callable_annotation_for_declaration_with_context,
+    resolve_decorated_callable_site_with_context,
+    resolve_plain_dataclass_class_shape_from_decl_with_context,
+};
 
 #[must_use]
 pub fn collect_effective_callable_stub_overrides(
@@ -12,7 +26,9 @@ pub fn collect_effective_callable_stub_overrides(
         .flat_map(|node| {
             node.declarations
                 .iter()
-                .filter(|declaration| declaration.kind == DeclarationKind::Function)
+                .filter(|declaration| {
+                    declaration.kind == typepython_binding::DeclarationKind::Function
+                })
                 .filter_map(|declaration| {
                     let site =
                         resolve_decorated_callable_site_with_context(&context, node, declaration)?;
@@ -62,7 +78,8 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
             node.declarations
                 .iter()
                 .filter(|declaration| {
-                    declaration.owner.is_none() && declaration.kind == DeclarationKind::Class
+                    declaration.owner.is_none()
+                        && declaration.kind == typepython_binding::DeclarationKind::Class
                 })
                 .filter_map(|declaration| {
                     let class_line = module_info
@@ -70,14 +87,16 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                         .iter()
                         .find(|class_site| class_site.name == declaration.name)
                         .map(|class_site| class_site.line)?;
-                    let shape = resolve_dataclass_transform_class_shape_from_decl(
+                    let shape = resolve_dataclass_transform_class_shape_from_decl_with_context(
+                        &context,
                         &graph.nodes,
                         node,
                         declaration,
                         &mut BTreeSet::new(),
                     )
                     .or_else(|| {
-                        resolve_plain_dataclass_class_shape_from_decl(
+                        resolve_plain_dataclass_class_shape_from_decl_with_context(
+                            &context,
                             &graph.nodes,
                             node,
                             declaration,
@@ -87,7 +106,7 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                     if shape.has_explicit_init {
                         return None;
                     }
-                    let mut params = vec![typepython_syntax::FunctionParam {
+                    let mut params = vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
                         has_default: false,
@@ -96,23 +115,21 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                         variadic: false,
                         keyword_variadic: false,
                     }];
-                    params.extend(shape.fields.iter().map(|field| {
-                        typepython_syntax::FunctionParam {
-                            name: field.keyword_name.clone(),
-                            annotation: Some(field.annotation.clone()),
-                            has_default: !field.required,
-                            positional_only: false,
-                            keyword_only: field.kw_only,
-                            variadic: false,
-                            keyword_variadic: false,
-                        }
+                    params.extend(shape.fields.iter().map(|field| FunctionParam {
+                        name: field.keyword_name.clone(),
+                        annotation: Some(field.annotation.clone()),
+                        has_default: !field.required,
+                        positional_only: false,
+                        keyword_only: field.kw_only,
+                        variadic: false,
+                        keyword_variadic: false,
                     }));
                     Some(SyntheticMethodStub {
                         module_key: node.module_key.clone(),
                         owner_type_name: declaration.name.clone(),
                         class_line,
                         name: String::from("__init__"),
-                        method_kind: typepython_syntax::MethodKind::Instance,
+                        method_kind: MethodKind::Instance,
                         params,
                         returns: Some(String::from("None")),
                     })

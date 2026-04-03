@@ -600,6 +600,7 @@ mod tests {
     use std::path::PathBuf;
     use typepython_binding::{
         BindingTable, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
+        ModuleSurfaceFacts,
     };
     use typepython_syntax::SourceKind;
 
@@ -609,6 +610,7 @@ mod tests {
             module_path: PathBuf::from("src/app/__init__.tpy"),
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),
@@ -715,6 +717,7 @@ mod tests {
             module_path: PathBuf::from("src/app/__init__.tpy"),
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
@@ -752,6 +755,7 @@ mod tests {
             module_path: PathBuf::from("src/app/__init__.tpy"),
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
                     name: String::from("UserId"),
@@ -820,6 +824,7 @@ mod tests {
             module_path: PathBuf::from("src/app/__init__.tpy"),
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: Vec::new(),
             calls: Vec::new(),
             method_calls: Vec::new(),
@@ -921,6 +926,7 @@ mod tests {
             module_path: PathBuf::from("src/pkg/sub/module.py"),
             module_key: String::from("pkg.sub.module"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
@@ -985,6 +991,7 @@ mod tests {
             module_path: PathBuf::from("src/pkg/sub/module.py"),
             module_key: String::from("pkg.sub.module"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
@@ -1022,6 +1029,7 @@ mod tests {
             module_path: PathBuf::from("src/pkg/sub/module.py"),
             module_key: String::from("pkg.sub.module"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
                     name: String::from("greet"),
@@ -1111,6 +1119,7 @@ mod tests {
             module_path: PathBuf::from("src/typing.tpy"),
             module_key: String::from("typing"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("List"),
                 kind: DeclarationKind::Class,
@@ -1155,6 +1164,7 @@ mod tests {
             module_path: PathBuf::from("src/typing_extensions.tpy"),
             module_key: String::from("typing_extensions"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("Protocol"),
                 kind: DeclarationKind::Class,
@@ -1200,6 +1210,7 @@ mod tests {
             module_path: PathBuf::from("src/collections/abc.tpy"),
             module_key: String::from("collections.abc"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("Iterable"),
                 kind: DeclarationKind::Class,
@@ -1245,6 +1256,7 @@ mod tests {
                 module_path: PathBuf::from("src/pkg/a.py"),
                 module_key: String::from("pkg.a"),
                 module_kind: SourceKind::Python,
+                surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
                     name: String::from("alpha"),
                     kind: DeclarationKind::Function,
@@ -1282,6 +1294,7 @@ mod tests {
                 module_path: PathBuf::from("src/pkg/b.py"),
                 module_key: String::from("pkg.b"),
                 module_kind: SourceKind::Python,
+                surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
                     name: String::from("beta"),
                     kind: DeclarationKind::Function,
@@ -1341,6 +1354,7 @@ mod tests {
             module_path: PathBuf::from("src/a/b/c/d.py"),
             module_key: String::from("a.b.c.d"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("deep"),
                 kind: DeclarationKind::Function,
@@ -1419,6 +1433,7 @@ mod tests {
                 module_path: PathBuf::from("src/app/__init__.tpy"),
                 module_key: String::from("app"),
                 module_kind: SourceKind::TypePython,
+                surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
                     name: String::from("init_app"),
                     kind: DeclarationKind::Function,
@@ -1456,6 +1471,7 @@ mod tests {
                 module_path: PathBuf::from("src/app/sub.py"),
                 module_key: String::from("app.sub"),
                 module_kind: SourceKind::Python,
+                surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
@@ -1512,6 +1528,7 @@ mod tests {
             module_path: PathBuf::from("src/app/__init__.tpy"),
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
@@ -1563,6 +1580,7 @@ mod tests {
             module_path: PathBuf::from("src/alpha.py"),
             module_key: String::from("alpha"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
@@ -1600,6 +1618,7 @@ mod tests {
             module_path: PathBuf::from("src/beta.py"),
             module_key: String::from("beta"),
             module_kind: SourceKind::Python,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
@@ -1654,6 +1673,7 @@ mod tests {
             module_path: PathBuf::from("src/models.tpy"),
             module_key: String::from("models"),
             module_kind: SourceKind::TypePython,
+            surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
                     name: String::from("User"),
