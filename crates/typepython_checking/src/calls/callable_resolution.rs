@@ -928,10 +928,10 @@ fn decorator_candidate_accepts_semantic_callable(
     let Some(param) = candidate.signature_sites.iter().find(|param| !param.keyword_variadic) else {
         return false;
     };
-    let Some(annotation) = param.annotation.as_deref() else {
+    let Some(annotation) = param.rendered_annotation() else {
         return true;
     };
-    semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(annotation), current_callable)
+    semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(&annotation), current_callable)
 }
 
 fn substitute_single_paramspec_from_semantic_callable(

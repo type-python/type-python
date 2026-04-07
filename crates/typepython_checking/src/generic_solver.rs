@@ -852,8 +852,12 @@ pub(crate) fn instantiate_direct_function_param(
     mut param: typepython_syntax::DirectFunctionParamSite,
     substitutions: &GenericTypeParamSubstitutions,
 ) -> typepython_syntax::DirectFunctionParamSite {
-    param.annotation = instantiate_direct_function_param_annotation(&param, substitutions)
-        .map(|annotation| render_semantic_type(&annotation));
+    let instantiated_annotation = instantiate_direct_function_param_annotation(&param, substitutions);
+    param.annotation = instantiated_annotation.as_ref().map(render_semantic_type);
+    param.annotation_expr = instantiated_annotation
+        .as_ref()
+        .map(render_semantic_type)
+        .and_then(|annotation| typepython_syntax::TypeExpr::parse(&annotation));
     param
 }
 
@@ -862,7 +866,7 @@ pub(crate) fn instantiate_direct_function_param_annotation(
     substitutions: &GenericTypeParamSubstitutions,
 ) -> Option<SemanticType> {
     param
-        .annotation
+        .rendered_annotation()
         .as_deref()
         .map(|annotation| instantiate_semantic_annotation(annotation, substitutions))
 }

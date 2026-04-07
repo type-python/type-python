@@ -28,7 +28,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
         current_owner_name,
         current_owner_type_name,
         current_line,
-        metadata.value_type.as_deref(),
+        metadata.rendered_value_type().as_deref(),
         metadata.is_awaited,
         metadata.value_callee.as_deref(),
         metadata.value_name.as_deref(),
@@ -1019,13 +1019,13 @@ pub(super) fn expected_positional_arg_types_from_signature_sites(
         .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
         .collect::<Vec<_>>();
     let variadic_type =
-        signature.iter().find(|param| param.variadic).and_then(|param| param.annotation.clone());
+        signature.iter().find(|param| param.variadic).and_then(|param| param.rendered_annotation());
 
     (0..arg_count)
         .map(|index| {
             positional_params
                 .get(index)
-                .and_then(|param| param.annotation.clone())
+                .and_then(|param| param.rendered_annotation())
                 .or_else(|| variadic_type.clone())
         })
         .collect()
@@ -1038,7 +1038,7 @@ pub(super) fn expected_keyword_arg_types_from_signature_sites(
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
-        .and_then(|param| param.annotation.clone());
+        .and_then(|param| param.rendered_annotation());
 
     keyword_names
         .iter()
@@ -1046,7 +1046,7 @@ pub(super) fn expected_keyword_arg_types_from_signature_sites(
             signature
                 .iter()
                 .find(|param| param.name == *keyword && !param.positional_only)
-                .and_then(|param| param.annotation.clone())
+                .and_then(|param| param.rendered_annotation())
                 .or_else(|| keyword_variadic_type.clone())
         })
         .collect()

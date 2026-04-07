@@ -402,8 +402,8 @@ fn semantic_callable_from_bound_signature(
         .iter()
         .map(|param| SemanticCallableParam {
             name: param.name.clone(),
-            annotation_text: param.annotation.clone(),
-            annotation: param.annotation.as_deref().map(|annotation| {
+            annotation_text: param.rendered_annotation(),
+            annotation: param.rendered_annotation().as_deref().map(|annotation| {
                 lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
             }),
             has_default: param.has_default,
@@ -413,10 +413,7 @@ fn semantic_callable_from_bound_signature(
             keyword_variadic: param.keyword_variadic,
         })
         .collect::<Vec<_>>();
-    let return_annotation_text = signature
-        .returns
-        .as_ref()
-        .map(typepython_binding::BoundTypeExpr::render);
+    let return_annotation_text = signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render);
     let return_type = return_annotation_text.as_deref().map(lower_type_text_or_name);
     SemanticCallableDeclaration {
         params,

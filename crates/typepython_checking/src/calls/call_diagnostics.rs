@@ -402,8 +402,8 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
     let keyword_variadic_annotation = signature
         .iter()
         .find(|param| param.keyword_variadic)
-        .and_then(|param| param.annotation.as_deref())
-        .map(normalize_type_text);
+        .and_then(|param| param.rendered_annotation())
+        .map(|annotation| normalize_type_text(&annotation));
     let param_names = signature
         .iter()
         .filter(|param| !param.keyword_variadic)
@@ -683,16 +683,16 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
     let variadic_type = signature
         .iter()
         .find(|param| param.variadic)
-        .and_then(|param| param.annotation.as_deref())
-        .map(lower_type_text_or_name);
+        .and_then(|param| param.rendered_annotation())
+        .map(|annotation| lower_type_text_or_name(&annotation));
     let unpack_shape =
         unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_type = signature
         .iter()
         .find(|param| param.keyword_variadic)
-        .and_then(|param| param.annotation.as_deref())
+        .and_then(|param| param.rendered_annotation())
         .filter(|annotation| !normalize_type_text(annotation).starts_with("Unpack["))
-        .map(lower_type_text_or_name);
+        .map(|annotation| lower_type_text_or_name(&annotation));
     diagnostics.extend(positional_and_keyword_semantic_type_diagnostics(
         node,
         nodes,
@@ -1256,8 +1256,8 @@ pub(super) fn unpack_typed_dict_shape_from_signature_with_context(
     let annotation = signature
         .iter()
         .find(|param| param.keyword_variadic)
-        .and_then(|param| param.annotation.as_deref())?;
-    let annotation = normalize_type_text(annotation);
+        .and_then(|param| param.rendered_annotation())?;
+    let annotation = normalize_type_text(&annotation);
     let inner = annotation.strip_prefix("Unpack[")?.strip_suffix(']')?;
     resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, inner)
 }

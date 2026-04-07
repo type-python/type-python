@@ -1585,7 +1585,7 @@ fn render_signature_from_direct_params(
             rendered_params.push(String::from("*"));
         }
 
-        let mut rendered = match &param.annotation {
+        let mut rendered = match param.rendered_annotation() {
             Some(annotation) => format!("{}:{}", param.name, annotation),
             None => param.name.clone(),
         };
