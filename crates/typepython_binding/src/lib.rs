@@ -478,6 +478,7 @@ impl ReturnSite {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.value_type.clone(),
+                None,
                 self.is_awaited,
                 self.value_callee.clone(),
                 self.value_name.clone(),
@@ -515,6 +516,7 @@ impl YieldSite {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.value_type.clone(),
+                None,
                 false,
                 self.value_callee.clone(),
                 self.value_name.clone(),
@@ -552,6 +554,7 @@ impl MatchSite {
         self.subject.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.subject_type.clone(),
+                None,
                 self.subject_is_awaited,
                 self.subject_callee.clone(),
                 self.subject_name.clone(),
@@ -589,6 +592,7 @@ impl ForSite {
         self.iter.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.iter_type.clone(),
+                None,
                 self.iter_is_awaited,
                 self.iter_callee.clone(),
                 self.iter_name.clone(),
@@ -626,6 +630,7 @@ impl WithSite {
         self.context.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.context_type.clone(),
+                None,
                 self.context_is_awaited,
                 self.context_callee.clone(),
                 self.context_name.clone(),
@@ -668,6 +673,7 @@ impl AssignmentSite {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_flat_fields(
                 self.value_type.clone(),
+                None,
                 self.is_awaited,
                 self.value_callee.clone(),
                 self.value_name.clone(),
@@ -1616,6 +1622,7 @@ fn direct_expr_metadata_from_value_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.value_type.clone(),
+        statement.value_type_expr.clone(),
         statement.is_awaited,
         statement.value_callee.clone(),
         statement.value_name.clone(),
@@ -1650,6 +1657,7 @@ fn direct_expr_metadata_from_return_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.value_type.clone(),
+        None,
         statement.is_awaited,
         statement.value_callee.clone(),
         statement.value_name.clone(),
@@ -1684,6 +1692,7 @@ fn direct_expr_metadata_from_yield_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.value_type.clone(),
+        None,
         false,
         statement.value_callee.clone(),
         statement.value_name.clone(),
@@ -1718,6 +1727,7 @@ fn direct_expr_metadata_from_match_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.subject_type.clone(),
+        None,
         statement.subject_is_awaited,
         statement.subject_callee.clone(),
         statement.subject_name.clone(),
@@ -1752,6 +1762,7 @@ fn direct_expr_metadata_from_for_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.iter_type.clone(),
+        None,
         statement.iter_is_awaited,
         statement.iter_callee.clone(),
         statement.iter_name.clone(),
@@ -1786,6 +1797,7 @@ fn direct_expr_metadata_from_with_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_flat_fields(
         statement.context_type.clone(),
+        None,
         statement.context_is_awaited,
         statement.context_callee.clone(),
         statement.context_name.clone(),
@@ -1817,6 +1829,7 @@ fn direct_expr_metadata_from_with_statement(
 
 fn direct_expr_metadata_from_flat_fields(
     value_type: Option<String>,
+    value_type_expr: Option<typepython_syntax::TypeExpr>,
     is_awaited: bool,
     value_callee: Option<String>,
     value_name: Option<String>,
@@ -1845,7 +1858,8 @@ fn direct_expr_metadata_from_flat_fields(
     value_dict_entries: Option<Vec<typepython_syntax::TypedDictLiteralEntry>>,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     let metadata = typepython_syntax::DirectExprMetadata {
-        value_type_expr: value_type.as_deref().and_then(typepython_syntax::TypeExpr::parse),
+        value_type_expr: value_type_expr
+            .or_else(|| value_type.as_deref().and_then(typepython_syntax::TypeExpr::parse)),
         value_type,
         is_awaited,
         value_callee,
@@ -2338,6 +2352,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: None,
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: None,
                     is_awaited: false,
                     value_callee: None,
@@ -2478,6 +2493,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -2516,6 +2532,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: Some(String::from("str")),
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -2731,6 +2748,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -2870,6 +2888,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: None,
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -2996,6 +3015,7 @@ mod tests {
                 destructuring_target_names: Some(vec![String::from("left"), String::from("right")]),
                 annotation: None,
                 annotation_expr: None,
+                value_type_expr: None,
                 value_type: Some(String::from("tuple[int, str]")),
                 is_awaited: false,
                 value_callee: None,
@@ -3732,6 +3752,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: Some(String::from("Final")),
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -3886,6 +3907,7 @@ mod tests {
                     destructuring_target_names: None,
                     annotation: Some(String::from("ClassVar[int]")),
                     annotation_expr: None,
+                    value_type_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -5097,6 +5119,7 @@ mod tests {
                 destructuring_target_names: None,
                 annotation: None,
                 annotation_expr: None,
+                value_type_expr: None,
                 value_type: None,
                 is_awaited: false,
                 value_callee: None,

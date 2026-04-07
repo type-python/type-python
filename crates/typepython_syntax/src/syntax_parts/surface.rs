@@ -180,6 +180,7 @@ pub struct ValueStatement {
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
     pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
     pub value_name: Option<String>,
