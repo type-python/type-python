@@ -1,7 +1,7 @@
 use super::discovery::{
-    ExternalSupportRoot, bundled_stdlib_snapshot_identity_for_root,
-    bundled_stdlib_sources_for_root, collect_source_paths, external_resolution_sources,
-    python_type_roots_from_interpreter,
+    bundled_stdlib_snapshot_identity_for_root, bundled_stdlib_sources_for_root,
+    collect_source_paths, external_resolution_sources, python_type_roots_from_interpreter,
+    ExternalSupportRoot,
 };
 use super::migration::{build_migration_report, emit_migration_stubs};
 use super::pipeline::{
@@ -9,12 +9,12 @@ use super::pipeline::{
     run_pipeline, should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
 use super::verification::{
-    SuppliedArtifactKind, SuppliedVerifyArtifact, supplied_verify_artifacts,
-    verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
+    supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
+    verify_runtime_public_name_parity, SuppliedArtifactKind, SuppliedVerifyArtifact,
 };
-use super::{Cli, embedded_config_template, exit_code_for_error, init_project};
+use super::{embedded_config_template, exit_code_for_error, init_project, Cli};
 use clap::Parser;
-use flate2::{Compression, write::GzEncoder};
+use flate2::{write::GzEncoder, Compression};
 use notify::RecursiveMode;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -30,10 +30,10 @@ use typepython_binding::bind;
 use typepython_checking::check as check_graph;
 use typepython_config::load;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-use typepython_emit::{EmitArtifact, write_runtime_outputs};
+use typepython_emit::{write_runtime_outputs, EmitArtifact};
 use typepython_graph::build as build_graph;
 use typepython_incremental::IncrementalState;
-use zip::{ZipWriter, write::FileOptions};
+use zip::{write::FileOptions, ZipWriter};
 
 #[test]
 fn collect_source_paths_includes_implicit_namespace_packages() {
@@ -433,6 +433,33 @@ fn run_pipeline_accepts_json_from_bundled_stdlib() {
 
         let config = load(&project_dir).expect("test setup should succeed");
         run_pipeline(&config).expect("pipeline should succeed").diagnostics
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!diagnostics.has_errors(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn run_pipeline_accepts_bundled_common_library_stubs() {
+    let project_dir = temp_project_dir("run_pipeline_accepts_bundled_common_library_stubs");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            concat!(
+                "from numpy import array, ndarray\n",
+                "from torch import Tensor, tensor\n\n",
+                "matrix: ndarray = array([1])\n",
+                "reshaped: ndarray = matrix.reshape((1,))\n",
+                "value: Tensor = tensor(1).to(\"cpu\")\n",
+            ),
+        )
+        .expect("test setup should succeed");
+
+        let config = load(&project_dir).expect("test setup should succeed");
+        run_pipeline(&config).expect("test setup should succeed").diagnostics
     };
     remove_temp_project_dir(&project_dir);
 
@@ -1810,11 +1837,9 @@ fn watch_targets_include_config_and_existing_source_roots() {
     assert!(targets.iter().any(|(path, mode)| {
         path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
     }));
-    assert!(
-        targets
-            .iter()
-            .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive)
-    );
+    assert!(targets
+        .iter()
+        .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive));
 }
 
 #[test]
