@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use typepython_binding::{
-    AssignmentSite, CallSite, Declaration, DeclarationKind, GenericTypeParam, GenericTypeParamKind,
+    AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, GenericTypeParam,
+    GenericTypeParamKind, ModuleSurfaceFacts,
 };
-use typepython_checking::check;
+use typepython_checking::{check, semantic_incremental_state_with_binding_metadata};
+use typepython_config::ImportFallback;
 use typepython_graph::{ModuleGraph, ModuleNode};
 use typepython_syntax::SourceKind;
 
@@ -14,23 +16,26 @@ fn declaration(
     detail: &str,
     type_params: Vec<GenericTypeParam>,
 ) -> Declaration {
-    Declaration { metadata: Default::default(), name: name.to_owned(),
-    kind,
-    detail: detail.to_owned(),
-    value_type: None,
-    method_kind: None,
-    class_kind: None,
-    owner: None,
-    is_async: false,
-    is_override: false,
-    is_abstract_method: false,
-    is_final_decorator: false,
-    is_deprecated: false,
-    deprecation_message: None,
-    is_final: false,
-    is_class_var: false,
-    bases: Vec::new(),
-    type_params, }
+    Declaration {
+        metadata: Default::default(),
+        name: name.to_owned(),
+        kind,
+        detail: detail.to_owned(),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params,
+    }
 }
 
 fn import_declaration(name: &str, target: &str) -> Declaration {
@@ -81,6 +86,8 @@ fn assignment_from_call(
     line: usize,
 ) -> AssignmentSite {
     AssignmentSite {
+        annotation_expr: None,
+        value: None,
         name,
         destructuring_target_names: None,
         destructuring_index: None,
@@ -116,6 +123,33 @@ fn assignment_from_call(
         owner_type_name: None,
         line,
     }
+}
+
+fn bindings_from_graph(graph: &ModuleGraph) -> Vec<BindingTable> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| BindingTable {
+            module_path: node.module_path.clone(),
+            module_key: node.module_key.clone(),
+            module_kind: node.module_kind,
+            surface_facts: ModuleSurfaceFacts::default(),
+            declarations: node.declarations.clone(),
+            calls: node.calls.clone(),
+            method_calls: node.method_calls.clone(),
+            member_accesses: node.member_accesses.clone(),
+            returns: node.returns.clone(),
+            yields: node.yields.clone(),
+            if_guards: node.if_guards.clone(),
+            asserts: node.asserts.clone(),
+            invalidations: node.invalidations.clone(),
+            matches: node.matches.clone(),
+            for_loops: node.for_loops.clone(),
+            with_statements: node.with_statements.clone(),
+            except_handlers: node.except_handlers.clone(),
+            assignments: node.assignments.clone(),
+        })
+        .collect()
 }
 
 fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
@@ -257,5 +291,21 @@ fn bench_checker_medium(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_checker_small, bench_checker_medium);
+fn bench_semantic_summary_medium(c: &mut Criterion) {
+    let graph = make_checker_bench_graph(64);
+    let bindings = bindings_from_graph(&graph);
+    c.bench_function("check_semantic_incremental_summary_medium", |b| {
+        b.iter(|| {
+            black_box(semantic_incremental_state_with_binding_metadata(
+                black_box(&graph),
+                black_box(&bindings),
+                ImportFallback::Unknown,
+                None,
+                None,
+            ))
+        })
+    });
+}
+
+criterion_group!(benches, bench_checker_small, bench_checker_medium, bench_semantic_summary_medium);
 criterion_main!(benches);

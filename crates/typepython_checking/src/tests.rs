@@ -351,6 +351,32 @@ fn check_reports_missing_required_typed_dict_key() {
 }
 
 #[test]
+fn check_conformance_baseline_common_library_stub_surface() {
+    let result = check_temp_project_sources(&[
+        (
+            "numpy/__init__.pyi",
+            "numpy",
+            SourceKind::Stub,
+            "from typing import Any\n\nclass ndarray:\n    def reshape(self, shape: Any) -> ndarray: ...\n\ndef array(value: Any) -> ndarray: ...\n",
+        ),
+        (
+            "torch/__init__.pyi",
+            "torch",
+            SourceKind::Stub,
+            "from typing import Any\n\nclass Tensor:\n    def to(self, device: Any) -> Tensor: ...\n\ndef tensor(value: Any) -> Tensor: ...\n",
+        ),
+        (
+            "app.tpy",
+            "app",
+            SourceKind::TypePython,
+            "from numpy import array, ndarray\nfrom torch import Tensor, tensor\n\nmatrix: ndarray = array([1])\nreshaped: ndarray = matrix.reshape((1,))\nvalue: Tensor = tensor(1).to(\"cpu\")\n",
+        ),
+    ]);
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_accepts_total_false_typed_dict_missing_keys() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass User(TypedDict, total=False):\n    id: int\n    name: str\n\npayload: User = {}\n",
