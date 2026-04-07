@@ -7,11 +7,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use typepython_binding::{
-    Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
+    bind, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
 };
 use typepython_config::{DiagnosticLevel, ImportFallback};
-use typepython_graph::{ModuleGraph, ModuleNode, build};
-use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
+use typepython_graph::{build, ModuleGraph, ModuleNode};
+use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
 
 static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -210,6 +210,7 @@ fn type_relation_node_with_base_child() -> ModuleNode {
             Declaration {
                 name: String::from("Base"),
                 kind: DeclarationKind::Class,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -229,6 +230,7 @@ fn type_relation_node_with_base_child() -> ModuleNode {
             Declaration {
                 name: String::from("Child"),
                 kind: DeclarationKind::Class,
+                metadata: Default::default(),
                 detail: String::from("Base"),
                 value_type: None,
                 method_kind: None,
@@ -274,6 +276,7 @@ fn check_reports_duplicate_module_symbols() {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -293,6 +296,7 @@ fn check_reports_duplicate_module_symbols() {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -558,6 +562,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         line: 1,
     };
     let typed_dict_overload = Declaration {
+        metadata: Default::default(),
         name: String::from("choose"),
         kind: DeclarationKind::Overload,
         detail: String::from("(user:User)->int"),
@@ -576,9 +581,13 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
-    let string_overload =
-        Declaration { detail: String::from("(user:str)->str"), ..typed_dict_overload.clone() };
+    let string_overload = Declaration {
+        metadata: Default::default(),
+        detail: String::from("(user:str)->str"),
+        ..typed_dict_overload.clone()
+    };
     let typed_dict_class = Declaration {
+        metadata: Default::default(),
         name: String::from("User"),
         kind: DeclarationKind::Class,
         detail: String::new(),
@@ -598,6 +607,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         type_params: Vec::new(),
     };
     let id_field = Declaration {
+        metadata: Default::default(),
         name: String::from("id"),
         kind: DeclarationKind::Value,
         detail: String::from("int"),
@@ -619,8 +629,12 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
-    let name_field =
-        Declaration { name: String::from("name"), detail: String::from("str"), ..id_field.clone() };
+    let name_field = Declaration {
+        metadata: Default::default(),
+        name: String::from("name"),
+        detail: String::from("str"),
+        ..id_field.clone()
+    };
     let node = typepython_graph::ModuleNode {
         module_path: PathBuf::from("src/app/module.tpy"),
         module_key: String::new(),
@@ -905,6 +919,7 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                 declarations: vec![Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -944,6 +959,7 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                     Declaration {
                         name: String::from("util"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util"),
                         value_type: None,
                         method_kind: None,
@@ -963,6 +979,7 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util.parse"),
                         value_type: None,
                         method_kind: None,
@@ -2034,6 +2051,7 @@ fn check_accepts_unique_module_symbols() {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2053,6 +2071,7 @@ fn check_accepts_unique_module_symbols() {
                 Declaration {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2101,6 +2120,7 @@ fn check_accepts_overload_sets_with_one_implementation() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2120,6 +2140,7 @@ fn check_accepts_overload_sets_with_one_implementation() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2139,6 +2160,7 @@ fn check_accepts_overload_sets_with_one_implementation() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2187,6 +2209,7 @@ fn check_reports_overloads_without_concrete_implementation() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2206,6 +2229,7 @@ fn check_reports_overloads_without_concrete_implementation() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2256,6 +2280,7 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2275,6 +2300,7 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2294,6 +2320,7 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -2344,6 +2371,7 @@ fn check_reports_ambiguous_overload_resolution() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->int"),
                     value_type: None,
                     method_kind: None,
@@ -2363,6 +2391,7 @@ fn check_reports_ambiguous_overload_resolution() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -2382,6 +2411,7 @@ fn check_reports_ambiguous_overload_resolution() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->int"),
                     value_type: None,
                     method_kind: None,
@@ -2454,6 +2484,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -2473,6 +2504,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::from("(value:str)->int"),
                     value_type: None,
                     method_kind: None,
@@ -2492,6 +2524,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->int"),
                     value_type: None,
                     method_kind: None,
@@ -2511,6 +2544,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -2547,6 +2581,7 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("parse")),
@@ -2602,6 +2637,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(value:int)->str"),
                         value_type: None,
                         method_kind: None,
@@ -2621,6 +2657,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(value:str)->int"),
                         value_type: None,
                         method_kind: None,
@@ -2661,6 +2698,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util.parse"),
                         value_type: None,
                         method_kind: None,
@@ -2680,6 +2718,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     Declaration {
                         name: String::from("result"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("str"),
                         value_type: None,
                         method_kind: None,
@@ -2712,6 +2751,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("parse")),
@@ -2739,6 +2779,7 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -2797,6 +2838,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                 declarations: vec![Declaration {
                     name: String::from("box_value"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:int)->list[int]"),
                     value_type: None,
                     method_kind: None,
@@ -2835,6 +2877,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                 declarations: vec![Declaration {
                     name: String::from("helpers"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("helpers"),
                     value_type: None,
                     method_kind: None,
@@ -2926,6 +2969,7 @@ fn overload_applicability_accepts_keyword_default_and_semantic_match() {
         line: 1,
     };
     let declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:Optional[int]=)->int"),
@@ -2965,6 +3009,7 @@ fn overload_applicability_rejects_positional_only_keyword() {
         line: 1,
     };
     let declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:int,/)->int"),
@@ -3004,6 +3049,7 @@ fn overload_applicability_accepts_variadic_arguments() {
         line: 1,
     };
     let declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
         detail: String::from("(*args:int)->int"),
@@ -3043,6 +3089,7 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
         line: 1,
     };
     let declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:Base)->int"),
@@ -3070,6 +3117,7 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
             Declaration {
                 name: String::from("Base"),
                 kind: DeclarationKind::Class,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -3089,6 +3137,7 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
             Declaration {
                 name: String::from("Child"),
                 kind: DeclarationKind::Class,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -3147,6 +3196,7 @@ fn overload_applicability_accepts_list_for_sequence_parameter() {
         line: 1,
     };
     let declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:Sequence[int])->int"),
@@ -3284,6 +3334,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         line: 1,
     };
     let str_declaration = Declaration {
+        metadata: Default::default(),
         name: String::from("choose"),
         kind: DeclarationKind::Overload,
         detail: String::from("(fn:Callable[[int],str])->str"),
@@ -3303,6 +3354,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         type_params: Vec::new(),
     };
     let int_declaration = Declaration {
+        metadata: Default::default(),
         detail: String::from("(fn:Callable[[int],int])->int"),
         ..str_declaration.clone()
     };
@@ -3314,6 +3366,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
 #[test]
 fn overload_specificity_uses_instantiated_generic_candidate() {
     let generic_overload = Declaration {
+        metadata: Default::default(),
         name: String::from("wrap"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:T)->tuple[T]"),
@@ -3339,6 +3392,7 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
         }],
     };
     let object_overload = Declaration {
+        metadata: Default::default(),
         name: String::from("wrap"),
         kind: DeclarationKind::Overload,
         detail: String::from("(value:object)->tuple[object]"),
@@ -3416,6 +3470,7 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
 #[test]
 fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("build_pair"),
         kind: DeclarationKind::Function,
         detail: String::from("(value:int)->tuple[int, str]"),
@@ -3435,6 +3490,7 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         type_params: Vec::new(),
     };
     let alias = Declaration {
+        metadata: Default::default(),
         name: String::from("Pair"),
         kind: DeclarationKind::TypeAlias,
         detail: String::from("tuple[int, str]"),
@@ -3454,6 +3510,7 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         type_params: Vec::new(),
     };
     let value = Declaration {
+        metadata: Default::default(),
         name: String::from("pair"),
         kind: DeclarationKind::Value,
         detail: String::from("tuple[int, str]"),
@@ -3513,6 +3570,7 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("box_value"),
         kind: DeclarationKind::Function,
         detail: String::from("(value:T)->list[T]"),
@@ -3650,6 +3708,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -3669,6 +3728,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:int)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -3691,6 +3751,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:str)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -3734,6 +3795,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util.User"),
                         value_type: None,
                         method_kind: None,
@@ -3753,6 +3815,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                     Declaration {
                         name: String::from("user"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("User"),
                         value_type: Some(String::from("User")),
                         method_kind: None,
@@ -3820,6 +3883,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -3839,6 +3903,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:int)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -3861,6 +3926,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:str)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -3904,6 +3970,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util.User"),
                         value_type: None,
                         method_kind: None,
@@ -3923,6 +3990,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("user"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("User"),
                         value_type: None,
                         method_kind: None,
@@ -3942,6 +4010,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     Declaration {
                         name: String::from("value"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("str"),
                         value_type: None,
                         method_kind: None,
@@ -3974,6 +4043,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -4001,6 +4071,7 @@ fn check_accepts_stub_overloaded_method_return_type() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -4044,6 +4115,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -4063,6 +4135,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:T)->tuple[T]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -4091,6 +4164,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
+                        metadata: Default::default(),
                         detail: String::from("(self,value:object)->tuple[object]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -4134,6 +4208,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("User"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("pkg.util.User"),
                         value_type: None,
                         method_kind: None,
@@ -4153,6 +4228,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("user"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("User"),
                         value_type: None,
                         method_kind: None,
@@ -4172,6 +4248,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     Declaration {
                         name: String::from("result"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("tuple[int]"),
                         value_type: None,
                         method_kind: None,
@@ -4221,6 +4298,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("tuple[int]")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -4248,6 +4326,7 @@ fn check_accepts_generic_method_overload_specificity() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -4271,6 +4350,7 @@ fn check_accepts_imported_defaulted_function_call() {
                 declarations: vec![Declaration {
                     name: String::from("f"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(x:int,y:int=)->None"),
                     value_type: None,
                     method_kind: None,
@@ -4309,6 +4389,7 @@ fn check_accepts_imported_defaulted_function_call() {
                 declarations: vec![Declaration {
                     name: String::from("f"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("lib.f"),
                     value_type: None,
                     method_kind: None,
@@ -4371,6 +4452,7 @@ fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4390,6 +4472,7 @@ fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4438,6 +4521,7 @@ fn check_reports_duplicate_interface_members() {
                 Declaration {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4457,6 +4541,7 @@ fn check_reports_duplicate_interface_members() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4479,6 +4564,7 @@ fn check_reports_duplicate_interface_members() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4533,6 +4619,7 @@ fn check_accepts_class_method_overload_group() {
                 Declaration {
                     name: String::from("Parser"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4552,6 +4639,7 @@ fn check_accepts_class_method_overload_group() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4574,6 +4662,7 @@ fn check_accepts_class_method_overload_group() {
                 Declaration {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4625,6 +4714,7 @@ fn check_reports_final_reassignment_in_module_scope() {
                 Declaration {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4644,6 +4734,7 @@ fn check_reports_final_reassignment_in_module_scope() {
                 Declaration {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4705,6 +4796,7 @@ fn check_reports_final_reassignment_in_class_scope() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4724,6 +4816,7 @@ fn check_reports_final_reassignment_in_class_scope() {
                 Declaration {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4746,6 +4839,7 @@ fn check_reports_final_reassignment_in_class_scope() {
                 Declaration {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4833,6 +4927,7 @@ fn check_reports_overriding_base_final_member() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4852,6 +4947,7 @@ fn check_reports_overriding_base_final_member() {
                 Declaration {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4874,6 +4970,7 @@ fn check_reports_overriding_base_final_member() {
                 Declaration {
                     name: String::from("Derived"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4893,6 +4990,7 @@ fn check_reports_overriding_base_final_member() {
                 Declaration {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4946,6 +5044,7 @@ fn check_reports_subclassing_final_class() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4965,6 +5064,7 @@ fn check_reports_subclassing_final_class() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -4999,6 +5099,7 @@ fn check_reports_subclassing_final_class() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("bool")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -5026,6 +5127,7 @@ fn check_reports_subclassing_final_class() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -5051,6 +5153,7 @@ fn check_reports_subclassing_imported_final_class() {
                 declarations: vec![Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5090,6 +5193,7 @@ fn check_reports_subclassing_imported_final_class() {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("app.base.Base"),
                         value_type: None,
                         method_kind: None,
@@ -5109,6 +5213,7 @@ fn check_reports_subclassing_imported_final_class() {
                     Declaration {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Base"),
                         value_type: None,
                         method_kind: None,
@@ -5160,6 +5265,7 @@ fn check_reports_overriding_final_method() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5179,6 +5285,7 @@ fn check_reports_overriding_final_method() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5201,6 +5308,7 @@ fn check_reports_overriding_final_method() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5220,6 +5328,7 @@ fn check_reports_overriding_final_method() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5257,6 +5366,7 @@ fn check_reports_overriding_final_method() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("None")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -5284,6 +5394,7 @@ fn check_reports_overriding_final_method() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -5308,6 +5419,7 @@ fn check_reports_missing_interface_members() {
                 Declaration {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5327,6 +5439,7 @@ fn check_reports_missing_interface_members() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5349,6 +5462,7 @@ fn check_reports_missing_interface_members() {
                 Declaration {
                     name: String::from("Widget"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5399,6 +5513,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 Declaration {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5418,6 +5533,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->int"),
                     value_type: None,
                     method_kind: None,
@@ -5440,6 +5556,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 Declaration {
                     name: String::from("Widget"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5459,6 +5576,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: None,
@@ -5496,6 +5614,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("bool")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -5523,6 +5642,7 @@ fn check_reports_incompatible_interface_member_signature() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -5548,6 +5668,7 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                     Declaration {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -5567,6 +5688,7 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -5610,6 +5732,7 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                     Declaration {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("app.protocols.SupportsClose"),
                         value_type: None,
                         method_kind: None,
@@ -5629,6 +5752,7 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                     Declaration {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("SupportsClose"),
                         value_type: None,
                         method_kind: None,
@@ -5648,6 +5772,7 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                     Declaration {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -5702,6 +5827,7 @@ fn check_reports_missing_abstract_base_members() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5721,6 +5847,7 @@ fn check_reports_missing_abstract_base_members() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5743,6 +5870,7 @@ fn check_reports_missing_abstract_base_members() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5793,6 +5921,7 @@ fn check_reports_direct_instantiation_of_abstract_class() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5812,6 +5941,7 @@ fn check_reports_direct_instantiation_of_abstract_class() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -5879,6 +6009,7 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -5898,6 +6029,7 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                     Declaration {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->None"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -5940,6 +6072,7 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                 declarations: vec![Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("app.base.Base"),
                     value_type: None,
                     method_kind: None,
@@ -6002,6 +6135,7 @@ fn check_reports_unresolved_same_project_imports() {
             declarations: vec![Declaration {
                 name: String::from("Missing"),
                 kind: DeclarationKind::Import,
+                metadata: Default::default(),
                 detail: String::from("app.missing.Missing"),
                 value_type: None,
                 method_kind: None,
@@ -6035,6 +6169,7 @@ fn check_reports_unresolved_same_project_imports() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("None")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -6062,6 +6197,7 @@ fn check_reports_unresolved_same_project_imports() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -6150,6 +6286,7 @@ fn check_reports_direct_call_arity_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(x:int,y:int)->None"),
                 value_type: None,
                 method_kind: None,
@@ -6211,6 +6348,7 @@ fn check_reports_direct_call_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(x:int,y:str)->None"),
                 value_type: None,
                 method_kind: None,
@@ -6272,6 +6410,7 @@ fn check_reports_direct_return_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->int"),
                 value_type: None,
                 method_kind: None,
@@ -6294,6 +6433,7 @@ fn check_reports_direct_return_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::from("str")),
                 is_awaited: false,
                 value_callee: None,
@@ -6349,6 +6489,7 @@ fn check_reports_direct_bool_return_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->bool"),
                 value_type: None,
                 method_kind: None,
@@ -6371,6 +6512,7 @@ fn check_reports_direct_bool_return_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::from("str")),
                 is_awaited: false,
                 value_callee: None,
@@ -6426,6 +6568,7 @@ fn check_reports_direct_none_return_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->None"),
                 value_type: None,
                 method_kind: None,
@@ -6448,6 +6591,7 @@ fn check_reports_direct_none_return_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -6504,6 +6648,7 @@ fn check_accepts_direct_returned_call_result_type_match() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -6523,6 +6668,7 @@ fn check_accepts_direct_returned_call_result_type_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -6559,6 +6705,7 @@ fn check_accepts_direct_returned_call_result_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -6613,6 +6760,7 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -6632,6 +6780,7 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -6668,6 +6817,7 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -6724,6 +6874,7 @@ fn check_accepts_direct_returned_constructor_type_match() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -6743,6 +6894,7 @@ fn check_accepts_direct_returned_constructor_type_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Box"),
                     value_type: None,
                     method_kind: None,
@@ -6779,6 +6931,7 @@ fn check_accepts_direct_returned_constructor_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("Box")),
@@ -6833,6 +6986,7 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -6852,6 +7006,7 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -6888,6 +7043,7 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("Box")),
@@ -6943,6 +7099,7 @@ fn check_accepts_direct_returned_parameter_type_match() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:int)->int"),
                 value_type: None,
                 method_kind: None,
@@ -6965,6 +7122,7 @@ fn check_accepts_direct_returned_parameter_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7018,6 +7176,7 @@ fn check_reports_direct_returned_parameter_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:str)->int"),
                 value_type: None,
                 method_kind: None,
@@ -7040,6 +7199,7 @@ fn check_reports_direct_returned_parameter_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7096,6 +7256,7 @@ fn check_accepts_direct_returned_member_type_match() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -7115,6 +7276,7 @@ fn check_accepts_direct_returned_member_type_match() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7137,6 +7299,7 @@ fn check_accepts_direct_returned_member_type_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->str"),
                     value_type: None,
                     method_kind: None,
@@ -7160,6 +7323,7 @@ fn check_accepts_direct_returned_member_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7214,6 +7378,7 @@ fn check_reports_direct_returned_member_type_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -7233,6 +7398,7 @@ fn check_reports_direct_returned_member_type_mismatch() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7255,6 +7421,7 @@ fn check_reports_direct_returned_member_type_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->int"),
                     value_type: None,
                     method_kind: None,
@@ -7278,6 +7445,7 @@ fn check_reports_direct_returned_member_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7334,6 +7502,7 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -7353,6 +7522,7 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7375,6 +7545,7 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -7398,6 +7569,7 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7452,6 +7624,7 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -7471,6 +7644,7 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7493,6 +7667,7 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -7516,6 +7691,7 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -7571,6 +7747,7 @@ fn check_reports_bool_annotated_assignment_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("flag"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("bool"),
                 value_type: Some(String::from("int")),
                 method_kind: None,
@@ -7604,6 +7781,7 @@ fn check_reports_bool_annotated_assignment_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("bool")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -7631,6 +7809,7 @@ fn check_reports_bool_annotated_assignment_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -7654,6 +7833,7 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("missing"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("None"),
                 value_type: Some(String::from("int")),
                 method_kind: None,
@@ -7687,6 +7867,7 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("None")),
+                annotation_expr: None,
                 value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
@@ -7714,6 +7895,7 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -7738,6 +7920,7 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -7757,6 +7940,7 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -7791,6 +7975,7 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -7818,6 +8003,7 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -7840,6 +8026,7 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -7859,6 +8046,7 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -7893,6 +8081,7 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -7920,6 +8109,7 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -7944,6 +8134,7 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
                 Declaration {
                     name: String::from("source"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7963,6 +8154,7 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
                 Declaration {
                     name: String::from("target"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -7997,6 +8189,7 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("str")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -8024,6 +8217,7 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -8046,6 +8240,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -8065,6 +8260,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -8087,6 +8283,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -8106,6 +8303,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 Declaration {
                     name: String::from("target"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -8140,6 +8338,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -8167,6 +8366,7 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -8190,6 +8390,7 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:str)->None"),
                 value_type: None,
                 method_kind: None,
@@ -8223,6 +8424,7 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -8250,6 +8452,7 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 line: 1,
@@ -8275,6 +8478,7 @@ fn check_accepts_return_from_local_bare_assignment() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -8294,6 +8498,7 @@ fn check_accepts_return_from_local_bare_assignment() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -8317,6 +8522,7 @@ fn check_accepts_return_from_local_bare_assignment() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -8357,6 +8563,7 @@ fn check_accepts_return_from_local_bare_assignment() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: None,
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -8384,6 +8591,7 @@ fn check_accepts_return_from_local_bare_assignment() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 line: 2,
@@ -8425,6 +8633,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->None"),
                 value_type: None,
                 method_kind: None,
@@ -8465,6 +8674,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -8492,6 +8702,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -8501,6 +8712,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -8528,6 +8740,7 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 4,
@@ -8552,6 +8765,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -8571,6 +8785,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->None"),
                     value_type: None,
                     method_kind: None,
@@ -8606,6 +8821,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -8633,6 +8849,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -8642,6 +8859,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -8669,6 +8887,7 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -8694,6 +8913,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -8713,6 +8933,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -8732,6 +8953,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -8767,6 +8989,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -8794,6 +9017,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -8803,6 +9027,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -8830,6 +9055,7 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 2,
@@ -8869,6 +9095,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -8888,6 +9115,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -8929,6 +9157,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -8956,6 +9185,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -8965,6 +9195,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -8992,6 +9223,7 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 3,
@@ -9016,6 +9248,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -9035,6 +9268,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -9054,6 +9288,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -9089,6 +9324,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -9116,6 +9352,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -9125,6 +9362,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9152,6 +9390,7 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 2,
@@ -9177,6 +9416,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -9196,6 +9436,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->None"),
                     value_type: None,
                     method_kind: None,
@@ -9231,6 +9472,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -9258,6 +9500,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 1,
@@ -9267,6 +9510,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9294,6 +9538,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -9303,6 +9548,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9330,6 +9576,7 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -9353,6 +9600,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -9372,6 +9620,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -9395,6 +9644,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -9436,6 +9686,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -9463,6 +9714,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 1,
@@ -9472,6 +9724,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9499,6 +9752,7 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 2,
@@ -9522,6 +9776,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                 Declaration {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -9541,6 +9796,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                 Declaration {
                     name: String::from("x"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -9560,6 +9816,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                 Declaration {
                     name: String::from("y"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -9579,6 +9836,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -9614,6 +9872,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -9641,6 +9900,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -9650,6 +9910,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9677,6 +9938,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 2,
@@ -9686,6 +9948,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -9713,6 +9976,7 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 3,
@@ -9738,6 +10002,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
                 Declaration {
                     name: String::from("count"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -9757,6 +10022,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
                 Declaration {
                     name: String::from("size"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -9780,6 +10046,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("count"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("len")),
@@ -9820,6 +10087,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("len")),
@@ -9847,6 +10115,7 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -9908,6 +10177,7 @@ fn check_infers_generic_function_call_through_union_actual() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("maybe"),
         kind: DeclarationKind::Function,
         detail: String::from("(x:T | None)->T | None"),
@@ -9989,6 +10259,7 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
@@ -10064,6 +10335,7 @@ fn check_infers_paramspec_from_callable_argument() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("wrap"),
         kind: DeclarationKind::Function,
         detail: String::from("(cb:Callable[P, int])->Callable[P, int]"),
@@ -10143,6 +10415,7 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
@@ -10228,6 +10501,7 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
         method_calls: Vec::new(),
     };
     let function = Declaration {
+        metadata: Default::default(),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(value:tuple[Unpack[Ts]])->tuple[Unpack[Ts]]"),
@@ -10312,6 +10586,7 @@ fn check_reports_unresolved_source_authored_typevartuple_method_call() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -10331,6 +10606,7 @@ fn check_reports_unresolved_source_authored_typevartuple_method_call() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -10350,6 +10626,7 @@ fn check_reports_unresolved_source_authored_typevartuple_method_call() {
                 Declaration {
                     name: String::from("collect"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -10446,6 +10723,7 @@ fn resolve_scope_param_semantic_type_uses_declaration_signature_sites() {
         declarations: vec![Declaration {
             name: String::from("build"),
             kind: DeclarationKind::Function,
+            metadata: Default::default(),
             detail: String::from("(x:int,*args:str,**kwargs:bool)->None"),
             value_type: None,
             method_kind: None,
@@ -10531,6 +10809,7 @@ fn check_accepts_imported_semantic_type_alias_expansion() {
 #[test]
 fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
     let alias = Declaration {
+        metadata: Default::default(),
         name: String::from("Items"),
         kind: DeclarationKind::TypeAlias,
         detail: String::from("list[T]"),
@@ -11432,6 +11711,7 @@ fn check_reports_builtin_return_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("name"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("str"),
                 value_type: None,
                 method_kind: None,
@@ -11465,6 +11745,7 @@ fn check_reports_builtin_return_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("str")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("len")),
@@ -11492,6 +11773,7 @@ fn check_reports_builtin_return_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -11516,6 +11798,7 @@ fn check_accepts_generic_alias_normalization() {
                 Declaration {
                     name: String::from("make_items"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->List[int]"),
                     value_type: None,
                     method_kind: None,
@@ -11535,6 +11818,7 @@ fn check_accepts_generic_alias_normalization() {
                 Declaration {
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("list[int]"),
                     value_type: None,
                     method_kind: None,
@@ -11569,6 +11853,7 @@ fn check_accepts_generic_alias_normalization() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("list[int]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("make_items")),
@@ -11596,6 +11881,7 @@ fn check_accepts_generic_alias_normalization() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -11618,6 +11904,7 @@ fn check_accepts_callable_assignment_compatibility() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -11637,6 +11924,7 @@ fn check_accepts_callable_assignment_compatibility() {
                 Declaration {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(x:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -11671,6 +11959,7 @@ fn check_accepts_callable_assignment_compatibility() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -11698,6 +11987,7 @@ fn check_accepts_callable_assignment_compatibility() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -11719,6 +12009,7 @@ fn check_accepts_annotated_type_equivalence() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Annotated[str, tag])->str"),
                 value_type: None,
                 method_kind: None,
@@ -11739,6 +12030,7 @@ fn check_accepts_annotated_type_equivalence() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -11795,6 +12087,7 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -11814,6 +12107,7 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
                 Declaration {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(x:str)->str"),
                     value_type: None,
                     method_kind: None,
@@ -11848,6 +12142,7 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -11875,6 +12170,7 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -11901,6 +12197,7 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[..., str]"),
                     value_type: None,
                     method_kind: None,
@@ -11920,6 +12217,7 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
                 Declaration {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(x:str,y:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -11954,6 +12252,7 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[..., str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -11981,6 +12280,7 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12003,6 +12303,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[..., int]"),
                     value_type: None,
                     method_kind: None,
@@ -12022,6 +12323,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
                 Declaration {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(x:str,y:int)->str"),
                     value_type: None,
                     method_kind: None,
@@ -12056,6 +12358,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[..., int]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -12083,6 +12386,7 @@ fn check_reports_callable_ellipsis_return_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12109,6 +12413,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -12128,6 +12433,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -12150,6 +12456,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -12169,6 +12476,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -12201,6 +12509,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -12228,6 +12537,7 @@ fn check_accepts_callable_assignment_from_bound_method() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12252,6 +12562,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -12271,6 +12582,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:str)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -12293,6 +12605,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -12312,6 +12625,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -12344,6 +12658,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -12371,6 +12686,7 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12399,6 +12715,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -12418,6 +12735,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -12440,6 +12758,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 Declaration {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Box"),
                     value_type: None,
                     method_kind: None,
@@ -12459,6 +12778,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -12491,6 +12811,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -12518,6 +12839,7 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12542,6 +12864,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -12561,6 +12884,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:str)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -12583,6 +12907,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 Declaration {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Box"),
                     value_type: None,
                     method_kind: None,
@@ -12602,6 +12927,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 Declaration {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Callable[[int], str]"),
                     value_type: None,
                     method_kind: None,
@@ -12634,6 +12960,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Callable[[int], str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -12661,6 +12988,7 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12688,6 +13016,7 @@ fn check_accepts_builtin_container_generic_any_match() {
             declarations: vec![Declaration {
                 name: String::from("items"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("list[str]"),
                 value_type: None,
                 method_kind: None,
@@ -12721,6 +13050,7 @@ fn check_accepts_builtin_container_generic_any_match() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("list[str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("list")),
@@ -12748,6 +13078,7 @@ fn check_accepts_builtin_container_generic_any_match() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -12770,6 +13101,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                 Declaration {
                     name: String::from("anything"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Any"),
                     value_type: None,
                     method_kind: None,
@@ -12789,6 +13121,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                 Declaration {
                     name: String::from("maybe"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Optional[int]"),
                     value_type: None,
                     method_kind: None,
@@ -12808,6 +13141,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                 Declaration {
                     name: String::from("choice"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Union[int, str]"),
                     value_type: None,
                     method_kind: None,
@@ -12827,6 +13161,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                 Declaration {
                     name: String::from("measure"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -12850,6 +13185,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("measure"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("len")),
@@ -12891,6 +13227,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("Any")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("len")),
@@ -12918,6 +13255,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -12927,6 +13265,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("Optional[int]")),
+                    annotation_expr: None,
                     value_type: Some(String::from("None")),
                     is_awaited: false,
                     value_callee: None,
@@ -12954,6 +13293,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 2,
@@ -12963,6 +13303,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("Union[int, str]")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("len")),
@@ -12990,6 +13331,7 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 3,
@@ -13012,6 +13354,7 @@ fn check_reports_optional_direct_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("name"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("Optional[str]"),
                 value_type: None,
                 method_kind: None,
@@ -13045,6 +13388,7 @@ fn check_reports_optional_direct_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Optional[str]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("len")),
@@ -13072,6 +13416,7 @@ fn check_reports_optional_direct_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -13096,6 +13441,7 @@ fn check_accepts_cast_builtin_return_type() {
                 Declaration {
                     name: String::from("text"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -13115,6 +13461,7 @@ fn check_accepts_cast_builtin_return_type() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Any"),
                     value_type: None,
                     method_kind: None,
@@ -13134,6 +13481,7 @@ fn check_accepts_cast_builtin_return_type() {
                 Declaration {
                     name: String::from("cast"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("typing.cast"),
                     value_type: None,
                     method_kind: None,
@@ -13157,6 +13505,7 @@ fn check_accepts_cast_builtin_return_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("cast")),
@@ -13197,6 +13546,7 @@ fn check_accepts_cast_builtin_return_type() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("str")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("cast")),
@@ -13224,6 +13574,7 @@ fn check_accepts_cast_builtin_return_type() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -13246,6 +13597,7 @@ fn check_accepts_typing_typevar_assignment() {
                 Declaration {
                     name: String::from("TypeVar"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("typing.TypeVar"),
                     value_type: None,
                     method_kind: None,
@@ -13265,6 +13617,7 @@ fn check_accepts_typing_typevar_assignment() {
                 Declaration {
                     name: String::from("T"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("TypeVar"),
                     value_type: None,
                     method_kind: None,
@@ -13312,6 +13665,7 @@ fn check_accepts_typing_typevar_assignment() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("TypeVar")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("TypeVar")),
@@ -13339,6 +13693,7 @@ fn check_accepts_typing_typevar_assignment() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -13360,6 +13715,7 @@ fn check_reports_typing_typevar_argument_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("TypeVar"),
                 kind: DeclarationKind::Import,
+                metadata: Default::default(),
                 detail: String::from("typing.TypeVar"),
                 value_type: None,
                 method_kind: None,
@@ -13425,6 +13781,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     Declaration {
                         name: String::from("TypeVar"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing_extensions.TypeVar"),
                         value_type: None,
                         method_kind: None,
@@ -13444,6 +13801,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     Declaration {
                         name: String::from("T"),
                         kind: DeclarationKind::Value,
+                        metadata: Default::default(),
                         detail: String::from("TypeVar"),
                         value_type: None,
                         method_kind: None,
@@ -13491,6 +13849,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: Some(String::from("TypeVar")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("TypeVar")),
@@ -13518,6 +13877,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: None,
                     owner_type_name: None,
                     line: 1,
@@ -13531,6 +13891,7 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                 declarations: vec![typepython_binding::Declaration {
                     name: String::from("TypeVar"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(name:str)->TypeVar"),
                     value_type: None,
                     method_kind: None,
@@ -13580,6 +13941,7 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                     Declaration {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing_extensions.Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -13599,6 +13961,7 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                     Declaration {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -13618,6 +13981,7 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                     Declaration {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -13640,6 +14004,7 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                     Declaration {
                         name: String::from("BadReader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Reader"),
                         value_type: None,
                         method_kind: None,
@@ -13679,6 +14044,7 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                 declarations: vec![typepython_binding::Declaration {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -13730,6 +14096,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     Declaration {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.AsyncIterator"),
                         value_type: None,
                         method_kind: None,
@@ -13749,6 +14116,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     Declaration {
                         name: String::from("Stream"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("AsyncIterator"),
                         value_type: None,
                         method_kind: None,
@@ -13768,6 +14136,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     Declaration {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->AsyncIterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -13790,6 +14159,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     Declaration {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Awaitable[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -13833,6 +14203,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     typepython_binding::Declaration {
                         name: String::from("AsyncIterable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -13852,6 +14223,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     typepython_binding::Declaration {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->AsyncIterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -13874,6 +14246,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     typepython_binding::Declaration {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("AsyncIterable"),
                         value_type: None,
                         method_kind: None,
@@ -13893,6 +14266,7 @@ fn check_accepts_collections_abc_async_iterator_base() {
                     typepython_binding::Declaration {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Awaitable[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -13946,6 +14320,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     Declaration {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.AsyncIterator"),
                         value_type: None,
                         method_kind: None,
@@ -13965,6 +14340,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     Declaration {
                         name: String::from("BadStream"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("AsyncIterator"),
                         value_type: None,
                         method_kind: None,
@@ -13984,6 +14360,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     Declaration {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->AsyncIterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14027,6 +14404,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("AsyncIterable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -14046,6 +14424,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->AsyncIterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14068,6 +14447,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("AsyncIterable"),
                         value_type: None,
                         method_kind: None,
@@ -14087,6 +14467,7 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Awaitable[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14143,6 +14524,7 @@ fn check_accepts_newtype_assignment() {
                 Declaration {
                     name: String::from("NewType"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("typing.NewType"),
                     value_type: None,
                     method_kind: None,
@@ -14162,6 +14544,7 @@ fn check_accepts_newtype_assignment() {
                 Declaration {
                     name: String::from("UserId"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("NewType"),
                     value_type: None,
                     method_kind: None,
@@ -14209,6 +14592,7 @@ fn check_accepts_newtype_assignment() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("NewType")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("NewType")),
@@ -14236,6 +14620,7 @@ fn check_accepts_newtype_assignment() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -14257,6 +14642,7 @@ fn check_reports_newtype_argument_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("NewType"),
                 kind: DeclarationKind::Import,
+                metadata: Default::default(),
                 detail: String::from("typing.NewType"),
                 value_type: None,
                 method_kind: None,
@@ -14322,6 +14708,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                     Declaration {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing.Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -14341,6 +14728,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                     Declaration {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -14360,6 +14748,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                     Declaration {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14382,6 +14771,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                     Declaration {
                         name: String::from("FileReader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Reader"),
                         value_type: None,
                         method_kind: None,
@@ -14401,6 +14791,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                     Declaration {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14443,6 +14834,7 @@ fn check_accepts_protocol_derived_base_implementation() {
                 declarations: vec![typepython_binding::Declaration {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -14492,6 +14884,7 @@ fn check_reports_protocol_derived_base_missing_member() {
                     Declaration {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing.Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -14511,6 +14904,7 @@ fn check_reports_protocol_derived_base_missing_member() {
                     Declaration {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Protocol"),
                         value_type: None,
                         method_kind: None,
@@ -14530,6 +14924,7 @@ fn check_reports_protocol_derived_base_missing_member() {
                     Declaration {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->str"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14552,6 +14947,7 @@ fn check_reports_protocol_derived_base_missing_member() {
                     Declaration {
                         name: String::from("BadReader"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Reader"),
                         value_type: None,
                         method_kind: None,
@@ -14591,6 +14987,7 @@ fn check_reports_protocol_derived_base_missing_member() {
                 declarations: vec![typepython_binding::Declaration {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -14642,6 +15039,7 @@ fn check_accepts_collections_abc_sized_base() {
                     Declaration {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.Sized"),
                         value_type: None,
                         method_kind: None,
@@ -14661,6 +15059,7 @@ fn check_accepts_collections_abc_sized_base() {
                     Declaration {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Sized"),
                         value_type: None,
                         method_kind: None,
@@ -14680,6 +15079,7 @@ fn check_accepts_collections_abc_sized_base() {
                     Declaration {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14723,6 +15123,7 @@ fn check_accepts_collections_abc_sized_base() {
                     typepython_binding::Declaration {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -14742,6 +15143,7 @@ fn check_accepts_collections_abc_sized_base() {
                     typepython_binding::Declaration {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14795,6 +15197,7 @@ fn check_reports_collections_abc_sized_missing_member() {
                     Declaration {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.Sized"),
                         value_type: None,
                         method_kind: None,
@@ -14814,6 +15217,7 @@ fn check_reports_collections_abc_sized_missing_member() {
                     Declaration {
                         name: String::from("BadBox"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Sized"),
                         value_type: None,
                         method_kind: None,
@@ -14854,6 +15258,7 @@ fn check_reports_collections_abc_sized_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -14873,6 +15278,7 @@ fn check_reports_collections_abc_sized_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -14928,6 +15334,7 @@ fn check_accepts_collections_abc_callable_base() {
                     Declaration {
                         name: String::from("Callable"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.Callable"),
                         value_type: None,
                         method_kind: None,
@@ -14947,6 +15354,7 @@ fn check_accepts_collections_abc_callable_base() {
                     Declaration {
                         name: String::from("Runner"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Callable"),
                         value_type: None,
                         method_kind: None,
@@ -14966,6 +15374,7 @@ fn check_accepts_collections_abc_callable_base() {
                     Declaration {
                         name: String::from("__call__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Any"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15009,6 +15418,7 @@ fn check_accepts_collections_abc_callable_base() {
                     typepython_binding::Declaration {
                         name: String::from("Callable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -15028,6 +15438,7 @@ fn check_accepts_collections_abc_callable_base() {
                     typepython_binding::Declaration {
                         name: String::from("__call__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Any"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15081,6 +15492,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     Declaration {
                         name: String::from("Iterator"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("collections.abc.Iterator"),
                         value_type: None,
                         method_kind: None,
@@ -15100,6 +15512,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     Declaration {
                         name: String::from("Cursor"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Iterator"),
                         value_type: None,
                         method_kind: None,
@@ -15119,6 +15532,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     Declaration {
                         name: String::from("__iter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Iterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15162,6 +15576,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -15181,6 +15596,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15203,6 +15619,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("Iterable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Sized"),
                         value_type: None,
                         method_kind: None,
@@ -15222,6 +15639,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__iter__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Iterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15244,6 +15662,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("Iterator"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Iterable"),
                         value_type: None,
                         method_kind: None,
@@ -15263,6 +15682,7 @@ fn check_reports_collections_abc_iterator_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__next__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Any"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15318,6 +15738,7 @@ fn check_accepts_typing_awaitable_base() {
                     Declaration {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing.Awaitable"),
                         value_type: None,
                         method_kind: None,
@@ -15337,6 +15758,7 @@ fn check_accepts_typing_awaitable_base() {
                     Declaration {
                         name: String::from("Job"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Awaitable"),
                         value_type: None,
                         method_kind: None,
@@ -15356,6 +15778,7 @@ fn check_accepts_typing_awaitable_base() {
                     Declaration {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Iterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15399,6 +15822,7 @@ fn check_accepts_typing_awaitable_base() {
                     typepython_binding::Declaration {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -15418,6 +15842,7 @@ fn check_accepts_typing_awaitable_base() {
                     typepython_binding::Declaration {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Iterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15471,6 +15896,7 @@ fn check_reports_typing_awaitable_missing_member() {
                     Declaration {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("typing.Awaitable"),
                         value_type: None,
                         method_kind: None,
@@ -15490,6 +15916,7 @@ fn check_reports_typing_awaitable_missing_member() {
                     Declaration {
                         name: String::from("BadJob"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Awaitable"),
                         value_type: None,
                         method_kind: None,
@@ -15530,6 +15957,7 @@ fn check_reports_typing_awaitable_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -15549,6 +15977,7 @@ fn check_reports_typing_awaitable_missing_member() {
                     typepython_binding::Declaration {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self)->Iterator[Any]"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -15603,6 +16032,7 @@ fn check_accepts_async_function_call_as_awaitable() {
                 Declaration {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -15622,6 +16052,7 @@ fn check_accepts_async_function_call_as_awaitable() {
                 Declaration {
                     name: String::from("task"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Awaitable[int]"),
                     value_type: None,
                     method_kind: None,
@@ -15656,6 +16087,7 @@ fn check_accepts_async_function_call_as_awaitable() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("Awaitable[int]")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("fetch")),
@@ -15683,6 +16115,7 @@ fn check_accepts_async_function_call_as_awaitable() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -15705,6 +16138,7 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
                 Declaration {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -15724,6 +16158,7 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -15758,6 +16193,7 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("fetch")),
@@ -15785,6 +16221,7 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -15809,6 +16246,7 @@ fn check_accepts_direct_await_of_async_function() {
                 Declaration {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -15828,6 +16266,7 @@ fn check_accepts_direct_await_of_async_function() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -15852,6 +16291,7 @@ fn check_accepts_direct_await_of_async_function() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("fetch"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -15882,6 +16322,7 @@ fn check_accepts_direct_await_of_async_function() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("build"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::new()),
                     is_awaited: true,
                     value_callee: Some(String::from("fetch")),
@@ -15946,6 +16387,7 @@ fn check_reports_direct_await_mismatch() {
                 Declaration {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -15965,6 +16407,7 @@ fn check_reports_direct_await_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -15989,6 +16432,7 @@ fn check_reports_direct_await_mismatch() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("fetch"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -16019,6 +16463,7 @@ fn check_reports_direct_await_mismatch() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("build"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::new()),
                     is_awaited: true,
                     value_callee: Some(String::from("fetch")),
@@ -16077,6 +16522,7 @@ fn check_accepts_generator_yield_type() {
             declarations: vec![Declaration {
                 name: String::from("produce"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->Generator[int, None, None]"),
                 value_type: None,
                 method_kind: None,
@@ -16100,6 +16546,7 @@ fn check_accepts_generator_yield_type() {
             yields: vec![typepython_binding::YieldSite {
                 owner_name: String::from("produce"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::from("int")),
                 value_callee: None,
                 value_name: None,
@@ -16161,6 +16608,7 @@ fn check_reports_generator_yield_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("produce"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->Generator[int, None, None]"),
                 value_type: None,
                 method_kind: None,
@@ -16184,6 +16632,7 @@ fn check_reports_generator_yield_type_mismatch() {
             yields: vec![typepython_binding::YieldSite {
                 owner_name: String::from("produce"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::from("str")),
                 value_callee: None,
                 value_name: None,
@@ -16320,6 +16769,7 @@ fn check_accepts_yield_from_iterable_type() {
                 Declaration {
                     name: String::from("values"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("list[int]"),
                     value_type: None,
                     method_kind: None,
@@ -16339,6 +16789,7 @@ fn check_accepts_yield_from_iterable_type() {
                 Declaration {
                     name: String::from("relay"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Generator[int, None, None]"),
                     value_type: None,
                     method_kind: None,
@@ -16363,6 +16814,7 @@ fn check_accepts_yield_from_iterable_type() {
             yields: vec![typepython_binding::YieldSite {
                 owner_name: String::from("relay"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 value_callee: None,
                 value_name: Some(String::from("values")),
@@ -16415,6 +16867,7 @@ fn check_reports_unknown_direct_call_keyword() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(x:int,y:int)->None"),
                 value_type: None,
                 method_kind: None,
@@ -16476,6 +16929,7 @@ fn check_reports_unknown_member_access() {
             declarations: vec![Declaration {
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("unknown"),
                 value_type: None,
                 method_kind: None,
@@ -16531,6 +16985,7 @@ fn check_reports_unknown_method_call() {
             declarations: vec![Declaration {
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::from("unknown"),
                 value_type: None,
                 method_kind: None,
@@ -16594,6 +17049,7 @@ fn check_reports_unknown_direct_call_on_import() {
             declarations: vec![Declaration {
                 name: String::from("external"),
                 kind: DeclarationKind::Import,
+                metadata: Default::default(),
                 detail: String::from("pkg.external"),
                 value_type: None,
                 method_kind: None,
@@ -16656,6 +17112,7 @@ fn check_reports_unknown_dotted_call_on_unresolved_import_when_imports_unknown()
                 declarations: vec![Declaration {
                     name: String::from("external"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("pkg.external"),
                     value_type: None,
                     method_kind: None,
@@ -16725,6 +17182,7 @@ fn check_allows_dotted_call_on_unresolved_import_when_imports_dynamic() {
                 declarations: vec![Declaration {
                     name: String::from("external"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("pkg.external"),
                     value_type: None,
                     method_kind: None,
@@ -16813,6 +17271,7 @@ fn check_reports_missing_direct_member_access() {
             declarations: vec![Declaration {
                 name: String::from("Box"),
                 kind: DeclarationKind::Class,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -16876,6 +17335,7 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                 Declaration {
                     name: String::from("A"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -16895,6 +17355,7 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                 Declaration {
                     name: String::from("name"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("str")),
                     method_kind: None,
@@ -16917,6 +17378,7 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                 Declaration {
                     name: String::from("B"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -16936,6 +17398,7 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                 Declaration {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("A | B"),
                     value_type: None,
                     method_kind: None,
@@ -16999,6 +17462,7 @@ fn check_reports_direct_method_call_arity_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17018,6 +17482,7 @@ fn check_reports_direct_method_call_arity_mismatch() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int,y:int)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -17086,6 +17551,7 @@ fn check_reports_direct_constructor_arity_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17105,6 +17571,7 @@ fn check_reports_direct_constructor_arity_mismatch() {
                 Declaration {
                     name: String::from("__init__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int,y:int)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -17171,6 +17638,7 @@ fn check_reports_direct_constructor_type_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17190,6 +17658,7 @@ fn check_reports_direct_constructor_type_mismatch() {
                 Declaration {
                     name: String::from("__init__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int,y:str)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -17256,6 +17725,7 @@ fn check_reports_invalid_top_level_override_usage() {
             declarations: vec![Declaration {
                 name: String::from("top_level"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -17305,6 +17775,7 @@ fn check_reports_member_override_without_base_member() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17324,6 +17795,7 @@ fn check_reports_member_override_without_base_member() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17343,6 +17815,7 @@ fn check_reports_member_override_without_base_member() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17396,6 +17869,7 @@ fn check_reports_incompatible_direct_override_signature() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17415,6 +17889,7 @@ fn check_reports_incompatible_direct_override_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:int)->int"),
                     value_type: None,
                     method_kind: None,
@@ -17437,6 +17912,7 @@ fn check_reports_incompatible_direct_override_signature() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::from("Base"),
                     value_type: None,
                     method_kind: None,
@@ -17456,6 +17932,7 @@ fn check_reports_incompatible_direct_override_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:str)->int"),
                     value_type: None,
                     method_kind: None,
@@ -17510,6 +17987,7 @@ fn check_accepts_variance_compatible_override_signature() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17529,6 +18007,7 @@ fn check_accepts_variance_compatible_override_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:Child)->Base"),
                     value_type: None,
                     method_kind: None,
@@ -17551,6 +18030,7 @@ fn check_accepts_variance_compatible_override_signature() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::from("Base"),
                     value_type: None,
                     method_kind: None,
@@ -17570,6 +18050,7 @@ fn check_accepts_variance_compatible_override_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:Base)->Child"),
                     value_type: None,
                     method_kind: None,
@@ -17666,6 +18147,7 @@ fn check_accepts_typevartuple_alias_expansion_assignment() {
         declarations: vec![Declaration {
             name: String::from("Pack"),
             kind: DeclarationKind::TypeAlias,
+            metadata: Default::default(),
             detail: String::from("tuple[Unpack[Ts]]"),
             value_type: None,
             method_kind: None,
@@ -17744,6 +18226,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("typing.Protocol"),
                     value_type: None,
                     method_kind: None,
@@ -17763,6 +18246,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17782,6 +18266,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->None"),
                     value_type: None,
                     method_kind: None,
@@ -17804,6 +18289,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("FileHandle"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17823,6 +18309,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->None"),
                     value_type: None,
                     method_kind: None,
@@ -17845,6 +18332,7 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                 Declaration {
                     name: String::from("consume"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:SupportsClose)->None"),
                     value_type: None,
                     method_kind: None,
@@ -17906,6 +18394,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("typing.Protocol"),
                     value_type: None,
                     method_kind: None,
@@ -17925,6 +18414,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("Runner"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17944,6 +18434,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:Child)->Base"),
                     value_type: None,
                     method_kind: None,
@@ -17966,6 +18457,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -17985,6 +18477,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::from("Base"),
                     value_type: None,
                     method_kind: None,
@@ -18004,6 +18497,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("Impl"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::from("Runner"),
                     value_type: None,
                     method_kind: None,
@@ -18023,6 +18517,7 @@ fn check_accepts_structural_interface_implementation_signature() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,x:Base)->Child"),
                     value_type: None,
                     method_kind: None,
@@ -18075,6 +18570,7 @@ fn check_reports_incompatible_imported_override_signature() {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -18094,6 +18590,7 @@ fn check_reports_incompatible_imported_override_signature() {
                     Declaration {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self,x:int)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18137,6 +18634,7 @@ fn check_reports_incompatible_imported_override_signature() {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("app.base.Base"),
                         value_type: None,
                         method_kind: None,
@@ -18156,6 +18654,7 @@ fn check_reports_incompatible_imported_override_signature() {
                     Declaration {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::from("Base"),
                         value_type: None,
                         method_kind: None,
@@ -18175,6 +18674,7 @@ fn check_reports_incompatible_imported_override_signature() {
                     Declaration {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("(self,x:str)->int"),
                         value_type: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18229,6 +18729,7 @@ fn check_reports_incompatible_override_method_kind() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -18248,6 +18749,7 @@ fn check_reports_incompatible_override_method_kind() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(cls)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Class),
@@ -18270,6 +18772,7 @@ fn check_reports_incompatible_override_method_kind() {
                 Declaration {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::from("Base"),
                     value_type: None,
                     method_kind: None,
@@ -18289,6 +18792,7 @@ fn check_reports_incompatible_override_method_kind() {
                 Declaration {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18343,6 +18847,7 @@ fn check_reports_missing_explicit_override_when_required() {
                     Declaration {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -18362,6 +18867,7 @@ fn check_reports_missing_explicit_override_when_required() {
                     Declaration {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -18384,6 +18890,7 @@ fn check_reports_missing_explicit_override_when_required() {
                     Declaration {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -18403,6 +18910,7 @@ fn check_reports_missing_explicit_override_when_required() {
                     Declaration {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::new(),
                         value_type: None,
                         method_kind: None,
@@ -18465,6 +18973,7 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                         Declaration {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
+                            metadata: Default::default(),
                             detail: String::new(),
                             value_type: None,
                             method_kind: None,
@@ -18484,6 +18993,7 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                         Declaration {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
+                            metadata: Default::default(),
                             detail: String::from("(self)->None"),
                             value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18527,6 +19037,7 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                         Declaration {
                             name: String::from("Base"),
                             kind: DeclarationKind::Import,
+                            metadata: Default::default(),
                             detail: String::from("app.base.Base"),
                             value_type: None,
                             method_kind: None,
@@ -18546,6 +19057,7 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                         Declaration {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
+                            metadata: Default::default(),
                             detail: String::from("Base"),
                             value_type: None,
                             method_kind: None,
@@ -18565,6 +19077,7 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                         Declaration {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
+                            metadata: Default::default(),
                             detail: String::from("(self)->None"),
                             value_type: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18625,6 +19138,7 @@ fn check_reports_classvar_outside_class_scope() {
             declarations: vec![Declaration {
                 name: String::from("VALUE"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -18674,6 +19188,7 @@ fn check_accepts_classvar_inside_class_scope() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -18693,6 +19208,7 @@ fn check_accepts_classvar_inside_class_scope() {
                 Declaration {
                     name: String::from("cache"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -18744,6 +19260,7 @@ fn check_accepts_direct_method_call_result_return() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -18763,6 +19280,7 @@ fn check_accepts_direct_method_call_result_return() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18785,6 +19303,7 @@ fn check_accepts_direct_method_call_result_return() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->str"),
                     value_type: None,
                     method_kind: None,
@@ -18806,6 +19325,7 @@ fn check_accepts_direct_method_call_result_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -18862,6 +19382,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -18881,6 +19402,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -18903,6 +19425,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -18922,6 +19445,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("str"),
                     value_type: None,
                     method_kind: None,
@@ -18954,6 +19478,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("str")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -18981,6 +19506,7 @@ fn check_accepts_direct_method_call_result_assignment() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -19005,6 +19531,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -19024,6 +19551,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -19046,6 +19574,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -19065,6 +19594,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 Declaration {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("int"),
                     value_type: None,
                     method_kind: None,
@@ -19097,6 +19627,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19124,6 +19655,7 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: None,
                 owner_type_name: None,
                 line: 1,
@@ -19150,6 +19682,7 @@ fn check_reports_direct_method_call_result_return_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -19169,6 +19702,7 @@ fn check_reports_direct_method_call_result_return_mismatch() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -19191,6 +19725,7 @@ fn check_reports_direct_method_call_result_return_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->int"),
                     value_type: None,
                     method_kind: None,
@@ -19212,6 +19747,7 @@ fn check_reports_direct_method_call_result_return_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19270,6 +19806,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -19289,6 +19826,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -19311,6 +19849,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
                 Declaration {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Box"),
                     value_type: None,
                     method_kind: None,
@@ -19330,6 +19869,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->str"),
                     value_type: None,
                     method_kind: None,
@@ -19351,6 +19891,7 @@ fn check_accepts_direct_method_call_result_through_instance() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19407,6 +19948,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -19426,6 +19968,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                 Declaration {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -19448,6 +19991,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                 Declaration {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Box"),
                     value_type: None,
                     method_kind: None,
@@ -19467,6 +20011,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->int"),
                     value_type: None,
                     method_kind: None,
@@ -19488,6 +20033,7 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19588,6 +20134,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(values:list[int])->None"),
                 value_type: None,
                 method_kind: None,
@@ -19616,6 +20163,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -19635,6 +20183,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19662,6 +20211,7 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 line: 3,
@@ -19685,6 +20235,7 @@ fn check_reports_for_loop_target_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(values:list[int])->None"),
                 value_type: None,
                 method_kind: None,
@@ -19713,6 +20264,7 @@ fn check_reports_for_loop_target_type_mismatch() {
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -19732,6 +20284,7 @@ fn check_reports_for_loop_target_type_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("str")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19759,6 +20312,7 @@ fn check_reports_for_loop_target_type_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 line: 3,
@@ -19784,6 +20338,7 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(pairs:tuple[tuple[int, str]])->str"),
                 value_type: None,
                 method_kind: None,
@@ -19804,6 +20359,7 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19841,6 +20397,7 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -19875,6 +20432,7 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(pairs:list[Sequence[int]])->int"),
                 value_type: None,
                 method_kind: None,
@@ -19895,6 +20453,7 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -19932,6 +20491,7 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -19966,6 +20526,7 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(pairs:tuple[tuple[int, str]])->int"),
                 value_type: None,
                 method_kind: None,
@@ -19986,6 +20547,7 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20023,6 +20585,7 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -20061,6 +20624,7 @@ fn check_reports_tuple_for_loop_target_arity_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(pairs:tuple[tuple[int]])->None"),
                 value_type: None,
                 method_kind: None,
@@ -20089,6 +20653,7 @@ fn check_reports_tuple_for_loop_target_arity_mismatch() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -20126,6 +20691,7 @@ fn check_accepts_with_target_type_in_return() {
                 Declaration {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -20145,6 +20711,7 @@ fn check_accepts_with_target_type_in_return() {
                 Declaration {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -20167,6 +20734,7 @@ fn check_accepts_with_target_type_in_return() {
                 Declaration {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -20189,6 +20757,7 @@ fn check_accepts_with_target_type_in_return() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(manager:Manager)->str"),
                     value_type: None,
                     method_kind: None,
@@ -20210,6 +20779,7 @@ fn check_accepts_with_target_type_in_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20247,6 +20817,7 @@ fn check_accepts_with_target_type_in_return() {
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                context: None,
                 context_type: Some(String::new()),
                 context_is_awaited: false,
                 context_callee: None,
@@ -20281,6 +20852,7 @@ fn check_reports_with_target_type_mismatch() {
                 Declaration {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -20300,6 +20872,7 @@ fn check_reports_with_target_type_mismatch() {
                 Declaration {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->int"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -20322,6 +20895,7 @@ fn check_reports_with_target_type_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(manager:Manager)->None"),
                     value_type: None,
                     method_kind: None,
@@ -20351,6 +20925,7 @@ fn check_reports_with_target_type_mismatch() {
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                context: None,
                 context_type: Some(String::new()),
                 context_is_awaited: false,
                 context_callee: None,
@@ -20386,6 +20961,7 @@ fn check_accepts_except_handler_binding_type() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->ValueError"),
                 value_type: None,
                 method_kind: None,
@@ -20406,6 +20982,7 @@ fn check_accepts_except_handler_binding_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20468,6 +21045,7 @@ fn check_reports_except_handler_binding_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->TypeError"),
                 value_type: None,
                 method_kind: None,
@@ -20488,6 +21066,7 @@ fn check_reports_except_handler_binding_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20552,6 +21131,7 @@ fn check_does_not_keep_except_binding_after_handler() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->ValueError"),
                 value_type: None,
                 method_kind: None,
@@ -20572,6 +21152,7 @@ fn check_does_not_keep_except_binding_after_handler() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20634,6 +21215,7 @@ fn check_accepts_tuple_except_handler_binding_type() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->Union[ValueError, TypeError]"),
                 value_type: None,
                 method_kind: None,
@@ -20654,6 +21236,7 @@ fn check_accepts_tuple_except_handler_binding_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20716,6 +21299,7 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->ValueError"),
                 value_type: None,
                 method_kind: None,
@@ -20736,6 +21320,7 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20787,10 +21372,8 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered
-            .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`")
-    );
+    assert!(rendered
+        .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
 }
 
 #[test]
@@ -20803,6 +21386,7 @@ fn check_accepts_bare_except_handler_binding_type() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->BaseException"),
                 value_type: None,
                 method_kind: None,
@@ -20823,6 +21407,7 @@ fn check_accepts_bare_except_handler_binding_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20885,6 +21470,7 @@ fn check_reports_bare_except_handler_binding_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->ValueError"),
                 value_type: None,
                 method_kind: None,
@@ -20905,6 +21491,7 @@ fn check_reports_bare_except_handler_binding_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -20970,6 +21557,7 @@ fn check_reports_non_exhaustive_sealed_match() {
                 Declaration {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -20989,6 +21577,7 @@ fn check_reports_non_exhaustive_sealed_match() {
                 Declaration {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -21008,6 +21597,7 @@ fn check_reports_non_exhaustive_sealed_match() {
                 Declaration {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -21027,6 +21617,7 @@ fn check_reports_non_exhaustive_sealed_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(expr:Expr)->None"),
                     value_type: None,
                     method_kind: None,
@@ -21053,6 +21644,7 @@ fn check_reports_non_exhaustive_sealed_match() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -21098,6 +21690,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                 Declaration {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -21117,6 +21710,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                 Declaration {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -21136,6 +21730,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                 Declaration {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -21155,6 +21750,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(expr:Expr)->None"),
                     value_type: None,
                     method_kind: None,
@@ -21181,6 +21777,7 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -21230,6 +21827,7 @@ fn check_accepts_if_is_not_none_narrowing_for_return() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Optional[str])->str"),
                 value_type: None,
                 method_kind: None,
@@ -21250,6 +21848,7 @@ fn check_accepts_if_is_not_none_narrowing_for_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21317,6 +21916,7 @@ fn check_accepts_assert_is_not_none_narrowing_for_return() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Optional[str])->str"),
                 value_type: None,
                 method_kind: None,
@@ -21337,6 +21937,7 @@ fn check_accepts_assert_is_not_none_narrowing_for_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21400,6 +22001,7 @@ fn check_accepts_isinstance_tuple_narrowing_for_return() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Union[str, bytes, int])->Union[str, bytes]"),
                 value_type: None,
                 method_kind: None,
@@ -21420,6 +22022,7 @@ fn check_accepts_isinstance_tuple_narrowing_for_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21488,6 +22091,7 @@ fn check_accepts_typeguard_true_branch_narrowing() {
                 Declaration {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->TypeGuard[str]"),
                     value_type: None,
                     method_kind: None,
@@ -21507,6 +22111,7 @@ fn check_accepts_typeguard_true_branch_narrowing() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->str"),
                     value_type: None,
                     method_kind: None,
@@ -21528,6 +22133,7 @@ fn check_accepts_typeguard_true_branch_narrowing() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21596,6 +22202,7 @@ fn check_accepts_typeis_false_branch_narrowing() {
                 Declaration {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->TypeIs[str]"),
                     value_type: None,
                     method_kind: None,
@@ -21615,6 +22222,7 @@ fn check_accepts_typeis_false_branch_narrowing() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->int"),
                     value_type: None,
                     method_kind: None,
@@ -21636,6 +22244,7 @@ fn check_accepts_typeis_false_branch_narrowing() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21704,6 +22313,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                 Declaration {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->TypeIs[str]"),
                     value_type: None,
                     method_kind: None,
@@ -21723,6 +22333,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(value:Union[str, int])->int"),
                     value_type: None,
                     method_kind: None,
@@ -21745,6 +22356,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("build"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -21775,6 +22387,7 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                 typepython_binding::ReturnSite {
                     owner_name: String::from("build"),
                     owner_type_name: None,
+                    value: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -21843,6 +22456,7 @@ fn check_accepts_boolean_composition_narrowing() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:str | None)->str"),
                 value_type: None,
                 method_kind: None,
@@ -21863,6 +22477,7 @@ fn check_accepts_boolean_composition_narrowing() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -21978,6 +22593,7 @@ fn check_accepts_truthiness_narrowing_for_bool_optional() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(flag:Optional[Literal[True]])->Literal[True]"),
                 value_type: None,
                 method_kind: None,
@@ -21998,6 +22614,7 @@ fn check_accepts_truthiness_narrowing_for_bool_optional() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -22064,6 +22681,7 @@ fn check_does_not_over_narrow_truthiness_for_int_optional() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Optional[int])->int"),
                 value_type: None,
                 method_kind: None,
@@ -22084,6 +22702,7 @@ fn check_does_not_over_narrow_truthiness_for_int_optional() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -22152,6 +22771,7 @@ fn check_invalidates_narrowing_after_augassign() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(value:Optional[int])->int"),
                 value_type: None,
                 method_kind: None,
@@ -22172,6 +22792,7 @@ fn check_invalidates_narrowing_after_augassign() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -22247,6 +22868,7 @@ fn check_joins_branch_local_assignments_after_if() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(flag:bool)->Union[str, int]"),
                 value_type: None,
                 method_kind: None,
@@ -22267,6 +22889,7 @@ fn check_joins_branch_local_assignments_after_if() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -22319,6 +22942,7 @@ fn check_joins_branch_local_assignments_after_if() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::from("str")),
                     is_awaited: false,
                     value_callee: None,
@@ -22346,6 +22970,7 @@ fn check_joins_branch_local_assignments_after_if() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 3,
@@ -22355,6 +22980,7 @@ fn check_joins_branch_local_assignments_after_if() {
                     destructuring_target_names: None,
                     destructuring_index: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -22382,6 +23008,7 @@ fn check_joins_branch_local_assignments_after_if() {
                     value_list_elements: None,
                     value_set_elements: None,
                     value_dict_entries: None,
+                    value: None,
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
                     line: 4,
@@ -22426,6 +23053,7 @@ fn check_reports_deprecated_import_and_call_when_enabled() {
                     declarations: vec![Declaration {
                         name: String::from("old"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("()->int"),
                         value_type: None,
                         method_kind: None,
@@ -22464,6 +23092,7 @@ fn check_reports_deprecated_import_and_call_when_enabled() {
                     declarations: vec![Declaration {
                         name: String::from("old"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("lib.deps.old"),
                         value_type: None,
                         method_kind: None,
@@ -22537,6 +23166,7 @@ fn check_ignores_deprecated_uses_when_configured() {
                     declarations: vec![Declaration {
                         name: String::from("old"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("()->int"),
                         value_type: None,
                         method_kind: None,
@@ -22575,6 +23205,7 @@ fn check_ignores_deprecated_uses_when_configured() {
                     declarations: vec![Declaration {
                         name: String::from("old"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("lib.deps.old"),
                         value_type: None,
                         method_kind: None,
@@ -22669,6 +23300,7 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
             Declaration {
                 name: String::from("JsonObject"),
                 kind: DeclarationKind::TypeAlias,
+                metadata: Default::default(),
                 detail: String::from("dict[str, JsonValue]"),
                 value_type: None,
                 method_kind: None,
@@ -22688,6 +23320,7 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
             Declaration {
                 name: String::from("JsonArray"),
                 kind: DeclarationKind::TypeAlias,
+                metadata: Default::default(),
                 detail: String::from("list[JsonValue]"),
                 value_type: None,
                 method_kind: None,
@@ -22707,6 +23340,7 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
             Declaration {
                 name: String::from("JsonValue"),
                 kind: DeclarationKind::TypeAlias,
+                metadata: Default::default(),
                 detail: String::from("None | bool | int | str | JsonObject | JsonArray"),
                 value_type: None,
                 method_kind: None,
@@ -22775,6 +23409,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -22794,6 +23429,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
                 Declaration {
                     name: String::from("clone"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->Self"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -22816,6 +23452,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
                 Declaration {
                     name: String::from("SubBox"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -22835,6 +23472,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:SubBox)->SubBox"),
                     value_type: None,
                     method_kind: None,
@@ -22856,6 +23494,7 @@ fn check_accepts_self_return_through_inherited_method_call() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -22912,6 +23551,7 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -22931,6 +23571,7 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
                 Declaration {
                     name: String::from("merge"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self,other:Self)->Self"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -22997,6 +23638,7 @@ fn check_accepts_self_typed_attribute_access() {
                 Declaration {
                     name: String::from("Node"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23016,6 +23658,7 @@ fn check_accepts_self_typed_attribute_access() {
                 Declaration {
                     name: String::from("next"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Self"),
                     value_type: None,
                     method_kind: None,
@@ -23038,6 +23681,7 @@ fn check_accepts_self_typed_attribute_access() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(node:Node)->Node"),
                     value_type: None,
                     method_kind: None,
@@ -23059,6 +23703,7 @@ fn check_accepts_self_typed_attribute_access() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -23115,6 +23760,7 @@ fn check_accepts_property_access_in_return() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23134,6 +23780,7 @@ fn check_accepts_property_access_in_return() {
                 Declaration {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
@@ -23156,6 +23803,7 @@ fn check_accepts_property_access_in_return() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->str"),
                     value_type: None,
                     method_kind: None,
@@ -23177,6 +23825,7 @@ fn check_accepts_property_access_in_return() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -23233,6 +23882,7 @@ fn check_reports_property_access_assignment_mismatch() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23252,6 +23902,7 @@ fn check_reports_property_access_assignment_mismatch() {
                 Declaration {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
@@ -23274,6 +23925,7 @@ fn check_reports_property_access_assignment_mismatch() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->None"),
                     value_type: None,
                     method_kind: None,
@@ -23306,6 +23958,7 @@ fn check_reports_property_access_assignment_mismatch() {
                 destructuring_target_names: None,
                 destructuring_index: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -23333,6 +23986,7 @@ fn check_reports_property_access_assignment_mismatch() {
                 value_list_elements: None,
                 value_set_elements: None,
                 value_dict_entries: None,
+                value: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 line: 2,
@@ -23550,6 +24204,7 @@ fn check_accepts_inherited_property_access() {
                 Declaration {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23569,6 +24224,7 @@ fn check_accepts_inherited_property_access() {
                 Declaration {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
@@ -23591,6 +24247,7 @@ fn check_accepts_inherited_property_access() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23610,6 +24267,7 @@ fn check_accepts_inherited_property_access() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(box:Box)->str"),
                     value_type: None,
                     method_kind: None,
@@ -23631,6 +24289,7 @@ fn check_accepts_inherited_property_access() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -23687,6 +24346,7 @@ fn check_accepts_bare_property_member_access() {
                 Declaration {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23706,6 +24366,7 @@ fn check_accepts_bare_property_member_access() {
                 Declaration {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("Box"),
                     value_type: None,
                     method_kind: None,
@@ -23725,6 +24386,7 @@ fn check_accepts_bare_property_member_access() {
                 Declaration {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
@@ -23791,6 +24453,7 @@ fn check_accepts_mapping_subscript_read_type() {
             declarations: vec![Declaration {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("(values:Mapping[str, int])->int"),
                 value_type: None,
                 method_kind: None,
@@ -23813,6 +24476,7 @@ fn check_accepts_mapping_subscript_read_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -23924,6 +24588,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("enum.Enum"),
                     value_type: None,
                     method_kind: None,
@@ -23943,6 +24608,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -23962,6 +24628,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -23984,6 +24651,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Color"),
                     value_type: None,
                     method_kind: None,
@@ -24005,6 +24673,7 @@ fn check_accepts_enum_member_access_as_enum_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -24061,6 +24730,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("StrEnum"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("enum.StrEnum"),
                     value_type: None,
                     method_kind: None,
@@ -24080,6 +24750,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24099,6 +24770,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("str")),
                     method_kind: None,
@@ -24121,6 +24793,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->Color"),
                     value_type: None,
                     method_kind: None,
@@ -24142,6 +24815,7 @@ fn check_accepts_strenum_member_access_as_enum_type() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -24198,6 +24872,7 @@ fn check_reports_non_exhaustive_enum_match() {
                 Declaration {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("enum.Enum"),
                     value_type: None,
                     method_kind: None,
@@ -24217,6 +24892,7 @@ fn check_reports_non_exhaustive_enum_match() {
                 Declaration {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24236,6 +24912,7 @@ fn check_reports_non_exhaustive_enum_match() {
                 Declaration {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -24258,6 +24935,7 @@ fn check_reports_non_exhaustive_enum_match() {
                 Declaration {
                     name: String::from("BLUE"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -24280,6 +24958,7 @@ fn check_reports_non_exhaustive_enum_match() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(color:Color)->None"),
                     value_type: None,
                     method_kind: None,
@@ -24306,6 +24985,7 @@ fn check_reports_non_exhaustive_enum_match() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -24369,6 +25049,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                 Declaration {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24388,6 +25069,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                 Declaration {
                     name: String::from("Num"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24407,6 +25089,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                 Declaration {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24426,6 +25109,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                 Declaration {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24445,6 +25129,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                 Declaration {
                     name: String::from("render"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(expr:Expr)->int"),
                     value_type: None,
                     method_kind: None,
@@ -24471,6 +25156,7 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("render")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -24532,6 +25218,7 @@ fn check_accepts_with_without_target() {
                 Declaration {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24551,6 +25238,7 @@ fn check_accepts_with_without_target() {
                 Declaration {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24573,6 +25261,7 @@ fn check_accepts_with_without_target() {
                 Declaration {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24595,6 +25284,7 @@ fn check_accepts_with_without_target() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(manager:Manager)->None"),
                     value_type: None,
                     method_kind: None,
@@ -24624,6 +25314,7 @@ fn check_accepts_with_without_target() {
                 target_name: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
+                context: None,
                 context_type: Some(String::new()),
                 context_is_awaited: false,
                 context_callee: None,
@@ -24658,6 +25349,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("A"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24677,6 +25369,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->int"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24699,6 +25392,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24721,6 +25415,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("B"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -24740,6 +25435,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self)->str"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24762,6 +25458,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
@@ -24784,6 +25481,7 @@ fn check_accepts_multiple_with_items() {
                 Declaration {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(a:A,b:B)->str"),
                     value_type: None,
                     method_kind: None,
@@ -24805,6 +25503,7 @@ fn check_accepts_multiple_with_items() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("build"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -24843,6 +25542,7 @@ fn check_accepts_multiple_with_items() {
                     target_name: Some(String::from("x")),
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
+                    context: None,
                     context_type: Some(String::new()),
                     context_is_awaited: false,
                     context_callee: None,
@@ -24859,6 +25559,7 @@ fn check_accepts_multiple_with_items() {
                     target_name: Some(String::from("y")),
                     owner_name: Some(String::from("build")),
                     owner_type_name: None,
+                    context: None,
                     context_type: Some(String::new()),
                     context_is_awaited: false,
                     context_callee: None,
@@ -24979,6 +25680,7 @@ fn check_reports_deprecated_function_call_as_error() {
                     declarations: vec![Declaration {
                         name: String::from("old_func"),
                         kind: DeclarationKind::Function,
+                        metadata: Default::default(),
                         detail: String::from("()->int"),
                         value_type: None,
                         method_kind: None,
@@ -25017,6 +25719,7 @@ fn check_reports_deprecated_function_call_as_error() {
                     declarations: vec![Declaration {
                         name: String::from("old_func"),
                         kind: DeclarationKind::Import,
+                        metadata: Default::default(),
                         detail: String::from("lib.legacy.old_func"),
                         value_type: None,
                         method_kind: None,
@@ -25097,6 +25800,7 @@ fn check_reports_classvar_outside_class_scope_typepython_module() {
             declarations: vec![Declaration {
                 name: String::from("LIMIT"),
                 kind: DeclarationKind::Value,
+                metadata: Default::default(),
                 detail: String::new(),
                 value_type: None,
                 method_kind: None,
@@ -25158,6 +25862,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("enum.Enum"),
                     value_type: None,
                     method_kind: None,
@@ -25177,6 +25882,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("Status"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -25196,6 +25902,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("OPEN"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25218,6 +25925,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("CLOSED"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25240,6 +25948,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("PENDING"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25262,6 +25971,7 @@ fn check_accepts_enum_exhaustive_match() {
                 Declaration {
                     name: String::from("handle"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(s:Status)->None"),
                     value_type: None,
                     method_kind: None,
@@ -25288,6 +25998,7 @@ fn check_accepts_enum_exhaustive_match() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("handle")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -25347,6 +26058,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("enum.Enum"),
                     value_type: None,
                     method_kind: None,
@@ -25366,6 +26078,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("Priority"),
                     kind: DeclarationKind::Class,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: None,
                     method_kind: None,
@@ -25385,6 +26098,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("LOW"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25407,6 +26121,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("MEDIUM"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25429,6 +26144,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("HIGH"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::new(),
                     value_type: Some(String::from("int")),
                     method_kind: None,
@@ -25451,6 +26167,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                 Declaration {
                     name: String::from("triage"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("(p:Priority)->None"),
                     value_type: None,
                     method_kind: None,
@@ -25477,6 +26194,7 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
             matches: vec![typepython_binding::MatchSite {
                 owner_name: Some(String::from("triage")),
                 owner_type_name: None,
+                subject: None,
                 subject_type: Some(String::new()),
                 subject_is_awaited: false,
                 subject_callee: None,
@@ -25548,6 +26266,7 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
                 Declaration {
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
+                    metadata: Default::default(),
                     detail: String::from("list[tuple[int, str, bool]]"),
                     value_type: None,
                     method_kind: None,
@@ -25567,6 +26286,7 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
                 Declaration {
                     name: String::from("process"),
                     kind: DeclarationKind::Function,
+                    metadata: Default::default(),
                     detail: String::from("()->None"),
                     value_type: None,
                     method_kind: None,
@@ -25596,6 +26316,7 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("process")),
                 owner_type_name: None,
+                iter: None,
                 iter_type: Some(String::new()),
                 iter_is_awaited: false,
                 iter_callee: None,
@@ -25633,6 +26354,7 @@ fn check_reports_except_handler_binding_return_type_mismatch() {
             declarations: vec![Declaration {
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
+                metadata: Default::default(),
                 detail: String::from("()->str"),
                 value_type: None,
                 method_kind: None,
@@ -25653,6 +26375,7 @@ fn check_reports_except_handler_binding_return_type_mismatch() {
             returns: vec![typepython_binding::ReturnSite {
                 owner_name: String::from("run"),
                 owner_type_name: None,
+                value: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -25730,6 +26453,7 @@ fn check_reports_unresolved_import_with_fallback_unknown() {
                 declarations: vec![Declaration {
                     name: String::from("remote"),
                     kind: DeclarationKind::Import,
+                    metadata: Default::default(),
                     detail: String::from("pkg.missing.remote"),
                     value_type: None,
                     method_kind: None,

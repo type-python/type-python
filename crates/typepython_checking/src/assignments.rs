@@ -23,7 +23,7 @@ pub(super) fn annotated_assignment_type_diagnostics(
     let mut diagnostics = Vec::new();
 
     for assignment in &node.assignments {
-        let Some(annotation) = assignment.annotation.as_deref() else {
+        let Some(annotation) = assignment.annotation_text() else {
             continue;
         };
         let Some(expected) = normalized_assignment_annotation(annotation).map(normalize_type_text)
@@ -187,7 +187,7 @@ pub(super) fn simple_name_augmented_assignment_diagnostics(
 ) -> Vec<Diagnostic> {
     node.assignments
         .iter()
-        .filter(|assignment| assignment.annotation.is_none())
+        .filter(|assignment| assignment.annotation_text().is_none())
         .filter(|assignment| {
             assignment
                 .value_binop_left
@@ -310,7 +310,7 @@ pub(super) fn current_augmented_assignment_target_is_final(
             && previous.owner_name == assignment.owner_name
             && previous.owner_type_name == assignment.owner_type_name
             && previous.line < assignment.line
-            && previous.annotation.as_deref().is_some_and(is_final_annotation_text)
+            && previous.annotation_text().is_some_and(is_final_annotation_text)
     })
 }
 
@@ -379,35 +379,35 @@ pub(super) fn resolve_current_augmented_assignment_target_semantic_type(
 pub(super) fn direct_expr_metadata_from_assignment_site(
     assignment: &typepython_binding::AssignmentSite,
 ) -> typepython_syntax::DirectExprMetadata {
-    typepython_syntax::DirectExprMetadata {
-        value_type: assignment.value_type.clone(),
-        is_awaited: assignment.is_awaited,
-        value_callee: assignment.value_callee.clone(),
-        value_name: assignment.value_name.clone(),
-        value_member_owner_name: assignment.value_member_owner_name.clone(),
-        value_member_name: assignment.value_member_name.clone(),
-        value_member_through_instance: assignment.value_member_through_instance,
-        value_method_owner_name: assignment.value_method_owner_name.clone(),
-        value_method_name: assignment.value_method_name.clone(),
-        value_method_through_instance: assignment.value_method_through_instance,
-        value_subscript_target: assignment.value_subscript_target.clone(),
-        value_subscript_string_key: assignment.value_subscript_string_key.clone(),
-        value_subscript_index: assignment.value_subscript_index.clone(),
-        value_if_true: assignment.value_if_true.clone(),
-        value_if_false: assignment.value_if_false.clone(),
-        value_if_guard: assignment.value_if_guard.as_ref().map(site_to_guard),
-        value_bool_left: assignment.value_bool_left.clone(),
-        value_bool_right: assignment.value_bool_right.clone(),
-        value_binop_left: assignment.value_binop_left.clone(),
-        value_binop_right: assignment.value_binop_right.clone(),
-        value_binop_operator: assignment.value_binop_operator.clone(),
-        value_lambda: assignment.value_lambda.clone(),
-        value_list_comprehension: assignment.value_list_comprehension.clone(),
-        value_generator_comprehension: assignment.value_generator_comprehension.clone(),
-        value_list_elements: assignment.value_list_elements.clone(),
-        value_set_elements: assignment.value_set_elements.clone(),
-        value_dict_entries: assignment.value_dict_entries.clone(),
-    }
+    assignment.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
+        value_type: None,
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    })
 }
 
 #[derive(Debug, Clone)]

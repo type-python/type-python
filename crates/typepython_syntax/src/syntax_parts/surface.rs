@@ -772,7 +772,7 @@ pub struct DecoratorTransformModuleInfo {
 }
 
 /// One parameter in a direct callable signature surface.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectFunctionParamSite {
     pub name: String,
     pub annotation: Option<String>,

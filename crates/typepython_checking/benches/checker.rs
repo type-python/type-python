@@ -14,25 +14,23 @@ fn declaration(
     detail: &str,
     type_params: Vec<GenericTypeParam>,
 ) -> Declaration {
-    Declaration {
-        name: name.to_owned(),
-        kind,
-        detail: detail.to_owned(),
-        value_type: None,
-        method_kind: None,
-        class_kind: None,
-        owner: None,
-        is_async: false,
-        is_override: false,
-        is_abstract_method: false,
-        is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
-        is_final: false,
-        is_class_var: false,
-        bases: Vec::new(),
-        type_params,
-    }
+    Declaration { metadata: Default::default(), name: name.to_owned(),
+    kind,
+    detail: detail.to_owned(),
+    value_type: None,
+    method_kind: None,
+    class_kind: None,
+    owner: None,
+    is_async: false,
+    is_override: false,
+    is_abstract_method: false,
+    is_final_decorator: false,
+    is_deprecated: false,
+    deprecation_message: None,
+    is_final: false,
+    is_class_var: false,
+    bases: Vec::new(),
+    type_params, }
 }
 
 fn import_declaration(name: &str, target: &str) -> Declaration {

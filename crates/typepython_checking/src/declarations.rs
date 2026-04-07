@@ -736,36 +736,17 @@ pub(super) fn resolve_match_subject_semantic_type(
     nodes: &[typepython_graph::ModuleNode],
     match_site: &typepython_binding::MatchSite,
 ) -> Option<SemanticType> {
-    resolve_direct_expression_semantic_type(
-        node,
-        nodes,
-        None,
-        None,
-        match_site.owner_name.as_deref(),
-        match_site.owner_type_name.as_deref(),
-        match_site.line,
-        match_site.subject_type.as_deref(),
-        match_site.subject_is_awaited,
-        match_site.subject_callee.as_deref(),
-        match_site.subject_name.as_deref(),
-        match_site.subject_member_owner_name.as_deref(),
-        match_site.subject_member_name.as_deref(),
-        match_site.subject_member_through_instance,
-        match_site.subject_method_owner_name.as_deref(),
-        match_site.subject_method_name.as_deref(),
-        match_site.subject_method_through_instance,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
+    match_site.subject_metadata().as_ref().and_then(|metadata| {
+        resolve_direct_expression_semantic_type_from_metadata(
+            node,
+            nodes,
+            None,
+            match_site.owner_name.as_deref(),
+            match_site.owner_type_name.as_deref(),
+            match_site.line,
+            metadata,
+        )
+    })
 }
 
 pub(super) fn resolve_match_subject_enum_type(subject_type: &SemanticType) -> String {

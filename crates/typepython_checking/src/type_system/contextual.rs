@@ -364,7 +364,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<(Vec<SemanticType>, SemanticType)> {
     if let Some(lambda) = assignment.value_lambda.as_deref() {
-        let expected = normalized_assignment_annotation(assignment.annotation.as_deref()?)?;
+    let expected = normalized_assignment_annotation(assignment.annotation_text()?)?;
         return resolve_contextual_lambda_callable_semantic_signature(
             node,
             nodes,

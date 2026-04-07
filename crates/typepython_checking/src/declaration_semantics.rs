@@ -327,7 +327,12 @@ fn build_cached_semantic_declaration_facts(
 ) -> CachedSemanticDeclarationFacts {
     CachedSemanticDeclarationFacts {
         callable: matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-            .then(|| parse_direct_callable_declaration(&declaration.detail))
+            .then(|| {
+                declaration
+                    .callable_signature()
+                    .map(semantic_callable_from_bound_signature)
+                    .or_else(|| parse_direct_callable_declaration(&declaration.detail))
+            })
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
                 params: callable.params,
@@ -349,27 +354,81 @@ fn build_cached_semantic_declaration_facts(
                 return_type_id: intern_semantic_type(type_store, callable.return_type),
             }),
         value: (declaration.kind == DeclarationKind::Value).then(|| {
+            let annotation_text = declaration
+                .value_annotation()
+                .map(|annotation| annotation.text.clone())
+                .or_else(|| (!declaration.detail.trim().is_empty()).then(|| declaration.detail.clone()));
             CachedSemanticValueDeclaration {
-                annotation_text: (!declaration.detail.trim().is_empty())
-                    .then(|| declaration.detail.clone()),
+                annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
                     type_store,
-                    (!declaration.detail.trim().is_empty())
-                        .then(|| lower_type_text_or_name(&declaration.detail)),
+                    annotation_text.as_deref().map(lower_type_text_or_name),
                 ),
             }
         }),
         type_alias: (declaration.kind == DeclarationKind::TypeAlias).then(|| {
+            let body_text = declaration
+                .type_alias_value()
+                .map(|value| value.text.clone())
+                .unwrap_or_else(|| declaration.detail.clone());
             CachedSemanticTypeAliasDeclaration {
                 head: declaration.name.clone(),
                 type_params: declaration.type_params.clone(),
-                body_text: declaration.detail.clone(),
-                body_id: type_store.intern(lower_type_text_or_name(&declaration.detail)),
+                body_text: body_text.clone(),
+                body_id: type_store.intern(lower_type_text_or_name(&body_text)),
             }
         }),
-        import_target: (declaration.kind == DeclarationKind::Import)
-            .then(|| parse_import_target_ref(&declaration.detail))
-            .flatten(),
+        import_target: (declaration.kind == DeclarationKind::Import).then(|| {
+            declaration
+                .import_target()
+                .map(semantic_import_target_from_bound_target)
+                .or_else(|| parse_import_target_ref(&declaration.detail))
+        }).flatten(),
+    }
+}
+
+fn semantic_callable_from_bound_signature(
+    signature: &typepython_binding::BoundCallableSignature,
+) -> SemanticCallableDeclaration {
+    let params = signature.params.clone();
+    let semantic_params = params
+        .iter()
+        .map(|param| SemanticCallableParam {
+            name: param.name.clone(),
+            annotation_text: param.annotation.clone(),
+            annotation: param.annotation.as_deref().map(|annotation| {
+                lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
+            }),
+            has_default: param.has_default,
+            positional_only: param.positional_only,
+            keyword_only: param.keyword_only,
+            variadic: param.variadic,
+            keyword_variadic: param.keyword_variadic,
+        })
+        .collect::<Vec<_>>();
+    let return_annotation_text = signature.returns.as_ref().map(|returns| returns.text.clone());
+    let return_type = return_annotation_text.as_deref().map(lower_type_text_or_name);
+    SemanticCallableDeclaration {
+        params,
+        semantic_params,
+        return_annotation_text,
+        return_type,
+    }
+}
+
+fn semantic_import_target_from_bound_target(
+    target: &typepython_binding::BoundImportTarget,
+) -> SemanticImportTargetRef {
+    SemanticImportTargetRef {
+        raw_target: target.raw_target.clone(),
+        module_target: target.module_target.clone(),
+        symbol_target: target
+            .symbol_target
+            .as_ref()
+            .map(|symbol| SemanticImportSymbolTargetRef {
+                module_key: symbol.module_key.clone(),
+                symbol_name: symbol.symbol_name.clone(),
+            }),
     }
 }
 

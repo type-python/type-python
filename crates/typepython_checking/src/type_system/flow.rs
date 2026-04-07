@@ -515,36 +515,17 @@ pub(super) fn resolve_for_loop_target_semantic_type(
             && for_loop.line < current_line
     })?;
 
-    let iter_type = resolve_direct_expression_semantic_type(
-        node,
-        nodes,
-        signature,
-        None,
-        loop_site.owner_name.as_deref(),
-        loop_site.owner_type_name.as_deref(),
-        loop_site.line,
-        loop_site.iter_type.as_deref(),
-        loop_site.iter_is_awaited,
-        loop_site.iter_callee.as_deref(),
-        loop_site.iter_name.as_deref(),
-        loop_site.iter_member_owner_name.as_deref(),
-        loop_site.iter_member_name.as_deref(),
-        loop_site.iter_member_through_instance,
-        loop_site.iter_method_owner_name.as_deref(),
-        loop_site.iter_method_name.as_deref(),
-        loop_site.iter_method_through_instance,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )?;
+    let iter_type = loop_site.iter_metadata().as_ref().and_then(|metadata| {
+        resolve_direct_expression_semantic_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            loop_site.owner_name.as_deref(),
+            loop_site.owner_type_name.as_deref(),
+            loop_site.line,
+            metadata,
+        )
+    })?;
 
     let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
 
@@ -586,36 +567,17 @@ pub(super) fn resolve_with_target_semantic_type_for_signature(
     signature: Option<&str>,
     with_site: &typepython_binding::WithSite,
 ) -> Option<SemanticType> {
-    let context_type = resolve_direct_expression_semantic_type(
-        node,
-        nodes,
-        signature,
-        None,
-        with_site.owner_name.as_deref(),
-        with_site.owner_type_name.as_deref(),
-        with_site.line,
-        with_site.context_type.as_deref(),
-        with_site.context_is_awaited,
-        with_site.context_callee.as_deref(),
-        with_site.context_name.as_deref(),
-        with_site.context_member_owner_name.as_deref(),
-        with_site.context_member_name.as_deref(),
-        with_site.context_member_through_instance,
-        with_site.context_method_owner_name.as_deref(),
-        with_site.context_method_name.as_deref(),
-        with_site.context_method_through_instance,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )?;
+    let context_type = with_site.context_metadata().as_ref().and_then(|metadata| {
+        resolve_direct_expression_semantic_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            with_site.owner_name.as_deref(),
+            with_site.owner_type_name.as_deref(),
+            with_site.line,
+            metadata,
+        )
+    })?;
 
     let context_type_name = semantic_nominal_owner_name(&context_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &context_type_name)?;
@@ -715,37 +677,38 @@ pub(super) fn resolve_assignment_site_semantic_type(
     assignment: &typepython_binding::AssignmentSite,
 ) -> Option<SemanticType> {
     if let Some(index) = assignment.destructuring_index {
+        let metadata = assignment.value_metadata()?;
         let tuple_elements = unpacked_fixed_tuple_semantic_elements(
             &resolve_direct_expression_semantic_type(
-            node,
-            nodes,
-            signature,
-            Some(assignment.name.as_str()),
-            assignment.owner_name.as_deref(),
-            assignment.owner_type_name.as_deref(),
-            assignment.line,
-            assignment.value_type.as_deref(),
-            assignment.is_awaited,
-            assignment.value_callee.as_deref(),
-            assignment.value_name.as_deref(),
-            assignment.value_member_owner_name.as_deref(),
-            assignment.value_member_name.as_deref(),
-            assignment.value_member_through_instance,
-            assignment.value_method_owner_name.as_deref(),
-            assignment.value_method_name.as_deref(),
-            assignment.value_method_through_instance,
-            assignment.value_subscript_target.as_deref(),
-            assignment.value_subscript_string_key.as_deref(),
-            assignment.value_subscript_index.as_deref(),
-            assignment.value_if_true.as_deref(),
-            assignment.value_if_false.as_deref(),
-            assignment.value_if_guard.as_ref(),
-            assignment.value_bool_left.as_deref(),
-            assignment.value_bool_right.as_deref(),
-            assignment.value_binop_left.as_deref(),
-            assignment.value_binop_right.as_deref(),
-            assignment.value_binop_operator.as_deref(),
-        )?,
+                node,
+                nodes,
+                signature,
+                Some(assignment.name.as_str()),
+                assignment.owner_name.as_deref(),
+                assignment.owner_type_name.as_deref(),
+                assignment.line,
+                metadata.value_type.as_deref(),
+                metadata.is_awaited,
+                metadata.value_callee.as_deref(),
+                metadata.value_name.as_deref(),
+                metadata.value_member_owner_name.as_deref(),
+                metadata.value_member_name.as_deref(),
+                metadata.value_member_through_instance,
+                metadata.value_method_owner_name.as_deref(),
+                metadata.value_method_name.as_deref(),
+                metadata.value_method_through_instance,
+                metadata.value_subscript_target.as_deref(),
+                metadata.value_subscript_string_key.as_deref(),
+                metadata.value_subscript_index.as_deref(),
+                metadata.value_if_true.as_deref(),
+                metadata.value_if_false.as_deref(),
+                metadata.value_if_guard.as_ref().map(guard_to_site).as_ref(),
+                metadata.value_bool_left.as_deref(),
+                metadata.value_bool_right.as_deref(),
+                metadata.value_binop_left.as_deref(),
+                metadata.value_binop_right.as_deref(),
+                metadata.value_binop_operator.as_deref(),
+            )?,
         )?;
         let target_names = assignment.destructuring_target_names.as_ref()?;
         if tuple_elements.len() == target_names.len() {
@@ -807,36 +770,39 @@ pub(super) fn resolve_assignment_site_semantic_type(
         );
     }
 
-    resolve_direct_expression_semantic_type(
-        node,
-        nodes,
-        signature,
-        Some(assignment.name.as_str()),
-        assignment.owner_name.as_deref(),
-        assignment.owner_type_name.as_deref(),
-        assignment.line,
-        assignment.value_type.as_deref(),
-        assignment.is_awaited,
-        assignment.value_callee.as_deref(),
-        assignment.value_name.as_deref(),
-        assignment.value_member_owner_name.as_deref(),
-        assignment.value_member_name.as_deref(),
-        assignment.value_member_through_instance,
-        assignment.value_method_owner_name.as_deref(),
-        assignment.value_method_name.as_deref(),
-        assignment.value_method_through_instance,
-        assignment.value_subscript_target.as_deref(),
-        assignment.value_subscript_string_key.as_deref(),
-        assignment.value_subscript_index.as_deref(),
-        assignment.value_if_true.as_deref(),
-        assignment.value_if_false.as_deref(),
-        assignment.value_if_guard.as_ref(),
-        assignment.value_bool_left.as_deref(),
-        assignment.value_bool_right.as_deref(),
-        assignment.value_binop_left.as_deref(),
-        assignment.value_binop_right.as_deref(),
-        assignment.value_binop_operator.as_deref(),
-    )
+    assignment.value_metadata().as_ref().and_then(|metadata| {
+        let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
+        resolve_direct_expression_semantic_type(
+            node,
+            nodes,
+            signature,
+            Some(assignment.name.as_str()),
+            assignment.owner_name.as_deref(),
+            assignment.owner_type_name.as_deref(),
+            assignment.line,
+            metadata.value_type.as_deref(),
+            metadata.is_awaited,
+            metadata.value_callee.as_deref(),
+            metadata.value_name.as_deref(),
+            metadata.value_member_owner_name.as_deref(),
+            metadata.value_member_name.as_deref(),
+            metadata.value_member_through_instance,
+            metadata.value_method_owner_name.as_deref(),
+            metadata.value_method_name.as_deref(),
+            metadata.value_method_through_instance,
+            metadata.value_subscript_target.as_deref(),
+            metadata.value_subscript_string_key.as_deref(),
+            metadata.value_subscript_index.as_deref(),
+            metadata.value_if_true.as_deref(),
+            metadata.value_if_false.as_deref(),
+            value_if_guard.as_ref(),
+            metadata.value_bool_left.as_deref(),
+            metadata.value_bool_right.as_deref(),
+            metadata.value_binop_left.as_deref(),
+            metadata.value_binop_right.as_deref(),
+            metadata.value_binop_operator.as_deref(),
+        )
+    })
 }
 
 pub(super) fn resolve_comprehension_local_semantic_bindings(

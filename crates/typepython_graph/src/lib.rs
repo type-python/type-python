@@ -1,13 +1,14 @@
 //! Module graph and summary construction boundary for TypePython.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, hash_map::DefaultHasher},
+    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet},
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
 };
 
 use typepython_binding::{
-    AssertGuardSite, AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind,
+    AssertGuardSite, AssignmentSite, BindingTable, BoundCallableSignature, BoundImportTarget,
+    BoundTypeExpr, CallSite, Declaration, DeclarationKind, DeclarationMetadata,
     DeclarationOwnerKind, ExceptHandlerSite, ForSite, IfGuardSite, InvalidationSite, MatchSite,
     MemberAccessSite, MethodCallSite, ReturnSite, WithSite, YieldSite,
 };
@@ -219,6 +220,9 @@ fn namespace_module_node(module_key: &str, child_keys: &[String]) -> ModuleNode 
 
 fn package_child_import_declaration(name: &str, module_key: &str) -> Declaration {
     Declaration {
+        metadata: DeclarationMetadata::Import {
+            target: BoundImportTarget::new(module_key.to_owned()),
+        },
         name: name.to_owned(),
         kind: DeclarationKind::Import,
         detail: module_key.to_owned(),
@@ -457,6 +461,7 @@ fn collections_abc_prelude_node() -> ModuleNode {
 
 fn prelude_type_alias(name: &str, detail: &str) -> Declaration {
     Declaration {
+        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(detail) },
         name: String::from(name),
         kind: DeclarationKind::TypeAlias,
         detail: String::from(detail),
@@ -479,6 +484,7 @@ fn prelude_type_alias(name: &str, detail: &str) -> Declaration {
 
 fn prelude_function(name: &str, detail: &str) -> Declaration {
     Declaration {
+        metadata: parse_prelude_callable_metadata(detail),
         name: String::from(name),
         kind: DeclarationKind::Function,
         detail: String::from(detail),
@@ -501,6 +507,7 @@ fn prelude_function(name: &str, detail: &str) -> Declaration {
 
 fn prelude_protocol_class(name: &str) -> Declaration {
     Declaration {
+        metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
         detail: String::new(),
@@ -523,6 +530,7 @@ fn prelude_protocol_class(name: &str) -> Declaration {
 
 fn prelude_class(name: &str) -> Declaration {
     Declaration {
+        metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
         detail: String::new(),
@@ -549,6 +557,9 @@ fn prelude_protocol_class_with_methods(
     methods: &[(&str, &str)],
 ) -> Vec<Declaration> {
     let mut declarations = vec![Declaration {
+        metadata: DeclarationMetadata::Class {
+            bases: bases.iter().map(|base| String::from(*base)).collect(),
+        },
         name: String::from(name),
         kind: DeclarationKind::Class,
         detail: bases.join(","),
@@ -569,6 +580,7 @@ fn prelude_protocol_class_with_methods(
     }];
 
     declarations.extend(methods.iter().map(|(method_name, detail)| Declaration {
+        metadata: parse_prelude_callable_metadata(detail),
         name: String::from(*method_name),
         kind: DeclarationKind::Function,
         detail: String::from(*detail),
@@ -594,6 +606,89 @@ fn prelude_protocol_class_with_methods(
     declarations
 }
 
+fn parse_prelude_callable_metadata(detail: &str) -> DeclarationMetadata {
+    parse_prelude_signature(detail)
+        .map(|signature| DeclarationMetadata::Callable { signature })
+        .unwrap_or_default()
+}
+
+fn parse_prelude_signature(detail: &str) -> Option<BoundCallableSignature> {
+    let inner = detail.strip_prefix('(')?.split_once(')')?.0;
+    let parts = split_prelude_signature_parts(inner);
+    let slash_index = parts.iter().position(|part| part.trim() == "/");
+    let star_index = parts.iter().position(|part| part.trim() == "*");
+    let mut keyword_only_active = false;
+    let mut params = Vec::new();
+    for (index, part) in parts.into_iter().enumerate() {
+        let part = part.trim();
+        if part.is_empty() || part == "/" {
+            continue;
+        }
+        if part == "*" {
+            keyword_only_active = true;
+            continue;
+        }
+        let has_default = part.ends_with('=');
+        let part = part.trim_end_matches('=').trim();
+        let (part, variadic, keyword_variadic) = if let Some(part) = part.strip_prefix("**") {
+            (part.trim(), false, true)
+        } else if let Some(part) = part.strip_prefix('*') {
+            keyword_only_active = true;
+            (part.trim(), true, false)
+        } else {
+            (part, false, false)
+        };
+        let (name, annotation) = part
+            .split_once(':')
+            .map(|(name, annotation)| (name.trim(), annotation.trim()))
+            .unwrap_or((part, ""));
+        params.push(typepython_syntax::DirectFunctionParamSite {
+            name: name.to_owned(),
+            annotation: (!annotation.is_empty()).then(|| annotation.to_owned()),
+            has_default,
+            positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
+            keyword_only: !variadic
+                && !keyword_variadic
+                && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
+            variadic,
+            keyword_variadic,
+        });
+    }
+    let returns = detail
+        .split_once("->")
+        .map(|(_, returns)| returns.trim())
+        .filter(|returns| !returns.is_empty())
+        .map(BoundTypeExpr::new);
+    Some(BoundCallableSignature { params, returns })
+}
+
+fn split_prelude_signature_parts(source: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0_i32;
+    for character in source.chars() {
+        match character {
+            '[' | '(' | '{' => {
+                depth += 1;
+                current.push(character);
+            }
+            ']' | ')' | '}' => {
+                depth -= 1;
+                current.push(character);
+            }
+            ',' if depth == 0 => {
+                parts.push(current.trim().to_owned());
+                current.clear();
+            }
+            _ => current.push(character),
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current.trim().to_owned());
+    }
+    parts
+}
+
 #[cfg(test)]
 mod tests {
     use super::build;
@@ -613,6 +708,7 @@ mod tests {
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
@@ -632,6 +728,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -670,6 +767,7 @@ mod tests {
             graph.nodes[0].declarations,
             vec![
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
@@ -689,6 +787,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -719,6 +818,7 @@ mod tests {
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
                 detail: String::new(),
@@ -758,6 +858,7 @@ mod tests {
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::new(),
@@ -777,6 +878,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -871,53 +973,52 @@ mod tests {
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "NewType"));
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "TypeVar"));
         assert_eq!(typing_extensions.module_kind, SourceKind::Stub);
-        assert!(
-            typing_extensions.declarations.iter().any(|declaration| declaration.name == "Protocol")
-        );
-        assert!(
-            typing_extensions
-                .declarations
-                .iter()
-                .any(|declaration| declaration.name == "TypedDict")
-        );
-        assert!(
-            typing_extensions.declarations.iter().any(|declaration| declaration.name == "TypeVar")
-        );
-        assert!(
-            typing_extensions
-                .declarations
-                .iter()
-                .any(|declaration| declaration.name == "Awaitable")
-        );
+        assert!(typing_extensions
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Protocol"));
+        assert!(typing_extensions
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "TypedDict"));
+        assert!(typing_extensions
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "TypeVar"));
+        assert!(typing_extensions
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Awaitable"));
         assert_eq!(collections_abc.module_kind, SourceKind::Stub);
         assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Sized"));
-        assert!(
-            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterable")
-        );
-        assert!(
-            collections_abc.declarations.iter().any(|declaration| declaration.name == "Callable")
-        );
-        assert!(
-            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterator")
-        );
-        assert!(
-            collections_abc
-                .declarations
-                .iter()
-                .any(|declaration| declaration.name == "AsyncIterator")
-        );
-        assert!(
-            collections_abc
-                .declarations
-                .iter()
-                .any(|declaration| declaration.name == "AsyncGenerator")
-        );
-        assert!(
-            collections_abc.declarations.iter().any(|declaration| declaration.name == "Sequence")
-        );
-        assert!(
-            collections_abc.declarations.iter().any(|declaration| declaration.name == "Mapping")
-        );
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Iterable"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Callable"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Iterator"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "AsyncIterator"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "AsyncGenerator"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Sequence"));
+        assert!(collections_abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "Mapping"));
     }
 
     #[test]
@@ -928,6 +1029,7 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
                 detail: String::from("(name:str)->str"),
@@ -973,16 +1075,18 @@ mod tests {
             .expect("expected synthetic pkg.sub namespace node");
 
         assert!(pkg.module_path.to_string_lossy().contains("<namespace-package:pkg>"));
-        assert!(
-            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(pkg
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.detail == "pkg.sub")
-        );
-        assert!(
-            sub.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.detail == "pkg.sub"));
+        assert!(sub
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "module"
-                && declaration.detail == "pkg.sub.module")
-        );
+                && declaration.detail == "pkg.sub.module"));
     }
 
     #[test]
@@ -993,6 +1097,7 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
                 detail: String::from("(name:str)->str"),
@@ -1032,6 +1137,7 @@ mod tests {
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("greet"),
                     kind: DeclarationKind::Function,
                     detail: String::from("(name:str)->str"),
@@ -1051,6 +1157,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("version"),
                     kind: DeclarationKind::Value,
                     detail: String::from("str"),
@@ -1121,6 +1228,7 @@ mod tests {
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("List"),
                 kind: DeclarationKind::Class,
                 detail: String::new(),
@@ -1166,6 +1274,7 @@ mod tests {
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("Protocol"),
                 kind: DeclarationKind::Class,
                 detail: String::new(),
@@ -1212,6 +1321,7 @@ mod tests {
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("Iterable"),
                 kind: DeclarationKind::Class,
                 detail: String::new(),
@@ -1258,6 +1368,7 @@ mod tests {
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("alpha"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->None"),
@@ -1296,6 +1407,7 @@ mod tests {
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("beta"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->None"),
@@ -1336,16 +1448,18 @@ mod tests {
             .find(|node| node.module_key == "pkg")
             .expect("expected synthetic pkg namespace node");
 
-        assert!(
-            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(pkg
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "a"
-                && declaration.detail == "pkg.a")
-        );
-        assert!(
-            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.detail == "pkg.a"));
+        assert!(pkg
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.detail == "pkg.b")
-        );
+                && declaration.detail == "pkg.b"));
     }
 
     #[test]
@@ -1356,6 +1470,7 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("deep"),
                 kind: DeclarationKind::Function,
                 detail: String::from("()->None"),
@@ -1409,21 +1524,24 @@ mod tests {
         assert!(ab.module_path.to_string_lossy().contains("<namespace-package:a.b>"));
         assert!(abc.module_path.to_string_lossy().contains("<namespace-package:a.b.c>"));
 
-        assert!(
-            a.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(a
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.detail == "a.b")
-        );
-        assert!(
-            ab.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.detail == "a.b"));
+        assert!(ab
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "c"
-                && declaration.detail == "a.b.c")
-        );
-        assert!(
-            abc.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.detail == "a.b.c"));
+        assert!(abc
+            .declarations
+            .iter()
+            .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "d"
-                && declaration.detail == "a.b.c.d")
-        );
+                && declaration.detail == "a.b.c.d"));
     }
 
     #[test]
@@ -1435,6 +1553,7 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("init_app"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->None"),
@@ -1473,6 +1592,7 @@ mod tests {
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->None"),
@@ -1530,6 +1650,7 @@ mod tests {
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
                 detail: String::from("()->None"),
@@ -1582,6 +1703,7 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
                 detail: String::from("int"),
@@ -1620,6 +1742,7 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![Declaration {
+                metadata: Default::default(),
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
                 detail: String::from("int"),
@@ -1676,6 +1799,7 @@ mod tests {
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -1695,6 +1819,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: Default::default(),
                     name: String::from("name"),
                     kind: DeclarationKind::Value,
                     detail: String::from("str"),

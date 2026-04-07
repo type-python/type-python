@@ -1075,36 +1075,17 @@ pub(super) fn resolve_contextual_return_type(
         };
     }
     ContextualReturnTypeResult {
-        actual_type: resolve_direct_expression_semantic_type(
-            node,
-            nodes,
-            None,
-            None,
-            Some(return_site.owner_name.as_str()),
-            return_site.owner_type_name.as_deref(),
-            return_site.line,
-            return_site.value_type.as_deref(),
-            return_site.is_awaited,
-            return_site.value_callee.as_deref(),
-            return_site.value_name.as_deref(),
-            return_site.value_member_owner_name.as_deref(),
-            return_site.value_member_name.as_deref(),
-            return_site.value_member_through_instance,
-            return_site.value_method_owner_name.as_deref(),
-            return_site.value_method_name.as_deref(),
-            return_site.value_method_through_instance,
-            return_site.value_subscript_target.as_deref(),
-            return_site.value_subscript_string_key.as_deref(),
-            return_site.value_subscript_index.as_deref(),
-            return_site.value_if_true.as_deref(),
-            return_site.value_if_false.as_deref(),
-            return_site.value_if_guard.as_ref(),
-            return_site.value_bool_left.as_deref(),
-            return_site.value_bool_right.as_deref(),
-            return_site.value_binop_left.as_deref(),
-            return_site.value_binop_right.as_deref(),
-            return_site.value_binop_operator.as_deref(),
-        ),
+        actual_type: return_site.value_metadata().as_ref().and_then(|metadata| {
+            resolve_direct_expression_semantic_type_from_metadata(
+                node,
+                nodes,
+                None,
+                Some(return_site.owner_name.as_str()),
+                return_site.owner_type_name.as_deref(),
+                return_site.line,
+                metadata,
+            )
+        }),
         diagnostics: Vec::new(),
     }
 }
@@ -1112,69 +1093,69 @@ pub(super) fn resolve_contextual_return_type(
 pub(super) fn direct_expr_metadata_from_return_site(
     return_site: &typepython_binding::ReturnSite,
 ) -> typepython_syntax::DirectExprMetadata {
-    typepython_syntax::DirectExprMetadata {
-        value_type: return_site.value_type.clone(),
-        is_awaited: return_site.is_awaited,
-        value_callee: return_site.value_callee.clone(),
-        value_name: return_site.value_name.clone(),
-        value_member_owner_name: return_site.value_member_owner_name.clone(),
-        value_member_name: return_site.value_member_name.clone(),
-        value_member_through_instance: return_site.value_member_through_instance,
-        value_method_owner_name: return_site.value_method_owner_name.clone(),
-        value_method_name: return_site.value_method_name.clone(),
-        value_method_through_instance: return_site.value_method_through_instance,
-        value_subscript_target: return_site.value_subscript_target.clone(),
-        value_subscript_string_key: return_site.value_subscript_string_key.clone(),
-        value_subscript_index: return_site.value_subscript_index.clone(),
-        value_if_true: return_site.value_if_true.clone(),
-        value_if_false: return_site.value_if_false.clone(),
-        value_if_guard: return_site.value_if_guard.as_ref().map(site_to_guard),
-        value_bool_left: return_site.value_bool_left.clone(),
-        value_bool_right: return_site.value_bool_right.clone(),
-        value_binop_left: return_site.value_binop_left.clone(),
-        value_binop_right: return_site.value_binop_right.clone(),
-        value_binop_operator: return_site.value_binop_operator.clone(),
-        value_lambda: return_site.value_lambda.clone(),
+    return_site.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
+        value_type: None,
+        is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
         value_list_comprehension: None,
         value_generator_comprehension: None,
-        value_list_elements: return_site.value_list_elements.clone(),
-        value_set_elements: return_site.value_set_elements.clone(),
-        value_dict_entries: return_site.value_dict_entries.clone(),
-    }
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    })
 }
 
 pub(super) fn direct_expr_metadata_from_yield_site(
     yield_site: &typepython_binding::YieldSite,
 ) -> typepython_syntax::DirectExprMetadata {
-    typepython_syntax::DirectExprMetadata {
-        value_type: yield_site.value_type.clone(),
+    yield_site.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
+        value_type: None,
         is_awaited: false,
-        value_callee: yield_site.value_callee.clone(),
-        value_name: yield_site.value_name.clone(),
-        value_member_owner_name: yield_site.value_member_owner_name.clone(),
-        value_member_name: yield_site.value_member_name.clone(),
-        value_member_through_instance: yield_site.value_member_through_instance,
-        value_method_owner_name: yield_site.value_method_owner_name.clone(),
-        value_method_name: yield_site.value_method_name.clone(),
-        value_method_through_instance: yield_site.value_method_through_instance,
-        value_subscript_target: yield_site.value_subscript_target.clone(),
-        value_subscript_string_key: yield_site.value_subscript_string_key.clone(),
-        value_subscript_index: yield_site.value_subscript_index.clone(),
-        value_if_true: yield_site.value_if_true.clone(),
-        value_if_false: yield_site.value_if_false.clone(),
-        value_if_guard: yield_site.value_if_guard.as_ref().map(site_to_guard),
-        value_bool_left: yield_site.value_bool_left.clone(),
-        value_bool_right: yield_site.value_bool_right.clone(),
-        value_binop_left: yield_site.value_binop_left.clone(),
-        value_binop_right: yield_site.value_binop_right.clone(),
-        value_binop_operator: yield_site.value_binop_operator.clone(),
-        value_lambda: yield_site.value_lambda.clone(),
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
         value_list_comprehension: None,
         value_generator_comprehension: None,
-        value_list_elements: yield_site.value_list_elements.clone(),
-        value_set_elements: yield_site.value_set_elements.clone(),
-        value_dict_entries: yield_site.value_dict_entries.clone(),
-    }
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None,
+    })
 }
 
 pub(super) struct ContextualYieldTypeResult {
@@ -1271,40 +1252,6 @@ pub(super) fn resolve_contextual_yield_type(
             yield_site.value_binop_operator.as_deref(),
         ),
         diagnostics: Vec::new(),
-    }
-}
-
-pub(super) fn site_to_guard(
-    guard: &typepython_binding::GuardConditionSite,
-) -> typepython_syntax::GuardCondition {
-    match guard {
-        typepython_binding::GuardConditionSite::IsNone { name, negated } => {
-            typepython_syntax::GuardCondition::IsNone { name: name.clone(), negated: *negated }
-        }
-        typepython_binding::GuardConditionSite::IsInstance { name, types } => {
-            typepython_syntax::GuardCondition::IsInstance {
-                name: name.clone(),
-                types: types.clone(),
-            }
-        }
-        typepython_binding::GuardConditionSite::PredicateCall { name, callee } => {
-            typepython_syntax::GuardCondition::PredicateCall {
-                name: name.clone(),
-                callee: callee.clone(),
-            }
-        }
-        typepython_binding::GuardConditionSite::TruthyName { name } => {
-            typepython_syntax::GuardCondition::TruthyName { name: name.clone() }
-        }
-        typepython_binding::GuardConditionSite::Not(inner) => {
-            typepython_syntax::GuardCondition::Not(Box::new(site_to_guard(inner)))
-        }
-        typepython_binding::GuardConditionSite::And(parts) => {
-            typepython_syntax::GuardCondition::And(parts.iter().map(site_to_guard).collect())
-        }
-        typepython_binding::GuardConditionSite::Or(parts) => {
-            typepython_syntax::GuardCondition::Or(parts.iter().map(site_to_guard).collect())
-        }
     }
 }
 

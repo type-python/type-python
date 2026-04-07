@@ -64,6 +64,95 @@ pub struct ModuleSurfaceFacts {
     pub dataclass_transform_module_info: typepython_syntax::DataclassTransformModuleInfo,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct BoundTypeExpr {
+    pub text: String,
+}
+
+impl BoundTypeExpr {
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct BoundImportSymbolTarget {
+    pub module_key: String,
+    pub symbol_name: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct BoundImportTarget {
+    pub raw_target: String,
+    pub module_target: String,
+    pub symbol_target: Option<BoundImportSymbolTarget>,
+}
+
+impl BoundImportTarget {
+    #[must_use]
+    pub fn new(raw_target: impl Into<String>) -> Self {
+        let raw_target = raw_target.into();
+        let symbol_target =
+            raw_target.rsplit_once('.').map(|(module_key, symbol_name)| BoundImportSymbolTarget {
+                module_key: module_key.to_owned(),
+                symbol_name: symbol_name.to_owned(),
+            });
+        Self { raw_target: raw_target.clone(), module_target: raw_target, symbol_target }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct BoundCallableSignature {
+    pub params: Vec<typepython_syntax::DirectFunctionParamSite>,
+    pub returns: Option<BoundTypeExpr>,
+}
+
+impl BoundCallableSignature {
+    #[must_use]
+    pub fn from_function_parts(
+        params: &[typepython_syntax::FunctionParam],
+        returns: Option<&str>,
+    ) -> Self {
+        Self {
+            params: params.iter().map(direct_param_site_from_function_param).collect(),
+            returns: returns
+                .map(str::trim)
+                .filter(|returns| !returns.is_empty())
+                .map(BoundTypeExpr::new),
+        }
+    }
+
+    #[must_use]
+    pub fn rendered(&self) -> String {
+        render_signature_from_direct_params(
+            &self.params,
+            self.returns.as_ref().map(|expr| expr.text.as_str()),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default)]
+pub enum DeclarationMetadata {
+    #[default]
+    None,
+    TypeAlias {
+        value: BoundTypeExpr,
+    },
+    Callable {
+        signature: BoundCallableSignature,
+    },
+    Import {
+        target: BoundImportTarget,
+    },
+    Value {
+        annotation: Option<BoundTypeExpr>,
+    },
+    Class {
+        bases: Vec<String>,
+    },
+}
+
 /// Direct function call captured from a bound module.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct CallSite {
@@ -116,6 +205,7 @@ pub struct MethodCallSite {
 pub struct ReturnSite {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
+    pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub value_type: Option<String>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
@@ -149,6 +239,7 @@ pub struct ReturnSite {
 pub struct YieldSite {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
+    pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub value_type: Option<String>,
     pub value_callee: Option<String>,
     pub value_name: Option<String>,
@@ -234,6 +325,7 @@ pub enum GuardConditionSite {
 pub struct MatchSite {
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    pub subject: Option<typepython_syntax::DirectExprMetadata>,
     pub subject_type: Option<String>,
     pub subject_is_awaited: bool,
     pub subject_callee: Option<String>,
@@ -272,6 +364,7 @@ pub struct ForSite {
     pub target_names: Vec<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    pub iter: Option<typepython_syntax::DirectExprMetadata>,
     pub iter_type: Option<String>,
     pub iter_is_awaited: bool,
     pub iter_callee: Option<String>,
@@ -291,6 +384,7 @@ pub struct WithSite {
     pub target_name: Option<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    pub context: Option<typepython_syntax::DirectExprMetadata>,
     pub context_type: Option<String>,
     pub context_is_awaited: bool,
     pub context_callee: Option<String>,
@@ -322,6 +416,8 @@ pub struct AssignmentSite {
     pub destructuring_target_names: Option<Vec<String>>,
     pub destructuring_index: Option<usize>,
     pub annotation: Option<String>,
+    pub annotation_expr: Option<BoundTypeExpr>,
+    pub value: Option<typepython_syntax::DirectExprMetadata>,
     pub value_type: Option<String>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
@@ -354,12 +450,243 @@ pub struct AssignmentSite {
     pub line: usize,
 }
 
+impl ReturnSite {
+    #[must_use]
+    pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.value.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.value_type.clone(),
+                self.is_awaited,
+                self.value_callee.clone(),
+                self.value_name.clone(),
+                self.value_member_owner_name.clone(),
+                self.value_member_name.clone(),
+                self.value_member_through_instance,
+                self.value_method_owner_name.clone(),
+                self.value_method_name.clone(),
+                self.value_method_through_instance,
+                self.value_subscript_target.clone(),
+                self.value_subscript_string_key.clone(),
+                self.value_subscript_index.clone(),
+                self.value_if_true.clone(),
+                self.value_if_false.clone(),
+                self.value_if_guard.as_ref().map(guard_condition_site_to_guard),
+                self.value_bool_left.clone(),
+                self.value_bool_right.clone(),
+                self.value_binop_left.clone(),
+                self.value_binop_right.clone(),
+                self.value_binop_operator.clone(),
+                self.value_lambda.clone(),
+                None,
+                None,
+                self.value_list_elements.clone(),
+                self.value_set_elements.clone(),
+                self.value_dict_entries.clone(),
+            )
+        })
+    }
+}
+
+impl YieldSite {
+    #[must_use]
+    pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.value.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.value_type.clone(),
+                false,
+                self.value_callee.clone(),
+                self.value_name.clone(),
+                self.value_member_owner_name.clone(),
+                self.value_member_name.clone(),
+                self.value_member_through_instance,
+                self.value_method_owner_name.clone(),
+                self.value_method_name.clone(),
+                self.value_method_through_instance,
+                self.value_subscript_target.clone(),
+                self.value_subscript_string_key.clone(),
+                self.value_subscript_index.clone(),
+                self.value_if_true.clone(),
+                self.value_if_false.clone(),
+                self.value_if_guard.as_ref().map(guard_condition_site_to_guard),
+                self.value_bool_left.clone(),
+                self.value_bool_right.clone(),
+                self.value_binop_left.clone(),
+                self.value_binop_right.clone(),
+                self.value_binop_operator.clone(),
+                self.value_lambda.clone(),
+                None,
+                None,
+                self.value_list_elements.clone(),
+                self.value_set_elements.clone(),
+                self.value_dict_entries.clone(),
+            )
+        })
+    }
+}
+
+impl MatchSite {
+    #[must_use]
+    pub fn subject_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.subject.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.subject_type.clone(),
+                self.subject_is_awaited,
+                self.subject_callee.clone(),
+                self.subject_name.clone(),
+                self.subject_member_owner_name.clone(),
+                self.subject_member_name.clone(),
+                self.subject_member_through_instance,
+                self.subject_method_owner_name.clone(),
+                self.subject_method_name.clone(),
+                self.subject_method_through_instance,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+    }
+}
+
+impl ForSite {
+    #[must_use]
+    pub fn iter_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.iter.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.iter_type.clone(),
+                self.iter_is_awaited,
+                self.iter_callee.clone(),
+                self.iter_name.clone(),
+                self.iter_member_owner_name.clone(),
+                self.iter_member_name.clone(),
+                self.iter_member_through_instance,
+                self.iter_method_owner_name.clone(),
+                self.iter_method_name.clone(),
+                self.iter_method_through_instance,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+    }
+}
+
+impl WithSite {
+    #[must_use]
+    pub fn context_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.context.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.context_type.clone(),
+                self.context_is_awaited,
+                self.context_callee.clone(),
+                self.context_name.clone(),
+                self.context_member_owner_name.clone(),
+                self.context_member_name.clone(),
+                self.context_member_through_instance,
+                self.context_method_owner_name.clone(),
+                self.context_method_name.clone(),
+                self.context_method_through_instance,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+    }
+}
+
+impl AssignmentSite {
+    #[must_use]
+    pub fn annotation_text(&self) -> Option<&str> {
+        self.annotation_expr
+            .as_ref()
+            .map(|annotation| annotation.text.as_str())
+            .or(self.annotation.as_deref())
+    }
+
+    #[must_use]
+    pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
+        self.value.clone().or_else(|| {
+            direct_expr_metadata_from_flat_fields(
+                self.value_type.clone(),
+                self.is_awaited,
+                self.value_callee.clone(),
+                self.value_name.clone(),
+                self.value_member_owner_name.clone(),
+                self.value_member_name.clone(),
+                self.value_member_through_instance,
+                self.value_method_owner_name.clone(),
+                self.value_method_name.clone(),
+                self.value_method_through_instance,
+                self.value_subscript_target.clone(),
+                self.value_subscript_string_key.clone(),
+                self.value_subscript_index.clone(),
+                self.value_if_true.clone(),
+                self.value_if_false.clone(),
+                self.value_if_guard.as_ref().map(guard_condition_site_to_guard),
+                self.value_bool_left.clone(),
+                self.value_bool_right.clone(),
+                self.value_binop_left.clone(),
+                self.value_binop_right.clone(),
+                self.value_binop_operator.clone(),
+                self.value_lambda.clone(),
+                self.value_list_comprehension.clone(),
+                self.value_generator_comprehension.clone(),
+                self.value_list_elements.clone(),
+                self.value_set_elements.clone(),
+                self.value_dict_entries.clone(),
+            )
+        })
+    }
+}
+
 /// Bound declaration exported by a module or owned by a type block.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
     pub detail: String,
+    pub metadata: DeclarationMetadata,
     pub value_type: Option<String>,
     pub method_kind: Option<MethodKind>,
     pub class_kind: Option<DeclarationOwnerKind>,
@@ -374,6 +701,48 @@ pub struct Declaration {
     pub is_class_var: bool,
     pub bases: Vec<String>,
     pub type_params: Vec<GenericTypeParam>,
+}
+
+impl Declaration {
+    #[must_use]
+    pub fn callable_signature(&self) -> Option<&BoundCallableSignature> {
+        match &self.metadata {
+            DeclarationMetadata::Callable { signature } => Some(signature),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn type_alias_value(&self) -> Option<&BoundTypeExpr> {
+        match &self.metadata {
+            DeclarationMetadata::TypeAlias { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn import_target(&self) -> Option<&BoundImportTarget> {
+        match &self.metadata {
+            DeclarationMetadata::Import { target } => Some(target),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn value_annotation(&self) -> Option<&BoundTypeExpr> {
+        match &self.metadata {
+            DeclarationMetadata::Value { annotation } => annotation.as_ref(),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn class_bases(&self) -> Option<&[String]> {
+        match &self.metadata {
+            DeclarationMetadata::Class { bases } => Some(bases),
+            _ => None,
+        }
+    }
 }
 
 /// Generic parameter category preserved by binding.
@@ -496,6 +865,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 SyntaxStatement::Return(statement) => Some(ReturnSite {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
+                    value: direct_expr_metadata_from_return_statement(statement),
                     value_type: statement.value_type.clone(),
                     is_awaited: statement.is_awaited,
                     value_callee: statement.value_callee.clone(),
@@ -533,6 +903,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 SyntaxStatement::Yield(statement) => Some(YieldSite {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
+                    value: direct_expr_metadata_from_yield_statement(statement),
                     value_type: statement.value_type.clone(),
                     value_callee: statement.value_callee.clone(),
                     value_name: statement.value_name.clone(),
@@ -622,6 +993,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                 SyntaxStatement::Match(statement) => Some(MatchSite {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
+                    subject: direct_expr_metadata_from_match_statement(statement),
                     subject_type: statement.subject_type.clone(),
                     subject_is_awaited: statement.subject_is_awaited,
                     subject_callee: statement.subject_callee.clone(),
@@ -672,6 +1044,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     target_names: statement.target_names.clone(),
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
+                    iter: direct_expr_metadata_from_for_statement(statement),
                     iter_type: statement.iter_type.clone(),
                     iter_is_awaited: statement.iter_is_awaited,
                     iter_callee: statement.iter_callee.clone(),
@@ -695,6 +1068,7 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     target_name: statement.target_name.clone(),
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
+                    context: direct_expr_metadata_from_with_statement(statement),
                     context_type: statement.context_type.clone(),
                     context_is_awaited: statement.context_is_awaited,
                     context_callee: statement.context_callee.clone(),
@@ -741,6 +1115,8 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                             .as_ref()
                             .map(|_| index),
                         annotation: statement.annotation.clone(),
+                        annotation_expr: statement.annotation.clone().map(BoundTypeExpr::new),
+                        value: direct_expr_metadata_from_value_statement(statement),
                         value_type: statement.value_type.clone(),
                         is_awaited: statement.is_awaited,
                         value_callee: statement.value_callee.clone(),
@@ -822,6 +1198,9 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
             detail: statement.value.clone(),
+            metadata: DeclarationMetadata::TypeAlias {
+                value: BoundTypeExpr::new(statement.value.clone()),
+            },
             value_type: None,
             method_kind: None,
             class_kind: None,
@@ -852,7 +1231,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
-            detail: format_signature(&statement.params, statement.returns.as_deref()),
+            detail: BoundCallableSignature::from_function_parts(
+                &statement.params,
+                statement.returns.as_deref(),
+            )
+            .rendered(),
+            metadata: DeclarationMetadata::Callable {
+                signature: BoundCallableSignature::from_function_parts(
+                    &statement.params,
+                    statement.returns.as_deref(),
+                ),
+            },
             value_type: None,
             method_kind: None,
             class_kind: None,
@@ -871,7 +1260,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
-            detail: format_signature(&statement.params, statement.returns.as_deref()),
+            detail: BoundCallableSignature::from_function_parts(
+                &statement.params,
+                statement.returns.as_deref(),
+            )
+            .rendered(),
+            metadata: DeclarationMetadata::Callable {
+                signature: BoundCallableSignature::from_function_parts(
+                    &statement.params,
+                    statement.returns.as_deref(),
+                ),
+            },
             value_type: None,
             method_kind: None,
             class_kind: None,
@@ -894,6 +1293,9 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 name: binding.local_name.clone(),
                 kind: DeclarationKind::Import,
                 detail: binding.source_path.clone(),
+                metadata: DeclarationMetadata::Import {
+                    target: BoundImportTarget::new(binding.source_path.clone()),
+                },
                 value_type: None,
                 method_kind: None,
                 class_kind: None,
@@ -923,6 +1325,9 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     name,
                     kind: DeclarationKind::Value,
                     detail: statement.annotation.clone().unwrap_or_default(),
+                    metadata: DeclarationMetadata::Value {
+                        annotation: statement.annotation.clone().map(BoundTypeExpr::new),
+                    },
                     value_type: statement.value_type.clone(),
                     method_kind: None,
                     class_kind: None,
@@ -1000,6 +1405,7 @@ fn bind_named_block(
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
         detail: statement.bases.join(","),
+        metadata: DeclarationMetadata::Class { bases: statement.bases.clone() },
         value_type: None,
         method_kind: None,
         class_kind: Some(owner_kind),
@@ -1031,6 +1437,18 @@ fn bind_named_block(
                 format_signature(&member.params, member.returns.as_deref())
             }
         },
+        metadata: match member.kind {
+            typepython_syntax::ClassMemberKind::Field => DeclarationMetadata::Value {
+                annotation: member.annotation.clone().map(BoundTypeExpr::new),
+            },
+            typepython_syntax::ClassMemberKind::Method
+            | typepython_syntax::ClassMemberKind::Overload => DeclarationMetadata::Callable {
+                signature: BoundCallableSignature::from_function_parts(
+                    &member.params,
+                    member.returns.as_deref(),
+                ),
+            },
+        },
         value_type: member.value_type.clone(),
         method_kind: member.method_kind,
         class_kind: None,
@@ -1049,7 +1467,31 @@ fn bind_named_block(
     declarations
 }
 
+fn direct_param_site_from_function_param(
+    param: &typepython_syntax::FunctionParam,
+) -> typepython_syntax::DirectFunctionParamSite {
+    typepython_syntax::DirectFunctionParamSite {
+        name: param.name.clone(),
+        annotation: param.annotation.clone(),
+        has_default: param.has_default,
+        positional_only: param.positional_only,
+        keyword_only: param.keyword_only,
+        variadic: param.variadic,
+        keyword_variadic: param.keyword_variadic,
+    }
+}
+
 fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option<&str>) -> String {
+    render_signature_from_direct_params(
+        &params.iter().map(direct_param_site_from_function_param).collect::<Vec<_>>(),
+        returns,
+    )
+}
+
+fn render_signature_from_direct_params(
+    params: &[typepython_syntax::DirectFunctionParamSite],
+    returns: Option<&str>,
+) -> String {
     let mut rendered_params = Vec::new();
     let positional_only_count = params.iter().filter(|param| param.positional_only).count();
     let has_variadic = params.iter().any(|param| param.variadic);
@@ -1082,6 +1524,335 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
     format!("({})->{}", rendered_params.join(","), returns.unwrap_or(""))
 }
 
+fn direct_expr_metadata_from_value_statement(
+    statement: &typepython_syntax::ValueStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.value_type.clone(),
+        statement.is_awaited,
+        statement.value_callee.clone(),
+        statement.value_name.clone(),
+        statement.value_member_owner_name.clone(),
+        statement.value_member_name.clone(),
+        statement.value_member_through_instance,
+        statement.value_method_owner_name.clone(),
+        statement.value_method_name.clone(),
+        statement.value_method_through_instance,
+        statement.value_subscript_target.clone(),
+        statement.value_subscript_string_key.clone(),
+        statement.value_subscript_index.clone(),
+        statement.value_if_true.clone(),
+        statement.value_if_false.clone(),
+        statement.value_if_guard.clone(),
+        statement.value_bool_left.clone(),
+        statement.value_bool_right.clone(),
+        statement.value_binop_left.clone(),
+        statement.value_binop_right.clone(),
+        statement.value_binop_operator.clone(),
+        statement.value_lambda.clone(),
+        statement.value_list_comprehension.clone(),
+        statement.value_generator_comprehension.clone(),
+        statement.value_list_elements.clone(),
+        statement.value_set_elements.clone(),
+        statement.value_dict_entries.clone(),
+    )
+}
+
+fn direct_expr_metadata_from_return_statement(
+    statement: &typepython_syntax::ReturnStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.value_type.clone(),
+        statement.is_awaited,
+        statement.value_callee.clone(),
+        statement.value_name.clone(),
+        statement.value_member_owner_name.clone(),
+        statement.value_member_name.clone(),
+        statement.value_member_through_instance,
+        statement.value_method_owner_name.clone(),
+        statement.value_method_name.clone(),
+        statement.value_method_through_instance,
+        statement.value_subscript_target.clone(),
+        statement.value_subscript_string_key.clone(),
+        statement.value_subscript_index.clone(),
+        statement.value_if_true.clone(),
+        statement.value_if_false.clone(),
+        statement.value_if_guard.clone(),
+        statement.value_bool_left.clone(),
+        statement.value_bool_right.clone(),
+        statement.value_binop_left.clone(),
+        statement.value_binop_right.clone(),
+        statement.value_binop_operator.clone(),
+        statement.value_lambda.clone(),
+        None,
+        None,
+        statement.value_list_elements.clone(),
+        statement.value_set_elements.clone(),
+        statement.value_dict_entries.clone(),
+    )
+}
+
+fn direct_expr_metadata_from_yield_statement(
+    statement: &typepython_syntax::YieldStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.value_type.clone(),
+        false,
+        statement.value_callee.clone(),
+        statement.value_name.clone(),
+        statement.value_member_owner_name.clone(),
+        statement.value_member_name.clone(),
+        statement.value_member_through_instance,
+        statement.value_method_owner_name.clone(),
+        statement.value_method_name.clone(),
+        statement.value_method_through_instance,
+        statement.value_subscript_target.clone(),
+        statement.value_subscript_string_key.clone(),
+        statement.value_subscript_index.clone(),
+        statement.value_if_true.clone(),
+        statement.value_if_false.clone(),
+        statement.value_if_guard.clone(),
+        statement.value_bool_left.clone(),
+        statement.value_bool_right.clone(),
+        statement.value_binop_left.clone(),
+        statement.value_binop_right.clone(),
+        statement.value_binop_operator.clone(),
+        statement.value_lambda.clone(),
+        None,
+        None,
+        statement.value_list_elements.clone(),
+        statement.value_set_elements.clone(),
+        statement.value_dict_entries.clone(),
+    )
+}
+
+fn direct_expr_metadata_from_match_statement(
+    statement: &typepython_syntax::MatchStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.subject_type.clone(),
+        statement.subject_is_awaited,
+        statement.subject_callee.clone(),
+        statement.subject_name.clone(),
+        statement.subject_member_owner_name.clone(),
+        statement.subject_member_name.clone(),
+        statement.subject_member_through_instance,
+        statement.subject_method_owner_name.clone(),
+        statement.subject_method_name.clone(),
+        statement.subject_method_through_instance,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+fn direct_expr_metadata_from_for_statement(
+    statement: &typepython_syntax::ForStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.iter_type.clone(),
+        statement.iter_is_awaited,
+        statement.iter_callee.clone(),
+        statement.iter_name.clone(),
+        statement.iter_member_owner_name.clone(),
+        statement.iter_member_name.clone(),
+        statement.iter_member_through_instance,
+        statement.iter_method_owner_name.clone(),
+        statement.iter_method_name.clone(),
+        statement.iter_method_through_instance,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+fn direct_expr_metadata_from_with_statement(
+    statement: &typepython_syntax::WithStatement,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    direct_expr_metadata_from_flat_fields(
+        statement.context_type.clone(),
+        statement.context_is_awaited,
+        statement.context_callee.clone(),
+        statement.context_name.clone(),
+        statement.context_member_owner_name.clone(),
+        statement.context_member_name.clone(),
+        statement.context_member_through_instance,
+        statement.context_method_owner_name.clone(),
+        statement.context_method_name.clone(),
+        statement.context_method_through_instance,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+fn direct_expr_metadata_from_flat_fields(
+    value_type: Option<String>,
+    is_awaited: bool,
+    value_callee: Option<String>,
+    value_name: Option<String>,
+    value_member_owner_name: Option<String>,
+    value_member_name: Option<String>,
+    value_member_through_instance: bool,
+    value_method_owner_name: Option<String>,
+    value_method_name: Option<String>,
+    value_method_through_instance: bool,
+    value_subscript_target: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_subscript_string_key: Option<String>,
+    value_subscript_index: Option<String>,
+    value_if_true: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_if_false: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_if_guard: Option<typepython_syntax::GuardCondition>,
+    value_bool_left: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_bool_right: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_binop_left: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_binop_right: Option<Box<typepython_syntax::DirectExprMetadata>>,
+    value_binop_operator: Option<String>,
+    value_lambda: Option<Box<typepython_syntax::LambdaMetadata>>,
+    value_list_comprehension: Option<Box<typepython_syntax::ComprehensionMetadata>>,
+    value_generator_comprehension: Option<Box<typepython_syntax::ComprehensionMetadata>>,
+    value_list_elements: Option<Vec<typepython_syntax::DirectExprMetadata>>,
+    value_set_elements: Option<Vec<typepython_syntax::DirectExprMetadata>>,
+    value_dict_entries: Option<Vec<typepython_syntax::TypedDictLiteralEntry>>,
+) -> Option<typepython_syntax::DirectExprMetadata> {
+    let metadata = typepython_syntax::DirectExprMetadata {
+        value_type,
+        is_awaited,
+        value_callee,
+        value_name,
+        value_member_owner_name,
+        value_member_name,
+        value_member_through_instance,
+        value_method_owner_name,
+        value_method_name,
+        value_method_through_instance,
+        value_subscript_target,
+        value_subscript_string_key,
+        value_subscript_index,
+        value_if_true,
+        value_if_false,
+        value_if_guard,
+        value_bool_left,
+        value_bool_right,
+        value_binop_left,
+        value_binop_right,
+        value_binop_operator,
+        value_lambda,
+        value_list_comprehension,
+        value_generator_comprehension,
+        value_list_elements,
+        value_set_elements,
+        value_dict_entries,
+    };
+    direct_expr_metadata_present(&metadata).then_some(metadata)
+}
+
+fn direct_expr_metadata_present(metadata: &typepython_syntax::DirectExprMetadata) -> bool {
+    metadata.value_type.as_deref().is_some_and(|value| !value.is_empty())
+        || metadata.is_awaited
+        || metadata.value_callee.is_some()
+        || metadata.value_name.is_some()
+        || metadata.value_member_owner_name.is_some()
+        || metadata.value_member_name.is_some()
+        || metadata.value_member_through_instance
+        || metadata.value_method_owner_name.is_some()
+        || metadata.value_method_name.is_some()
+        || metadata.value_method_through_instance
+        || metadata.value_subscript_target.is_some()
+        || metadata.value_subscript_string_key.is_some()
+        || metadata.value_subscript_index.is_some()
+        || metadata.value_if_true.is_some()
+        || metadata.value_if_false.is_some()
+        || metadata.value_if_guard.is_some()
+        || metadata.value_bool_left.is_some()
+        || metadata.value_bool_right.is_some()
+        || metadata.value_binop_left.is_some()
+        || metadata.value_binop_right.is_some()
+        || metadata.value_binop_operator.is_some()
+        || metadata.value_lambda.is_some()
+        || metadata.value_list_comprehension.is_some()
+        || metadata.value_generator_comprehension.is_some()
+        || metadata.value_list_elements.is_some()
+        || metadata.value_set_elements.is_some()
+        || metadata.value_dict_entries.is_some()
+}
+
+fn guard_condition_site_to_guard(
+    condition: &GuardConditionSite,
+) -> typepython_syntax::GuardCondition {
+    match condition {
+        GuardConditionSite::IsNone { name, negated } => {
+            typepython_syntax::GuardCondition::IsNone { name: name.clone(), negated: *negated }
+        }
+        GuardConditionSite::IsInstance { name, types } => {
+            typepython_syntax::GuardCondition::IsInstance {
+                name: name.clone(),
+                types: types.clone(),
+            }
+        }
+        GuardConditionSite::PredicateCall { name, callee } => {
+            typepython_syntax::GuardCondition::PredicateCall {
+                name: name.clone(),
+                callee: callee.clone(),
+            }
+        }
+        GuardConditionSite::TruthyName { name } => {
+            typepython_syntax::GuardCondition::TruthyName { name: name.clone() }
+        }
+        GuardConditionSite::Not(inner) => {
+            typepython_syntax::GuardCondition::Not(Box::new(guard_condition_site_to_guard(inner)))
+        }
+        GuardConditionSite::And(conditions) => typepython_syntax::GuardCondition::And(
+            conditions.iter().map(guard_condition_site_to_guard).collect(),
+        ),
+        GuardConditionSite::Or(conditions) => typepython_syntax::GuardCondition::Or(
+            conditions.iter().map(guard_condition_site_to_guard).collect(),
+        ),
+    }
+}
+
 fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<GenericTypeParam> {
     type_params
         .iter()
@@ -1104,10 +1875,11 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
 #[cfg(test)]
 mod tests {
     use super::{
-        AssertGuardSite, AssignmentSite, Declaration, DeclarationKind, DeclarationOwner,
+        bind, AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget,
+        BoundTypeExpr, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
         DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind,
         GuardConditionSite, IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite,
-        MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
+        MatchPatternSite, MatchSite, WithSite, YieldSite,
     };
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
@@ -1116,6 +1888,28 @@ mod tests {
         ImportStatement, MethodKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
         SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, ValueStatement,
     };
+
+    fn metadata_type_alias(text: &str) -> DeclarationMetadata {
+        DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(text) }
+    }
+
+    fn metadata_value(annotation: Option<&str>) -> DeclarationMetadata {
+        DeclarationMetadata::Value { annotation: annotation.map(BoundTypeExpr::new) }
+    }
+
+    fn metadata_class(bases: &[&str]) -> DeclarationMetadata {
+        DeclarationMetadata::Class { bases: bases.iter().map(|base| String::from(*base)).collect() }
+    }
+
+    fn metadata_import(target: &str) -> DeclarationMetadata {
+        DeclarationMetadata::Import { target: BoundImportTarget::new(target) }
+    }
+
+    fn metadata_empty_callable() -> DeclarationMetadata {
+        DeclarationMetadata::Callable {
+            signature: BoundCallableSignature { params: Vec::new(), returns: None },
+        }
+    }
 
     #[test]
     fn bind_collects_top_level_aliases_classes_and_functions() {
@@ -1185,6 +1979,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_type_alias("Box[T]"),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::from("Box[T]"),
@@ -1210,6 +2005,7 @@ mod tests {
                     }],
                 },
                 Declaration {
+                    metadata: metadata_class(&[]),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -1235,6 +2031,7 @@ mod tests {
                     }],
                 },
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
@@ -1339,6 +2136,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     detail: String::from("()->"),
@@ -1364,6 +2162,7 @@ mod tests {
                     }],
                 },
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
@@ -1455,6 +2254,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_import("pkg.foo"),
                     name: String::from("local_foo"),
                     kind: DeclarationKind::Import,
                     detail: String::from("pkg.foo"),
@@ -1474,6 +2274,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_import("pkg.bar"),
                     name: String::from("bar"),
                     kind: DeclarationKind::Import,
                     detail: String::from("pkg.bar"),
@@ -1493,6 +2294,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_value(None),
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
@@ -1512,6 +2314,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_value(None),
                     name: String::from("count"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
@@ -1627,6 +2430,36 @@ mod tests {
             table.assignments,
             vec![
                 AssignmentSite {
+                    annotation_expr: Some(BoundTypeExpr::new("int")),
+                    value: Some(DirectExprMetadata {
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: Some(String::from("helper")),
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                    }),
                     name: String::from("value"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -1663,6 +2496,36 @@ mod tests {
                     line: 1,
                 },
                 AssignmentSite {
+                    annotation_expr: Some(BoundTypeExpr::new("str")),
+                    value: Some(DirectExprMetadata {
+                        value_type: Some(String::new()),
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: Some(String::from("source")),
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                    }),
                     name: String::from("copy"),
                     destructuring_target_names: None,
                     destructuring_index: None,
@@ -1778,6 +2641,36 @@ mod tests {
         assert_eq!(
             table.assignments,
             vec![AssignmentSite {
+                annotation_expr: Some(BoundTypeExpr::new("int")),
+                value: Some(DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("value")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -1884,6 +2777,36 @@ mod tests {
         assert_eq!(
             table.assignments,
             vec![AssignmentSite {
+                annotation_expr: None,
+                value: Some(DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: Some(String::from("helper")),
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 name: String::from("result"),
                 destructuring_target_names: None,
                 destructuring_index: None,
@@ -2029,6 +2952,35 @@ mod tests {
         assert_eq!(
             table.yields,
             vec![YieldSite {
+                value: Some(DirectExprMetadata {
+                    value_type: Some(String::from("int")),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 owner_name: String::from("produce"),
                 owner_type_name: None,
                 value_type: Some(String::from("int")),
@@ -2094,6 +3046,35 @@ mod tests {
         assert_eq!(
             table.for_loops,
             vec![ForSite {
+                iter: Some(DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("values")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 target_name: String::from("item"),
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
@@ -2149,6 +3130,35 @@ mod tests {
         assert_eq!(
             table.matches,
             vec![MatchSite {
+                subject: Some(DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("expr")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
                 subject_type: Some(String::new()),
@@ -2300,6 +3310,35 @@ mod tests {
         assert_eq!(
             table.with_statements,
             vec![WithSite {
+                context: Some(DirectExprMetadata {
+                    value_type: Some(String::new()),
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: Some(String::from("manager")),
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
@@ -2438,6 +3477,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_class(&[]),
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -2457,6 +3497,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_value(None),
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
@@ -2479,6 +3520,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
@@ -2501,6 +3543,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("close"),
                     kind: DeclarationKind::Overload,
                     detail: String::from("()->"),
@@ -2611,6 +3654,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_value(Some("Final")),
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
                     detail: String::from("Final"),
@@ -2630,6 +3674,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_class(&[]),
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -2649,6 +3694,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_value(None),
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
@@ -2759,6 +3805,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_value(Some("ClassVar[int]")),
                     name: String::from("VALUE"),
                     kind: DeclarationKind::Value,
                     detail: String::from("ClassVar[int]"),
@@ -2778,6 +3825,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_class(&[]),
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     detail: String::new(),
@@ -2797,6 +3845,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_value(None),
                     name: String::from("cache"),
                     kind: DeclarationKind::Value,
                     detail: String::new(),
@@ -2881,6 +3930,7 @@ mod tests {
             table.declarations,
             vec![
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("top_level"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),
@@ -2900,6 +3950,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_class(&["Base"]),
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     detail: String::from("Base"),
@@ -2919,6 +3970,7 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
+                    metadata: metadata_empty_callable(),
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->"),

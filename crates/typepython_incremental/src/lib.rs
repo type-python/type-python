@@ -168,7 +168,13 @@ pub fn dependency_index(graph: &ModuleGraph) -> ModuleDependencyIndex {
             .iter()
             .filter(|declaration| declaration.owner.is_none())
             .filter(|declaration| declaration.kind == DeclarationKind::Import)
-            .filter_map(|declaration| resolve_import_module_key(&declaration.detail, &module_keys))
+            .filter_map(|declaration| {
+                let target = declaration
+                    .import_target()
+                    .map(|target| target.module_target.as_str())
+                    .unwrap_or_else(|| declaration.detail.as_str());
+                resolve_import_module_key(target, &module_keys)
+            })
             .collect::<BTreeSet<_>>();
         for imported in &imports {
             reverse_imports.entry(imported.clone()).or_default().insert(node.module_key.clone());
@@ -264,7 +270,12 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
     let mut imports = top_level_declarations
         .iter()
         .filter(|declaration| declaration.kind == DeclarationKind::Import)
-        .map(|declaration| declaration.detail.clone())
+        .map(|declaration| {
+            declaration
+                .import_target()
+                .map(|target| target.raw_target.clone())
+                .unwrap_or_else(|| declaration.detail.clone())
+        })
         .collect::<Vec<_>>();
     imports.sort();
     imports.dedup();
@@ -314,12 +325,26 @@ fn summary_type_repr(declaration: &Declaration) -> String {
             .value_type
             .clone()
             .filter(|value| !value.is_empty())
+            .or_else(|| declaration.value_annotation().map(|annotation| annotation.text.clone()))
             .unwrap_or_else(|| declaration.detail.clone()),
         _ => {
-            if declaration.detail.is_empty() {
+            let structured = match declaration.kind {
+                DeclarationKind::TypeAlias => {
+                    declaration.type_alias_value().map(|value| value.text.clone())
+                }
+                DeclarationKind::Function | DeclarationKind::Overload => {
+                    declaration.callable_signature().map(|signature| signature.rendered())
+                }
+                DeclarationKind::Import => {
+                    declaration.import_target().map(|target| target.raw_target.clone())
+                }
+                DeclarationKind::Class | DeclarationKind::Value => None,
+            };
+            let detail = structured.unwrap_or_else(|| declaration.detail.clone());
+            if detail.is_empty() {
                 declaration.name.clone()
             } else {
-                declaration.detail.clone()
+                detail
             }
         }
     }
@@ -379,9 +404,10 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Fingerprint, IncrementalState, PublicSummary, SNAPSHOT_SCHEMA_VERSION, SealedRootSummary,
-        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam, affected_modules,
-        decode_snapshot, dependency_index, diff, encode_snapshot, snapshot, snapshot_diff_modules,
+        affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
+        snapshot_diff_modules, Fingerprint, IncrementalState, PublicSummary, SealedRootSummary,
+        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
+        SNAPSHOT_SCHEMA_VERSION,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -483,6 +509,7 @@ mod tests {
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
                     Declaration {
+                        metadata: Default::default(),
                         name: String::from("Expr"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
@@ -508,6 +535,7 @@ mod tests {
                         }],
                     },
                     Declaration {
+                        metadata: Default::default(),
                         name: String::from("Add"),
                         kind: DeclarationKind::Class,
                         detail: String::new(),
@@ -527,6 +555,7 @@ mod tests {
                         type_params: Vec::new(),
                     },
                     Declaration {
+                        metadata: Default::default(),
                         name: String::from("helper"),
                         kind: DeclarationKind::Function,
                         detail: String::from("()->int"),
@@ -552,6 +581,7 @@ mod tests {
                         }],
                     },
                     Declaration {
+                        metadata: Default::default(),
                         name: String::from("base"),
                         kind: DeclarationKind::Import,
                         detail: String::from("pkg.base"),
@@ -648,6 +678,7 @@ mod tests {
                 module_key: String::from("pkg.a"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
                     detail: String::from("()->int"),
@@ -917,6 +948,7 @@ mod tests {
                 module_key: String::from("pkg"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("VERSION"),
                     kind: DeclarationKind::Value,
                     detail: String::from("1.0"),
@@ -964,6 +996,7 @@ mod tests {
                 module_key: String::from("pkg.ops"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![Declaration {
+                    metadata: Default::default(),
                     name: String::from("compute"),
                     kind: DeclarationKind::Function,
                     detail: String::from(detail),
@@ -1234,6 +1267,7 @@ mod tests {
 
     fn import_declaration(name: &str, detail: &str) -> Declaration {
         Declaration {
+            metadata: Default::default(),
             name: String::from(name),
             kind: DeclarationKind::Import,
             detail: String::from(detail),
@@ -1256,6 +1290,7 @@ mod tests {
 
     fn value_declaration(name: &str, value_type: &str) -> Declaration {
         Declaration {
+            metadata: Default::default(),
             name: String::from(name),
             kind: DeclarationKind::Value,
             detail: String::from(value_type),

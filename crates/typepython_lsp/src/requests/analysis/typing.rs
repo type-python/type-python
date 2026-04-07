@@ -174,7 +174,12 @@ pub(crate) fn resolve_callable_return_type_in_scope(
             if declaration.kind == typepython_binding::DeclarationKind::Class {
                 return Some(callee.to_owned());
             }
-            return parse_return_annotation(&declaration.detail);
+            return declaration
+                .callable_signature()
+                .and_then(|signature| {
+                    signature.returns.as_ref().map(|returns| returns.text.clone())
+                })
+                .or_else(|| parse_return_annotation(&declaration.detail));
         }
     }
 
@@ -469,7 +474,11 @@ pub(crate) fn narrow_to_instance_types(base_type: &str, types: &[String]) -> Str
         .into_iter()
         .filter(|branch| types.iter().any(|expected| type_branch_matches(branch, expected)))
         .collect::<Vec<_>>();
-    if kept.is_empty() { join_type_candidates(types.to_vec()) } else { join_type_candidates(kept) }
+    if kept.is_empty() {
+        join_type_candidates(types.to_vec())
+    } else {
+        join_type_candidates(kept)
+    }
 }
 
 pub(crate) fn remove_instance_types(base_type: &str, types: &[String]) -> String {
@@ -477,7 +486,11 @@ pub(crate) fn remove_instance_types(base_type: &str, types: &[String]) -> String
         .into_iter()
         .filter(|branch| !types.iter().any(|expected| type_branch_matches(branch, expected)))
         .collect::<Vec<_>>();
-    if kept.is_empty() { base_type.to_owned() } else { join_type_candidates(kept) }
+    if kept.is_empty() {
+        base_type.to_owned()
+    } else {
+        join_type_candidates(kept)
+    }
 }
 
 pub(crate) fn remove_none_branch(base_type: &str) -> Option<String> {
@@ -688,4 +701,3 @@ pub(crate) fn line_indentation(text: &str) -> usize {
 pub(crate) fn lsp_position(line: usize) -> LspPosition {
     LspPosition { line: line.saturating_sub(1) as u32, character: 0 }
 }
-
