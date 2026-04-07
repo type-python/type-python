@@ -1962,6 +1962,17 @@ fn check_reports_readonly_typed_dict_item_assignment() {
 }
 
 #[test]
+fn check_reports_qualified_readonly_typed_dict_item_assignment() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\nimport typing_extensions\n\nclass User(TypedDict):\n    name: typing_extensions.ReadOnly[str]\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = \"Grace\"\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4016"), "{rendered}");
+    assert!(rendered.contains("cannot be assigned"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_writable_typed_dict_item_assignment() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass User(TypedDict):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = \"Grace\"\n",
@@ -2001,6 +2012,36 @@ fn check_reports_readonly_typed_dict_extra_item_assignment() {
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4016"));
     assert!(rendered.contains("cannot be assigned"));
+}
+
+#[test]
+fn check_reports_qualified_readonly_typed_dict_extra_item_assignment() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\nimport typing_extensions\n\nclass User(TypedDict, extra_items=typing_extensions.ReadOnly[int]):\n    name: str\n\ndef mutate(user: User) -> None:\n    user[\"age\"] = 1\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4016"), "{rendered}");
+    assert!(rendered.contains("cannot be assigned"), "{rendered}");
+}
+
+#[test]
+fn check_accepts_qualified_notrequired_typed_dict_field() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\nimport typing_extensions\n\nclass User(TypedDict):\n    name: str\n    age: typing_extensions.NotRequired[int]\n\nuser: User = {\"name\": \"Ada\"}\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_treats_qualified_never_extra_items_as_closed_typed_dict() {
+    let result = check_temp_typepython_source(
+        "from typing import TypedDict\nimport typing_extensions\n\nclass User(TypedDict, extra_items=typing_extensions.Never):\n    name: str\n\nuser: User = {\"name\": \"Ada\", \"age\": 1}\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("unknown key `age`"), "{rendered}");
 }
 
 #[test]

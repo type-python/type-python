@@ -289,7 +289,13 @@ fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
 }
 
 fn normalize_name(text: &str) -> String {
-    text.trim().strip_prefix("typing.").unwrap_or(text.trim()).trim().to_owned()
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("typing.")
+        .or_else(|| trimmed.strip_prefix("typing_extensions."))
+        .unwrap_or(trimmed)
+        .trim()
+        .to_owned()
 }
 
 fn normalize_type_text_legacy(text: &str) -> String {
