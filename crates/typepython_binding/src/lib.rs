@@ -66,13 +66,27 @@ pub struct ModuleSurfaceFacts {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BoundTypeExpr {
-    pub text: String,
+    pub expr: typepython_syntax::TypeExpr,
 }
 
 impl BoundTypeExpr {
     #[must_use]
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+        let text = text.into();
+        Self {
+            expr: typepython_syntax::TypeExpr::parse(&text)
+                .unwrap_or(typepython_syntax::TypeExpr::Name(text)),
+        }
+    }
+
+    #[must_use]
+    pub fn from_expr(expr: typepython_syntax::TypeExpr) -> Self {
+        Self { expr }
+    }
+
+    #[must_use]
+    pub fn render(&self) -> String {
+        self.expr.render()
     }
 }
 
@@ -114,12 +128,20 @@ impl BoundCallableSignature {
         params: &[typepython_syntax::FunctionParam],
         returns: Option<&str>,
     ) -> Self {
+        Self::from_function_parts_with_expr(params, returns, None)
+    }
+
+    #[must_use]
+    pub fn from_function_parts_with_expr(
+        params: &[typepython_syntax::FunctionParam],
+        returns: Option<&str>,
+        returns_expr: Option<&typepython_syntax::TypeExpr>,
+    ) -> Self {
         Self {
             params: params.iter().map(direct_param_site_from_function_param).collect(),
-            returns: returns
-                .map(str::trim)
-                .filter(|returns| !returns.is_empty())
-                .map(BoundTypeExpr::new),
+            returns: returns_expr.cloned().map(BoundTypeExpr::from_expr).or_else(|| {
+                returns.map(str::trim).filter(|returns| !returns.is_empty()).map(BoundTypeExpr::new)
+            }),
         }
     }
 
@@ -127,7 +149,7 @@ impl BoundCallableSignature {
     pub fn rendered(&self) -> String {
         render_signature_from_direct_params(
             &self.params,
-            self.returns.as_ref().map(|expr| expr.text.as_str()),
+            self.returns.as_ref().map(|expr| expr.render()).as_deref(),
         )
     }
 }
@@ -638,10 +660,7 @@ impl WithSite {
 impl AssignmentSite {
     #[must_use]
     pub fn annotation_text(&self) -> Option<&str> {
-        self.annotation_expr
-            .as_ref()
-            .map(|annotation| annotation.text.as_str())
-            .or(self.annotation.as_deref())
+        self.annotation.as_deref()
     }
 
     #[must_use]
@@ -708,12 +727,12 @@ impl Declaration {
     pub fn rendered_detail(&self) -> String {
         match &self.metadata {
             DeclarationMetadata::None => self.detail.clone(),
-            DeclarationMetadata::TypeAlias { value } => value.text.clone(),
+            DeclarationMetadata::TypeAlias { value } => value.render(),
             DeclarationMetadata::Callable { signature } => signature.rendered(),
             DeclarationMetadata::Import { target } => target.raw_target.clone(),
             DeclarationMetadata::Value { annotation } => annotation
                 .as_ref()
-                .map(|annotation| annotation.text.clone())
+                .map(BoundTypeExpr::render)
                 .unwrap_or_else(|| self.detail.clone()),
             DeclarationMetadata::Class { bases } => bases.join(","),
         }
@@ -774,8 +793,32 @@ pub struct GenericTypeParam {
     pub kind: GenericTypeParamKind,
     pub name: String,
     pub bound: Option<String>,
+    pub bound_expr: Option<BoundTypeExpr>,
     pub constraints: Vec<String>,
+    pub constraint_exprs: Vec<BoundTypeExpr>,
     pub default: Option<String>,
+    pub default_expr: Option<BoundTypeExpr>,
+}
+
+impl GenericTypeParam {
+    #[must_use]
+    pub fn rendered_bound(&self) -> Option<String> {
+        self.bound_expr.as_ref().map(BoundTypeExpr::render).or_else(|| self.bound.clone())
+    }
+
+    #[must_use]
+    pub fn rendered_constraints(&self) -> Vec<String> {
+        if !self.constraint_exprs.is_empty() {
+            self.constraint_exprs.iter().map(BoundTypeExpr::render).collect()
+        } else {
+            self.constraints.clone()
+        }
+    }
+
+    #[must_use]
+    pub fn rendered_default(&self) -> Option<String> {
+        self.default_expr.as_ref().map(BoundTypeExpr::render).or_else(|| self.default.clone())
+    }
 }
 
 /// Owning type declaration for a bound member.
@@ -1214,7 +1257,11 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             kind: DeclarationKind::TypeAlias,
             detail: statement.value.clone(),
             metadata: DeclarationMetadata::TypeAlias {
-                value: BoundTypeExpr::new(statement.value.clone()),
+                value: statement
+                    .value_expr
+                    .clone()
+                    .map(BoundTypeExpr::from_expr)
+                    .unwrap_or_else(|| BoundTypeExpr::new(statement.value.clone())),
             },
             value_type: None,
             method_kind: None,
@@ -1246,15 +1293,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
-            detail: BoundCallableSignature::from_function_parts(
+            detail: BoundCallableSignature::from_function_parts_with_expr(
                 &statement.params,
                 statement.returns.as_deref(),
+                statement.returns_expr.as_ref(),
             )
             .rendered(),
             metadata: DeclarationMetadata::Callable {
-                signature: BoundCallableSignature::from_function_parts(
+                signature: BoundCallableSignature::from_function_parts_with_expr(
                     &statement.params,
                     statement.returns.as_deref(),
+                    statement.returns_expr.as_ref(),
                 ),
             },
             value_type: None,
@@ -1275,15 +1324,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
-            detail: BoundCallableSignature::from_function_parts(
+            detail: BoundCallableSignature::from_function_parts_with_expr(
                 &statement.params,
                 statement.returns.as_deref(),
+                statement.returns_expr.as_ref(),
             )
             .rendered(),
             metadata: DeclarationMetadata::Callable {
-                signature: BoundCallableSignature::from_function_parts(
+                signature: BoundCallableSignature::from_function_parts_with_expr(
                     &statement.params,
                     statement.returns.as_deref(),
+                    statement.returns_expr.as_ref(),
                 ),
             },
             value_type: None,
@@ -1341,7 +1392,11 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     kind: DeclarationKind::Value,
                     detail: statement.annotation.clone().unwrap_or_default(),
                     metadata: DeclarationMetadata::Value {
-                        annotation: statement.annotation.clone().map(BoundTypeExpr::new),
+                        annotation: statement
+                            .annotation_expr
+                            .clone()
+                            .map(BoundTypeExpr::from_expr)
+                            .or_else(|| statement.annotation.clone().map(BoundTypeExpr::new)),
                     },
                     value_type: statement.value_type.clone(),
                     method_kind: None,
@@ -1436,48 +1491,60 @@ fn bind_named_block(
         bases: statement.bases.clone(),
         type_params: bind_type_params(&statement.type_params),
     }];
-    declarations.extend(statement.members.iter().map(|member| Declaration {
-        name: member.name.clone(),
-        kind: match member.kind {
-            typepython_syntax::ClassMemberKind::Field => DeclarationKind::Value,
-            typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
-            typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
-        },
-        detail: match member.kind {
-            typepython_syntax::ClassMemberKind::Field => {
-                member.annotation.clone().unwrap_or_default()
-            }
-            typepython_syntax::ClassMemberKind::Method
-            | typepython_syntax::ClassMemberKind::Overload => {
-                format_signature(&member.params, member.returns.as_deref())
-            }
-        },
-        metadata: match member.kind {
-            typepython_syntax::ClassMemberKind::Field => DeclarationMetadata::Value {
-                annotation: member.annotation.clone().map(BoundTypeExpr::new),
+    declarations.extend(statement.members.iter().map(|member| {
+        Declaration {
+            name: member.name.clone(),
+            kind: match member.kind {
+                typepython_syntax::ClassMemberKind::Field => DeclarationKind::Value,
+                typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
+                typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
             },
-            typepython_syntax::ClassMemberKind::Method
-            | typepython_syntax::ClassMemberKind::Overload => DeclarationMetadata::Callable {
-                signature: BoundCallableSignature::from_function_parts(
-                    &member.params,
-                    member.returns.as_deref(),
-                ),
+            detail: match member.kind {
+                typepython_syntax::ClassMemberKind::Field => {
+                    member.annotation.clone().unwrap_or_default()
+                }
+                typepython_syntax::ClassMemberKind::Method
+                | typepython_syntax::ClassMemberKind::Overload => {
+                    BoundCallableSignature::from_function_parts_with_expr(
+                        &member.params,
+                        member.returns.as_deref(),
+                        member.returns_expr.as_ref(),
+                    )
+                    .rendered()
+                }
             },
-        },
-        value_type: member.value_type.clone(),
-        method_kind: member.method_kind,
-        class_kind: None,
-        owner: Some(owner.clone()),
-        is_async: member.is_async,
-        is_override: member.is_override,
-        is_abstract_method: member.is_abstract_method,
-        is_final_decorator: member.is_final_decorator,
-        is_deprecated: member.is_deprecated,
-        deprecation_message: member.deprecation_message.clone(),
-        is_final: member.is_final,
-        is_class_var: member.is_class_var,
-        bases: Vec::new(),
-        type_params: Vec::new(),
+            metadata: match member.kind {
+                typepython_syntax::ClassMemberKind::Field => DeclarationMetadata::Value {
+                    annotation: member
+                        .annotation_expr
+                        .clone()
+                        .map(BoundTypeExpr::from_expr)
+                        .or_else(|| member.annotation.clone().map(BoundTypeExpr::new)),
+                },
+                typepython_syntax::ClassMemberKind::Method
+                | typepython_syntax::ClassMemberKind::Overload => DeclarationMetadata::Callable {
+                    signature: BoundCallableSignature::from_function_parts_with_expr(
+                        &member.params,
+                        member.returns.as_deref(),
+                        member.returns_expr.as_ref(),
+                    ),
+                },
+            },
+            value_type: member.value_type.clone(),
+            method_kind: member.method_kind,
+            class_kind: None,
+            owner: Some(owner.clone()),
+            is_async: member.is_async,
+            is_override: member.is_override,
+            is_abstract_method: member.is_abstract_method,
+            is_final_decorator: member.is_final_decorator,
+            is_deprecated: member.is_deprecated,
+            deprecation_message: member.deprecation_message.clone(),
+            is_final: member.is_final,
+            is_class_var: member.is_class_var,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }
     }));
     declarations
 }
@@ -1488,6 +1555,7 @@ fn direct_param_site_from_function_param(
     typepython_syntax::DirectFunctionParamSite {
         name: param.name.clone(),
         annotation: param.annotation.clone(),
+        annotation_expr: param.annotation_expr.clone(),
         has_default: param.has_default,
         positional_only: param.positional_only,
         keyword_only: param.keyword_only,
@@ -1773,6 +1841,7 @@ fn direct_expr_metadata_from_flat_fields(
     value_dict_entries: Option<Vec<typepython_syntax::TypedDictLiteralEntry>>,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     let metadata = typepython_syntax::DirectExprMetadata {
+        value_type_expr: value_type.as_deref().and_then(typepython_syntax::TypeExpr::parse),
         value_type,
         is_awaited,
         value_callee,
@@ -1881,8 +1950,16 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
             },
             name: param.name.clone(),
             bound: param.bound.clone(),
+            bound_expr: param.bound_expr.clone().map(|expr| BoundTypeExpr { expr }),
             constraints: param.constraints.clone(),
+            constraint_exprs: param
+                .constraint_exprs
+                .clone()
+                .into_iter()
+                .map(|expr| BoundTypeExpr { expr })
+                .collect(),
             default: param.default.clone(),
+            default_expr: param.default_expr.clone().map(|expr| BoundTypeExpr { expr }),
         })
         .collect()
 }
@@ -1944,8 +2021,12 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                     value: String::from("Box[T]"),
+                    value_expr: None,
                     line: 1,
                 }),
                 SyntaxStatement::ClassDef(NamedBlockStatement {
@@ -1956,6 +2037,9 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                     header_suffix: String::new(),
                     bases: Vec::new(),
@@ -1974,9 +2058,13 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -2017,6 +2105,9 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                 },
                 Declaration {
@@ -2043,6 +2134,9 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                 },
                 Declaration {
@@ -2069,6 +2163,9 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                 },
             ]
@@ -2089,6 +2186,7 @@ mod tests {
                 type_params: Vec::new(),
                 params: Vec::new(),
                 returns: Some(String::from("int")),
+                returns_expr: None,
                 is_async: true,
                 is_override: false,
                 is_deprecated: false,
@@ -2122,9 +2220,13 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -2136,6 +2238,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -2174,6 +2277,9 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                 },
                 Declaration {
@@ -2227,6 +2333,7 @@ mod tests {
                     names: vec![String::from("value"), String::from("count")],
                     destructuring_target_names: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: None,
                     is_awaited: false,
                     value_callee: None,
@@ -2366,6 +2473,7 @@ mod tests {
                     names: vec![String::from("value")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -2403,6 +2511,7 @@ mod tests {
                     names: vec![String::from("copy")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -2447,6 +2556,7 @@ mod tests {
                 AssignmentSite {
                     annotation_expr: Some(BoundTypeExpr::new("int")),
                     value: Some(DirectExprMetadata {
+                        value_type_expr: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
                         value_callee: Some(String::from("helper")),
@@ -2513,6 +2623,7 @@ mod tests {
                 AssignmentSite {
                     annotation_expr: Some(BoundTypeExpr::new("str")),
                     value: Some(DirectExprMetadata {
+                        value_type_expr: None,
                         value_type: Some(String::new()),
                         is_awaited: false,
                         value_callee: None,
@@ -2596,6 +2707,7 @@ mod tests {
                     params: vec![typepython_syntax::FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -2603,6 +2715,7 @@ mod tests {
                         keyword_variadic: false,
                     }],
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -2613,6 +2726,7 @@ mod tests {
                     names: vec![String::from("result")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -2658,6 +2772,7 @@ mod tests {
             vec![AssignmentSite {
                 annotation_expr: Some(BoundTypeExpr::new("int")),
                 value: Some(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -2739,6 +2854,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -2749,6 +2865,7 @@ mod tests {
                     names: vec![String::from("result")],
                     destructuring_target_names: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -2794,6 +2911,7 @@ mod tests {
             vec![AssignmentSite {
                 annotation_expr: None,
                 value: Some(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -2873,6 +2991,7 @@ mod tests {
                 names: vec![String::from("left"), String::from("right")],
                 destructuring_target_names: Some(vec![String::from("left"), String::from("right")]),
                 annotation: None,
+                annotation_expr: None,
                 value_type: Some(String::from("tuple[int, str]")),
                 is_awaited: false,
                 value_callee: None,
@@ -2968,6 +3087,7 @@ mod tests {
             table.yields,
             vec![YieldSite {
                 value: Some(DirectExprMetadata {
+                    value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -3062,6 +3182,7 @@ mod tests {
             table.for_loops,
             vec![ForSite {
                 iter: Some(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -3146,6 +3267,7 @@ mod tests {
             table.matches,
             vec![MatchSite {
                 subject: Some(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -3326,6 +3448,7 @@ mod tests {
             table.with_statements,
             vec![WithSite {
                 context: Some(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -3432,9 +3555,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -3450,9 +3575,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -3468,9 +3595,11 @@ mod tests {
                         kind: ClassMemberKind::Overload,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -3598,6 +3727,7 @@ mod tests {
                     names: vec![String::from("MAX_SIZE")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("Final")),
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -3645,9 +3775,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                        annotation_expr: None,
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -3749,6 +3881,7 @@ mod tests {
                     names: vec![String::from("VALUE")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("ClassVar[int]")),
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -3796,9 +3929,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                        annotation_expr: None,
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -3901,6 +4036,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: true,
                     is_deprecated: false,
@@ -3921,9 +4057,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: true,
                         is_abstract_method: false,
@@ -4035,9 +4173,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("float")),
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4053,9 +4193,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("float")),
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4071,9 +4213,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: Some(String::from("float")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4145,9 +4289,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4163,9 +4309,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: Some(String::from("float")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4218,9 +4366,11 @@ mod tests {
                     kind: ClassMemberKind::Method,
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
+                    annotation_expr: None,
                     value_type: None,
                     params: Vec::new(),
                     returns: Some(String::from("bytes")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_abstract_method: true,
@@ -4257,6 +4407,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: true,
@@ -4268,6 +4419,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: true,
@@ -4335,6 +4487,9 @@ mod tests {
                         bound: Some(String::from("Comparable")),
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     },
                     TypeParam {
                         name: String::from("U"),
@@ -4342,6 +4497,9 @@ mod tests {
                         bound: None,
                         constraints: vec![String::from("int"), String::from("str")],
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     },
                     TypeParam {
                         name: String::from("V"),
@@ -4349,9 +4507,13 @@ mod tests {
                         bound: None,
                         constraints: Vec::new(),
                         default: Some(String::from("str")),
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     },
                 ],
                 value: String::from("list[T]"),
+                value_expr: None,
                 line: 1,
             })],
             type_ignore_directives: Vec::new(),
@@ -4368,6 +4530,9 @@ mod tests {
                     bound: Some(String::from("Comparable")),
                     constraints: Vec::new(),
                     default: None,
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
                 },
                 GenericTypeParam {
                     name: String::from("U"),
@@ -4375,6 +4540,9 @@ mod tests {
                     bound: None,
                     constraints: vec![String::from("int"), String::from("str")],
                     default: None,
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
                 },
                 GenericTypeParam {
                     name: String::from("V"),
@@ -4382,6 +4550,9 @@ mod tests {
                     bound: None,
                     constraints: Vec::new(),
                     default: Some(String::from("str")),
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
                 },
             ]
         );
@@ -4404,9 +4575,13 @@ mod tests {
                     bound: None,
                     constraints: Vec::new(),
                     default: None,
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
                 }],
                 params: Vec::new(),
                 returns: None,
+                returns_expr: None,
                 is_async: false,
                 is_override: false,
                 is_deprecated: false,
@@ -4426,6 +4601,9 @@ mod tests {
                 bound: None,
                 constraints: Vec::new(),
                 default: None,
+                bound_expr: None,
+                constraint_exprs: Vec::new(),
+                default_expr: None,
             }]
         );
     }
@@ -4447,8 +4625,12 @@ mod tests {
                     bound: None,
                     constraints: Vec::new(),
                     default: None,
+                    bound_expr: None,
+                    constraint_exprs: Vec::new(),
+                    default_expr: None,
                 }],
                 value: String::from("tuple[Unpack[Ts]]"),
+                value_expr: None,
                 line: 1,
             })],
             type_ignore_directives: Vec::new(),
@@ -4464,6 +4646,9 @@ mod tests {
                 bound: None,
                 constraints: Vec::new(),
                 default: None,
+                bound_expr: None,
+                constraint_exprs: Vec::new(),
+                default_expr: None,
             }]
         );
     }
@@ -4484,6 +4669,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("x"),
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: true,
                         keyword_only: false,
@@ -4493,6 +4679,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("y"),
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4501,6 +4688,7 @@ mod tests {
                     },
                 ],
                 returns: Some(String::from("int")),
+                returns_expr: None,
                 is_async: false,
                 is_override: false,
                 is_deprecated: false,
@@ -4531,6 +4719,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("x"),
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4540,6 +4729,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("y"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: true,
                         positional_only: false,
                         keyword_only: true,
@@ -4548,6 +4738,7 @@ mod tests {
                     },
                 ],
                 returns: None,
+                returns_expr: None,
                 is_async: false,
                 is_override: false,
                 is_deprecated: false,
@@ -4578,6 +4769,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("args"),
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4587,6 +4779,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("kwargs"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4595,6 +4788,7 @@ mod tests {
                     },
                 ],
                 returns: Some(String::from("None")),
+                returns_expr: None,
                 is_async: false,
                 is_override: false,
                 is_deprecated: false,
@@ -4633,9 +4827,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Static),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4651,9 +4847,11 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Class),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -4894,6 +5092,7 @@ mod tests {
                 names: vec![String::from("count")],
                 destructuring_target_names: None,
                 annotation: None,
+                annotation_expr: None,
                 value_type: None,
                 is_awaited: false,
                 value_callee: None,
@@ -4913,6 +5112,7 @@ mod tests {
                 value_bool_left: None,
                 value_bool_right: None,
                 value_binop_left: Some(Box::new(DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: None,
                     is_awaited: false,
                     value_callee: None,

@@ -67,8 +67,11 @@ struct GenericSolverParam {
     kind: typepython_binding::GenericTypeParamKind,
     name: String,
     bound: Option<String>,
+    bound_expr: Option<typepython_syntax::TypeExpr>,
     constraints: Vec<String>,
+    constraint_exprs: Vec<typepython_syntax::TypeExpr>,
     default: Option<String>,
+    default_expr: Option<typepython_syntax::TypeExpr>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,8 +92,15 @@ impl GenericSolverMetadata {
                     kind: type_param.kind.clone(),
                     name: type_param.name.clone(),
                     bound: type_param.bound.clone(),
+                    bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
                     constraints: type_param.constraints.clone(),
+                    constraint_exprs: type_param
+                        .constraint_exprs
+                        .iter()
+                        .map(|expr| expr.expr.clone())
+                        .collect(),
                     default: type_param.default.clone(),
+                    default_expr: type_param.default_expr.as_ref().map(|expr| expr.expr.clone()),
                 })
                 .collect(),
             type_names: function
@@ -256,8 +266,20 @@ fn solve_collected_generic_constraints_detailed(
 }
 
 fn generic_type_param_requirement(type_param: &GenericSolverParam) -> String {
-    if let Some(bound) = &type_param.bound {
+    if let Some(bound) = &type_param.bound_expr {
+        format!("bound `{}`", normalize_type_text(&bound.render()))
+    } else if let Some(bound) = &type_param.bound {
         format!("bound `{}`", normalize_type_text(bound))
+    } else if !type_param.constraint_exprs.is_empty() {
+        format!(
+            "constraint list `{}`",
+            type_param
+                .constraint_exprs
+                .iter()
+                .map(typepython_syntax::TypeExpr::render)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )
     } else if !type_param.constraints.is_empty() {
         format!(
             "constraint list `{}`",
@@ -285,11 +307,13 @@ fn finalize_generic_solution_detailed(
         match type_param.kind {
             typepython_binding::GenericTypeParamKind::TypeVar => {
                 if !substitutions.types.contains_key(&type_param.name)
-                    && let Some(default) = &type_param.default
+                    && let Some(default) = type_param
+                        .default_expr
+                        .as_ref()
+                        .map(typepython_syntax::TypeExpr::render)
+                        .or_else(|| type_param.default.clone())
                 {
-                    substitutions
-                        .types
-                        .insert(type_param.name.clone(), lower_type_text_or_name(default));
+                    substitutions.types.insert(type_param.name.clone(), lower_type_text_or_name(&default));
                 }
                 let Some(actual) = substitutions.types.get(&type_param.name) else {
                     continue;
@@ -301,8 +325,16 @@ fn finalize_generic_solution_detailed(
                         kind: type_param.kind.clone(),
                         name: type_param.name.clone(),
                         bound: type_param.bound.clone(),
+                        bound_expr: type_param.bound_expr.clone().map(|expr| typepython_binding::BoundTypeExpr { expr }),
                         constraints: type_param.constraints.clone(),
+                        constraint_exprs: type_param
+                            .constraint_exprs
+                            .clone()
+                            .into_iter()
+                            .map(|expr| typepython_binding::BoundTypeExpr { expr })
+                            .collect(),
                         default: type_param.default.clone(),
+                        default_expr: type_param.default_expr.clone().map(|expr| typepython_binding::BoundTypeExpr { expr }),
                     },
                     actual,
                 ) {
@@ -317,15 +349,20 @@ fn finalize_generic_solution_detailed(
                 if substitutions.param_lists.contains_key(&type_param.name) {
                     continue;
                 }
-                let Some(default) = &type_param.default else {
+                let Some(default) = type_param
+                    .default_expr
+                    .as_ref()
+                    .map(typepython_syntax::TypeExpr::render)
+                    .or_else(|| type_param.default.clone())
+                else {
                     continue;
                 };
                 substitutions.param_lists.insert(
                     type_param.name.clone(),
-                    param_list_binding_from_default(default).ok_or_else(|| {
+                    param_list_binding_from_default(&default).ok_or_else(|| {
                         GenericSolveFailure::ParamSpecInferenceFailed {
                             annotation: SemanticType::Name(type_param.name.clone()),
-                            actual: lower_type_text_or_name(default),
+                            actual: lower_type_text_or_name(&default),
                         }
                     })?,
                 );
@@ -334,12 +371,17 @@ fn finalize_generic_solution_detailed(
                 if substitutions.type_packs.contains_key(&type_param.name) {
                     continue;
                 }
-                let Some(default) = &type_param.default else {
+                let Some(default) = type_param
+                    .default_expr
+                    .as_ref()
+                    .map(typepython_syntax::TypeExpr::render)
+                    .or_else(|| type_param.default.clone())
+                else {
                     continue;
                 };
                 substitutions.type_packs.insert(
                     type_param.name.clone(),
-                    type_pack_binding_from_default(default).ok_or_else(|| {
+                    type_pack_binding_from_default(&default).ok_or_else(|| {
                         GenericSolveFailure::TypeVarTupleBindingConflict {
                             param_name: type_param.name.clone(),
                         }
@@ -778,6 +820,7 @@ pub(crate) fn instantiate_direct_function_signature(
                 typepython_syntax::DirectFunctionParamSite {
                     name: format!("{}{}", param.name, index),
                     annotation: Some(render_semantic_type(element_type)),
+                    annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(element_type)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(element_type)))),
                     has_default: false,
                     positional_only: true,
                     keyword_only: false,
@@ -789,6 +832,7 @@ pub(crate) fn instantiate_direct_function_signature(
                 instantiated.push(typepython_syntax::DirectFunctionParamSite {
                     name: param.name.clone(),
                     annotation: Some(render_semantic_type(variadic_tail)),
+                    annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(variadic_tail)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(variadic_tail)))),
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -1011,6 +1055,7 @@ pub(crate) fn resolve_callable_shape_from_metadata(
             .map(|(param, annotation)| typepython_syntax::DirectFunctionParamSite {
                 name: param.name.clone(),
                 annotation: Some(render_semantic_type(annotation)),
+                annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(annotation)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(annotation)))),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -1049,6 +1094,7 @@ pub(crate) fn synthesize_param_list_binding(
         .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
             name: format!("arg{index}"),
             annotation: Some(annotation),
+            annotation_expr: None,
             has_default: false,
             positional_only: false,
             keyword_only: false,
@@ -1067,6 +1113,7 @@ pub(crate) fn synthesize_semantic_param_list_binding(
         .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
             name: format!("arg{index}"),
             annotation: Some(render_semantic_type(&annotation)),
+            annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(&annotation)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(&annotation)))),
             has_default: false,
             positional_only: false,
             keyword_only: false,
@@ -1117,12 +1164,12 @@ pub(crate) fn generic_type_param_accepts_actual(
     type_param: &typepython_binding::GenericTypeParam,
     actual: &SemanticType,
 ) -> bool {
-    if let Some(bound) = &type_param.bound {
-        return semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(bound), actual);
+    if let Some(bound) = type_param.rendered_bound() {
+        return semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(&bound), actual);
     }
-    if !type_param.constraints.is_empty() {
-        return type_param
-            .constraints
+    let constraints = type_param.rendered_constraints();
+    if !constraints.is_empty() {
+        return constraints
             .iter()
             .map(|constraint| lower_type_text_or_name(constraint))
             .any(|constraint| semantic_type_is_assignable(node, nodes, &constraint, actual));

@@ -15,6 +15,7 @@ fn param(name: &str, annotation: &str) -> FunctionParam {
     FunctionParam {
         name: name.to_owned(),
         annotation: Some(annotation.to_owned()),
+        annotation_expr: typepython_syntax::TypeExpr::parse(annotation),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -85,8 +86,11 @@ fn type_var(name: &str) -> GenericTypeParam {
         kind: GenericTypeParamKind::TypeVar,
         name: name.to_owned(),
         bound: None,
+        bound_expr: None,
         constraints: Vec::new(),
+        constraint_exprs: Vec::new(),
         default: None,
+        default_expr: None,
     }
 }
 
@@ -95,8 +99,11 @@ fn type_var_tuple(name: &str) -> GenericTypeParam {
         kind: GenericTypeParamKind::TypeVarTuple,
         name: name.to_owned(),
         bound: None,
+        bound_expr: None,
         constraints: Vec::new(),
+        constraint_exprs: Vec::new(),
         default: None,
+        default_expr: None,
     }
 }
 

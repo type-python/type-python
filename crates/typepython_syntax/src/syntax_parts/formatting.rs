@@ -116,15 +116,34 @@ fn render_type_param(type_param: &TypeParam) -> String {
         TypeParamKind::TypeVarTuple => "*",
     };
     let mut rendered = if !type_param.constraints.is_empty() {
-        format!("{}: ({})", type_param.name, type_param.constraints.join(", "))
+        format!(
+            "{}: ({})",
+            type_param.name,
+            if type_param.constraint_exprs.is_empty() {
+                type_param.constraints.join(", ")
+            } else {
+                type_param
+                    .constraint_exprs
+                    .iter()
+                    .map(TypeExpr::render)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
     } else {
-        match &type_param.bound {
-            Some(bound) => format!("{}: {}", type_param.name, bound),
-            None => type_param.name.clone(),
+        match &type_param.bound_expr {
+            Some(bound) => format!("{}: {}", type_param.name, bound.render()),
+            None => match &type_param.bound {
+                Some(bound) => format!("{}: {}", type_param.name, bound),
+                None => type_param.name.clone(),
+            },
         }
     };
     rendered.insert_str(0, prefix);
-    if let Some(default) = &type_param.default {
+    if let Some(default) = &type_param.default_expr {
+        rendered.push_str(" = ");
+        rendered.push_str(&default.render());
+    } else if let Some(default) = &type_param.default {
         rendered.push_str(" = ");
         rendered.push_str(default);
     }
@@ -462,4 +481,3 @@ fn variadic_unpack_operand_bounds(
 
     Some((operand_start, operand_end, delimiter))
 }
-

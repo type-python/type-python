@@ -39,7 +39,6 @@ mod generic_solver;
 mod semantic;
 mod stubs;
 mod type_core;
-mod type_expr;
 mod type_system;
 
 pub(crate) use self::assignments::*;
@@ -50,8 +49,12 @@ pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
 pub use self::stubs::{collect_effective_callable_stub_overrides, collect_synthetic_method_stubs};
 pub(crate) use self::type_core::*;
-pub(crate) use self::type_expr::*;
 pub(crate) use self::type_system::*;
+pub(crate) use typepython_syntax::{
+    CallableParamExpr, TypeExpr, UnionStyle, annotated_inner, normalize_callable_param_expr,
+    normalize_type_head, normalize_type_text, parse_callable_annotation,
+    parse_callable_annotation_parts, split_top_level_type_args, union_branches, unpack_inner,
+};
 
 const BUILTIN_FUNCTION_RETURN_TYPES: &[(&str, &str)] = &[
     ("len", "int"),
@@ -794,8 +797,8 @@ fn semantic_declaration_fact(
             .map(|type_alias| type_alias.body_text.clone())
             .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation_text.clone()))
             .or_else(|| declaration.value_type.clone())
-            .or_else(|| declaration.type_alias_value().map(|value| value.text.clone()))
-            .or_else(|| declaration.value_annotation().map(|annotation| annotation.text.clone())),
+            .or_else(|| declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render))
+            .or_else(|| declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render)),
         import_target: semantics
             .import_target
             .as_ref()
@@ -846,7 +849,7 @@ fn semantic_exported_type(
             .type_alias
             .as_ref()
             .map(|type_alias| diagnostic_type_text(&type_alias.body))
-            .or_else(|| declaration.type_alias_value().map(|value| value.text.clone())),
+            .or_else(|| declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render)),
         DeclarationKind::Import => semantics
             .import_target
             .as_ref()
@@ -860,7 +863,10 @@ fn summary_callable_signature_from_bound(
 ) -> SummaryCallableSignature {
     SummaryCallableSignature {
         params: signature.params.iter().map(summary_signature_param).collect(),
-        returns: signature.returns.as_ref().map(|returns| returns.text.clone()),
+        returns: signature
+            .returns
+            .as_ref()
+            .map(typepython_binding::BoundTypeExpr::render),
     }
 }
 
@@ -900,7 +906,7 @@ fn summary_signature_param(
 }
 
 fn summary_type_param(type_param: &typepython_binding::GenericTypeParam) -> SummaryTypeParam {
-    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.bound.clone() }
+    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.rendered_bound() }
 }
 
 fn summary_kind_string(declaration: &Declaration) -> String {

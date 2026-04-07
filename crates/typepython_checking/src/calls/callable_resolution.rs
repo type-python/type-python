@@ -530,6 +530,7 @@ pub(super) fn direct_function_signature_sites_from_semantic_callable(
             .map(|(index, ty)| typepython_syntax::DirectFunctionParamSite {
                 name: format!("arg{index}"),
                 annotation: Some(diagnostic_type_text(ty)),
+                annotation_expr: Some(typepython_syntax::TypeExpr::parse(&diagnostic_type_text(ty)).unwrap_or(typepython_syntax::TypeExpr::Name(diagnostic_type_text(ty)))),
                 has_default: false,
                 positional_only: false,
                 keyword_only: false,
@@ -551,6 +552,7 @@ pub(super) fn synthetic_direct_expr_metadata(
     value_type: &str,
 ) -> typepython_syntax::DirectExprMetadata {
     typepython_syntax::DirectExprMetadata {
+        value_type_expr: None,
         value_type: Some(value_type.to_owned()),
         is_awaited: false,
         value_callee: None,

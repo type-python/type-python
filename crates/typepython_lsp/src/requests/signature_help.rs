@@ -288,6 +288,9 @@ pub(crate) fn class_constructor_signature_information(
         .map(|member| typepython_syntax::FunctionParam {
             name: member.name.clone(),
             annotation: member.annotation.clone().or_else(|| member.value_type.clone()),
+            annotation_expr: member.annotation_expr.clone().or_else(|| {
+                member.rendered_annotation().as_deref().and_then(typepython_syntax::TypeExpr::parse)
+            }),
             has_default: false,
             positional_only: false,
             keyword_only: false,

@@ -381,6 +381,7 @@ pub(super) fn direct_expr_metadata_from_assignment_site(
 ) -> typepython_syntax::DirectExprMetadata {
     assignment.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
         value_type: None,
+        value_type_expr: None,
         is_awaited: false,
         value_callee: None,
         value_name: None,
@@ -741,6 +742,7 @@ pub(super) fn direct_expr_metadata_for_known_type(
 ) -> typepython_syntax::DirectExprMetadata {
     typepython_syntax::DirectExprMetadata {
         value_type: Some(String::from(value_type)),
+        value_type_expr: typepython_syntax::TypeExpr::parse(value_type),
         is_awaited: false,
         value_callee: None,
         value_name: None,

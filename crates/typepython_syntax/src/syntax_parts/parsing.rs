@@ -632,6 +632,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                 },
                 method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
                 annotation: None,
+                annotation_expr: None,
                 value_type: None,
                 params: extract_function_params(normalized, &function.parameters),
                 returns: function
@@ -639,6 +640,11 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                     .as_ref()
                     .and_then(|returns| slice_range(normalized, returns.range()))
                     .map(str::to_owned),
+                returns_expr: function
+                    .returns
+                    .as_ref()
+                    .and_then(|returns| slice_range(normalized, returns.range()))
+                    .and_then(TypeExpr::parse),
                 is_async: function.is_async,
                 is_override: function.decorator_list.iter().any(is_override_decorator),
                 is_abstract_method: function.decorator_list.iter().any(is_abstractmethod_decorator),
@@ -659,9 +665,12 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                         method_kind: None,
                         annotation: slice_range(normalized, assign.annotation.range())
                             .map(str::to_owned),
+                        annotation_expr: slice_range(normalized, assign.annotation.range())
+                            .and_then(TypeExpr::parse),
                         value_type: assign.value.as_deref().map(infer_literal_arg_type),
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -682,9 +691,11 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -734,4 +745,3 @@ fn ast_function_def_for_line<'a>(
         _ => None,
     })
 }
-

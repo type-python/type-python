@@ -1,5 +1,5 @@
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum TypeExpr {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum TypeExpr {
     Name(String),
     Generic { head: String, args: Vec<TypeExpr> },
     Callable { params: Box<CallableParamExpr>, return_type: Box<TypeExpr> },
@@ -8,14 +8,14 @@ pub(crate) enum TypeExpr {
     Unpack(Box<TypeExpr>),
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum UnionStyle {
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub enum UnionStyle {
     Explicit,
     Shorthand,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum CallableParamExpr {
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum CallableParamExpr {
     Ellipsis,
     ParamList(Vec<TypeExpr>),
     Concatenate(Vec<TypeExpr>),
@@ -23,12 +23,12 @@ pub(crate) enum CallableParamExpr {
 }
 
 impl TypeExpr {
-    pub(crate) fn parse(text: &str) -> Option<Self> {
-        let normalized = typepython_syntax::normalize_source_variadic_type_syntax(text);
+    pub fn parse(text: &str) -> Option<Self> {
+        let normalized = normalize_source_variadic_type_syntax(text);
         parse_type_expr(&normalized)
     }
 
-    pub(crate) fn render(&self) -> String {
+    pub fn render(&self) -> String {
         match self {
             Self::Name(name) => normalize_name(name),
             Self::Generic { head, args } => {
@@ -61,7 +61,7 @@ impl TypeExpr {
 }
 
 impl CallableParamExpr {
-    pub(crate) fn render(&self) -> String {
+    pub fn render(&self) -> String {
         match self {
             Self::Ellipsis => String::from("..."),
             Self::ParamList(types) => {
@@ -77,7 +77,7 @@ impl CallableParamExpr {
     }
 }
 
-pub(crate) fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)> {
+pub fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String>>, String)> {
     let (params, return_type) = parse_callable_annotation_parts(text)?;
     if params == "..." {
         return Some((None, return_type));
@@ -91,21 +91,21 @@ pub(crate) fn parse_callable_annotation(text: &str) -> Option<(Option<Vec<String
     Some((Some(param_types), return_type))
 }
 
-pub(crate) fn parse_callable_annotation_parts(text: &str) -> Option<(String, String)> {
+pub fn parse_callable_annotation_parts(text: &str) -> Option<(String, String)> {
     match TypeExpr::parse(text)? {
         TypeExpr::Callable { params, return_type } => Some((params.render(), return_type.render())),
         _ => None,
     }
 }
 
-pub(crate) fn normalize_callable_param_expr(params: &str) -> String {
+pub fn normalize_callable_param_expr(params: &str) -> String {
     parse_callable_param_expr(params)
         .map(|params| params.render())
         .unwrap_or_else(|| normalize_type_text_legacy(params))
 }
 
-pub(crate) fn normalize_type_text(text: &str) -> String {
-    let normalized_source = typepython_syntax::normalize_source_variadic_type_syntax(text);
+pub fn normalize_type_text(text: &str) -> String {
+    let normalized_source = normalize_source_variadic_type_syntax(text);
     let text = normalized_source.trim();
     if text.is_empty() {
         return String::new();
@@ -115,11 +115,9 @@ pub(crate) fn normalize_type_text(text: &str) -> String {
         .unwrap_or_else(|| normalize_type_text_legacy(text))
 }
 
-pub(crate) fn union_branches(text: &str) -> Option<Vec<String>> {
+pub fn union_branches(text: &str) -> Option<Vec<String>> {
     match TypeExpr::parse(text)? {
-        TypeExpr::Annotated { value, .. } => {
-            union_branches(&value.render()).or(Some(vec![value.render()]))
-        }
+        TypeExpr::Annotated { value, .. } => union_branches(&value.render()).or(Some(vec![value.render()])),
         TypeExpr::Generic { head, args } if head == "Optional" && args.len() == 1 => {
             Some(vec![args[0].render(), String::from("None")])
         }
@@ -130,7 +128,7 @@ pub(crate) fn union_branches(text: &str) -> Option<Vec<String>> {
     }
 }
 
-pub(crate) fn split_top_level_union_branches(text: &str) -> Vec<&str> {
+pub fn split_top_level_union_branches(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0usize;
     let mut start = 0usize;
@@ -149,21 +147,21 @@ pub(crate) fn split_top_level_union_branches(text: &str) -> Vec<&str> {
     parts
 }
 
-pub(crate) fn annotated_inner(text: &str) -> Option<String> {
+pub fn annotated_inner(text: &str) -> Option<String> {
     match TypeExpr::parse(text)? {
         TypeExpr::Annotated { value, .. } => Some(value.render()),
         _ => None,
     }
 }
 
-pub(crate) fn unpack_inner(text: &str) -> Option<String> {
+pub fn unpack_inner(text: &str) -> Option<String> {
     match TypeExpr::parse(text)? {
         TypeExpr::Unpack(inner) => Some(inner.render()),
         _ => None,
     }
 }
 
-pub(crate) fn normalize_type_head(head: &str) -> &str {
+pub fn normalize_type_head(head: &str) -> &str {
     match head.trim() {
         "List" => "list",
         "Dict" => "dict",
@@ -178,7 +176,7 @@ pub(crate) fn normalize_type_head(head: &str) -> &str {
     }
 }
 
-pub(crate) fn split_top_level_type_args(args: &str) -> Vec<&str> {
+pub fn split_top_level_type_args(args: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0usize;
     let mut start = 0usize;
@@ -280,8 +278,7 @@ fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
         };
         return Some(CallableParamExpr::ParamList(params));
     }
-    if let Some(inner) = text.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
-    {
+    if let Some(inner) = text.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']')) {
         let params = split_top_level_type_args(inner)
             .into_iter()
             .map(|arg| parse_type_expr(arg).unwrap_or(TypeExpr::Name(normalize_name(arg))))
@@ -317,7 +314,7 @@ fn normalize_type_text_legacy(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+mod type_expr_tests {
     use super::{
         CallableParamExpr, TypeExpr, UnionStyle, annotated_inner, normalize_callable_param_expr,
         normalize_type_text, parse_callable_annotation_parts, union_branches,

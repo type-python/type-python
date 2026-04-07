@@ -390,12 +390,12 @@ fn summary_type_repr(declaration: &Declaration) -> String {
             .value_type
             .clone()
             .filter(|value| !value.is_empty())
-            .or_else(|| declaration.value_annotation().map(|annotation| annotation.text.clone()))
+            .or_else(|| declaration.value_annotation().map(|annotation| annotation.render()))
             .unwrap_or_else(|| declaration.detail.clone()),
         _ => {
             let structured = match declaration.kind {
                 DeclarationKind::TypeAlias => {
-                    declaration.type_alias_value().map(|value| value.text.clone())
+                    declaration.type_alias_value().map(|value| value.render())
                 }
                 DeclarationKind::Function | DeclarationKind::Overload => {
                     declaration.callable_signature().map(|signature| signature.rendered())
@@ -416,7 +416,7 @@ fn summary_type_repr(declaration: &Declaration) -> String {
 }
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
-    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.bound.clone() }
+    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.rendered_bound() }
 }
 
 fn summary_fingerprint(summary: &PublicSummary) -> u64 {
@@ -603,6 +603,9 @@ mod tests {
                             bound: Some(String::from("SupportsClose")),
                             constraints: Vec::new(),
                             default: None,
+                            bound_expr: None,
+                            constraint_exprs: Vec::new(),
+                            default_expr: None,
                         }],
                     },
                     Declaration {
@@ -649,6 +652,9 @@ mod tests {
                             bound: None,
                             constraints: Vec::new(),
                             default: None,
+                            bound_expr: None,
+                            constraint_exprs: Vec::new(),
+                            default_expr: None,
                         }],
                     },
                     Declaration {

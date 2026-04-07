@@ -1239,7 +1239,7 @@ pub(super) fn alias_type_param_substitutions_semantic(
             let argument = args
                 .get(start)
                 .cloned()
-                .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
+                .or_else(|| type_param.rendered_default().map(|default| lower_type_text_or_name(&default)))?;
             if args.get(start).is_some() {
                 start += 1;
             }
@@ -1255,7 +1255,7 @@ pub(super) fn alias_type_param_substitutions_semantic(
             } else {
                 None
             }
-            .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
+            .or_else(|| type_param.rendered_default().map(|default| lower_type_text_or_name(&default)))?;
             trailing.push((type_param.name.clone(), argument));
         }
         for (name, argument) in trailing.into_iter().rev() {
@@ -1276,7 +1276,7 @@ pub(super) fn alias_type_param_substitutions_semantic(
         let argument = args
             .get(index)
             .cloned()
-            .or_else(|| type_param.default.as_ref().map(|default| lower_type_text_or_name(default)))?;
+            .or_else(|| type_param.rendered_default().map(|default| lower_type_text_or_name(&default)))?;
         substitutions.types.insert(type_param.name.clone(), argument);
     }
     Some(substitutions)

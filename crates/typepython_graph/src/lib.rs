@@ -702,6 +702,7 @@ fn prelude_param(name: &str, annotation: &str) -> typepython_syntax::FunctionPar
     typepython_syntax::FunctionParam {
         name: String::from(name),
         annotation: Some(String::from(annotation)),
+        annotation_expr: typepython_syntax::TypeExpr::parse(annotation),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -714,6 +715,7 @@ fn prelude_untyped_param(name: &str) -> typepython_syntax::FunctionParam {
     typepython_syntax::FunctionParam {
         name: String::from(name),
         annotation: None,
+        annotation_expr: None,
         has_default: false,
         positional_only: false,
         keyword_only: false,

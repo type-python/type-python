@@ -614,6 +614,7 @@ fn check_accepts_contextual_typed_dict_literal_method_keyword_argument() {
 fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
         typepython_syntax::DirectExprMetadata {
+            value_type_expr: None,
             value_type: Some(String::from(value_type)),
             is_awaited: false,
             value_callee: None,
@@ -649,6 +650,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         arg_count: 1,
         arg_types: vec![String::from("dict[str, object]")],
         arg_values: vec![typepython_syntax::DirectExprMetadata {
+            value_type_expr: None,
             value_type: Some(String::from("dict[str, object]")),
             is_awaited: false,
             value_callee: None,
@@ -1441,6 +1443,7 @@ fn semantic_metadata_resolution_reuses_expression_semantic_path() {
     let graph = build(&[binding]);
     let node = &graph.nodes[0];
     let metadata = typepython_syntax::DirectExprMetadata {
+        value_type_expr: None,
         value_type: None,
         is_awaited: true,
         value_callee: Some(String::from("fetch")),
@@ -1508,6 +1511,7 @@ fn semantic_contextual_lambda_resolution_builds_callable_types() {
         params: vec![typepython_syntax::FunctionParam {
             name: String::from("item"),
             annotation: None,
+            annotation_expr: None,
             has_default: false,
             positional_only: false,
             keyword_only: false,
@@ -1515,6 +1519,7 @@ fn semantic_contextual_lambda_resolution_builds_callable_types() {
             keyword_variadic: false,
         }],
         body: Box::new(typepython_syntax::DirectExprMetadata {
+            value_type_expr: None,
             value_type: Some(String::from("str")),
             is_awaited: false,
             value_callee: None,
@@ -1586,6 +1591,7 @@ fn call_diagnostics_resolve_argument_types_through_semantic_path() {
         arg_count: 1,
         arg_types: vec![String::new()],
         arg_values: vec![typepython_syntax::DirectExprMetadata {
+            value_type_expr: None,
             value_type: None,
             is_awaited: true,
             value_callee: Some(String::from("fetch")),
@@ -3387,6 +3393,7 @@ fn overload_applicability_accepts_list_for_sequence_parameter() {
 fn overload_applicability_uses_contextual_lambda_callable_types() {
     fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
         typepython_syntax::DirectExprMetadata {
+            value_type_expr: None,
             value_type: Some(String::from(value_type)),
             is_awaited: false,
             value_callee: None,
@@ -3418,6 +3425,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
     }
 
     let lambda_arg = typepython_syntax::DirectExprMetadata {
+        value_type_expr: None,
         value_type: Some(String::new()),
         is_awaited: false,
         value_callee: None,
@@ -3443,6 +3451,7 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
             params: vec![typepython_syntax::FunctionParam {
                 name: String::from("x"),
                 annotation: None,
+                annotation_expr: None,
                 has_default: false,
                 positional_only: false,
                 keyword_only: false,
@@ -3527,6 +3536,9 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let object_overload = Declaration {
@@ -3731,6 +3743,9 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let call = typepython_binding::CallSite {
@@ -4297,6 +4312,9 @@ fn check_accepts_generic_method_overload_specificity() {
                             bound: None,
                             constraints: Vec::new(),
                             default: None,
+                            bound_expr: None,
+                            constraint_exprs: Vec::new(),
+                            default_expr: None,
                         }],
                     },
                     Declaration {
@@ -10338,11 +10356,15 @@ fn check_infers_generic_function_call_through_union_actual() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let signature = vec![typepython_syntax::DirectFunctionParamSite {
         name: String::from("x"),
         annotation: Some(String::from("T | None")),
+        annotation_expr: None,
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -10420,6 +10442,9 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let signature = super::declaration_signature_sites(&function);
@@ -10496,6 +10521,9 @@ fn check_infers_paramspec_from_callable_argument() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let signature = super::declaration_signature_sites(&function);
@@ -10576,6 +10604,9 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let call = typepython_binding::CallSite {
@@ -10662,6 +10693,9 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
     let signature = super::declaration_signature_sites(&function);
@@ -10785,6 +10819,9 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                         bound: None,
                         constraints: Vec::new(),
                         default: None,
+                        bound_expr: None,
+                        constraint_exprs: Vec::new(),
+                        default_expr: None,
                     }],
                 },
             ],
@@ -10971,6 +11008,9 @@ fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
             bound: None,
             constraints: Vec::new(),
             default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
         }],
     };
 
@@ -18307,6 +18347,9 @@ fn check_accepts_typevartuple_alias_expansion_assignment() {
                 bound: None,
                 constraints: Vec::new(),
                 default: None,
+                bound_expr: None,
+                constraint_exprs: Vec::new(),
+                default_expr: None,
             }],
         }],
         calls: Vec::new(),
@@ -24627,6 +24670,7 @@ fn check_accepts_mapping_subscript_read_type() {
                 value_method_name: None,
                 value_method_through_instance: false,
                 value_subscript_target: Some(Box::new(typepython_syntax::DirectExprMetadata {
+                    value_type_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,

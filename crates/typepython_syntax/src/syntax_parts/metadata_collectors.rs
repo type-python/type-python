@@ -180,12 +180,12 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                     }
                     direct_function_signatures.push(DirectFunctionSignatureSite {
                         name: function.name.as_str().to_owned(),
-                        params: collect_direct_function_param_sites(&normalized, &function.parameters),
-                        line: offset_to_line_column(
+                        params: collect_direct_function_param_sites(
                             &normalized,
-                            function.range.start().to_usize(),
-                        )
-                        .0,
+                            &function.parameters,
+                        ),
+                        line: offset_to_line_column(&normalized, function.range.start().to_usize())
+                            .0,
                     });
                 }
                 Stmt::ClassDef(class_def) => {
@@ -221,30 +221,25 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                         class_def,
                         &import_bindings,
                     ));
-                    direct_method_signatures.extend(
-                        class_def
-                            .body
-                            .iter()
-                            .filter_map(|member| match member {
-                                Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
-                                    owner_type_name: class_def.name.as_str().to_owned(),
-                                    name: function.name.as_str().to_owned(),
-                                    method_kind: method_kind_from_decorators(
-                                        &function.decorator_list,
-                                    ),
-                                    params: collect_direct_function_param_sites(
-                                        &normalized,
-                                        &function.parameters,
-                                    ),
-                                    line: offset_to_line_column(
-                                        &normalized,
-                                        function.range.start().to_usize(),
-                                    )
-                                    .0,
-                                }),
-                                _ => None,
+                    direct_method_signatures.extend(class_def.body.iter().filter_map(|member| {
+                        match member {
+                            Stmt::FunctionDef(function) => Some(DirectMethodSignatureSite {
+                                owner_type_name: class_def.name.as_str().to_owned(),
+                                name: function.name.as_str().to_owned(),
+                                method_kind: method_kind_from_decorators(&function.decorator_list),
+                                params: collect_direct_function_param_sites(
+                                    &normalized,
+                                    &function.parameters,
+                                ),
+                                line: offset_to_line_column(
+                                    &normalized,
+                                    function.range.start().to_usize(),
+                                )
+                                .0,
                             }),
-                    );
+                            _ => None,
+                        }
+                    }));
                 }
                 _ => {}
             }
@@ -347,6 +342,10 @@ fn collect_direct_function_param_sites(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: true,
         keyword_only: false,
@@ -359,6 +358,10 @@ fn collect_direct_function_param_sites(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: false,
         keyword_only: false,
@@ -371,6 +374,10 @@ fn collect_direct_function_param_sites(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -383,6 +390,10 @@ fn collect_direct_function_param_sites(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: false,
         keyword_only: true,
@@ -395,6 +406,10 @@ fn collect_direct_function_param_sites(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -1082,7 +1097,11 @@ fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
+    if tail.is_empty() {
+        head
+    } else {
+        format!("{head}.{}", tail.join("."))
+    }
 }
 
 fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {

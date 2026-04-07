@@ -5,13 +5,13 @@ use typepython_graph::ModuleGraph;
 use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 use crate::{
-    CheckerContext, EffectiveCallableStubOverride, SyntheticMethodStub,
     decorated_function_return_type_from_callable_annotation,
     direct_function_signature_sites_from_callable_annotation,
     resolve_dataclass_transform_class_shape_from_decl_with_context,
     resolve_decorated_callable_annotation_for_declaration_with_context,
     resolve_decorated_callable_site_with_context,
-    resolve_plain_dataclass_class_shape_from_decl_with_context,
+    resolve_plain_dataclass_class_shape_from_decl_with_context, CheckerContext,
+    EffectiveCallableStubOverride, SyntheticMethodStub,
 };
 
 #[must_use]
@@ -109,6 +109,7 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                     let mut params = vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -118,6 +119,7 @@ pub fn collect_synthetic_method_stubs(graph: &ModuleGraph) -> Vec<SyntheticMetho
                     params.extend(shape.fields.iter().map(|field| FunctionParam {
                         name: field.keyword_name.clone(),
                         annotation: Some(field.annotation.clone()),
+                        annotation_expr: typepython_syntax::TypeExpr::parse(&field.annotation),
                         has_default: !field.required,
                         positional_only: false,
                         keyword_only: field.kw_only,
@@ -155,6 +157,10 @@ fn function_params_from_direct_sites(
         .map(|param| typepython_syntax::FunctionParam {
             name: param.name.clone(),
             annotation: param.annotation.clone(),
+            annotation_expr: param
+                .annotation
+                .as_deref()
+                .and_then(typepython_syntax::TypeExpr::parse),
             has_default: param.has_default,
             positional_only: param.positional_only,
             keyword_only: param.keyword_only,

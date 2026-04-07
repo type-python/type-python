@@ -177,7 +177,7 @@ pub(crate) fn resolve_callable_return_type_in_scope(
             return declaration
                 .callable_signature()
                 .and_then(|signature| {
-                    signature.returns.as_ref().map(|returns| returns.text.clone())
+                    signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render)
                 })
                 .or_else(|| parse_return_annotation(&declaration.rendered_detail()));
         }

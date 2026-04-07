@@ -104,6 +104,11 @@ fn extract_ast_backed_statement(
                     .as_ref()
                     .and_then(|returns| slice_range(source, returns.range()))
                     .map(str::to_owned),
+                returns_expr: stmt
+                    .returns
+                    .as_ref()
+                    .and_then(|returns| slice_range(source, returns.range()))
+                    .and_then(TypeExpr::parse),
                 is_async: stmt.is_async,
                 is_override: stmt.decorator_list.iter().any(is_override_decorator),
                 is_deprecated: deprecation_message.is_some(),
@@ -181,6 +186,7 @@ fn extract_ast_backed_statement(
                     names,
                     destructuring_target_names,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: value.value_type,
                     is_awaited: value.is_awaited,
                     value_callee: value.value_callee,
@@ -225,39 +231,37 @@ fn extract_ast_backed_statement(
                     .value
                     .as_deref()
                     .map(|expr| extract_direct_expr_metadata(source, expr))
-                    .unwrap_or(DirectExprMetadata {
-                        value_type: None,
-                        is_awaited: false,
-                        value_callee: None,
-                        value_name: None,
-                        value_member_owner_name: None,
-                        value_member_name: None,
-                        value_member_through_instance: false,
-                        value_method_owner_name: None,
-                        value_method_name: None,
-                        value_method_through_instance: false,
-                        value_subscript_target: None,
-                        value_subscript_string_key: None,
-                        value_subscript_index: None,
-                        value_if_true: None,
-                        value_if_false: None,
-                        value_if_guard: None,
-                        value_bool_left: None,
-                        value_bool_right: None,
-                        value_binop_left: None,
-                        value_binop_right: None,
-                        value_binop_operator: None,
-                        value_lambda: None,
-                        value_list_comprehension: None,
-                        value_generator_comprehension: None,
-                        value_list_elements: None,
-                        value_set_elements: None,
-                        value_dict_entries: None,
-                    });
+                    .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None, });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     destructuring_target_names: None,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
+                    annotation_expr: slice_range(source, stmt.annotation.range()).and_then(TypeExpr::parse),
                     value_type: value.value_type,
                     is_awaited: value.is_awaited,
                     value_callee: value.value_callee,
@@ -1984,6 +1988,7 @@ impl<'a> NamedExprAssignmentCollector<'a> {
             names: vec![name.id.as_str().to_owned()],
             destructuring_target_names: None,
             annotation: None,
+            annotation_expr: None,
             value_type: value.value_type,
             is_awaited: value.is_awaited,
             value_callee: value.value_callee,
@@ -2062,40 +2067,38 @@ fn extract_function_body_assignment_statement(
     }
     let value =
         assign.value.as_deref().map(|expr| extract_direct_expr_metadata(source, expr)).unwrap_or(
-            DirectExprMetadata {
-                value_type: None,
-                is_awaited: false,
-                value_callee: None,
-                value_name: None,
-                value_member_owner_name: None,
-                value_member_name: None,
-                value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-                value_subscript_target: None,
-                value_subscript_string_key: None,
-                value_subscript_index: None,
-                value_if_true: None,
-                value_if_false: None,
-                value_if_guard: None,
-                value_bool_left: None,
-                value_bool_right: None,
-                value_binop_left: None,
-                value_binop_right: None,
-                value_binop_operator: None,
-                value_lambda: None,
-                value_list_comprehension: None,
-                value_generator_comprehension: None,
-                value_list_elements: None,
-                value_set_elements: None,
-                value_dict_entries: None,
-            },
+            DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None, },
         );
     Some(SyntaxStatement::Value(ValueStatement {
         names,
         destructuring_target_names: None,
         annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
+        annotation_expr: slice_range(source, assign.annotation.range()).and_then(TypeExpr::parse),
         value_type: value.value_type,
         is_awaited: value.is_awaited,
         value_callee: value.value_callee,
@@ -2154,6 +2157,7 @@ fn extract_function_body_bare_assignment_statement(
                 names,
                 destructuring_target_names,
                 annotation: None,
+                annotation_expr: None,
                 value_type: value.value_type,
                 is_awaited: value.is_awaited,
                 value_callee: value.value_callee,
@@ -2219,6 +2223,7 @@ fn extract_augmented_assignment_value_statement(
         names,
         destructuring_target_names: None,
         annotation: None,
+        annotation_expr: None,
         value_type: None,
         is_awaited: false,
         value_callee: None,
@@ -2271,35 +2276,32 @@ fn extract_yield_statement(
                 .value
                 .as_deref()
                 .map(|expr| extract_direct_expr_metadata(source, expr))
-                .unwrap_or(DirectExprMetadata {
-                    value_type: None,
-                    is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: None,
-                    value_method_name: None,
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_comprehension: None,
-                    value_generator_comprehension: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                }),
+                .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None, }),
             false,
         ),
         Expr::YieldFrom(yield_expr) => {
@@ -2551,35 +2553,32 @@ fn extract_return_statement(
         .value
         .as_deref()
         .map(|expr| extract_direct_expr_metadata(source, expr))
-        .unwrap_or(DirectExprMetadata {
-            value_type: None,
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        });
+        .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, });
 
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
@@ -2625,488 +2624,12 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
     }
 
     if let Expr::Dict(dict) = expr {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: Some(extract_typed_dict_literal_entries(source, dict)),
-        };
-    }
-
-    if let Expr::List(list) = expr {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: Some(
-                list.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
-            ),
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::Set(set) = expr {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: Some(
-                set.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
-            ),
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::Lambda(lambda) = expr {
-        let mut params = lambda
-            .parameters
-            .as_ref()
-            .map(|parameters| extract_function_params(source, parameters))
-            .unwrap_or_default();
-        let (line, column) = offset_to_line_column(source, expr.range().start().to_usize());
-        if let Some(site) = annotated_lambda_site_at(line, column)
-            && site.param_names.len() == params.len()
-            && site.param_names.iter().zip(params.iter()).all(|(name, param)| name == &param.name)
-        {
-            for (param, annotation) in params.iter_mut().zip(site.annotations) {
-                param.annotation = annotation;
-            }
-        }
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: Some(Box::new(LambdaMetadata {
-                params,
-                body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
-            })),
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::ListComp(comp) = expr {
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-                kind: ComprehensionKind::List,
-                clauses: extract_list_comprehension_clauses(source, &comp.generators),
-                key: None,
-                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-            })),
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::SetComp(comp) = expr {
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-                kind: ComprehensionKind::Set,
-                clauses: extract_list_comprehension_clauses(source, &comp.generators),
-                key: None,
-                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-            })),
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::DictComp(comp) = expr {
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-                kind: ComprehensionKind::Dict,
-                clauses: extract_list_comprehension_clauses(source, &comp.generators),
-                key: Some(Box::new(extract_direct_expr_metadata(source, &comp.key))),
-                element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
-            })),
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::Generator(comp) = expr {
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
-                kind: ComprehensionKind::Generator,
-                clauses: extract_list_comprehension_clauses(source, &comp.generators),
-                key: None,
-                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-            })),
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: Some(owner_name),
-            value_method_name: Some(method_name),
-            value_method_through_instance: through_instance,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::BoolOp(bool_op) = expr {
-        let mut values = bool_op.values.iter();
-        let left_expr = values.next();
-        let left_guard = left_expr.and_then(|expr| extract_guard_condition(source, expr));
-        let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
-        let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: left_guard,
-            value_bool_left: left.map(Box::new),
-            value_bool_right: right.map(Box::new),
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: Some(match bool_op.op {
-                ruff_python_ast::BoolOp::And => String::from("and"),
-                ruff_python_ast::BoolOp::Or => String::from("or"),
-            }),
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::BinOp(bin_op) = expr {
-        return DirectExprMetadata {
-            value_type: Some(String::new()),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
-            value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
-            value_binop_operator: Some(direct_operator_text(bin_op.op)),
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::If(if_expr) = expr {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
-            value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
-            value_if_guard: extract_guard_condition(source, &if_expr.test),
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    if let Expr::Subscript(subscript) = expr {
-        return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: Some(Box::new(extract_direct_expr_metadata(
-                source,
-                &subscript.value,
-            ))),
-            value_subscript_string_key: extract_string_literal_value(source, &subscript.slice),
-            value_subscript_index: match infer_literal_arg_type(&subscript.slice).as_str() {
-                "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
-                _ => None,
-            },
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        };
-    }
-
-    let member = extract_direct_member_access(expr);
-    DirectExprMetadata {
-        value_type: Some(infer_literal_arg_type(expr)),
-        is_awaited: false,
-        value_callee: extract_direct_callee(expr),
-        value_name: extract_direct_name(expr),
-        value_member_owner_name: member.as_ref().map(|(owner_name, _, _)| owner_name.clone()),
-        value_member_name: member.as_ref().map(|(_, member, _)| member.clone()),
-        value_member_through_instance: member
-            .as_ref()
-            .map(|(_, _, through_instance)| *through_instance)
-            .unwrap_or(false),
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
@@ -3126,8 +2649,442 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_generator_comprehension: None,
         value_list_elements: None,
         value_set_elements: None,
-        value_dict_entries: None,
+        value_dict_entries: Some(extract_typed_dict_literal_entries(source, dict)), };
     }
+
+    if let Expr::List(list) = expr {
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: Some(
+            list.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+        ),
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::Set(set) = expr {
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: Some(
+            set.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+        ),
+        value_dict_entries: None, };
+    }
+
+    if let Expr::Lambda(lambda) = expr {
+        let mut params = lambda
+            .parameters
+            .as_ref()
+            .map(|parameters| extract_function_params(source, parameters))
+            .unwrap_or_default();
+        let (line, column) = offset_to_line_column(source, expr.range().start().to_usize());
+        if let Some(site) = annotated_lambda_site_at(line, column)
+            && site.param_names.len() == params.len()
+            && site.param_names.iter().zip(params.iter()).all(|(name, param)| name == &param.name)
+        {
+            for (param, annotation) in params.iter_mut().zip(site.annotations) {
+                param.annotation = annotation;
+            }
+        }
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: Some(Box::new(LambdaMetadata {
+            params,
+            body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
+        })),
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::ListComp(comp) = expr {
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+            kind: ComprehensionKind::List,
+            clauses: extract_list_comprehension_clauses(source, &comp.generators),
+            key: None,
+            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+        })),
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::SetComp(comp) = expr {
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+            kind: ComprehensionKind::Set,
+            clauses: extract_list_comprehension_clauses(source, &comp.generators),
+            key: None,
+            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+        })),
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::DictComp(comp) = expr {
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+            kind: ComprehensionKind::Dict,
+            clauses: extract_list_comprehension_clauses(source, &comp.generators),
+            key: Some(Box::new(extract_direct_expr_metadata(source, &comp.key))),
+            element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
+        })),
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::Generator(comp) = expr {
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
+            kind: ComprehensionKind::Generator,
+            clauses: extract_list_comprehension_clauses(source, &comp.generators),
+            key: None,
+            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+        })),
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: Some(owner_name),
+        value_method_name: Some(method_name),
+        value_method_through_instance: through_instance,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::BoolOp(bool_op) = expr {
+        let mut values = bool_op.values.iter();
+        let left_expr = values.next();
+        let left_guard = left_expr.and_then(|expr| extract_guard_condition(source, expr));
+        let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
+        let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: left_guard,
+        value_bool_left: left.map(Box::new),
+        value_bool_right: right.map(Box::new),
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: Some(match bool_op.op {
+            ruff_python_ast::BoolOp::And => String::from("and"),
+            ruff_python_ast::BoolOp::Or => String::from("or"),
+        }),
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::BinOp(bin_op) = expr {
+        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
+        value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
+        value_binop_operator: Some(direct_operator_text(bin_op.op)),
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::If(if_expr) = expr {
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: None,
+        value_subscript_string_key: None,
+        value_subscript_index: None,
+        value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
+        value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
+        value_if_guard: extract_guard_condition(source, &if_expr.test),
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    if let Expr::Subscript(subscript) = expr {
+        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+        value_callee: None,
+        value_name: None,
+        value_member_owner_name: None,
+        value_member_name: None,
+        value_member_through_instance: false,
+        value_method_owner_name: None,
+        value_method_name: None,
+        value_method_through_instance: false,
+        value_subscript_target: Some(Box::new(extract_direct_expr_metadata(
+            source,
+            &subscript.value,
+        ))),
+        value_subscript_string_key: extract_string_literal_value(source, &subscript.slice),
+        value_subscript_index: match infer_literal_arg_type(&subscript.slice).as_str() {
+            "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
+            _ => None,
+        },
+        value_if_true: None,
+        value_if_false: None,
+        value_if_guard: None,
+        value_bool_left: None,
+        value_bool_right: None,
+        value_binop_left: None,
+        value_binop_right: None,
+        value_binop_operator: None,
+        value_lambda: None,
+        value_list_comprehension: None,
+        value_generator_comprehension: None,
+        value_list_elements: None,
+        value_set_elements: None,
+        value_dict_entries: None, };
+    }
+
+    let member = extract_direct_member_access(expr);
+    DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
+    value_callee: extract_direct_callee(expr),
+    value_name: extract_direct_name(expr),
+    value_member_owner_name: member.as_ref().map(|(owner_name, _, _)| owner_name.clone()),
+    value_member_name: member.as_ref().map(|(_, member, _)| member.clone()),
+    value_member_through_instance: member
+        .as_ref()
+        .map(|(_, _, through_instance)| *through_instance)
+        .unwrap_or(false),
+    value_method_owner_name: None,
+    value_method_name: None,
+    value_method_through_instance: false,
+    value_subscript_target: None,
+    value_subscript_string_key: None,
+    value_subscript_index: None,
+    value_if_true: None,
+    value_if_false: None,
+    value_if_guard: None,
+    value_bool_left: None,
+    value_bool_right: None,
+    value_binop_left: None,
+    value_binop_right: None,
+    value_binop_operator: None,
+    value_lambda: None,
+    value_list_comprehension: None,
+    value_generator_comprehension: None,
+    value_list_elements: None,
+    value_set_elements: None,
+    value_dict_entries: None, }
 }
 
 fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
@@ -3208,8 +3165,15 @@ fn extract_ast_type_params(
                 parsed.push(TypeParam {
                     kind: TypeParamKind::TypeVar,
                     name: type_var.name.as_str().to_owned(),
+                    bound_expr: bound.as_deref().and_then(TypeExpr::parse),
                     bound,
+                    constraint_exprs: constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect(),
                     constraints,
+                    default_expr: type_var
+                        .default
+                        .as_ref()
+                        .and_then(|default| slice_range(source, default.range()))
+                        .and_then(TypeExpr::parse),
                     default: type_var
                         .default
                         .as_ref()
@@ -3221,8 +3185,15 @@ fn extract_ast_type_params(
                 parsed.push(TypeParam {
                     kind: TypeParamKind::ParamSpec,
                     name: param_spec.name.as_str().to_owned(),
+                    bound_expr: None,
                     bound: None,
+                    constraint_exprs: Vec::new(),
                     constraints: Vec::new(),
+                    default_expr: param_spec
+                        .default
+                        .as_ref()
+                        .and_then(|default| slice_range(source, default.range()))
+                        .and_then(TypeExpr::parse),
                     default: param_spec
                         .default
                         .as_ref()
@@ -3234,8 +3205,15 @@ fn extract_ast_type_params(
                 parsed.push(TypeParam {
                     kind: TypeParamKind::TypeVarTuple,
                     name: type_var_tuple.name.as_str().to_owned(),
+                    bound_expr: None,
                     bound: None,
+                    constraint_exprs: Vec::new(),
                     constraints: Vec::new(),
+                    default_expr: type_var_tuple
+                        .default
+                        .as_ref()
+                        .and_then(|default| slice_range(source, default.range()))
+                        .and_then(TypeExpr::parse),
                     default: type_var_tuple
                         .default
                         .as_ref()
@@ -3283,6 +3261,10 @@ fn extract_function_params(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: true,
         keyword_only: false,
@@ -3295,6 +3277,10 @@ fn extract_function_params(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: false,
         keyword_only: false,
@@ -3307,6 +3293,10 @@ fn extract_function_params(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -3319,6 +3309,10 @@ fn extract_function_params(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: parameter.default().is_some(),
         positional_only: false,
         keyword_only: true,
@@ -3331,6 +3325,10 @@ fn extract_function_params(
             .annotation()
             .and_then(|annotation| slice_range(source, annotation.range()))
             .map(str::to_owned),
+        annotation_expr: parameter
+            .annotation()
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .and_then(TypeExpr::parse),
         has_default: false,
         positional_only: false,
         keyword_only: false,
@@ -3646,6 +3644,7 @@ fn parse_typealias(
         name,
         type_params: parsed_type_params.type_params,
         value: tail.trim().to_owned(),
+        value_expr: TypeExpr::parse(tail.trim()),
         line: line_number,
     }))
 }
@@ -3759,6 +3758,7 @@ fn parse_function(
         type_params: parsed_type_params.type_params,
         params: Vec::new(),
         returns: None,
+        returns_expr: None,
         is_async: false,
         is_override: false,
         is_deprecated: false,
@@ -4051,7 +4051,16 @@ fn parse_type_param(
         None => None,
     };
 
-    Ok(TypeParam { kind, name: name_part.to_owned(), bound, constraints, default })
+    Ok(TypeParam {
+        kind,
+        name: name_part.to_owned(),
+        bound_expr: bound.as_deref().and_then(TypeExpr::parse),
+        bound,
+        constraint_exprs: constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect(),
+        constraints,
+        default_expr: default.as_deref().and_then(TypeExpr::parse),
+        default,
+    })
 }
 
 fn parse_type_param_constraints(
@@ -4766,11 +4775,15 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     value: String::from("tuple[T, T]"),
+                    value_expr: None,
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -4815,6 +4828,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4822,6 +4836,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -4862,11 +4877,15 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: Some(String::from("Hashable")),
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     value: String::from("tuple[T, T]"),
+                    value_expr: None,
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -4874,8 +4893,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     header_suffix: String::new(),
@@ -4892,8 +4914,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: Some(String::from("Sequence[str]")),
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     header_suffix: String::new(),
@@ -4910,8 +4935,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     header_suffix: String::new(),
@@ -4928,13 +4956,17 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: Some(String::from("Sequence[str]")),
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -4942,6 +4974,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5001,11 +5034,15 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: Some(String::from("int")),
                     }],
                     value: String::from("tuple[T, T]"),
+                    value_expr: None,
                     line: 1,
                 }),
                 SyntaxStatement::Interface(NamedBlockStatement {
@@ -5013,8 +5050,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: vec![String::from("str"), String::from("bytes")],
+                        default_expr: None,
                         default: Some(String::from("str")),
                     }],
                     header_suffix: String::new(),
@@ -5031,13 +5071,17 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: vec![String::from("A"), String::from("B")],
+                        default_expr: None,
                         default: None,
                     }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -5045,6 +5089,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5167,6 +5212,7 @@ mod tests {
                 params: vec![FunctionParam {
                     name: String::from("x"),
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -5174,6 +5220,7 @@ mod tests {
                     keyword_variadic: false
                 }],
                 returns: Some(String::from("int")),
+                returns_expr: None,
                 is_async: false,
                 is_override: false,
                 is_deprecated: false,
@@ -5217,6 +5264,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -5224,6 +5272,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: None,
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5319,6 +5368,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("x"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -5326,6 +5376,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5401,8 +5452,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     header_suffix: String::new(),
@@ -5419,13 +5473,17 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: None,
                     }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("T")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -5433,6 +5491,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("T")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5493,8 +5552,11 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: vec![String::from("str"), String::from("bytes")],
+                        default_expr: None,
                         default: Some(String::from("str")),
                     }],
                     header_suffix: String::new(),
@@ -5511,13 +5573,17 @@ mod tests {
                     type_params: vec![TypeParam {
                         name: String::from("T"),
                         kind: TypeParamKind::TypeVar,
+                        bound_expr: None,
                         bound: None,
+                        constraint_exprs: Vec::new(),
                         constraints: Vec::new(),
+                        default_expr: None,
                         default: Some(String::from("int")),
                     }],
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("T")),
+                        annotation_expr: None,
                         has_default: true,
                         positional_only: false,
                         keyword_only: false,
@@ -5525,6 +5591,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("T")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5600,15 +5667,21 @@ mod tests {
                 TypeParam {
                     name: String::from("Ts"),
                     kind: TypeParamKind::TypeVarTuple,
+                    bound_expr: None,
                     bound: None,
+                    constraint_exprs: Vec::new(),
                     constraints: Vec::new(),
+                    default_expr: None,
                     default: None,
                 },
                 TypeParam {
                     name: String::from("R"),
                     kind: TypeParamKind::TypeVar,
+                    bound_expr: None,
                     bound: None,
+                    constraint_exprs: Vec::new(),
                     constraints: Vec::new(),
+                    default_expr: None,
                     default: None,
                 },
             ]),
@@ -5688,6 +5761,7 @@ mod tests {
                     names: vec![String::from("value")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -5725,6 +5799,7 @@ mod tests {
                     names: vec![String::from("a"), String::from("b")],
                     destructuring_target_names: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -5781,6 +5856,7 @@ mod tests {
                     names: vec![String::from("value")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -5832,6 +5908,7 @@ mod tests {
                     names: vec![String::from("copy")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -5869,6 +5946,7 @@ mod tests {
                     names: vec![String::from("field")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -5935,6 +6013,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -5942,6 +6021,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -5952,6 +6032,7 @@ mod tests {
                     names: vec![String::from("result")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
@@ -6003,6 +6084,7 @@ mod tests {
                     names: vec![String::from("item")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
@@ -6211,6 +6293,7 @@ mod tests {
                     names: vec![String::from("value")],
                     destructuring_target_names: None,
                     annotation: None,
+                    annotation_expr: None,
                     value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("Factory")),
@@ -6286,6 +6369,7 @@ mod tests {
                 keyword_arg_values: vec![
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -6315,6 +6399,7 @@ mod tests {
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -6419,6 +6504,7 @@ mod tests {
                 arg_values: vec![
                     DirectExprMetadata {
                         value_type: Some(String::from("int")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -6448,6 +6534,7 @@ mod tests {
                     },
                     DirectExprMetadata {
                         value_type: Some(String::from("str")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -6593,6 +6680,7 @@ mod tests {
                 arg_types: vec![String::new()],
                 arg_values: vec![DirectExprMetadata {
                     value_type: Some(String::new()),
+                    value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -6617,6 +6705,7 @@ mod tests {
                         params: vec![FunctionParam {
                             name: String::from("x"),
                             annotation: None,
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -6625,6 +6714,7 @@ mod tests {
                         }],
                         body: Box::new(DirectExprMetadata {
                             value_type: Some(String::new()),
+                            value_type_expr: None,
                             is_awaited: false,
                             value_callee: None,
                             value_name: Some(String::from("x")),
@@ -6691,6 +6781,7 @@ mod tests {
                 FunctionParam {
                     name: String::from("x"),
                     annotation: Some(String::from("int")),
+                    annotation_expr: None,
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -6700,6 +6791,7 @@ mod tests {
                 FunctionParam {
                     name: String::from("y"),
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -6828,6 +6920,7 @@ mod tests {
                 names: vec![String::from("value")],
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
+                annotation_expr: None,
                 value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
@@ -6843,6 +6936,7 @@ mod tests {
                 value_subscript_index: None,
                 value_if_true: Some(Box::new(DirectExprMetadata {
                     value_type: Some(String::from("int")),
+                    value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -6872,6 +6966,7 @@ mod tests {
                 })),
                 value_if_false: Some(Box::new(DirectExprMetadata {
                     value_type: Some(String::from("int")),
+                    value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -6957,6 +7052,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -6999,6 +7095,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -7059,6 +7156,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("bool")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -7100,6 +7198,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -7158,6 +7257,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -7217,6 +7317,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("box"),
                         annotation: Some(String::from("Box")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -7224,6 +7325,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -7318,6 +7420,7 @@ mod tests {
                     arg_types: vec![String::from("int")],
                     arg_values: vec![DirectExprMetadata {
                         value_type: Some(String::from("int")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -7367,6 +7470,7 @@ mod tests {
                     keyword_arg_types: vec![String::from("int")],
                     keyword_arg_values: vec![DirectExprMetadata {
                         value_type: Some(String::from("int")),
+                        value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
                         value_name: None,
@@ -7453,9 +7557,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7471,9 +7577,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
+                    annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7489,10 +7597,12 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -7500,6 +7610,7 @@ mod tests {
                             keyword_variadic: false
                         }],
                         returns: Some(String::from("int")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7548,16 +7659,18 @@ mod tests {
                     deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
-                        ClassMember {
-                            name: String::from("parse"),
-                            kind: ClassMemberKind::Overload,
-                            method_kind: Some(MethodKind::Instance),
-                            annotation: None,
-                            value_type: None,
-                            params: vec![
+                    ClassMember {
+                        name: String::from("parse"),
+                        kind: ClassMemberKind::Overload,
+                        method_kind: Some(MethodKind::Instance),
+                        annotation: None,
+                        annotation_expr: None,
+                        value_type: None,
+                        params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
                                     annotation: None,
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -7567,6 +7680,7 @@ mod tests {
                                 FunctionParam {
                                     name: String::from("x"),
                                     annotation: Some(String::from("str")),
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -7575,6 +7689,7 @@ mod tests {
                                 },
                             ],
                             returns: Some(String::from("int")),
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -7590,11 +7705,13 @@ mod tests {
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Instance),
                             annotation: None,
+                            annotation_expr: None,
                             value_type: None,
                             params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
                                     annotation: None,
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -7604,6 +7721,7 @@ mod tests {
                                 FunctionParam {
                                     name: String::from("x"),
                                     annotation: None,
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -7612,6 +7730,7 @@ mod tests {
                                 },
                             ],
                             returns: None,
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -7685,6 +7804,7 @@ mod tests {
                     names: vec![String::from("MAX_SIZE")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("Final")),
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -7732,9 +7852,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("Final[int]")),
+                        annotation_expr: None,
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7787,17 +7909,20 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
                             variadic: false,
                             keyword_variadic: false
                         }],
-                        returns: Some(String::from("None")),
+                    returns: Some(String::from("None")),
+                    returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7840,6 +7965,7 @@ mod tests {
                     names: vec![String::from("VALUE")],
                     destructuring_target_names: None,
                     annotation: Some(String::from("ClassVar[int]")),
+                    annotation_expr: None,
                     value_type: Some(String::from("int")),
                     is_awaited: false,
                     value_callee: None,
@@ -7887,9 +8013,11 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: Some(String::from("ClassVar[int]")),
+                        annotation_expr: None,
                         value_type: Some(String::from("int")),
                         params: Vec::new(),
                         returns: None,
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -7991,6 +8119,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: true,
                     is_override: false,
                     is_deprecated: false,
@@ -8051,6 +8180,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: true,
                     is_override: false,
                     is_deprecated: false,
@@ -8092,6 +8222,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: true,
                     is_override: false,
                     is_deprecated: false,
@@ -8152,6 +8283,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("Generator[int, None, None]")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8193,6 +8325,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("Generator[int, None, None]")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8310,6 +8443,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8371,6 +8505,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("values"),
                         annotation: Some(String::from("list[int]")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8378,6 +8513,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8456,6 +8592,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("pairs"),
                         annotation: Some(String::from("tuple[tuple[int, str]]")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8463,6 +8600,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8541,6 +8679,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("manager"),
                         annotation: Some(String::from("Manager")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8548,6 +8687,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8625,6 +8765,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("manager"),
                         annotation: Some(String::from("Manager")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8632,6 +8773,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8680,6 +8822,7 @@ mod tests {
                         FunctionParam {
                             name: String::from("a"),
                             annotation: Some(String::from("A")),
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -8689,6 +8832,7 @@ mod tests {
                         FunctionParam {
                             name: String::from("b"),
                             annotation: Some(String::from("B")),
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -8697,6 +8841,7 @@ mod tests {
                         },
                     ],
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8789,6 +8934,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("ValueError")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8880,6 +9026,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8887,6 +9034,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("int")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8899,6 +9047,7 @@ mod tests {
                     params: vec![FunctionParam {
                         name: String::from("value"),
                         annotation: Some(String::from("int")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -8906,6 +9055,7 @@ mod tests {
                         keyword_variadic: false
                     }],
                     returns: Some(String::from("str")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: false,
                     is_deprecated: false,
@@ -8973,6 +9123,7 @@ mod tests {
                     type_params: Vec::new(),
                     params: Vec::new(),
                     returns: Some(String::from("None")),
+                    returns_expr: None,
                     is_async: false,
                     is_override: true,
                     is_deprecated: false,
@@ -8993,10 +9144,12 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -9004,6 +9157,7 @@ mod tests {
                             keyword_variadic: false
                         }],
                         returns: Some(String::from("None")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: true,
                         is_abstract_method: false,
@@ -9056,10 +9210,12 @@ mod tests {
                         kind: ClassMemberKind::Method,
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
+                            annotation_expr: None,
                             has_default: false,
                             positional_only: false,
                             keyword_only: false,
@@ -9067,6 +9223,7 @@ mod tests {
                             keyword_variadic: false
                         }],
                         returns: Some(String::from("None")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: true,
@@ -9112,18 +9269,21 @@ mod tests {
                             name: String::from("make"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Class),
-                            annotation: None,
-                            value_type: None,
+                        annotation: None,
+                        annotation_expr: None,
+                        value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("cls"),
-                                annotation: None,
-                                has_default: false,
+                            annotation: None,
+                            annotation_expr: None,
+                            has_default: false,
                                 positional_only: false,
                                 keyword_only: false,
                                 variadic: false,
                                 keyword_variadic: false
                             }],
                             returns: Some(String::from("None")),
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -9138,10 +9298,12 @@ mod tests {
                             name: String::from("build"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Static),
-                            annotation: None,
-                            value_type: None,
+                        annotation: None,
+                        annotation_expr: None,
+                        value_type: None,
                             params: Vec::new(),
                             returns: Some(String::from("None")),
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -9156,18 +9318,21 @@ mod tests {
                             name: String::from("name"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Property),
-                            annotation: None,
-                            value_type: None,
+                        annotation: None,
+                        annotation_expr: None,
+                        value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("self"),
                                 annotation: None,
+                                annotation_expr: None,
                                 has_default: false,
                                 positional_only: false,
                                 keyword_only: false,
                                 variadic: false,
                                 keyword_variadic: false
                             }],
-                            returns: Some(String::from("str")),
+                        returns: Some(String::from("str")),
+                        returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -9182,12 +9347,14 @@ mod tests {
                             name: String::from("name"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::PropertySetter),
-                            annotation: None,
+                                annotation: None,
+                                annotation_expr: None,
                             value_type: None,
                             params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
                                     annotation: None,
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -9197,6 +9364,7 @@ mod tests {
                                 FunctionParam {
                                     name: String::from("value"),
                                     annotation: Some(String::from("str")),
+                                    annotation_expr: None,
                                     has_default: false,
                                     positional_only: false,
                                     keyword_only: false,
@@ -9204,7 +9372,8 @@ mod tests {
                                     keyword_variadic: false
                                 },
                             ],
-                            returns: Some(String::from("None")),
+                    returns: Some(String::from("None")),
+                    returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,

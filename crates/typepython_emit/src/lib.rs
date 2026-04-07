@@ -2956,6 +2956,7 @@ mod tests {
                 params: vec![FunctionParam {
                     name: String::from("name"),
                     annotation: Some(String::from("str")),
+                    annotation_expr: None,
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -2974,6 +2975,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("self"),
                         annotation: None,
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,
@@ -2983,6 +2985,7 @@ mod tests {
                     FunctionParam {
                         name: String::from("name"),
                         annotation: Some(String::from("str")),
+                        annotation_expr: None,
                         has_default: false,
                         positional_only: false,
                         keyword_only: false,

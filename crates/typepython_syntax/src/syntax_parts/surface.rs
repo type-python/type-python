@@ -104,6 +104,7 @@ pub struct TypeAliasStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub value: String,
+    pub value_expr: Option<TypeExpr>,
     pub line: usize,
 }
 
@@ -129,6 +130,7 @@ pub struct FunctionStatement {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub returns_expr: Option<TypeExpr>,
     pub is_async: bool,
     pub is_override: bool,
     pub is_deprecated: bool,
@@ -141,11 +143,19 @@ pub struct FunctionStatement {
 pub struct FunctionParam {
     pub name: String,
     pub annotation: Option<String>,
+    pub annotation_expr: Option<TypeExpr>,
     pub has_default: bool,
     pub positional_only: bool,
     pub keyword_only: bool,
     pub variadic: bool,
     pub keyword_variadic: bool,
+}
+
+impl FunctionParam {
+    #[must_use]
+    pub fn rendered_annotation(&self) -> Option<String> {
+        self.annotation_expr.as_ref().map(TypeExpr::render).or_else(|| self.annotation.clone())
+    }
 }
 
 /// Parsed import statement.
@@ -168,6 +178,7 @@ pub struct ValueStatement {
     pub names: Vec<String>,
     pub destructuring_target_names: Option<Vec<String>>,
     pub annotation: Option<String>,
+    pub annotation_expr: Option<TypeExpr>,
     pub value_type: Option<String>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
@@ -460,9 +471,11 @@ pub struct ClassMember {
     pub kind: ClassMemberKind,
     pub method_kind: Option<MethodKind>,
     pub annotation: Option<String>,
+    pub annotation_expr: Option<TypeExpr>,
     pub value_type: Option<String>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+    pub returns_expr: Option<TypeExpr>,
     pub is_async: bool,
     pub is_override: bool,
     pub is_abstract_method: bool,
@@ -472,6 +485,18 @@ pub struct ClassMember {
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
+}
+
+impl ClassMember {
+    #[must_use]
+    pub fn rendered_annotation(&self) -> Option<String> {
+        self.annotation_expr.as_ref().map(TypeExpr::render).or_else(|| self.annotation.clone())
+    }
+
+    #[must_use]
+    pub fn rendered_returns(&self) -> Option<String> {
+        self.returns_expr.as_ref().map(TypeExpr::render).or_else(|| self.returns.clone())
+    }
 }
 
 /// High-level class member categories.
@@ -512,8 +537,32 @@ pub struct TypeParam {
     pub kind: TypeParamKind,
     pub name: String,
     pub bound: Option<String>,
+    pub bound_expr: Option<TypeExpr>,
     pub constraints: Vec<String>,
+    pub constraint_exprs: Vec<TypeExpr>,
     pub default: Option<String>,
+    pub default_expr: Option<TypeExpr>,
+}
+
+impl TypeParam {
+    #[must_use]
+    pub fn rendered_bound(&self) -> Option<String> {
+        self.bound_expr.as_ref().map(TypeExpr::render).or_else(|| self.bound.clone())
+    }
+
+    #[must_use]
+    pub fn rendered_constraints(&self) -> Vec<String> {
+        if !self.constraint_exprs.is_empty() {
+            self.constraint_exprs.iter().map(TypeExpr::render).collect()
+        } else {
+            self.constraints.clone()
+        }
+    }
+
+    #[must_use]
+    pub fn rendered_default(&self) -> Option<String> {
+        self.default_expr.as_ref().map(TypeExpr::render).or_else(|| self.default.clone())
+    }
 }
 
 struct ParsedTypeParams<'source> {
@@ -572,6 +621,7 @@ pub enum ComprehensionKind {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
     pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
     pub value_name: Option<String>,
@@ -598,6 +648,13 @@ pub struct DirectExprMetadata {
     pub value_list_elements: Option<Vec<DirectExprMetadata>>,
     pub value_set_elements: Option<Vec<DirectExprMetadata>>,
     pub value_dict_entries: Option<Vec<TypedDictLiteralEntry>>,
+}
+
+impl DirectExprMetadata {
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render).or_else(|| self.value_type.clone())
+    }
 }
 
 /// One key/value entry inside a parsed dict or TypedDict literal.
@@ -776,11 +833,19 @@ pub struct DecoratorTransformModuleInfo {
 pub struct DirectFunctionParamSite {
     pub name: String,
     pub annotation: Option<String>,
+    pub annotation_expr: Option<TypeExpr>,
     pub has_default: bool,
     pub positional_only: bool,
     pub keyword_only: bool,
     pub variadic: bool,
     pub keyword_variadic: bool,
+}
+
+impl DirectFunctionParamSite {
+    #[must_use]
+    pub fn rendered_annotation(&self) -> Option<String> {
+        self.annotation_expr.as_ref().map(TypeExpr::render).or_else(|| self.annotation.clone())
+    }
 }
 
 /// Function signature recovered directly from source text.
