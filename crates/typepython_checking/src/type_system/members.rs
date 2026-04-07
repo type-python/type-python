@@ -49,7 +49,7 @@ pub(super) fn resolve_direct_member_reference_semantic_type(
     if is_enum_like_class(nodes, class_node, class_decl) {
         return Some(lower_type_text_or_name(&format!("Literal[{}.{}]", class_decl.name, member_name)));
     }
-    resolve_readable_member_semantic_type(node, member, &owner_type)
+            resolve_readable_member_semantic_type(node, nodes, member, &owner_type)
 }
 
 pub(super) fn is_enum_like_class(
