@@ -1600,6 +1600,14 @@ pub(super) fn direct_unresolved_paramspec_call_diagnostics(
             if owner_has_paramspec && semantic_callable_has_unresolved_paramlist(&callable_type) {
                 return None;
             }
+            if semantic_callable_unresolved_paramlist_is_empty_for_call_site(
+                node,
+                nodes,
+                &callable_type,
+                &call_site,
+            ) {
+                return None;
+            }
             semantic_callable_has_unresolved_paramlist(&callable_type).then(|| {
                 let failure = DirectCallResolutionFailure::UnresolvedCallableParamList {
                     callable: callable_type.clone(),
@@ -1637,5 +1645,33 @@ pub(super) fn semantic_callable_params_are_unresolved(params: &SemanticCallableP
     match params {
         SemanticCallableParams::Ellipsis | SemanticCallableParams::ParamList(_) => false,
         SemanticCallableParams::Single(_) | SemanticCallableParams::Concatenate(_) => true,
+    }
+}
+
+fn semantic_callable_unresolved_paramlist_is_empty_for_call_site(
+    _node: &typepython_graph::ModuleNode,
+    _nodes: &[typepython_graph::ModuleNode],
+    callable: &SemanticType,
+    call: &typepython_syntax::DirectCallContextSite,
+) -> bool {
+    let Some((params, _)) = callable.callable_parts() else {
+        return false;
+    };
+    match params {
+        SemanticCallableParams::Single(_) => {
+            call.positional_arg_count == 0
+                && call.keyword_arg_count == 0
+                && !call.has_starred_args
+                && !call.has_unpacked_kwargs
+        }
+        SemanticCallableParams::Concatenate(types) if !types.is_empty() => {
+            call.positional_arg_count == types.len().saturating_sub(1)
+                && call.keyword_arg_count == 0
+                && !call.has_starred_args
+                && !call.has_unpacked_kwargs
+        }
+        SemanticCallableParams::Ellipsis
+        | SemanticCallableParams::ParamList(_)
+        | SemanticCallableParams::Concatenate(_) => false,
     }
 }

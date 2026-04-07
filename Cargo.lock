@@ -1914,6 +1914,7 @@ dependencies = [
  "littrs-ruff-python-parser",
  "littrs-ruff-text-size",
  "proptest",
+ "serde",
  "typepython-diagnostics",
 ]
 

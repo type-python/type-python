@@ -811,33 +811,21 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
 }
 
 #[test]
-fn check_reports_unresolved_paramspec_call() {
+fn check_accepts_empty_tail_paramspec_call() {
     let result = check_temp_typepython_source(
         "from typing import Callable, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[P, int]) -> int:\n    return cb()\n",
     );
 
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4014"));
-    assert!(rendered.contains("Callable[P, int]"));
-    assert!(
-        rendered.contains("reason: callable type `Callable[P, int]` still contains an unresolved ParamSpec or Concatenate tail"),
-        "{rendered}"
-    );
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
-fn check_reports_unresolved_concatenate_call() {
+fn check_accepts_empty_tail_concatenate_call() {
     let result = check_temp_typepython_source(
         "from typing import Callable, Concatenate, ParamSpec\n\nP = ParamSpec(\"P\")\n\ndef invoke(cb: Callable[Concatenate[int, P], int]) -> int:\n    return cb(1)\n",
     );
 
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4014"));
-    assert!(rendered.contains("Concatenate[int, P]"));
-    assert!(
-        rendered.contains("reason: callable type `Callable[Concatenate[int, P], int]` still contains an unresolved ParamSpec or Concatenate tail"),
-        "{rendered}"
-    );
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]

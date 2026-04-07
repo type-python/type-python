@@ -1643,6 +1643,10 @@ fn extract_direct_call_context_site(
         callee: extract_direct_call_context_callee(expr)?,
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
+        positional_arg_count: extract_direct_call_positional_arg_count(expr)?,
+        keyword_arg_count: extract_direct_call_keyword_arg_count(expr)?,
+        has_starred_args: direct_call_has_starred_args(expr)?,
+        has_unpacked_kwargs: direct_call_has_unpacked_kwargs(expr)?,
         line,
     })
 }
@@ -1659,6 +1663,46 @@ fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {
         return None;
     };
     Some(name.id.as_str().to_owned())
+}
+
+fn extract_direct_call_positional_arg_count(expr: &Expr) -> Option<usize> {
+    if let Expr::Await(await_expr) = expr {
+        return extract_direct_call_positional_arg_count(&await_expr.value);
+    }
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    Some(call.arguments.args.iter().filter(|arg| !matches!(arg, Expr::Starred(_))).count())
+}
+
+fn extract_direct_call_keyword_arg_count(expr: &Expr) -> Option<usize> {
+    if let Expr::Await(await_expr) = expr {
+        return extract_direct_call_keyword_arg_count(&await_expr.value);
+    }
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    Some(call.arguments.keywords.iter().filter(|keyword| keyword.arg.is_some()).count())
+}
+
+fn direct_call_has_starred_args(expr: &Expr) -> Option<bool> {
+    if let Expr::Await(await_expr) = expr {
+        return direct_call_has_starred_args(&await_expr.value);
+    }
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    Some(call.arguments.args.iter().any(|arg| matches!(arg, Expr::Starred(_))))
+}
+
+fn direct_call_has_unpacked_kwargs(expr: &Expr) -> Option<bool> {
+    if let Expr::Await(await_expr) = expr {
+        return direct_call_has_unpacked_kwargs(&await_expr.value);
+    }
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    Some(call.arguments.keywords.iter().any(|keyword| keyword.arg.is_none()))
 }
 
 fn collect_typed_dict_literal_sites_in_suite(

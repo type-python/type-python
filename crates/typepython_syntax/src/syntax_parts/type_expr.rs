@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TypeExpr {
     Name(String),
     Generic { head: String, args: Vec<TypeExpr> },
@@ -8,13 +8,13 @@ pub enum TypeExpr {
     Unpack(Box<TypeExpr>),
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum UnionStyle {
     Explicit,
     Shorthand,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CallableParamExpr {
     Ellipsis,
     ParamList(Vec<TypeExpr>),

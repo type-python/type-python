@@ -695,6 +695,10 @@ pub struct DirectCallContextSite {
     pub callee: String,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
+    pub positional_arg_count: usize,
+    pub keyword_arg_count: usize,
+    pub has_starred_args: bool,
+    pub has_unpacked_kwargs: bool,
     pub line: usize,
 }
 

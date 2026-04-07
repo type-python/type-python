@@ -27,7 +27,8 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionAppli
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
     IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SummaryCallableSignature,
-    SummaryDeclarationFact, SummaryExport, SummarySignatureParam, SummaryTypeParam,
+    SummaryDeclarationFact, SummaryExport, SummaryImportSymbolTarget, SummaryImportTarget,
+    SummarySignatureParam, SummaryTypeParam,
     snapshot_with_summaries,
 };
 use typepython_syntax::SourceKind;
@@ -720,6 +721,21 @@ fn semantic_public_summary(
     imports.sort();
     imports.dedup();
 
+    let mut import_targets = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            context
+                .load_declaration_semantics(declaration)
+                .import_target
+                .as_ref()
+                .map(summary_import_target_from_semantics)
+                .or_else(|| declaration.import_target().map(summary_import_target_from_bound))
+        })
+        .collect::<Vec<_>>();
+    import_targets.sort_by(|left, right| left.raw_target.cmp(&right.raw_target));
+    import_targets.dedup_by(|left, right| left.raw_target == right.raw_target);
+
     let mut sealed_roots = top_level_declarations
         .iter()
         .filter(|declaration| declaration.class_kind == Some(DeclarationOwnerKind::SealedClass))
@@ -750,6 +766,7 @@ fn semantic_public_summary(
         is_package_entry: is_package_entry_path(&node.module_path),
         exports,
         imports,
+        import_targets,
         sealed_roots,
         solver_facts: ModuleSolverFacts { declaration_facts },
     }
@@ -771,8 +788,10 @@ fn semantic_summary_export(
         name: declaration.name.clone(),
         kind: summary_kind_string(declaration),
         type_repr: exported_type.clone().unwrap_or_else(|| declaration.name.clone()),
+        type_expr: exported_type.as_deref().and_then(TypeExpr::parse),
         declaration_signature,
         exported_type,
+        exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
         public: !declaration.name.starts_with('_'),
     }
@@ -799,11 +818,17 @@ fn semantic_declaration_fact(
             .or_else(|| declaration.value_type.clone())
             .or_else(|| declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render))
             .or_else(|| declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render)),
+        type_expr_structured: declaration_fact_type_expr(declaration, &semantics),
         import_target: semantics
             .import_target
             .as_ref()
             .map(|target| target.raw_target.clone())
             .or_else(|| declaration.import_target().map(|target| target.raw_target.clone())),
+        import_target_structured: semantics
+            .import_target
+            .as_ref()
+            .map(summary_import_target_from_semantics)
+            .or_else(|| declaration.import_target().map(summary_import_target_from_bound)),
         bases: declaration
             .class_bases()
             .map(|bases| bases.to_vec())
@@ -867,6 +892,7 @@ fn summary_callable_signature_from_bound(
             .returns
             .as_ref()
             .map(typepython_binding::BoundTypeExpr::render),
+        returns_expr: signature.returns.as_ref().map(|returns| returns.expr.clone()),
     }
 }
 
@@ -880,6 +906,11 @@ fn summary_callable_signature_from_semantics(
             .map(|param| SummarySignatureParam {
                 name: param.name.clone(),
                 annotation: param.annotation_text.clone(),
+                annotation_expr: param
+                    .annotation
+                    .as_ref()
+                    .map(diagnostic_type_text)
+                    .and_then(|annotation| TypeExpr::parse(&annotation)),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -888,6 +919,11 @@ fn summary_callable_signature_from_semantics(
             })
             .collect(),
         returns: callable.return_annotation_text.clone(),
+        returns_expr: callable
+            .return_type
+            .as_ref()
+            .map(diagnostic_type_text)
+            .and_then(|annotation| TypeExpr::parse(&annotation)),
     }
 }
 
@@ -896,7 +932,8 @@ fn summary_signature_param(
 ) -> SummarySignatureParam {
     SummarySignatureParam {
         name: param.name.clone(),
-        annotation: param.annotation.clone(),
+        annotation: param.rendered_annotation(),
+        annotation_expr: param.annotation_expr.clone(),
         has_default: param.has_default,
         positional_only: param.positional_only,
         keyword_only: param.keyword_only,
@@ -906,7 +943,88 @@ fn summary_signature_param(
 }
 
 fn summary_type_param(type_param: &typepython_binding::GenericTypeParam) -> SummaryTypeParam {
-    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.rendered_bound() }
+    SummaryTypeParam {
+        name: type_param.name.clone(),
+        bound: type_param.rendered_bound(),
+        bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
+    }
+}
+
+fn declaration_fact_type_expr(
+    declaration: &Declaration,
+    semantics: &SemanticDeclarationFacts,
+) -> Option<TypeExpr> {
+    semantics
+        .type_alias
+        .as_ref()
+        .map(|type_alias| diagnostic_type_text(&type_alias.body))
+        .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation.as_ref().map(diagnostic_type_text)))
+        .and_then(|text| TypeExpr::parse(&text))
+        .or_else(|| declaration.type_alias_value().map(|value| value.expr.clone()))
+        .or_else(|| declaration.value_annotation().map(|annotation| annotation.expr.clone()))
+}
+
+fn declaration_exported_type_expr(
+    declaration: &Declaration,
+    semantics: &SemanticDeclarationFacts,
+) -> Option<TypeExpr> {
+    match declaration.kind {
+        DeclarationKind::Value => semantics
+            .value
+            .as_ref()
+            .and_then(|value| value.annotation.as_ref().map(diagnostic_type_text).or_else(|| value.annotation_text.clone()))
+            .or_else(|| declaration.value_type.clone())
+            .and_then(|text| TypeExpr::parse(&text))
+            .or_else(|| declaration.value_annotation().map(|annotation| annotation.expr.clone())),
+        DeclarationKind::TypeAlias => semantics
+            .type_alias
+            .as_ref()
+            .map(|type_alias| diagnostic_type_text(&type_alias.body))
+            .and_then(|text| TypeExpr::parse(&text))
+            .or_else(|| declaration.type_alias_value().map(|value| value.expr.clone())),
+        DeclarationKind::Function | DeclarationKind::Overload => semantics
+            .callable
+            .as_ref()
+            .and_then(|callable| {
+                callable
+                    .return_type
+                    .as_ref()
+                    .map(diagnostic_type_text)
+                    .and_then(|text| TypeExpr::parse(&text))
+            })
+            .or_else(|| {
+                declaration
+                    .callable_signature()
+                    .and_then(|signature| signature.returns.as_ref().map(|returns| returns.expr.clone()))
+            }),
+        DeclarationKind::Class | DeclarationKind::Import => None,
+    }
+}
+
+fn summary_import_target_from_bound(
+    target: &typepython_binding::BoundImportTarget,
+) -> SummaryImportTarget {
+    SummaryImportTarget {
+        raw_target: target.raw_target.clone(),
+        module_target: target.module_target.clone(),
+        symbol_target: target.symbol_target.as_ref().map(|symbol| SummaryImportSymbolTarget {
+            module_key: symbol.module_key.clone(),
+            symbol_name: symbol.symbol_name.clone(),
+        }),
+    }
+}
+
+fn summary_import_target_from_semantics(
+    target: &SemanticImportTargetRef,
+) -> SummaryImportTarget {
+    SummaryImportTarget {
+        raw_target: target.raw_target.clone(),
+        module_target: target.module_target.clone(),
+        symbol_target: target.symbol_target.as_ref().map(|symbol| SummaryImportSymbolTarget {
+            module_key: symbol.module_key.clone(),
+            symbol_name: symbol.symbol_name.clone(),
+        }),
+    }
 }
 
 fn summary_kind_string(declaration: &Declaration) -> String {

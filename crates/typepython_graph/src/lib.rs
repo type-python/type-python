@@ -292,6 +292,7 @@ fn typing_prelude_declarations() -> Vec<Declaration> {
         vec![prelude_type_alias("Union", "Union[Any, Any]")],
         vec![prelude_type_alias("Callable", "Callable")],
         vec![prelude_type_alias("Literal", "Literal")],
+        vec![prelude_type_alias("Concatenate", "Concatenate")],
         vec![prelude_class("TypedDict")],
         vec![prelude_protocol_class("Protocol")],
         prelude_protocol_class_with_methods(

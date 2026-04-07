@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
 use typepython_graph::ModuleGraph;
+use typepython_syntax::TypeExpr;
 
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 
 /// Fingerprint of one summary-bearing module.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -45,6 +46,8 @@ pub struct PublicSummary {
     pub is_package_entry: bool,
     pub exports: Vec<SummaryExport>,
     pub imports: Vec<String>,
+    #[serde(rename = "importTargets", default)]
+    pub import_targets: Vec<SummaryImportTarget>,
     #[serde(rename = "sealedRoots")]
     pub sealed_roots: Vec<SealedRootSummary>,
     #[serde(rename = "solverFacts", default)]
@@ -57,13 +60,35 @@ pub struct SummaryExport {
     pub kind: String,
     #[serde(rename = "type")]
     pub type_repr: String,
+    #[serde(rename = "typeExpr", default)]
+    pub type_expr: Option<TypeExpr>,
     #[serde(rename = "declarationSignature", default)]
     pub declaration_signature: Option<SummaryCallableSignature>,
     #[serde(rename = "exportedType", default)]
     pub exported_type: Option<String>,
+    #[serde(rename = "exportedTypeExpr", default)]
+    pub exported_type_expr: Option<TypeExpr>,
     #[serde(rename = "typeParams")]
     pub type_params: Vec<SummaryTypeParam>,
     pub public: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryImportTarget {
+    #[serde(rename = "rawTarget")]
+    pub raw_target: String,
+    #[serde(rename = "moduleTarget")]
+    pub module_target: String,
+    #[serde(rename = "symbolTarget", default)]
+    pub symbol_target: Option<SummaryImportSymbolTarget>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryImportSymbolTarget {
+    #[serde(rename = "moduleKey")]
+    pub module_key: String,
+    #[serde(rename = "symbolName")]
+    pub symbol_name: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -80,8 +105,12 @@ pub struct SummaryDeclarationFact {
     pub signature: Option<SummaryCallableSignature>,
     #[serde(rename = "typeExpr", default)]
     pub type_expr: Option<String>,
+    #[serde(rename = "typeExprStructured", default)]
+    pub type_expr_structured: Option<TypeExpr>,
     #[serde(rename = "importTarget", default)]
     pub import_target: Option<String>,
+    #[serde(rename = "importTargetStructured", default)]
+    pub import_target_structured: Option<SummaryImportTarget>,
     #[serde(default)]
     pub bases: Vec<String>,
 }
@@ -90,12 +119,16 @@ pub struct SummaryDeclarationFact {
 pub struct SummaryCallableSignature {
     pub params: Vec<SummarySignatureParam>,
     pub returns: Option<String>,
+    #[serde(rename = "returnsExpr", default)]
+    pub returns_expr: Option<TypeExpr>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SummarySignatureParam {
     pub name: String,
     pub annotation: Option<String>,
+    #[serde(rename = "annotationExpr", default)]
+    pub annotation_expr: Option<TypeExpr>,
     #[serde(rename = "hasDefault")]
     pub has_default: bool,
     #[serde(rename = "positionalOnly")]
@@ -111,6 +144,8 @@ pub struct SummarySignatureParam {
 pub struct SummaryTypeParam {
     pub name: String,
     pub bound: Option<String>,
+    #[serde(rename = "boundExpr", default)]
+    pub bound_expr: Option<TypeExpr>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -323,8 +358,10 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             name: declaration.name.clone(),
             kind: summary_kind(declaration),
             type_repr: summary_type_repr(declaration),
+            type_expr: summary_type_expr(declaration),
             declaration_signature: None,
             exported_type: None,
+            exported_type_expr: summary_type_expr(declaration),
             type_params: declaration.type_params.iter().map(summary_type_param).collect(),
             public: !declaration.name.starts_with('_'),
         })
@@ -343,6 +380,25 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         .collect::<Vec<_>>();
     imports.sort();
     imports.dedup();
+
+    let mut import_targets = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            declaration.import_target().map(|target| SummaryImportTarget {
+                raw_target: target.raw_target.clone(),
+                module_target: target.module_target.clone(),
+                symbol_target: target.symbol_target.as_ref().map(|symbol| {
+                    SummaryImportSymbolTarget {
+                        module_key: symbol.module_key.clone(),
+                        symbol_name: symbol.symbol_name.clone(),
+                    }
+                }),
+            })
+        })
+        .collect::<Vec<_>>();
+    import_targets.sort_by(|left, right| left.raw_target.cmp(&right.raw_target));
+    import_targets.dedup_by(|left, right| left.raw_target == right.raw_target);
 
     let mut sealed_roots = top_level_declarations
         .iter()
@@ -367,6 +423,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         is_package_entry: is_package_entry_path(&node.module_path),
         exports,
         imports,
+        import_targets,
         sealed_roots,
         solver_facts: ModuleSolverFacts::default(),
     }
@@ -416,7 +473,27 @@ fn summary_type_repr(declaration: &Declaration) -> String {
 }
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
-    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.rendered_bound() }
+    SummaryTypeParam {
+        name: type_param.name.clone(),
+        bound: type_param.rendered_bound(),
+        bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
+    }
+}
+
+fn summary_type_expr(declaration: &Declaration) -> Option<TypeExpr> {
+    match declaration.kind {
+        DeclarationKind::TypeAlias => {
+            declaration.type_alias_value().map(|value| value.expr.clone())
+        }
+        DeclarationKind::Value => declaration
+            .value_annotation()
+            .map(|annotation| annotation.expr.clone())
+            .or_else(|| declaration.value_type.as_deref().and_then(TypeExpr::parse)),
+        DeclarationKind::Function | DeclarationKind::Overload => declaration
+            .callable_signature()
+            .and_then(|signature| signature.returns.as_ref().map(|returns| returns.expr.clone())),
+        DeclarationKind::Class | DeclarationKind::Import => None,
+    }
 }
 
 fn summary_fingerprint(summary: &PublicSummary) -> u64 {
@@ -540,15 +617,19 @@ mod tests {
                     name: String::from("Foo"),
                     kind: String::from("class"),
                     type_repr: String::from("Foo"),
+                    type_expr: None,
                     declaration_signature: None,
                     exported_type: None,
+                    exported_type_expr: None,
                     type_params: vec![SummaryTypeParam {
                         name: String::from("T"),
                         bound: Some(String::from("SupportsClose")),
+                        bound_expr: None,
                     }],
                     public: true,
                 }],
                 imports: vec![String::from("pkg.base")],
+                import_targets: Vec::new(),
                 sealed_roots: vec![SealedRootSummary {
                     root: String::from("Expr"),
                     members: vec![String::from("Add"), String::from("Num")],
@@ -706,8 +787,10 @@ mod tests {
                         name: String::from("Add"),
                         kind: String::from("class"),
                         type_repr: String::from("Add"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: Vec::new(),
                         public: true,
                     },
@@ -715,11 +798,14 @@ mod tests {
                         name: String::from("Expr"),
                         kind: String::from("class"),
                         type_repr: String::from("Expr"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: Some(String::from("SupportsClose")),
+                            bound_expr: None,
                         }],
                         public: true,
                     },
@@ -727,8 +813,10 @@ mod tests {
                         name: String::from("base"),
                         kind: String::from("import"),
                         type_repr: String::from("pkg.base"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: Vec::new(),
                         public: true,
                     },
@@ -736,16 +824,20 @@ mod tests {
                         name: String::from("helper"),
                         kind: String::from("function"),
                         type_repr: String::from("()->int"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: None,
+                            bound_expr: None,
                         }],
                         public: true,
                     },
                 ],
                 imports: vec![String::from("pkg.base")],
+                import_targets: Vec::new(),
                 sealed_roots: vec![SealedRootSummary {
                     root: String::from("Expr"),
                     members: vec![String::from("Add")],
@@ -966,15 +1058,19 @@ mod tests {
                         name: String::from("Widget"),
                         kind: String::from("class"),
                         type_repr: String::from("Widget"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: Some(String::from("Comparable")),
+                            bound_expr: None,
                         }],
                         public: true,
                     }],
                     imports: vec![String::from("pkg.base")],
+                    import_targets: Vec::new(),
                     sealed_roots: vec![SealedRootSummary {
                         root: String::from("Shape"),
                         members: vec![String::from("Circle"), String::from("Rect")],
@@ -988,12 +1084,15 @@ mod tests {
                         name: String::from("run"),
                         kind: String::from("function"),
                         type_repr: String::from("()->None"),
+                        type_expr: None,
                         declaration_signature: None,
                         exported_type: None,
+                        exported_type_expr: None,
                         type_params: Vec::new(),
                         public: true,
                     }],
                     imports: Vec::new(),
+                    import_targets: Vec::new(),
                     sealed_roots: Vec::new(),
                     solver_facts: ModuleSolverFacts::default(),
                 },

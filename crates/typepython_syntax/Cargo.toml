@@ -12,6 +12,7 @@ version.workspace = true
 littrs-ruff-python-ast = "0.6.2"
 littrs-ruff-python-parser = "0.6.2"
 littrs-ruff-text-size = "0.6.2"
+serde.workspace = true
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 
 [dev-dependencies]
