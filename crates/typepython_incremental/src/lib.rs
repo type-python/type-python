@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
 use typepython_graph::ModuleGraph;
 
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 
 /// Fingerprint of one summary-bearing module.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -47,6 +47,8 @@ pub struct PublicSummary {
     pub imports: Vec<String>,
     #[serde(rename = "sealedRoots")]
     pub sealed_roots: Vec<SealedRootSummary>,
+    #[serde(rename = "solverFacts", default)]
+    pub solver_facts: ModuleSolverFacts,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -55,9 +57,54 @@ pub struct SummaryExport {
     pub kind: String,
     #[serde(rename = "type")]
     pub type_repr: String,
+    #[serde(rename = "declarationSignature", default)]
+    pub declaration_signature: Option<SummaryCallableSignature>,
+    #[serde(rename = "exportedType", default)]
+    pub exported_type: Option<String>,
     #[serde(rename = "typeParams")]
     pub type_params: Vec<SummaryTypeParam>,
     pub public: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
+pub struct ModuleSolverFacts {
+    #[serde(rename = "declarationFacts", default)]
+    pub declaration_facts: Vec<SummaryDeclarationFact>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryDeclarationFact {
+    pub name: String,
+    pub kind: String,
+    #[serde(rename = "signature", default)]
+    pub signature: Option<SummaryCallableSignature>,
+    #[serde(rename = "typeExpr", default)]
+    pub type_expr: Option<String>,
+    #[serde(rename = "importTarget", default)]
+    pub import_target: Option<String>,
+    #[serde(default)]
+    pub bases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummaryCallableSignature {
+    pub params: Vec<SummarySignatureParam>,
+    pub returns: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SummarySignatureParam {
+    pub name: String,
+    pub annotation: Option<String>,
+    #[serde(rename = "hasDefault")]
+    pub has_default: bool,
+    #[serde(rename = "positionalOnly")]
+    pub positional_only: bool,
+    #[serde(rename = "keywordOnly")]
+    pub keyword_only: bool,
+    pub variadic: bool,
+    #[serde(rename = "keywordVariadic")]
+    pub keyword_variadic: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -110,6 +157,21 @@ pub struct ModuleDependencyIndex {
 #[must_use]
 pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
     let mut summaries = graph.nodes.iter().map(public_summary).collect::<Vec<_>>();
+    snapshot_from_summaries(&mut summaries, None)
+}
+
+#[must_use]
+pub fn snapshot_with_summaries(
+    mut summaries: Vec<PublicSummary>,
+    stdlib_snapshot: Option<String>,
+) -> IncrementalState {
+    snapshot_from_summaries(&mut summaries, stdlib_snapshot)
+}
+
+fn snapshot_from_summaries(
+    summaries: &mut Vec<PublicSummary>,
+    stdlib_snapshot: Option<String>,
+) -> IncrementalState {
     summaries.sort_by(|left, right| left.module.cmp(&right.module));
 
     let fingerprints = summaries
@@ -117,7 +179,7 @@ pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
         .map(|summary| (summary.module.clone(), summary_fingerprint(summary)))
         .collect();
 
-    IncrementalState { fingerprints, summaries, stdlib_snapshot: None }
+    IncrementalState { fingerprints, summaries: summaries.clone(), stdlib_snapshot }
 }
 
 #[must_use]
@@ -261,6 +323,8 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             name: declaration.name.clone(),
             kind: summary_kind(declaration),
             type_repr: summary_type_repr(declaration),
+            declaration_signature: None,
+            exported_type: None,
             type_params: declaration.type_params.iter().map(summary_type_param).collect(),
             public: !declaration.name.starts_with('_'),
         })
@@ -304,6 +368,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         exports,
         imports,
         sealed_roots,
+        solver_facts: ModuleSolverFacts::default(),
     }
 }
 
@@ -405,8 +470,8 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
-        snapshot_diff_modules, Fingerprint, IncrementalState, PublicSummary, SealedRootSummary,
-        SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
+        snapshot_diff_modules, Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary,
+        SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
         SNAPSHOT_SCHEMA_VERSION,
     };
     use std::{
@@ -475,6 +540,8 @@ mod tests {
                     name: String::from("Foo"),
                     kind: String::from("class"),
                     type_repr: String::from("Foo"),
+                    declaration_signature: None,
+                    exported_type: None,
                     type_params: vec![SummaryTypeParam {
                         name: String::from("T"),
                         bound: Some(String::from("SupportsClose")),
@@ -486,6 +553,7 @@ mod tests {
                     root: String::from("Expr"),
                     members: vec![String::from("Add"), String::from("Num")],
                 }],
+                solver_facts: ModuleSolverFacts::default(),
             }],
             stdlib_snapshot: Some(String::from("fnv1a64:demo")),
         })
@@ -497,6 +565,9 @@ mod tests {
         assert!(rendered.contains("\"exports\""));
         assert!(rendered.contains("\"imports\""));
         assert!(rendered.contains("\"sealedRoots\""));
+        assert!(rendered.contains("\"solverFacts\""));
+        assert!(rendered.contains("\"declarationSignature\""));
+        assert!(rendered.contains("\"exportedType\""));
         assert!(rendered.contains("fnv1a64:demo"));
     }
 
@@ -629,6 +700,8 @@ mod tests {
                         name: String::from("Add"),
                         kind: String::from("class"),
                         type_repr: String::from("Add"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: Vec::new(),
                         public: true,
                     },
@@ -636,6 +709,8 @@ mod tests {
                         name: String::from("Expr"),
                         kind: String::from("class"),
                         type_repr: String::from("Expr"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: Some(String::from("SupportsClose")),
@@ -646,6 +721,8 @@ mod tests {
                         name: String::from("base"),
                         kind: String::from("import"),
                         type_repr: String::from("pkg.base"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: Vec::new(),
                         public: true,
                     },
@@ -653,6 +730,8 @@ mod tests {
                         name: String::from("helper"),
                         kind: String::from("function"),
                         type_repr: String::from("()->int"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: None,
@@ -665,6 +744,7 @@ mod tests {
                     root: String::from("Expr"),
                     members: vec![String::from("Add")],
                 }],
+                solver_facts: ModuleSolverFacts::default(),
             }]
         );
         assert_eq!(state.stdlib_snapshot, None);
@@ -880,6 +960,8 @@ mod tests {
                         name: String::from("Widget"),
                         kind: String::from("class"),
                         type_repr: String::from("Widget"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: vec![SummaryTypeParam {
                             name: String::from("T"),
                             bound: Some(String::from("Comparable")),
@@ -891,6 +973,7 @@ mod tests {
                         root: String::from("Shape"),
                         members: vec![String::from("Circle"), String::from("Rect")],
                     }],
+                    solver_facts: ModuleSolverFacts::default(),
                 },
                 PublicSummary {
                     module: String::from("pkg.beta"),
@@ -899,11 +982,14 @@ mod tests {
                         name: String::from("run"),
                         kind: String::from("function"),
                         type_repr: String::from("()->None"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: Vec::new(),
                         public: true,
                     }],
                     imports: Vec::new(),
                     sealed_roots: Vec::new(),
+                    solver_facts: ModuleSolverFacts::default(),
                 },
             ],
             stdlib_snapshot: Some(String::from("fnv1a64:stdlib_hash")),

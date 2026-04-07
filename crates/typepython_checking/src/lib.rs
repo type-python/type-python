@@ -18,12 +18,18 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fs,
+    path::Path,
 };
 
 use typepython_binding::{BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind};
 use typepython_config::{DiagnosticLevel, ImportFallback};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
+use typepython_incremental::{
+    IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SummaryCallableSignature,
+    SummaryDeclarationFact, SummaryExport, SummarySignatureParam, SummaryTypeParam,
+    snapshot_with_summaries,
+};
 use typepython_syntax::SourceKind;
 mod assignments;
 mod calls;
@@ -501,6 +507,25 @@ pub fn check_with_binding_metadata(
 }
 
 #[must_use]
+pub fn semantic_incremental_state_with_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    stdlib_snapshot: Option<String>,
+) -> IncrementalState {
+    let bound_surface_facts = binding_surface_facts_by_module(bindings);
+    let context = CheckerContext::new_with_bound_surface_facts(
+        &graph.nodes,
+        import_fallback,
+        source_overrides,
+        Some(&bound_surface_facts),
+    );
+    let summaries = graph.nodes.iter().map(|node| semantic_public_summary(&context, node)).collect();
+    snapshot_with_summaries(summaries, stdlib_snapshot)
+}
+
+#[must_use]
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while adding LSP source overrides"
@@ -656,6 +681,238 @@ fn collect_node_diagnostics(
     collect_node_call_diagnostics(context, diagnostics, node);
     collect_node_assignment_diagnostics(context, diagnostics, node);
     collect_node_declaration_diagnostics(context, diagnostics, node, options);
+}
+
+fn semantic_public_summary(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+) -> PublicSummary {
+    let top_level_declarations = node
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.owner.is_none())
+        .collect::<Vec<_>>();
+
+    let mut exports = top_level_declarations
+        .iter()
+        .map(|declaration| semantic_summary_export(context, node, declaration))
+        .collect::<Vec<_>>();
+    exports.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut imports = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.kind == DeclarationKind::Import)
+        .filter_map(|declaration| {
+            context
+                .load_declaration_semantics(declaration)
+                .import_target
+                .map(|target| target.raw_target)
+                .or_else(|| declaration.import_target().map(|target| target.raw_target.clone()))
+                .or_else(|| (!declaration.detail.is_empty()).then(|| declaration.detail.clone()))
+        })
+        .collect::<Vec<_>>();
+    imports.sort();
+    imports.dedup();
+
+    let mut sealed_roots = top_level_declarations
+        .iter()
+        .filter(|declaration| declaration.class_kind == Some(DeclarationOwnerKind::SealedClass))
+        .map(|declaration| {
+            let mut members = top_level_declarations
+                .iter()
+                .filter(|candidate| {
+                    candidate.name != declaration.name
+                        && candidate.bases.iter().any(|base| base == &declaration.name)
+                })
+                .map(|candidate| candidate.name.clone())
+                .collect::<Vec<_>>();
+            members.sort();
+            SealedRootSummary { root: declaration.name.clone(), members }
+        })
+        .collect::<Vec<_>>();
+    sealed_roots.sort_by(|left, right| left.root.cmp(&right.root));
+
+    let mut declaration_facts = top_level_declarations
+        .iter()
+        .map(|declaration| semantic_declaration_fact(context, declaration))
+        .collect::<Vec<_>>();
+    declaration_facts
+        .sort_by(|left, right| left.name.cmp(&right.name).then_with(|| left.kind.cmp(&right.kind)));
+
+    PublicSummary {
+        module: node.module_key.clone(),
+        is_package_entry: is_package_entry_path(&node.module_path),
+        exports,
+        imports,
+        sealed_roots,
+        solver_facts: ModuleSolverFacts { declaration_facts },
+    }
+}
+
+fn semantic_summary_export(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+) -> SummaryExport {
+    let semantics = context.load_declaration_semantics(declaration);
+    let declaration_signature = semantics
+        .callable
+        .as_ref()
+        .map(summary_callable_signature_from_semantics)
+        .or_else(|| declaration.callable_signature().map(summary_callable_signature_from_bound));
+    let exported_type = semantic_exported_type(node, declaration, &semantics);
+    SummaryExport {
+        name: declaration.name.clone(),
+        kind: summary_kind_string(declaration),
+        type_repr: exported_type.clone().unwrap_or_else(|| declaration.name.clone()),
+        declaration_signature,
+        exported_type,
+        type_params: declaration.type_params.iter().map(summary_type_param).collect(),
+        public: !declaration.name.starts_with('_'),
+    }
+}
+
+fn semantic_declaration_fact(
+    context: &CheckerContext<'_>,
+    declaration: &Declaration,
+) -> SummaryDeclarationFact {
+    let semantics = context.load_declaration_semantics(declaration);
+    SummaryDeclarationFact {
+        name: declaration.name.clone(),
+        kind: summary_kind_string(declaration),
+        signature: semantics
+            .callable
+            .as_ref()
+            .map(summary_callable_signature_from_semantics)
+            .or_else(|| declaration.callable_signature().map(summary_callable_signature_from_bound)),
+        type_expr: semantics
+            .type_alias
+            .as_ref()
+            .map(|type_alias| type_alias.body_text.clone())
+            .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation_text.clone()))
+            .or_else(|| declaration.value_type.clone())
+            .or_else(|| declaration.type_alias_value().map(|value| value.text.clone()))
+            .or_else(|| declaration.value_annotation().map(|annotation| annotation.text.clone())),
+        import_target: semantics
+            .import_target
+            .as_ref()
+            .map(|target| target.raw_target.clone())
+            .or_else(|| declaration.import_target().map(|target| target.raw_target.clone())),
+        bases: declaration
+            .class_bases()
+            .map(|bases| bases.to_vec())
+            .unwrap_or_else(|| declaration.bases.clone()),
+    }
+}
+
+fn semantic_exported_type(
+    node: &typepython_graph::ModuleNode,
+    declaration: &Declaration,
+    semantics: &SemanticDeclarationFacts,
+) -> Option<String> {
+    match declaration.kind {
+        DeclarationKind::Class => Some(declaration.name.clone()),
+        DeclarationKind::Function | DeclarationKind::Overload => semantics
+            .callable
+            .as_ref()
+            .map(|callable| {
+                diagnostic_type_text(&SemanticType::Callable {
+                    params: SemanticCallableParams::ParamList(
+                        callable
+                            .semantic_params
+                            .iter()
+                            .map(SemanticCallableParam::annotation_or_dynamic)
+                            .collect(),
+                    ),
+                    return_type: Box::new(
+                        callable
+                            .return_type
+                            .clone()
+                            .unwrap_or_else(|| SemanticType::Name(String::from("dynamic"))),
+                    ),
+                })
+            })
+            .or_else(|| declaration.callable_signature().map(|signature| signature.rendered())),
+        DeclarationKind::Value => semantics
+            .value
+            .as_ref()
+            .and_then(|value| value.annotation.as_ref().map(diagnostic_type_text).or_else(|| value.annotation_text.clone()))
+            .or_else(|| declaration.value_type.clone())
+            .map(|text| rewrite_imported_typing_aliases(node, &text)),
+        DeclarationKind::TypeAlias => semantics
+            .type_alias
+            .as_ref()
+            .map(|type_alias| diagnostic_type_text(&type_alias.body))
+            .or_else(|| declaration.type_alias_value().map(|value| value.text.clone())),
+        DeclarationKind::Import => semantics
+            .import_target
+            .as_ref()
+            .map(|target| target.raw_target.clone())
+            .or_else(|| declaration.import_target().map(|target| target.raw_target.clone())),
+    }
+}
+
+fn summary_callable_signature_from_bound(
+    signature: &typepython_binding::BoundCallableSignature,
+) -> SummaryCallableSignature {
+    SummaryCallableSignature {
+        params: signature.params.iter().map(summary_signature_param).collect(),
+        returns: signature.returns.as_ref().map(|returns| returns.text.clone()),
+    }
+}
+
+fn summary_callable_signature_from_semantics(
+    callable: &SemanticCallableDeclaration,
+) -> SummaryCallableSignature {
+    SummaryCallableSignature {
+        params: callable
+            .semantic_params
+            .iter()
+            .map(|param| SummarySignatureParam {
+                name: param.name.clone(),
+                annotation: param.annotation_text.clone(),
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
+            })
+            .collect(),
+        returns: callable.return_annotation_text.clone(),
+    }
+}
+
+fn summary_signature_param(
+    param: &typepython_syntax::DirectFunctionParamSite,
+) -> SummarySignatureParam {
+    SummarySignatureParam {
+        name: param.name.clone(),
+        annotation: param.annotation.clone(),
+        has_default: param.has_default,
+        positional_only: param.positional_only,
+        keyword_only: param.keyword_only,
+        variadic: param.variadic,
+        keyword_variadic: param.keyword_variadic,
+    }
+}
+
+fn summary_type_param(type_param: &typepython_binding::GenericTypeParam) -> SummaryTypeParam {
+    SummaryTypeParam { name: type_param.name.clone(), bound: type_param.bound.clone() }
+}
+
+fn summary_kind_string(declaration: &Declaration) -> String {
+    match declaration.kind {
+        DeclarationKind::TypeAlias => String::from("typealias"),
+        DeclarationKind::Class => String::from("class"),
+        DeclarationKind::Function => String::from("function"),
+        DeclarationKind::Overload => String::from("overload"),
+        DeclarationKind::Value => String::from("value"),
+        DeclarationKind::Import => String::from("import"),
+    }
+}
+
+fn is_package_entry_path(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.tpy")
 }
 
 fn collect_node_semantic_diagnostics(

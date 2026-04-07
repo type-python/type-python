@@ -1736,6 +1736,8 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                         name: String::from("Foo"),
                         kind: String::from("class"),
                         type_repr: String::from("Foo"),
+                        declaration_signature: None,
+                        exported_type: None,
                         type_params: Vec::new(),
                         public: true,
                     }],
@@ -1744,6 +1746,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                         root: String::from("Expr"),
                         members: vec![String::from("Add"), String::from("Num")],
                     }],
+                    solver_facts: typepython_incremental::ModuleSolverFacts::default(),
                 }],
                 stdlib_snapshot: Some(String::from("fnv1a64:demo")),
             },
@@ -1765,6 +1768,9 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
     assert!(rendered.contains("\"exports\""));
     assert!(rendered.contains("\"imports\""));
     assert!(rendered.contains("\"sealedRoots\""));
+    assert!(rendered.contains("\"solverFacts\""));
+    assert!(rendered.contains("\"declarationSignature\""));
+    assert!(rendered.contains("\"exportedType\""));
     assert!(rendered.contains("fnv1a64:demo"));
 }
 

@@ -10,29 +10,29 @@ use notify::RecursiveMode;
 use typepython_binding::bind;
 use typepython_checking::{
     check_with_binding_metadata, collect_effective_callable_stub_overrides,
-    collect_synthetic_method_stubs,
+    collect_synthetic_method_stubs, semantic_incremental_state_with_binding_metadata,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
+    generate_inferred_stub_source, plan_emits, plan_emits_for_sources, write_runtime_outputs,
     EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSyntheticMethod,
-    StubValueOverride, TypePythonStubContext, generate_inferred_stub_source, plan_emits,
-    plan_emits_for_sources, write_runtime_outputs,
+    StubValueOverride, TypePythonStubContext,
 };
 use typepython_graph::build;
-use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot, snapshot};
-use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
-use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
+use typepython_incremental::{decode_snapshot, diff, encode_snapshot, IncrementalState};
+use typepython_lowering::{lower_with_options, LoweredModule, LoweringOptions, LoweringResult};
+use typepython_syntax::{apply_type_ignore_directives, SourceFile, SourceKind};
 
 use crate::cli::{CleanArgs, OutputFormat, RunArgs};
 use crate::discovery::{
-    DiscoveredSource, bundled_stdlib_snapshot_identity, bundled_stdlib_sources,
-    collect_source_paths, external_resolution_sources,
+    bundled_stdlib_snapshot_identity, bundled_stdlib_sources, collect_source_paths,
+    external_resolution_sources, DiscoveredSource,
 };
 use crate::verification::{public_surface_completeness_diagnostics, verify_build_artifacts};
 use crate::{
-    CommandSummary, bytecode_path_for, exit_code, load_project, print_summary,
-    remove_dir_if_exists, resolve_python_executable,
+    bytecode_path_for, exit_code, load_project, print_summary, remove_dir_if_exists,
+    resolve_python_executable, CommandSummary,
 };
 
 #[derive(Debug)]
@@ -608,9 +608,15 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         });
     }
 
-    let mut incremental = snapshot(&graph);
-    incremental.stdlib_snapshot =
+    let stdlib_snapshot =
         Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
+    let incremental = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        config.config.typing.imports,
+        None,
+        stdlib_snapshot,
+    );
     let tracked_modules = incremental.fingerprints.len();
     let planned_sources: Vec<_> = syntax_trees
         .iter()

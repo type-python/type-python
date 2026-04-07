@@ -278,7 +278,13 @@ impl IncrementalWorkspace {
         let graph = build(&bindings);
         let current_module_keys =
             graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
-        let current_incremental = snapshot(&graph);
+        let current_incremental = semantic_incremental_state_with_binding_metadata(
+            &graph,
+            &bindings,
+            self.config.config.typing.imports,
+            Some(&self.active_source_overrides()),
+            None,
+        );
         let current_dependency_index = dependency_index(&graph);
         let snapshot_diff = diff(&self.incremental, &current_incremental);
         let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
