@@ -504,9 +504,8 @@ pub(super) fn semantic_callable_type_from_signature_sites_in_module(
                     rewrite_imported_typing_semantic_type(
                         node,
                         &param
-                            .annotation
-                            .as_deref()
-                            .map(lower_type_text_or_name)
+                            .rendered_annotation()
+                            .map(|annotation| lower_type_text_or_name(&annotation))
                             .unwrap_or_else(|| SemanticType::Name(String::from("dynamic"))),
                     )
                 })

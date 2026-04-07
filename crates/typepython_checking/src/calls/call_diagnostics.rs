@@ -669,9 +669,8 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .filter(|param| !param.keyword_variadic)
         .map(|param| {
             param
-                .annotation
-                .as_deref()
-                .map(lower_type_text_or_name)
+                .rendered_annotation()
+                .map(|annotation| lower_type_text_or_name(&annotation))
                 .unwrap_or_else(|| SemanticType::Name(String::new()))
         })
         .collect::<Vec<_>>();
