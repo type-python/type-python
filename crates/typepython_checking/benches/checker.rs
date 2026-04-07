@@ -2,25 +2,44 @@ use std::path::PathBuf;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use typepython_binding::{
-    AssignmentSite, BindingTable, CallSite, Declaration, DeclarationKind, GenericTypeParam,
-    GenericTypeParamKind, ModuleSurfaceFacts,
+    AssignmentSite, BindingTable, BoundCallableSignature, BoundImportTarget, CallSite, Declaration,
+    DeclarationKind, DeclarationMetadata, GenericTypeParam, GenericTypeParamKind,
+    ModuleSurfaceFacts,
 };
 use typepython_checking::{check, semantic_incremental_state_with_binding_metadata};
 use typepython_config::ImportFallback;
 use typepython_graph::{ModuleGraph, ModuleNode};
-use typepython_syntax::SourceKind;
+use typepython_syntax::{FunctionParam, SourceKind};
 
-fn declaration(
+fn param(name: &str, annotation: &str) -> FunctionParam {
+    FunctionParam {
+        name: name.to_owned(),
+        annotation: Some(annotation.to_owned()),
+        has_default: false,
+        positional_only: false,
+        keyword_only: false,
+        variadic: false,
+        keyword_variadic: false,
+    }
+}
+
+fn variadic_param(name: &str, annotation: &str) -> FunctionParam {
+    FunctionParam { variadic: true, ..param(name, annotation) }
+}
+
+fn function_declaration(
     name: &str,
     kind: DeclarationKind,
-    detail: &str,
+    params: Vec<FunctionParam>,
+    returns: &str,
     type_params: Vec<GenericTypeParam>,
 ) -> Declaration {
+    let signature = BoundCallableSignature::from_function_parts(&params, Some(returns));
     Declaration {
-        metadata: Default::default(),
+        metadata: DeclarationMetadata::Callable { signature: signature.clone() },
         name: name.to_owned(),
         kind,
-        detail: detail.to_owned(),
+        detail: signature.rendered(),
         value_type: None,
         method_kind: None,
         class_kind: None,
@@ -39,7 +58,26 @@ fn declaration(
 }
 
 fn import_declaration(name: &str, target: &str) -> Declaration {
-    declaration(name, DeclarationKind::Import, target, Vec::new())
+    Declaration {
+        metadata: DeclarationMetadata::Import { target: BoundImportTarget::new(target) },
+        name: name.to_owned(),
+        kind: DeclarationKind::Import,
+        detail: target.to_owned(),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    }
 }
 
 fn type_var(name: &str) -> GenericTypeParam {
@@ -158,28 +196,32 @@ fn make_checker_bench_graph(repetitions: usize) -> ModuleGraph {
         module_key: String::from("bench.helpers"),
         module_kind: SourceKind::Stub,
         declarations: vec![
-            declaration(
+            function_declaration(
                 "box_value",
                 DeclarationKind::Function,
-                "(value:T)->list[T]",
+                vec![param("value", "T")],
+                "list[T]",
                 vec![type_var("T")],
             ),
-            declaration(
+            function_declaration(
                 "collect",
                 DeclarationKind::Function,
-                "(*args:Unpack[Ts])->tuple[Unpack[Ts]]",
+                vec![variadic_param("args", "Unpack[Ts]")],
+                "tuple[Unpack[Ts]]",
                 vec![type_var_tuple("Ts")],
             ),
-            declaration(
+            function_declaration(
                 "wrap",
                 DeclarationKind::Overload,
-                "(value:T)->tuple[T]",
+                vec![param("value", "T")],
+                "tuple[T]",
                 vec![type_var("T")],
             ),
-            declaration(
+            function_declaration(
                 "wrap",
                 DeclarationKind::Overload,
-                "(value:object)->tuple[object]",
+                vec![param("value", "object")],
+                "tuple[object]",
                 Vec::new(),
             ),
         ],

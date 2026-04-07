@@ -377,7 +377,9 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
         );
     }
 
-    if let Some(value_name) = assignment.value_name.as_deref() {
+    let metadata = assignment.value_metadata()?;
+
+    if let Some(value_name) = metadata.value_name.as_deref() {
         let function = resolve_direct_function(node, nodes, value_name)?;
         let actual_params = declaration_semantic_signature_params(function)
             .unwrap_or_default()
@@ -388,8 +390,8 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
         return Some((actual_params, actual_return));
     }
 
-    let owner_name = assignment.value_member_owner_name.as_deref()?;
-    let member_name = assignment.value_member_name.as_deref()?;
+    let owner_name = metadata.value_member_owner_name.as_deref()?;
+    let member_name = metadata.value_member_name.as_deref()?;
     resolve_direct_member_callable_semantic_signature(
         node,
         nodes,
@@ -398,7 +400,7 @@ pub(super) fn resolve_callable_assignment_semantic_signature(
         assignment.line,
         owner_name,
         member_name,
-        assignment.value_member_through_instance,
+        metadata.value_member_through_instance,
     )
 }
 

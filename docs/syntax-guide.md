@@ -360,7 +360,7 @@ def collect[*Ts](*args: *Ts) -> tuple[*Ts]:
 Current limits:
 
 - Variadic pack inference works when the call site exposes a fixed positional shape.
-- Open-ended starred iterables such as `collect(*items)` with `items: list[int]` still report `TPY4014`.
+- Open-ended starred iterables such as `collect(*items)` with `items: list[int]` now infer homogeneous variadic tuple tails like `tuple[int, ...]`.
 - More advanced higher-order pack algebra is not complete yet.
 
 ## Async Support
