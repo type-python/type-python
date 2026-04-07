@@ -156,15 +156,21 @@ pub(super) fn collect_typed_dict_fields(
             && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
             && declaration_value_annotation_text(declaration).is_some()
     }) {
+        let parsed = declaration
+            .value_annotation()
+            .map(|annotation| parse_typed_dict_field_shape_expr(&annotation.expr, total_default))
+            .unwrap_or_else(|| {
+                parse_typed_dict_field_shape(
+                    &rewrite_imported_typing_aliases(
+                        class_node,
+                        &declaration_value_annotation_text(declaration).unwrap_or_default(),
+                    ),
+                    total_default,
+                )
+            });
         fields.insert(
             declaration.name.clone(),
-            parse_typed_dict_field_shape(
-                &rewrite_imported_typing_aliases(
-                    class_node,
-                    &declaration_value_annotation_text(declaration).unwrap_or_default(),
-                ),
-                total_default,
-            ),
+            parsed,
         );
     }
 }
@@ -205,7 +211,13 @@ pub(super) fn collect_typed_dict_openness(
     let mut extra_items = inherited_extra_items;
 
     if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref()) {
-        if let Some(parsed) = parse_typed_dict_extra_items(node, &annotation.rendered_annotation()) {
+        if let Some(parsed) = annotation
+            .annotation_expr
+            .as_ref()
+            .map(parse_typed_dict_extra_items_expr)
+            .flatten()
+            .or_else(|| parse_typed_dict_extra_items(node, &annotation.rendered_annotation()))
+        {
             if parsed.rendered_value_type() == "Never" {
                 closed = true;
                 extra_items = None;
@@ -253,7 +265,44 @@ pub(super) fn parse_typed_dict_extra_items(
     Some(TypedDictExtraItemsShape { value_type, value_type_expr, readonly })
 }
 
+pub(super) fn parse_typed_dict_extra_items_expr(
+    annotation: &typepython_syntax::TypeExpr,
+) -> Option<TypedDictExtraItemsShape> {
+    parse_typed_dict_extra_items_from_rendered(&annotation.render())
+}
+
+fn parse_typed_dict_extra_items_from_rendered(
+    annotation: &str,
+) -> Option<TypedDictExtraItemsShape> {
+    let mut value_type = normalize_type_text(annotation);
+    let mut readonly = false;
+
+    if let Some(inner) =
+        value_type.strip_prefix("ReadOnly[").and_then(|inner| inner.strip_suffix(']'))
+    {
+        value_type = normalize_type_text(inner);
+        readonly = true;
+    }
+
+    let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
+    Some(TypedDictExtraItemsShape { value_type, value_type_expr, readonly })
+}
+
 pub(super) fn parse_typed_dict_field_shape(
+    annotation: &str,
+    total_default: bool,
+) -> TypedDictFieldShape {
+    parse_typed_dict_field_shape_from_rendered(annotation, total_default)
+}
+
+pub(super) fn parse_typed_dict_field_shape_expr(
+    annotation: &typepython_syntax::TypeExpr,
+    total_default: bool,
+) -> TypedDictFieldShape {
+    parse_typed_dict_field_shape_from_rendered(&annotation.render(), total_default)
+}
+
+fn parse_typed_dict_field_shape_from_rendered(
     annotation: &str,
     total_default: bool,
 ) -> TypedDictFieldShape {
