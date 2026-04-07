@@ -359,9 +359,8 @@ def collect[*Ts](*args: *Ts) -> tuple[*Ts]:
 
 Current limits:
 
-- Variadic pack inference works when the call site exposes a fixed positional shape.
+- Variadic pack inference covers fixed-shape positional calls, homogeneous starred iterables, and the forwarding/overload combinations exercised by the checker regression suite.
 - Open-ended starred iterables such as `collect(*items)` with `items: list[int]` now infer homogeneous variadic tuple tails like `tuple[int, ...]`.
-- More advanced higher-order pack algebra is not complete yet.
 
 ## Async Support
 
