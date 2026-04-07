@@ -1517,13 +1517,12 @@ pub(super) fn find_owned_writable_member_target<'a>(
 
 pub(super) fn resolve_writable_member_semantic_type(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
     match declaration.kind {
-        DeclarationKind::Value => {
-            resolve_readable_member_semantic_type(node, declaration, owner_type)
-        }
+        DeclarationKind::Value => resolve_readable_member_semantic_type(node, nodes, declaration, owner_type),
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {
@@ -1634,7 +1633,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                         ));
                     }
                     let expected =
-                        resolve_writable_member_semantic_type(node, declaration, &target_type)?;
+                resolve_writable_member_semantic_type(node, nodes, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -1741,7 +1740,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                 }
                 Some(WritableAttributeTarget::PropertySetter(declaration)) => {
                     let expected =
-                        resolve_writable_member_semantic_type(node, declaration, &target_type)?;
+                resolve_writable_member_semantic_type(node, nodes, declaration, &target_type)?;
                     let value = site.value.as_ref()?;
                     match site.kind {
                         typepython_syntax::FrozenFieldMutationKind::Assignment => {
@@ -1837,7 +1836,7 @@ pub(super) fn attribute_assignment_type_diagnostics(
                                 );
                             };
                             let readable_type =
-                                resolve_readable_member_semantic_type(node, readable, &target_type)?;
+            resolve_readable_member_semantic_type(node, nodes, readable, &target_type)?;
                             let actual = resolve_augmented_assignment_result_semantic_type(
                                 node,
                                 nodes,

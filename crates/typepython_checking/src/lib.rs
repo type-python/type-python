@@ -1020,6 +1020,7 @@ fn collect_node_declaration_diagnostics(
     if options.enable_sealed_exhaustiveness {
         push_diagnostics(diagnostics, sealed_match_exhaustiveness_diagnostics(node, context.nodes));
         push_diagnostics(diagnostics, enum_match_exhaustiveness_diagnostics(node, context.nodes));
+        push_diagnostics(diagnostics, literal_match_exhaustiveness_diagnostics(node, context.nodes));
     }
     push_diagnostics(
         diagnostics,

@@ -652,6 +652,69 @@ pub(super) fn enum_match_exhaustiveness_diagnostics(
         .collect()
 }
 
+pub(super) fn literal_match_exhaustiveness_diagnostics(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+) -> Vec<Diagnostic> {
+    node.matches
+        .iter()
+        .filter_map(|match_site| {
+            if match_site.cases.iter().any(|case| {
+                !case.has_guard
+                    && case.patterns.iter().any(|pattern| {
+                        matches!(pattern, typepython_binding::MatchPatternSite::Wildcard)
+                    })
+            }) {
+                return None;
+            }
+
+            let subject_type = resolve_match_subject_semantic_type(node, nodes, match_site)?;
+            let mut literals = literal_match_subject_values(&subject_type)?;
+            literals.sort();
+            literals.dedup();
+            if literals.len() < 2 {
+                return None;
+            }
+
+            let mut covered = BTreeSet::new();
+            for case in match_site.cases.iter().filter(|case| !case.has_guard) {
+                for pattern in &case.patterns {
+                    if let Some(value) = literal_pattern_value(pattern) {
+                        covered.insert(value.to_owned());
+                    }
+                }
+            }
+
+            let missing = literals
+                .into_iter()
+                .filter(|value| !covered.contains(value))
+                .collect::<Vec<_>>();
+            if missing.is_empty() {
+                return None;
+            }
+
+            let diagnostic = Diagnostic::error(
+                "TPY4009",
+                format!(
+                    "non-exhaustive `match` over literal set in module `{}`; missing cases: {}",
+                    node.module_path.display(),
+                    missing.join(", ")
+                ),
+            );
+            let rendered_cases = missing
+                .iter()
+                .map(|value| format!("case {value}:\n    ..."))
+                .collect::<Vec<_>>();
+            Some(attach_match_case_suggestion(
+                diagnostic,
+                &node.module_path,
+                match_site,
+                &rendered_cases,
+            ))
+        })
+        .collect()
+}
+
 pub(super) fn attach_match_case_suggestion(
     diagnostic: Diagnostic,
     module_path: &std::path::Path,
@@ -763,6 +826,30 @@ pub(super) fn resolve_match_subject_enum_type(subject_type: &SemanticType) -> St
     name.rsplit_once('.')
         .map(|(owner, _)| normalize_type_text(owner))
         .unwrap_or_else(|| render_semantic_type(subject_type))
+}
+
+fn literal_match_subject_values(subject_type: &SemanticType) -> Option<Vec<String>> {
+    match subject_type.strip_annotated() {
+        SemanticType::Generic { head, args } if head == "Literal" && !args.is_empty() => Some(
+            args.iter().map(render_semantic_type).collect(),
+        ),
+        SemanticType::Union(branches) => {
+            let mut values = Vec::new();
+            for branch in branches {
+                values.extend(literal_match_subject_values(branch)?);
+            }
+            Some(values)
+        }
+        SemanticType::Name(name) if name == "None" => Some(vec![String::from("None")]),
+        _ => None,
+    }
+}
+
+fn literal_pattern_value(pattern: &typepython_binding::MatchPatternSite) -> Option<&str> {
+    match pattern {
+        typepython_binding::MatchPatternSite::Literal(value) => Some(value.as_str()),
+        _ => None,
+    }
 }
 
 pub(super) fn resolve_sealed_root<'a>(

@@ -377,6 +377,69 @@ fn check_conformance_baseline_common_library_stub_surface() {
 }
 
 #[test]
+fn check_accepts_structural_protocol_property_implementation() {
+    let result = check_temp_typepython_source(
+        "from typing import Protocol\n\nclass Named(Protocol):\n    @property\n    def name(self) -> str:\n        return \"\"\n\nclass User:\n    name: str\n\ndef greet(value: Named) -> str:\n    return value.name\n\nuser = User()\nmessage: str = greet(user)\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_descriptor_backed_attribute_access() {
+    let result = check_temp_typepython_source(
+        "class IntDescriptor:\n    def __get__(self, instance, owner) -> int:\n        return 1\n\nclass Box:\n    value: IntDescriptor\n\ndef read(box: Box) -> int:\n    return box.value\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_general_metaclass_call_return_type() {
+    let result = check_temp_typepython_source(
+        "class FactoryMeta:\n    def __call__(cls) -> str:\n        return \"value\"\n\nclass Factory(metaclass=FactoryMeta):\n    pass\n\nvalue: str = Factory()\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_paramspec_overload_forwarding_call() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable\n\n",
+        "overload def invoke[**P](cb: Callable[P, int], *args: P.args, **kwargs: P.kwargs) -> int: ...\n",
+        "def invoke(cb, *args, **kwargs):\n",
+        "    return cb(*args, **kwargs)\n\n",
+        "def greet(name: str, *, times: int) -> int:\n",
+        "    return times\n\n",
+        "result: int = invoke(greet, \"Ada\", times=1)\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_accepts_typevartuple_overload_roundtrip() {
+    let result = check_temp_typepython_source(
+        "overload def collect[*Ts](*args: *Ts) -> tuple[*Ts]: ...\ndef collect(*args):\n    return args\n\nvalue: tuple[int, str] = collect(1, \"x\")\n",
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_reports_non_exhaustive_literal_match() {
+    let result = check_temp_typepython_source(
+        "from typing import Literal\n\ndef render(color: Literal[\"red\", \"blue\"]) -> int:\n    match color:\n        case \"red\":\n            return 1\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4009"), "{rendered}");
+    assert!(rendered.contains("literal set"), "{rendered}");
+    assert!(rendered.contains("\"blue\""), "{rendered}");
+}
+
+#[test]
 fn check_accepts_total_false_typed_dict_missing_keys() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass User(TypedDict, total=False):\n    id: int\n    name: str\n\npayload: User = {}\n",

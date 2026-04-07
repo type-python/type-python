@@ -745,12 +745,18 @@ pub(super) fn find_owned_readable_member_declaration<'a>(
 
 pub(super) fn resolve_readable_member_semantic_type(
     node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     declaration: &Declaration,
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
     match declaration.kind {
         DeclarationKind::Value => {
+            if let Some(descriptor_return) =
+                resolve_descriptor_get_semantic_type(node, nodes, declaration)
+            {
+                return Some(rewrite_imported_typing_semantic_type(node, &descriptor_return));
+            }
             let detail = rewrite_imported_typing_aliases(
                 node,
                 &substitute_self_annotation(
@@ -777,6 +783,20 @@ pub(super) fn resolve_readable_member_semantic_type(
         }
         _ => None,
     }
+}
+
+fn resolve_descriptor_get_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    declaration: &Declaration,
+) -> Option<SemanticType> {
+    let descriptor_name = declaration_value_annotation_text(declaration)?;
+    if !is_descriptor_type(nodes, node, &descriptor_name) {
+        return None;
+    }
+    let (descriptor_node, descriptor_decl) = resolve_direct_base(nodes, node, &descriptor_name)?;
+    let get = find_owned_callable_declaration(nodes, descriptor_node, descriptor_decl, "__get__")?;
+    declaration_signature_return_semantic_type(get)
 }
 
 pub(super) fn resolve_member_access_owner_semantic_type(

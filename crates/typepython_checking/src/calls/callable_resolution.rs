@@ -1132,14 +1132,33 @@ pub(super) fn decorated_function_return_type_from_callable_annotation(
     parse_callable_annotation(callable_annotation).map(|(_, return_type)| return_type)
 }
 
+pub(super) fn resolve_metaclass_call_declaration_with_context<'a>(
+    context: &CheckerContext<'_>,
+    node: &'a typepython_graph::ModuleNode,
+    nodes: &'a [typepython_graph::ModuleNode],
+    callee: &str,
+) -> Option<(&'a typepython_graph::ModuleNode, &'a Declaration, String)> {
+    let (class_node, class_decl) = resolve_direct_base(nodes, node, callee)?;
+    let module_info = context.load_dataclass_transform_module_info(class_node)?;
+    let metaclass_name = module_info
+        .classes
+        .iter()
+        .find(|class_site| class_site.name == class_decl.name)
+        .and_then(|class_site| class_site.metaclass.clone())?;
+    let (metaclass_node, metaclass_decl) = resolve_direct_base(nodes, class_node, &metaclass_name)?;
+    let call = find_owned_callable_declaration(nodes, metaclass_node, metaclass_decl, "__call__")?;
+    Some((metaclass_node, call, metaclass_decl.name.clone()))
+}
+
 pub(super) fn resolve_direct_callable_return_semantic_type<'a>(
     node: &'a typepython_graph::ModuleNode,
     nodes: &'a [typepython_graph::ModuleNode],
     callee: &str,
 ) -> Option<SemanticType> {
+    let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
     if let Some(callable_type) =
         resolve_decorated_function_callable_semantic_type_with_context(
-            &CheckerContext::new(nodes, ImportFallback::Unknown, None),
+            &context,
             node,
             nodes,
             callee,
@@ -1160,6 +1179,13 @@ pub(super) fn resolve_direct_callable_return_semantic_type<'a>(
         } else {
             return_type
         });
+    }
+
+    if let Some((metaclass_node, call, metaclass_name)) =
+        resolve_metaclass_call_declaration_with_context(&context, node, nodes, callee)
+    {
+        return declaration_signature_return_semantic_type_with_self(call, &metaclass_name)
+            .map(|return_type| rewrite_imported_typing_semantic_type(metaclass_node, &return_type));
     }
 
     if let Some((_, class_decl)) = resolve_direct_base(nodes, node, callee) {

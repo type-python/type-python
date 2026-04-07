@@ -457,9 +457,10 @@ pub(super) fn direct_source_function_keyword_diagnostics_with_context(
         .filter(|param| !param.keyword_variadic)
         .map(|param| param.name.as_str())
         .collect::<BTreeSet<_>>();
-    let accepts_extra_keywords = keyword_variadic_annotation
-        .as_deref()
-        .is_some_and(|annotation| !annotation.starts_with("Unpack["))
+    let accepts_extra_keywords = signature.iter().any(|param| param.keyword_variadic)
+        || keyword_variadic_annotation
+            .as_deref()
+            .is_some_and(|annotation| !annotation.starts_with("Unpack["))
         || unpack_shape.as_ref().is_some_and(|shape| shape.extra_items.is_some());
     let expected_positional_arg_types =
         expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
@@ -1364,6 +1365,13 @@ pub(super) fn resolve_direct_callable_signature_sites_with_context(
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        if let Some((metaclass_node, call, _)) =
+            resolve_metaclass_call_declaration_with_context(context, node, nodes, callee)
+        {
+            let callable = context.load_declaration_semantics(call).callable?;
+            let _ = metaclass_node;
+            return Some(callable_signature_sites_from_semantics(&callable).into_iter().skip(1).collect());
+        }
         let init = class_node.declarations.iter().find(|declaration| {
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
                 && declaration.name == "__init__"
@@ -1396,6 +1404,10 @@ pub(super) fn direct_param_names_from_signature(
     }
 
     if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, callee) {
+        let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+        if let Some((_, call, _)) = resolve_metaclass_call_declaration_with_context(&context, node, nodes, callee) {
+            return declaration_signature_param_names(call).map(|names| names.into_iter().skip(1).collect());
+        }
         let init = class_node.declarations.iter().find(|declaration| {
             declaration.kind == DeclarationKind::Function
                 && declaration.name == "__init__"

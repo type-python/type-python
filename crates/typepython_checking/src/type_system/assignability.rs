@@ -347,6 +347,38 @@ pub(super) fn actual_member_satisfies_requirement(
 ) -> bool {
     match requirement.declaration.kind {
         DeclarationKind::Function => {
+            if requirement.declaration.method_kind == Some(typepython_syntax::MethodKind::Property) {
+                if let Some(member) =
+                    find_apparent_callable_declaration(nodes, actual_node, actual_decl, &requirement.name)
+                {
+                    return methods_are_compatible_for_override(
+                        actual_node,
+                        nodes,
+                        member,
+                        &requirement.declaration,
+                    );
+                }
+                return find_apparent_value_declaration(
+                    nodes,
+                    actual_node,
+                    actual_decl,
+                    &requirement.name,
+                )
+                .is_some_and(|member| {
+                    let expected = declaration_signature_return_semantic_type(&requirement.declaration)
+                        .as_ref()
+                        .map(diagnostic_type_text)
+                        .map(|text| normalize_type_text(&text))
+                        .unwrap_or_default();
+                    let actual = declaration_value_annotation_text(member)
+                        .or_else(|| member.value_type.clone())
+                        .map(|text| normalize_type_text(&text))
+                        .unwrap_or_default();
+                    expected.is_empty()
+                        || actual.is_empty()
+                        || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
+                });
+            }
             find_apparent_callable_declaration(nodes, actual_node, actual_decl, &requirement.name)
                 .is_some_and(|member| {
                     methods_are_compatible_for_override(
