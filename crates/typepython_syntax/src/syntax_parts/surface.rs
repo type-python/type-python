@@ -723,6 +723,17 @@ pub struct TypedDictMutationSite {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypedDictExtraItemsMetadata {
     pub annotation: String,
+    pub annotation_expr: Option<TypeExpr>,
+}
+
+impl TypedDictExtraItemsMetadata {
+    #[must_use]
+    pub fn rendered_annotation(&self) -> String {
+        self.annotation_expr
+            .as_ref()
+            .map(TypeExpr::render)
+            .unwrap_or_else(|| self.annotation.clone())
+    }
 }
 
 /// Parsed TypedDict class-level metadata.

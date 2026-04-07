@@ -232,7 +232,7 @@ pub(super) fn resolve_subscript_type_from_target_semantic_type_with_context(
         )
     {
         return typed_dict_known_or_extra_field(&shape, key)
-            .map(|field| lower_type_text_or_name(field.value_type()));
+            .map(|field| lower_type_text_or_name(&field.rendered_value_type()));
     }
 
     if let Some((head, args)) = target_type.generic_parts() {

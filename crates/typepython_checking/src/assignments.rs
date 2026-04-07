@@ -512,6 +512,13 @@ impl<'a> TypedDictFieldShapeRef<'a> {
         }
     }
 
+    pub(super) fn rendered_value_type(&self) -> String {
+        match self {
+            Self::Known(field) => field.rendered_value_type(),
+            Self::Extra(field) => field.rendered_value_type(),
+        }
+    }
+
     pub(super) fn readonly(&self) -> bool {
         match self {
             Self::Known(field) => field.readonly,
@@ -960,13 +967,13 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         nodes,
                         site.line,
                         value,
-                        Some(field.value_type()),
+                        Some(&field.rendered_value_type()),
                     );
                     if let Some(mut result) = contextual {
                         if let Some(diagnostic) = result.diagnostics.pop() {
                             return Some(diagnostic);
                         }
-                        let expected = lower_type_text_or_name(field.value_type());
+                        let expected = lower_type_text_or_name(&field.rendered_value_type());
                         let actual = result.actual_type;
                         if !semantic_type_matches(node, nodes, &expected, &actual) {
                             return Some(
@@ -1003,7 +1010,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    let expected = lower_type_text_or_name(field.value_type());
+                    let expected = lower_type_text_or_name(&field.rendered_value_type());
                     if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
@@ -1038,10 +1045,10 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.owner_type_name.as_deref(),
                         site.line,
                         site.operator.as_deref(),
-                        field.value_type(),
+                        &field.rendered_value_type(),
                         value,
                     )?;
-                    let expected = lower_type_text_or_name(field.value_type());
+                    let expected = lower_type_text_or_name(&field.rendered_value_type());
                     if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(

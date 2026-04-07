@@ -205,7 +205,7 @@ pub(super) fn collect_typed_dict_openness(
     let mut extra_items = inherited_extra_items;
 
     if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref()) {
-        if let Some(parsed) = parse_typed_dict_extra_items(node, &annotation.annotation) {
+        if let Some(parsed) = parse_typed_dict_extra_items(node, &annotation.rendered_annotation()) {
             if parsed.rendered_value_type() == "Never" {
                 closed = true;
                 extra_items = None;

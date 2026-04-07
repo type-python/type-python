@@ -194,7 +194,10 @@ pub fn collect_module_surface_metadata(source: &str) -> ModuleSurfaceMetadata {
                         total: class_keyword_static_bool(class_def, "total"),
                         closed: class_keyword_static_bool(class_def, "closed"),
                         extra_items: class_keyword_source(&normalized, class_def, "extra_items")
-                            .map(|annotation| TypedDictExtraItemsMetadata { annotation }),
+                            .map(|annotation| TypedDictExtraItemsMetadata {
+                                annotation_expr: TypeExpr::parse(&annotation),
+                                annotation,
+                            }),
                         line: offset_to_line_column(
                             &normalized,
                             class_def.range.start().to_usize(),
