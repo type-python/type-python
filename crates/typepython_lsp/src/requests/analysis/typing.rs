@@ -179,7 +179,7 @@ pub(crate) fn resolve_callable_return_type_in_scope(
                 .and_then(|signature| {
                     signature.returns.as_ref().map(|returns| returns.text.clone())
                 })
-                .or_else(|| parse_return_annotation(&declaration.detail));
+                .or_else(|| parse_return_annotation(&declaration.rendered_detail()));
         }
     }
 

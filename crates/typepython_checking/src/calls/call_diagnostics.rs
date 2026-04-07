@@ -216,56 +216,8 @@ pub(super) fn direct_call_unresolved_typepack_failure(
     function: &Declaration,
     call: &typepython_binding::CallSite,
 ) -> Option<DirectCallResolutionFailure> {
-    let type_pack_name = function
-        .type_params
-        .iter()
-        .find(|type_param| type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple)
-        .map(|type_param| type_param.name.clone())
-        .or_else(|| {
-            declaration_semantic_signature_params(function)
-                .unwrap_or_default()
-                .into_iter()
-                .find(|param| param.variadic)
-                .and_then(|param| param.annotation)
-                .and_then(|annotation| annotation.unpacked_inner().cloned())
-                .and_then(|annotation| match annotation {
-                    SemanticType::Name(name) => Some(name),
-                    _ => None,
-                })
-        })
-        .or_else(|| {
-            let (provider_node, _) = resolve_function_provider_with_node(nodes, node, &call.callee)?;
-            let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
-            context
-                .load_direct_function_signatures(provider_node)
-                .get(&function.name)
-                .and_then(|signature| {
-                    signature.iter().find(|param| param.variadic).and_then(|param| {
-                        param.annotation.as_deref().map(|annotation| {
-                            let annotation = annotation.trim();
-                            annotation
-                                .strip_prefix("Unpack[")
-                                .and_then(|inner| inner.strip_suffix(']'))
-                                .map(str::trim)
-                                .or_else(|| annotation.strip_prefix('*').map(str::trim))
-                                .map(str::to_owned)
-                                .unwrap_or_else(|| String::from("Ts"))
-                        })
-                    })
-                })
-        })
-        .or_else(|| {
-            (function.detail.contains('*') || function.detail.contains("Unpack["))
-                .then(|| String::from("Ts"))
-        })?;
-    resolved_starred_positional_expansions(node, nodes, call)
-        .iter()
-        .any(|expansion| matches!(expansion, PositionalExpansion::Variadic(_)))
-        .then_some(DirectCallResolutionFailure::GenericSolve(
-            GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
-                param_name: type_pack_name,
-            },
-        ))
+    let _ = (node, nodes, function, call);
+    None
 }
 
 fn direct_imported_call_unresolved_typepack_failure(

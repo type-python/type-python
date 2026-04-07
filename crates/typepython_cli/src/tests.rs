@@ -450,9 +450,14 @@ fn run_pipeline_accepts_bundled_common_library_stubs() {
             project_dir.join("src/app.tpy"),
             concat!(
                 "from numpy import array, ndarray\n",
+                "from pandas import DataFrame, read_csv\n",
+                "from requests import Response, get\n",
                 "from torch import Tensor, tensor\n\n",
                 "matrix: ndarray = array([1])\n",
                 "reshaped: ndarray = matrix.reshape((1,))\n",
+                "frame: DataFrame = read_csv(\"demo.csv\").head()\n",
+                "response: Response = get(\"https://example.com\")\n",
+                "payload = response.json()\n",
                 "value: Tensor = tensor(1).to(\"cpu\")\n",
             ),
         )

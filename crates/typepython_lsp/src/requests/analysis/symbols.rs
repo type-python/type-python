@@ -368,14 +368,14 @@ pub(crate) fn document_for_module_key<'a>(
 pub(crate) fn render_member_detail(member: &typepython_binding::Declaration) -> String {
     match member.kind {
         typepython_binding::DeclarationKind::Value => {
-            let annotation = member.value_type.as_deref().unwrap_or(member.detail.as_str());
+            let rendered = member.rendered_detail();
+            let annotation = member.value_type.as_deref().unwrap_or(rendered.as_str());
             format!("field {}: {}", member.name, annotation)
         }
         typepython_binding::DeclarationKind::Function
         | typepython_binding::DeclarationKind::Overload => {
-            format!("method {}{}", member.name, member.detail)
+            format!("method {}{}", member.name, member.rendered_detail())
         }
-        _ => member.detail.clone(),
+        _ => member.rendered_detail(),
     }
 }
-

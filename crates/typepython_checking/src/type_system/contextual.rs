@@ -1261,7 +1261,7 @@ pub(super) fn alias_type_param_substitutions_semantic(
         }
         substitutions.type_packs.insert(
             alias_decl.type_params[type_pack_index].name.clone(),
-            TypePackBinding { types: args[start..end].to_vec() },
+            TypePackBinding { types: args[start..end].to_vec(), variadic_tail: None },
         );
         return Some(substitutions);
     }

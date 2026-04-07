@@ -20,15 +20,17 @@ cargo bench -p typepython-checking --bench checker
 - Inputs:
   - `check_solver_direct_calls_small`: 8 repetitions of the solver/direct-call mix
   - `check_solver_direct_calls_medium`: 64 repetitions of the same mix
+  - `check_semantic_incremental_summary_medium`: semantic summary snapshot generation over the 64-repetition graph
 
 ## Measured Results
 
-Recorded from a successful local run on Sat Apr 04 2026.
+Recorded from a successful local run on Tue Apr 07 2026.
 
 | Benchmark | Measured time range |
 | --- | --- |
-| `check_solver_direct_calls_small` | `308.67 µs .. 311.06 µs` |
-| `check_solver_direct_calls_medium` | `2.4565 ms .. 2.4711 ms` |
+| `check_solver_direct_calls_small` | `388.77 µs .. 390.61 µs` |
+| `check_solver_direct_calls_medium` | `3.1233 ms .. 3.1894 ms` |
+| `check_semantic_incremental_summary_medium` | `15.552 µs .. 15.805 µs` |
 
 Criterion also reported these runs as regressions relative to the currently
 saved local Criterion baseline, but the purpose of this checked-in file is to

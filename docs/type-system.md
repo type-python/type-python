@@ -188,10 +188,9 @@ TypePython supports source-authored `TypeVarTuple` (`*Ts`) syntax for inline var
 
 Current limits:
 
-- Inference requires a fixed positional shape at the call site.
-- Calls that only expose an open-ended starred iterable such as `collect(*items)` with `items: list[int]` remain unresolved and report `TPY4014`.
-- The checker preserves structured failure reasons for these unresolved calls, so `TPY4014` can now attach a concrete explanation (for example that a starred iterable does not expose a fixed tuple shape for `TypeVarTuple` inference).
-- Higher-order combinations beyond this minimum path, especially arbitrary `ParamSpec` + `TypeVarTuple` interactions, are still incomplete.
+- Fixed-shape positional calls infer exact packs, while homogeneous starred iterables infer variadic tuple tails.
+- Open-ended starred iterables such as `collect(*items)` with `items: list[int]` now infer a homogeneous variadic tuple result like `tuple[int, ...]`.
+- The checker preserves structured failure reasons when generic argument solving still fails, so diagnostics can explain which callable/pack interaction remained incompatible.
 
 ## Checker implementation model
 

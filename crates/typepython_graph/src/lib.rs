@@ -297,50 +297,89 @@ fn typing_prelude_declarations() -> Vec<Declaration> {
         prelude_protocol_class_with_methods(
             "Awaitable",
             &[],
-            &[("__await__", "(self)->Iterator[Any]")],
+            &[("__await__", vec![prelude_untyped_param("self")], "Iterator[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "AsyncIterable",
             &[],
-            &[("__aiter__", "(self)->AsyncIterator[Any]")],
+            &[("__aiter__", vec![prelude_untyped_param("self")], "AsyncIterator[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "AsyncIterator",
             &["AsyncIterable"],
-            &[("__anext__", "(self)->Awaitable[Any]")],
+            &[("__anext__", vec![prelude_untyped_param("self")], "Awaitable[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "AsyncGenerator",
             &["AsyncIterator"],
             &[
-                ("asend", "(self, value:Any)->Awaitable[Any]"),
-                ("athrow", "(self, typ:Any, val:Any, tb:Any)->Awaitable[Any]"),
-                ("aclose", "(self)->Awaitable[None]"),
+                (
+                    "asend",
+                    vec![prelude_untyped_param("self"), prelude_param("value", "Any")],
+                    "Awaitable[Any]",
+                ),
+                (
+                    "athrow",
+                    vec![
+                        prelude_untyped_param("self"),
+                        prelude_param("typ", "Any"),
+                        prelude_param("val", "Any"),
+                        prelude_param("tb", "Any"),
+                    ],
+                    "Awaitable[Any]",
+                ),
+                ("aclose", vec![prelude_untyped_param("self")], "Awaitable[None]"),
             ],
         ),
         prelude_protocol_class_with_methods(
             "Coroutine",
             &["Awaitable"],
             &[
-                ("send", "(self, value:Any)->Any"),
-                ("throw", "(self, typ:Any, val:Any, tb:Any)->Any"),
-                ("close", "(self)->None"),
+                ("send", vec![prelude_untyped_param("self"), prelude_param("value", "Any")], "Any"),
+                (
+                    "throw",
+                    vec![
+                        prelude_untyped_param("self"),
+                        prelude_param("typ", "Any"),
+                        prelude_param("val", "Any"),
+                        prelude_param("tb", "Any"),
+                    ],
+                    "Any",
+                ),
+                ("close", vec![prelude_untyped_param("self")], "None"),
             ],
         ),
         prelude_protocol_class_with_methods(
             "Generator",
             &["Iterator"],
             &[
-                ("send", "(self, value:Any)->Any"),
-                ("throw", "(self, typ:Any, val:Any, tb:Any)->Any"),
-                ("close", "(self)->None"),
+                ("send", vec![prelude_untyped_param("self"), prelude_param("value", "Any")], "Any"),
+                (
+                    "throw",
+                    vec![
+                        prelude_untyped_param("self"),
+                        prelude_param("typ", "Any"),
+                        prelude_param("val", "Any"),
+                        prelude_param("tb", "Any"),
+                    ],
+                    "Any",
+                ),
+                ("close", vec![prelude_untyped_param("self")], "None"),
             ],
         ),
-        vec![prelude_function("cast", "(t:,value:)->Any")],
-        vec![prelude_function("NewType", "(name:str,typ:)->NewType")],
-        vec![prelude_function("TypeVar", "(name:str)->TypeVar")],
-        vec![prelude_function("ParamSpec", "(name:str)->ParamSpec")],
-        vec![prelude_function("TypeVarTuple", "(name:str)->TypeVarTuple")],
+        vec![prelude_function(
+            "cast",
+            vec![prelude_untyped_param("t"), prelude_untyped_param("value")],
+            "Any",
+        )],
+        vec![prelude_function(
+            "NewType",
+            vec![prelude_param("name", "str"), prelude_untyped_param("typ")],
+            "NewType",
+        )],
+        vec![prelude_function("TypeVar", vec![prelude_param("name", "str")], "TypeVar")],
+        vec![prelude_function("ParamSpec", vec![prelude_param("name", "str")], "ParamSpec")],
+        vec![prelude_function("TypeVarTuple", vec![prelude_param("name", "str")], "TypeVarTuple")],
     ]
     .into_iter()
     .flatten()
@@ -378,58 +417,103 @@ fn collections_abc_prelude_node() -> ModuleNode {
     let module_path = PathBuf::from("<collections.abc-prelude>");
     let module_key = String::from("collections.abc");
     let declarations = [
-        prelude_protocol_class_with_methods("Sized", &[], &[("__len__", "(self)->int")]),
+        prelude_protocol_class_with_methods(
+            "Sized",
+            &[],
+            &[("__len__", vec![prelude_untyped_param("self")], "int")],
+        ),
         prelude_protocol_class_with_methods(
             "Iterable",
             &["Sized"],
-            &[("__iter__", "(self)->Iterator[Any]")],
+            &[("__iter__", vec![prelude_untyped_param("self")], "Iterator[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "Sequence",
             &["Sized", "Iterable"],
             &[
-                ("__getitem__", "(self, index:int)->Any"),
-                ("__iter__", "(self)->Iterator[Any]"),
-                ("count", "(self, item:object)->int"),
-                ("index", "(self, item:object)->int"),
+                (
+                    "__getitem__",
+                    vec![prelude_untyped_param("self"), prelude_param("index", "int")],
+                    "Any",
+                ),
+                ("__iter__", vec![prelude_untyped_param("self")], "Iterator[Any]"),
+                (
+                    "count",
+                    vec![prelude_untyped_param("self"), prelude_param("item", "object")],
+                    "int",
+                ),
+                (
+                    "index",
+                    vec![prelude_untyped_param("self"), prelude_param("item", "object")],
+                    "int",
+                ),
             ],
         ),
         prelude_protocol_class_with_methods(
             "Mapping",
             &["Sized", "Iterable"],
             &[
-                ("__getitem__", "(self, key:Any)->Any"),
-                ("__iter__", "(self)->Iterator[Any]"),
-                ("keys", "(self)->Any"),
-                ("values", "(self)->Any"),
-                ("items", "(self)->Any"),
-                ("get", "(self, key:Any, default:)->Any"),
+                (
+                    "__getitem__",
+                    vec![prelude_untyped_param("self"), prelude_param("key", "Any")],
+                    "Any",
+                ),
+                ("__iter__", vec![prelude_untyped_param("self")], "Iterator[Any]"),
+                ("keys", vec![prelude_untyped_param("self")], "Any"),
+                ("values", vec![prelude_untyped_param("self")], "Any"),
+                ("items", vec![prelude_untyped_param("self")], "Any"),
+                (
+                    "get",
+                    vec![
+                        prelude_untyped_param("self"),
+                        prelude_param("key", "Any"),
+                        prelude_untyped_param("default"),
+                    ],
+                    "Any",
+                ),
             ],
         ),
-        prelude_protocol_class_with_methods("Callable", &[], &[("__call__", "(self)->Any")]),
+        prelude_protocol_class_with_methods(
+            "Callable",
+            &[],
+            &[("__call__", vec![prelude_untyped_param("self")], "Any")],
+        ),
         prelude_protocol_class_with_methods(
             "AsyncIterable",
             &[],
-            &[("__aiter__", "(self)->AsyncIterator[Any]")],
+            &[("__aiter__", vec![prelude_untyped_param("self")], "AsyncIterator[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "AsyncIterator",
             &["AsyncIterable"],
-            &[("__anext__", "(self)->Awaitable[Any]")],
+            &[("__anext__", vec![prelude_untyped_param("self")], "Awaitable[Any]")],
         ),
         prelude_protocol_class_with_methods(
             "AsyncGenerator",
             &["AsyncIterator"],
             &[
-                ("asend", "(self, value:Any)->Awaitable[Any]"),
-                ("athrow", "(self, typ:Any, val:Any, tb:Any)->Awaitable[Any]"),
-                ("aclose", "(self)->Awaitable[None]"),
+                (
+                    "asend",
+                    vec![prelude_untyped_param("self"), prelude_param("value", "Any")],
+                    "Awaitable[Any]",
+                ),
+                (
+                    "athrow",
+                    vec![
+                        prelude_untyped_param("self"),
+                        prelude_param("typ", "Any"),
+                        prelude_param("val", "Any"),
+                        prelude_param("tb", "Any"),
+                    ],
+                    "Awaitable[Any]",
+                ),
+                ("aclose", vec![prelude_untyped_param("self")], "Awaitable[None]"),
             ],
         ),
         prelude_protocol_class_with_methods(
             "Iterator",
             &["Iterable"],
-            &[("__next__", "(self)->Any")],
+            &[("__next__", vec![prelude_untyped_param("self")], "Any")],
         ),
     ]
     .into_iter()
@@ -482,12 +566,17 @@ fn prelude_type_alias(name: &str, detail: &str) -> Declaration {
     }
 }
 
-fn prelude_function(name: &str, detail: &str) -> Declaration {
+fn prelude_function(
+    name: &str,
+    params: Vec<typepython_syntax::FunctionParam>,
+    returns: &str,
+) -> Declaration {
+    let signature = BoundCallableSignature::from_function_parts(&params, Some(returns));
     Declaration {
-        metadata: parse_prelude_callable_metadata(detail),
+        metadata: DeclarationMetadata::Callable { signature: signature.clone() },
         name: String::from(name),
         kind: DeclarationKind::Function,
-        detail: String::from(detail),
+        detail: signature.rendered(),
         value_type: None,
         method_kind: None,
         class_kind: None,
@@ -554,7 +643,7 @@ fn prelude_class(name: &str) -> Declaration {
 fn prelude_protocol_class_with_methods(
     name: &str,
     bases: &[&str],
-    methods: &[(&str, &str)],
+    methods: &[(&str, Vec<typepython_syntax::FunctionParam>, &str)],
 ) -> Vec<Declaration> {
     let mut declarations = vec![Declaration {
         metadata: DeclarationMetadata::Class {
@@ -579,114 +668,58 @@ fn prelude_protocol_class_with_methods(
         type_params: Vec::new(),
     }];
 
-    declarations.extend(methods.iter().map(|(method_name, detail)| Declaration {
-        metadata: parse_prelude_callable_metadata(detail),
-        name: String::from(*method_name),
-        kind: DeclarationKind::Function,
-        detail: String::from(*detail),
-        value_type: None,
-        method_kind: Some(MethodKind::Instance),
-        class_kind: None,
-        owner: Some(typepython_binding::DeclarationOwner {
-            name: String::from(name),
-            kind: DeclarationOwnerKind::Interface,
-        }),
-        is_async: false,
-        is_override: false,
-        is_abstract_method: false,
-        is_final_decorator: false,
-        is_deprecated: false,
-        deprecation_message: None,
-        is_final: false,
-        is_class_var: false,
-        bases: Vec::new(),
-        type_params: Vec::new(),
+    declarations.extend(methods.iter().map(|(method_name, params, returns)| {
+        let signature = BoundCallableSignature::from_function_parts(params, Some(*returns));
+        Declaration {
+            metadata: DeclarationMetadata::Callable { signature: signature.clone() },
+            name: String::from(*method_name),
+            kind: DeclarationKind::Function,
+            detail: signature.rendered(),
+            value_type: None,
+            method_kind: Some(MethodKind::Instance),
+            class_kind: None,
+            owner: Some(typepython_binding::DeclarationOwner {
+                name: String::from(name),
+                kind: DeclarationOwnerKind::Interface,
+            }),
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }
     }));
 
     declarations
 }
 
-fn parse_prelude_callable_metadata(detail: &str) -> DeclarationMetadata {
-    parse_prelude_signature(detail)
-        .map(|signature| DeclarationMetadata::Callable { signature })
-        .unwrap_or_default()
+fn prelude_param(name: &str, annotation: &str) -> typepython_syntax::FunctionParam {
+    typepython_syntax::FunctionParam {
+        name: String::from(name),
+        annotation: Some(String::from(annotation)),
+        has_default: false,
+        positional_only: false,
+        keyword_only: false,
+        variadic: false,
+        keyword_variadic: false,
+    }
 }
 
-fn parse_prelude_signature(detail: &str) -> Option<BoundCallableSignature> {
-    let inner = detail.strip_prefix('(')?.split_once(')')?.0;
-    let parts = split_prelude_signature_parts(inner);
-    let slash_index = parts.iter().position(|part| part.trim() == "/");
-    let star_index = parts.iter().position(|part| part.trim() == "*");
-    let mut keyword_only_active = false;
-    let mut params = Vec::new();
-    for (index, part) in parts.into_iter().enumerate() {
-        let part = part.trim();
-        if part.is_empty() || part == "/" {
-            continue;
-        }
-        if part == "*" {
-            keyword_only_active = true;
-            continue;
-        }
-        let has_default = part.ends_with('=');
-        let part = part.trim_end_matches('=').trim();
-        let (part, variadic, keyword_variadic) = if let Some(part) = part.strip_prefix("**") {
-            (part.trim(), false, true)
-        } else if let Some(part) = part.strip_prefix('*') {
-            keyword_only_active = true;
-            (part.trim(), true, false)
-        } else {
-            (part, false, false)
-        };
-        let (name, annotation) = part
-            .split_once(':')
-            .map(|(name, annotation)| (name.trim(), annotation.trim()))
-            .unwrap_or((part, ""));
-        params.push(typepython_syntax::DirectFunctionParamSite {
-            name: name.to_owned(),
-            annotation: (!annotation.is_empty()).then(|| annotation.to_owned()),
-            has_default,
-            positional_only: slash_index.is_some_and(|slash_index| index < slash_index),
-            keyword_only: !variadic
-                && !keyword_variadic
-                && (star_index.is_some_and(|star_index| index > star_index) || keyword_only_active),
-            variadic,
-            keyword_variadic,
-        });
+fn prelude_untyped_param(name: &str) -> typepython_syntax::FunctionParam {
+    typepython_syntax::FunctionParam {
+        name: String::from(name),
+        annotation: None,
+        has_default: false,
+        positional_only: false,
+        keyword_only: false,
+        variadic: false,
+        keyword_variadic: false,
     }
-    let returns = detail
-        .split_once("->")
-        .map(|(_, returns)| returns.trim())
-        .filter(|returns| !returns.is_empty())
-        .map(BoundTypeExpr::new);
-    Some(BoundCallableSignature { params, returns })
-}
-
-fn split_prelude_signature_parts(source: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0_i32;
-    for character in source.chars() {
-        match character {
-            '[' | '(' | '{' => {
-                depth += 1;
-                current.push(character);
-            }
-            ']' | ')' | '}' => {
-                depth -= 1;
-                current.push(character);
-            }
-            ',' if depth == 0 => {
-                parts.push(current.trim().to_owned());
-                current.clear();
-            }
-            _ => current.push(character),
-        }
-    }
-    if !current.is_empty() {
-        parts.push(current.trim().to_owned());
-    }
-    parts
 }
 
 #[cfg(test)]

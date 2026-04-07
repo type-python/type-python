@@ -6,7 +6,6 @@ pub(crate) type GenericTypeParamSubstitutions = GenericSolution;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum GenericSolveFailure {
-    UnsupportedStarredTypeVarTupleInference { param_name: String },
     ParamSpecInferenceFailed { annotation: SemanticType, actual: SemanticType },
     TypeBindingInferenceFailed { annotation: SemanticType, actual: SemanticType },
     ParamSpecBindingConflict { param_name: String },
@@ -17,10 +16,6 @@ pub(crate) enum GenericSolveFailure {
 impl GenericSolveFailure {
     pub(crate) fn diagnostic_reason(&self) -> String {
         match self {
-            Self::UnsupportedStarredTypeVarTupleInference { param_name } => format!(
-                "reason: `*{}` cannot be inferred from starred iterable arguments with unknown fixed length",
-                param_name
-            ),
             Self::ParamSpecInferenceFailed { annotation, actual } => format!(
                 "reason: could not infer callable parameter list from expected `{}` against actual `{}`",
                 diagnostic_type_text(annotation),
@@ -64,6 +59,7 @@ pub(crate) struct ParamListBinding {
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(crate) struct TypePackBinding {
     pub(crate) types: Vec<SemanticType>,
+    pub(crate) variadic_tail: Option<SemanticType>,
 }
 
 #[derive(Debug, Clone)]
@@ -412,19 +408,23 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
                 &annotation,
                 &solver.metadata.type_pack_names,
             ) {
-                if !variadic_starred_types.is_empty() {
-                    return Err(GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
-                        param_name: type_pack_name,
-                    });
-                }
-                solver.record_type_pack_binding(
-                    &type_pack_name,
-                    TypePackBinding {
-                        types: positional_types[positional_index..]
+                let fixed_types = positional_types[positional_index..]
+                    .iter()
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .collect::<Vec<_>>();
+                let variadic_tail = if variadic_starred_types.is_empty() {
+                    None
+                } else {
+                    Some(join_semantic_type_candidates(
+                        variadic_starred_types
                             .iter()
                             .map(|ty| lower_type_text_or_name(ty))
                             .collect(),
-                    },
+                    ))
+                };
+                solver.record_type_pack_binding(
+                    &type_pack_name,
+                    TypePackBinding { types: fixed_types, variadic_tail },
                 );
                 positional_index = positional_types.len();
                 continue;
@@ -590,19 +590,23 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
                 &annotation,
                 &solver.metadata.type_pack_names,
             ) {
-                if !variadic_starred_types.is_empty() {
-                    return Err(GenericSolveFailure::UnsupportedStarredTypeVarTupleInference {
-                        param_name: type_pack_name,
-                    });
-                }
-                solver.record_type_pack_binding(
-                    &type_pack_name,
-                    TypePackBinding {
-                        types: positional_types[positional_index..]
+                let fixed_types = positional_types[positional_index..]
+                    .iter()
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .collect::<Vec<_>>();
+                let variadic_tail = if variadic_starred_types.is_empty() {
+                    None
+                } else {
+                    Some(join_semantic_type_candidates(
+                        variadic_starred_types
                             .iter()
                             .map(|ty| lower_type_text_or_name(ty))
                             .collect(),
-                    },
+                    ))
+                };
+                solver.record_type_pack_binding(
+                    &type_pack_name,
+                    TypePackBinding { types: fixed_types, variadic_tail },
                 );
                 positional_index = positional_types.len();
                 continue;
@@ -781,6 +785,17 @@ pub(crate) fn instantiate_direct_function_signature(
                     keyword_variadic: false,
                 }
             }));
+            if let Some(variadic_tail) = binding.variadic_tail.as_ref() {
+                instantiated.push(typepython_syntax::DirectFunctionParamSite {
+                    name: param.name.clone(),
+                    annotation: Some(render_semantic_type(variadic_tail)),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: true,
+                    keyword_variadic: false,
+                });
+            }
             continue;
         }
         instantiated.push(instantiate_direct_function_param(param.clone(), substitutions));
@@ -1410,6 +1425,10 @@ pub(crate) fn expand_substituted_semantic_generic_args(
                 && let Some(binding) = substitutions.type_packs.get(name.trim())
             {
                 rendered.extend(binding.types.iter().cloned());
+                if let Some(variadic_tail) = binding.variadic_tail.as_ref() {
+                    rendered.push(variadic_tail.clone());
+                    rendered.push(SemanticType::Name(String::from("...")));
+                }
                 continue;
             }
             if let Some(elements) = unpacked_fixed_tuple_semantic_elements(inner) {
@@ -1461,6 +1480,11 @@ pub(crate) fn merge_type_pack_candidates(
             .zip(&actual.types)
             .map(|(left, right)| merge_generic_type_candidates(left, right))
             .collect(),
+        variadic_tail: match (&existing.variadic_tail, &actual.variadic_tail) {
+            (Some(left), Some(right)) => Some(merge_generic_type_candidates(left, right)),
+            (None, None) => None,
+            _ => return None,
+        },
     })
 }
 
@@ -1484,6 +1508,7 @@ pub(crate) fn type_pack_binding_from_default(default: &str) -> Option<TypePackBi
     if let Some(elements) = unpacked_fixed_tuple_elements(&normalized) {
         return Some(TypePackBinding {
             types: elements.into_iter().map(|element| lower_type_text_or_name(&element)).collect(),
+            variadic_tail: None,
         });
     }
     None
@@ -1532,7 +1557,10 @@ pub(crate) fn infer_generic_type_arg_bindings(
         insert_type_pack_binding(
             &mut inferred,
             &pack_name,
-            TypePackBinding { types: actual_args[pack_index..actual_pack_end].to_vec() },
+            TypePackBinding {
+                types: actual_args[pack_index..actual_pack_end].to_vec(),
+                variadic_tail: None,
+            },
         )?;
         for (expected_arg, actual_arg) in
             expected_args[pack_index + 1..].iter().zip(actual_args[actual_pack_end..].iter())

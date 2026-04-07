@@ -1423,35 +1423,14 @@ pub(super) fn destructuring_assignment_diagnostics(
         .filter(|assignment| assignment.destructuring_index == Some(0))
         .filter_map(|assignment| {
             let target_names = assignment.destructuring_target_names.as_ref()?;
-            let actual = resolve_direct_expression_semantic_type(
+            let actual = resolve_direct_expression_semantic_type_from_metadata(
                 node,
                 nodes,
                 None,
-                Some(assignment.name.as_str()),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
-                assignment.value_type.as_deref(),
-                assignment.is_awaited,
-                assignment.value_callee.as_deref(),
-                assignment.value_name.as_deref(),
-                assignment.value_member_owner_name.as_deref(),
-                assignment.value_member_name.as_deref(),
-                assignment.value_member_through_instance,
-                assignment.value_method_owner_name.as_deref(),
-                assignment.value_method_name.as_deref(),
-                assignment.value_method_through_instance,
-                assignment.value_subscript_target.as_deref(),
-                assignment.value_subscript_string_key.as_deref(),
-                assignment.value_subscript_index.as_deref(),
-                assignment.value_if_true.as_deref(),
-                assignment.value_if_false.as_deref(),
-                assignment.value_if_guard.as_ref(),
-                assignment.value_bool_left.as_deref(),
-                assignment.value_bool_right.as_deref(),
-                assignment.value_binop_left.as_deref(),
-                assignment.value_binop_right.as_deref(),
-                assignment.value_binop_operator.as_deref(),
+                assignment.value_metadata().as_ref()?,
             )?;
             let tuple_elements = unpacked_fixed_tuple_semantic_elements(&actual)?;
             (tuple_elements.len() != target_names.len()).then(|| {

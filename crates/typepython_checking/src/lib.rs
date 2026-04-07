@@ -708,7 +708,10 @@ fn semantic_public_summary(
                 .import_target
                 .map(|target| target.raw_target)
                 .or_else(|| declaration.import_target().map(|target| target.raw_target.clone()))
-                .or_else(|| (!declaration.detail.is_empty()).then(|| declaration.detail.clone()))
+                .or_else(|| {
+                    let detail = declaration.rendered_detail();
+                    (!detail.is_empty()).then_some(detail)
+                })
         })
         .collect::<Vec<_>>();
     imports.sort();

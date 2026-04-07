@@ -48,6 +48,7 @@ Checked-in baseline evidence for the current checker suite lives in
 | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `check_solver_direct_calls_small`  | 8 repetitions of imported generic calls, variadic tuple collection, and generic overload selection |
 | `check_solver_direct_calls_medium` | 64 repetitions of the same semantic-solver/direct-call mix                                         |
+| `check_semantic_incremental_summary_medium` | Semantic summary snapshot generation over the 64-repetition checker graph                         |
 
 ## Running benchmarks
 

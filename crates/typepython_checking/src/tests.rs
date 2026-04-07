@@ -377,6 +377,55 @@ fn check_conformance_baseline_common_library_stub_surface() {
 }
 
 #[test]
+fn check_conformance_baseline_higher_order_typing_surface() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable, Protocol\n\n",
+        "class Named(Protocol):\n",
+        "    @property\n",
+        "    def name(self) -> str:\n",
+        "        return \"\"\n\n",
+        "class IntDescriptor:\n",
+        "    def __get__(self, instance, owner) -> int:\n",
+        "        return 1\n\n",
+        "class FactoryMeta:\n",
+        "    def __call__(cls) -> str:\n",
+        "        return \"factory\"\n\n",
+        "class User:\n",
+        "    name: str\n\n",
+        "class Box:\n",
+        "    value: IntDescriptor\n\n",
+        "class Factory(metaclass=FactoryMeta):\n",
+        "    pass\n\n",
+        "def invoke[**P, R](cb: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "    return cb(*args, **kwargs)\n\n",
+        "def greet(name: str, *, times: int) -> str:\n",
+        "    return name\n\n",
+        "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n",
+        "    return args\n\n",
+        "user = User()\n",
+        "box = Box()\n",
+        "name: str = invoke(greet, user.name, times=1)\n",
+        "count: int = box.value\n",
+        "factory_value: str = Factory()\n",
+        "items: list[int] = [1, 2]\n",
+        "collected: tuple[int, ...] = collect(*items)\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
+fn check_conformance_baseline_literal_match_exhaustiveness_diagnostic() {
+    let result = check_temp_typepython_source(
+        "from typing import Literal\n\ndef render(color: Literal[\"red\", \"blue\"]) -> int:\n    match color:\n        case \"red\":\n            return 1\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4009"), "{rendered}");
+    assert!(rendered.contains("missing cases: \"blue\""), "{rendered}");
+}
+
+#[test]
 fn check_accepts_structural_protocol_property_implementation() {
     let result = check_temp_typepython_source(
         "from typing import Protocol\n\nclass Named(Protocol):\n    @property\n    def name(self) -> str:\n        return \"\"\n\nclass User:\n    name: str\n\ndef greet(value: Named) -> str:\n    return value.name\n\nuser = User()\nmessage: str = greet(user)\n",
@@ -10653,19 +10702,16 @@ fn check_accepts_source_authored_typevartuple_call_inference() {
 }
 
 #[test]
-fn check_reports_unresolved_source_authored_typevartuple_call() {
+fn check_accepts_source_authored_typevartuple_call_from_starred_iterable() {
     let result = check_temp_typepython_source(
-        "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n\nitems: list[int] = [1, 2]\nvalue = collect(*items)\n",
+        "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n\nitems: list[int] = [1, 2]\nvalue: tuple[int, ...] = collect(*items)\n",
     );
 
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4014"), "{rendered}");
-    assert!(rendered.contains("generic parameter list of `collect` could not be resolved"));
-    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
-fn check_reports_unresolved_source_authored_typevartuple_method_call() {
+fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable() {
     let result = check(&ModuleGraph {
         nodes: vec![ModuleNode {
             module_path: PathBuf::from("src/app/module.py"),
@@ -10760,7 +10806,37 @@ fn check_reports_unresolved_source_authored_typevartuple_method_call() {
                 line: 1,
             }],
             member_accesses: Vec::new(),
-            returns: Vec::new(),
+            returns: vec![typepython_binding::ReturnSite {
+                owner_name: String::from("run"),
+                owner_type_name: None,
+                value: None,
+                value_type: Some(String::new()),
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: Some(String::from("box")),
+                value_method_name: Some(String::from("collect")),
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None,
+                line: 2,
+            }],
             yields: Vec::new(),
             if_guards: Vec::new(),
             asserts: Vec::new(),
@@ -10774,33 +10850,7 @@ fn check_reports_unresolved_source_authored_typevartuple_method_call() {
         }],
     });
 
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4014"), "{rendered}");
-    assert!(rendered.contains("Box.collect"), "{rendered}");
-    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
-}
-
-#[test]
-fn check_reports_unresolved_source_authored_typevartuple_imported_module_method_call() {
-    let result = check_temp_project_sources(&[
-        (
-            "helpers.tpy",
-            "helpers",
-            SourceKind::TypePython,
-            "def collect[*Ts](*args: *Ts) -> tuple[*Ts]:\n    return args\n",
-        ),
-        (
-            "app.tpy",
-            "app",
-            SourceKind::TypePython,
-            "import helpers\n\nitems: list[int] = [1, 2]\nvalue = helpers.collect(*items)\n",
-        ),
-    ]);
-
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4014"), "{rendered}");
-    assert!(rendered.contains("helpers.collect"), "{rendered}");
-    assert!(rendered.contains("starred iterable arguments"), "{rendered}");
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]

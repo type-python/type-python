@@ -705,6 +705,21 @@ pub struct Declaration {
 
 impl Declaration {
     #[must_use]
+    pub fn rendered_detail(&self) -> String {
+        match &self.metadata {
+            DeclarationMetadata::None => self.detail.clone(),
+            DeclarationMetadata::TypeAlias { value } => value.text.clone(),
+            DeclarationMetadata::Callable { signature } => signature.rendered(),
+            DeclarationMetadata::Import { target } => target.raw_target.clone(),
+            DeclarationMetadata::Value { annotation } => annotation
+                .as_ref()
+                .map(|annotation| annotation.text.clone())
+                .unwrap_or_else(|| self.detail.clone()),
+            DeclarationMetadata::Class { bases } => bases.join(","),
+        }
+    }
+
+    #[must_use]
     pub fn callable_signature(&self) -> Option<&BoundCallableSignature> {
         match &self.metadata {
             DeclarationMetadata::Callable { signature } => Some(signature),

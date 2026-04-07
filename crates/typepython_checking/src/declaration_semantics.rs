@@ -331,7 +331,7 @@ fn build_cached_semantic_declaration_facts(
                 declaration
                     .callable_signature()
                     .map(semantic_callable_from_bound_signature)
-                    .or_else(|| parse_direct_callable_declaration(&declaration.detail))
+                    .or_else(|| parse_direct_callable_declaration(&declaration.rendered_detail()))
             })
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
@@ -357,7 +357,7 @@ fn build_cached_semantic_declaration_facts(
             let annotation_text = declaration
                 .value_annotation()
                 .map(|annotation| annotation.text.clone())
-                .or_else(|| (!declaration.detail.trim().is_empty()).then(|| declaration.detail.clone()));
+                .or_else(|| (!declaration.rendered_detail().trim().is_empty()).then(|| declaration.rendered_detail()));
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
@@ -370,7 +370,7 @@ fn build_cached_semantic_declaration_facts(
             let body_text = declaration
                 .type_alias_value()
                 .map(|value| value.text.clone())
-                .unwrap_or_else(|| declaration.detail.clone());
+                .unwrap_or_else(|| declaration.rendered_detail());
             CachedSemanticTypeAliasDeclaration {
                 head: declaration.name.clone(),
                 type_params: declaration.type_params.clone(),
@@ -382,7 +382,7 @@ fn build_cached_semantic_declaration_facts(
             declaration
                 .import_target()
                 .map(semantic_import_target_from_bound_target)
-                .or_else(|| parse_import_target_ref(&declaration.detail))
+                .or_else(|| parse_import_target_ref(&declaration.rendered_detail()))
         }).flatten(),
     }
 }
