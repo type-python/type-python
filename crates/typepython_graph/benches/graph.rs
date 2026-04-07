@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use typepython_binding::{
     BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind, ModuleSurfaceFacts,
 };
@@ -15,6 +15,7 @@ fn make_binding(index: usize, package: &str) -> BindingTable {
         surface_facts: ModuleSurfaceFacts::default(),
         declarations: vec![
             Declaration {
+                metadata: Default::default(),
                 name: format!("Func{index}"),
                 kind: DeclarationKind::Function,
                 detail: String::from("(x: int) -> int"),
@@ -34,6 +35,7 @@ fn make_binding(index: usize, package: &str) -> BindingTable {
                 type_params: Vec::new(),
             },
             Declaration {
+                metadata: Default::default(),
                 name: format!("Model{index}"),
                 kind: DeclarationKind::Class,
                 detail: String::new(),
