@@ -778,6 +778,7 @@ pub struct DataclassTransformProviderSite {
 pub struct DataclassTransformFieldSite {
     pub name: String,
     pub annotation: String,
+    pub annotation_expr: Option<TypeExpr>,
     pub value_type: Option<String>,
     pub value_metadata: Option<DirectExprMetadata>,
     pub has_default: bool,
@@ -789,6 +790,16 @@ pub struct DataclassTransformFieldSite {
     pub field_specifier_kw_only: Option<bool>,
     pub field_specifier_alias: Option<String>,
     pub line: usize,
+}
+
+impl DataclassTransformFieldSite {
+    #[must_use]
+    pub fn rendered_annotation(&self) -> String {
+        self.annotation_expr
+            .as_ref()
+            .map(TypeExpr::render)
+            .unwrap_or_else(|| self.annotation.clone())
+    }
 }
 
 /// Class site affected by dataclass-transform semantics.

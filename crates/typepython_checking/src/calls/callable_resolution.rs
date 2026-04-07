@@ -21,7 +21,7 @@ pub(super) fn resolve_direct_callable_param_types(
                 .fields
                 .iter()
                 .filter(|field| !field.kw_only)
-                .map(|field| field.annotation.clone())
+                .map(|field| field.rendered_annotation())
                 .collect(),
         );
     }

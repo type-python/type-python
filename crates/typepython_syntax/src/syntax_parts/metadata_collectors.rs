@@ -813,6 +813,7 @@ fn extract_dataclass_transform_field(
     Some(DataclassTransformFieldSite {
         name: name.id.as_str().to_owned(),
         annotation: slice_range(source, assign.annotation.range())?.to_owned(),
+        annotation_expr: slice_range(source, assign.annotation.range()).and_then(TypeExpr::parse),
         value_type: value.map(infer_literal_arg_type),
         value_metadata: value.map(|expr| extract_direct_expr_metadata(source, expr)),
         has_default: value.is_some(),

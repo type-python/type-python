@@ -1052,11 +1052,11 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 && let Some(field) = shape.fields.get(keyword.as_str())
             {
                 if !semantic_type_missing(arg_ty)
-                    && !field.value_type.is_empty()
+                    && !field.rendered_value_type().is_empty()
                     && !semantic_type_matches(
                         node,
                         nodes,
-                        &lower_type_text_or_name(&field.value_type),
+                        &lower_type_text_or_name(&field.rendered_value_type()),
                         arg_ty,
                     )
                 {
@@ -1069,14 +1069,14 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                             node.module_path.display(),
                             arg_text,
                             keyword,
-                            field.value_type
+                            field.rendered_value_type()
                         ),
                     );
                     diagnostics.push(attach_type_mismatch_notes(
                         diagnostic,
                         node,
                         nodes,
-                        &field.value_type,
+                        &field.rendered_value_type(),
                         &arg_text,
                     ));
                 }
@@ -1143,13 +1143,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 for (key, field) in &shape.fields {
                     if let Some(index) = param_names.iter().position(|param| param == key) {
                         let param_ty = &param_types[index];
-                        if !field.value_type.is_empty()
+                        if !field.rendered_value_type().is_empty()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&field.value_type),
+                                &lower_type_text_or_name(&field.rendered_value_type()),
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1161,7 +1161,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                     node.module_path.display(),
                                     shape.name,
                                     key,
-                                    field.value_type,
+                                    field.rendered_value_type(),
                                     param_text
                                 ),
                             ));
@@ -1169,13 +1169,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     } else if let Some(param_ty) =
                         unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                     {
-                        if !field.value_type.is_empty()
+                        if !field.rendered_value_type().is_empty()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&field.value_type),
+                                &lower_type_text_or_name(&field.rendered_value_type()),
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1187,7 +1187,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                     node.module_path.display(),
                                     shape.name,
                                     key,
-                                    field.value_type,
+                                    field.rendered_value_type(),
                                     param_text
                                 ),
                             ));
@@ -1197,13 +1197,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 if let Some(extra_items) = &shape.extra_items {
                     if let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                     {
-                        if !extra_items.value_type.is_empty()
+                        if !extra_items.rendered_value_type().is_empty()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&extra_items.value_type),
+                                &lower_type_text_or_name(&extra_items.rendered_value_type()),
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1214,7 +1214,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                     call.callee,
                                     node.module_path.display(),
                                     shape.name,
-                                    extra_items.value_type,
+                                    extra_items.rendered_value_type(),
                                     param_text
                                 ),
                             ));
@@ -1433,11 +1433,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         .zip(call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
         .filter(|(field, arg_ty)| {
             !semantic_type_missing(arg_ty)
-                && !field.annotation.is_empty()
+                && !field.rendered_annotation().is_empty()
                 && !semantic_type_matches(
                     node,
                     nodes,
-                    &lower_type_text_or_name(&field.annotation),
+                    &lower_type_text_or_name(&field.rendered_annotation()),
                     arg_ty,
                 )
         })
@@ -1451,7 +1451,7 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
                     node.module_path.display(),
                     arg_text,
                     field.name,
-                    field.annotation
+                    field.rendered_annotation()
                 ),
             )
         })
@@ -1466,11 +1466,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
             continue;
         };
         if !semantic_type_missing(&arg_ty)
-            && !field.annotation.is_empty()
+            && !field.rendered_annotation().is_empty()
             && !semantic_type_matches(
                 node,
                 nodes,
-                &lower_type_text_or_name(&field.annotation),
+                &lower_type_text_or_name(&field.rendered_annotation()),
                 &arg_ty,
             )
         {
@@ -1484,7 +1484,7 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
                     arg_text,
                     keyword,
                     field.name,
-                    field.annotation
+                    field.rendered_annotation()
                 ),
             ));
         }

@@ -110,7 +110,8 @@ pub(super) fn resolve_plain_dataclass_class_shape_from_decl_with_context(
             Some(DataclassTransformFieldShape {
                 name: field.name.clone(),
                 keyword_name: field.name.clone(),
-                annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
+                annotation: field.rendered_annotation(),
+                annotation_expr: field.annotation_expr.clone(),
                 required: if recognized_field_specifier {
                     !(field.field_specifier_has_default
                         || field.field_specifier_has_default_factory)
@@ -391,7 +392,8 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
         let synthesized = DataclassTransformFieldShape {
             name: field.name.clone(),
             keyword_name: field.field_specifier_alias.clone().unwrap_or_else(|| field.name.clone()),
-            annotation: rewrite_imported_typing_aliases(class_node, &field.annotation),
+            annotation: field.rendered_annotation(),
+            annotation_expr: field.annotation_expr.clone(),
             required,
             kw_only,
         };

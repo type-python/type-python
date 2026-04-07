@@ -414,6 +414,7 @@ pub(super) fn direct_expr_metadata_from_assignment_site(
 #[derive(Debug, Clone)]
 pub(super) struct TypedDictFieldShape {
     pub(super) value_type: String,
+    pub(super) value_type_expr: Option<typepython_syntax::TypeExpr>,
     pub(super) required: bool,
     pub(super) readonly: bool,
 }
@@ -421,6 +422,7 @@ pub(super) struct TypedDictFieldShape {
 #[derive(Debug, Clone)]
 pub(super) struct TypedDictExtraItemsShape {
     pub(super) value_type: String,
+    pub(super) value_type_expr: Option<typepython_syntax::TypeExpr>,
     pub(super) readonly: bool,
 }
 
@@ -437,8 +439,39 @@ pub(super) struct DataclassTransformFieldShape {
     pub(super) name: String,
     pub(super) keyword_name: String,
     pub(super) annotation: String,
+    pub(super) annotation_expr: Option<typepython_syntax::TypeExpr>,
     pub(super) required: bool,
     pub(super) kw_only: bool,
+}
+
+impl TypedDictFieldShape {
+    #[must_use]
+    pub(super) fn rendered_value_type(&self) -> String {
+        self.value_type_expr
+            .as_ref()
+            .map(typepython_syntax::TypeExpr::render)
+            .unwrap_or_else(|| self.value_type.clone())
+    }
+}
+
+impl TypedDictExtraItemsShape {
+    #[must_use]
+    pub(super) fn rendered_value_type(&self) -> String {
+        self.value_type_expr
+            .as_ref()
+            .map(typepython_syntax::TypeExpr::render)
+            .unwrap_or_else(|| self.value_type.clone())
+    }
+}
+
+impl DataclassTransformFieldShape {
+    #[must_use]
+    pub(super) fn rendered_annotation(&self) -> String {
+        self.annotation_expr
+            .as_ref()
+            .map(typepython_syntax::TypeExpr::render)
+            .unwrap_or_else(|| self.annotation.clone())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -614,7 +647,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 };
 
                 let expected_type = lower_type_text_or_name(target_field.value_type());
-                let actual_type = lower_type_text_or_name(&field.value_type);
+                let actual_type = lower_type_text_or_name(&field.rendered_value_type());
                 if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
@@ -640,8 +673,8 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                     !semantic_type_matches(
                         node,
                         nodes,
-                        &lower_type_text_or_name(&target_extra.value_type),
-                        &lower_type_text_or_name(&extra_items.value_type),
+                        &lower_type_text_or_name(&target_extra.rendered_value_type()),
+                        &lower_type_text_or_name(&extra_items.rendered_value_type()),
                     )
                 })
             {
@@ -652,7 +685,7 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                         "TypedDict literal for `{}` expands `{}` with additional keys of type `{}` that are not accepted by the target",
                         target_shape.name,
                         expansion_shape.name,
-                        extra_items.value_type
+                        extra_items.rendered_value_type()
                     ),
                 ));
             }

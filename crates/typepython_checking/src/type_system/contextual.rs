@@ -206,7 +206,7 @@ pub(super) fn collect_typed_dict_openness(
 
     if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref()) {
         if let Some(parsed) = parse_typed_dict_extra_items(node, &annotation.annotation) {
-            if parsed.value_type == "Never" {
+            if parsed.rendered_value_type() == "Never" {
                 closed = true;
                 extra_items = None;
             } else {
@@ -249,7 +249,8 @@ pub(super) fn parse_typed_dict_extra_items(
         readonly = true;
     }
 
-    Some(TypedDictExtraItemsShape { value_type, readonly })
+    let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
+    Some(TypedDictExtraItemsShape { value_type, value_type_expr, readonly })
 }
 
 pub(super) fn parse_typed_dict_field_shape(
@@ -285,7 +286,8 @@ pub(super) fn parse_typed_dict_field_shape(
         break;
     }
 
-    TypedDictFieldShape { value_type, required, readonly }
+    let value_type_expr = typepython_syntax::TypeExpr::parse(&value_type);
+    TypedDictFieldShape { value_type, value_type_expr, required, readonly }
 }
 
 pub(super) fn callable_assignment_result(
