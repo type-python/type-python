@@ -1173,7 +1173,11 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                             .as_ref()
                             .map(|_| index),
                         annotation: statement.annotation.clone(),
-                        annotation_expr: statement.annotation.clone().map(BoundTypeExpr::new),
+                        annotation_expr: statement
+                            .annotation_expr
+                            .clone()
+                            .map(BoundTypeExpr::from_expr)
+                            .or_else(|| statement.annotation.clone().map(BoundTypeExpr::new)),
                         value: direct_expr_metadata_from_value_statement(statement),
                         value_type: statement.value_type.clone(),
                         is_awaited: statement.is_awaited,

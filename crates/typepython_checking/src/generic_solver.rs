@@ -432,7 +432,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
     let mut positional_index = 0;
 
     for param in signature.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
-        let Some(annotation_text) = param.annotation.as_deref() else {
+        let Some(annotation_text) = param.rendered_annotation() else {
             if param.variadic {
                 positional_index = positional_types.len();
             } else if positional_index < positional_types.len() {
@@ -440,7 +440,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
             }
             continue;
         };
-        let annotation = lower_type_text_or_name(annotation_text);
+        let annotation = lower_type_text_or_name(&annotation_text);
         if param.variadic {
             if extract_param_spec_args_name_from_semantic(&annotation).is_some() {
                 positional_index = positional_types.len();
@@ -549,10 +549,10 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
         let Some(param) = signature.iter().find(|param| param.name == *keyword) else {
             continue;
         };
-        let Some(annotation_text) = param.annotation.as_deref() else {
+        let Some(annotation_text) = param.rendered_annotation() else {
             continue;
         };
-        let annotation = lower_type_text_or_name(annotation_text);
+        let annotation = lower_type_text_or_name(&annotation_text);
         let annotation_mentions_param_spec =
             annotation.callable_parts().is_some_and(|(params, _)| {
                 callable_param_expr_mentions_param_spec_semantic(
@@ -789,7 +789,8 @@ pub(crate) fn instantiate_direct_function_signature(
     let mut expanded_param_specs = BTreeSet::new();
 
     for param in signature {
-        let param_spec_name = param.annotation.as_deref().and_then(|annotation| {
+        let rendered_annotation = param.rendered_annotation();
+        let param_spec_name = rendered_annotation.as_deref().and_then(|annotation| {
             if param.variadic {
                 extract_param_spec_args_name(annotation)
             } else if param.keyword_variadic {
@@ -812,7 +813,7 @@ pub(crate) fn instantiate_direct_function_signature(
             continue;
         }
         if param.variadic
-            && let Some(annotation) = param.annotation.as_deref()
+            && let Some(annotation) = param.rendered_annotation().as_deref()
             && let Some(type_pack_name) = unpack_inner(annotation)
             && let Some(binding) = substitutions.type_packs.get(type_pack_name.trim())
         {
