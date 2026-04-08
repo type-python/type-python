@@ -597,9 +597,15 @@ fn is_authoritative_publication_file(
         return false;
     }
     if let Some((root, _)) = path.split_once('/') {
-        return published_package_roots.contains(root);
+        return published_package_roots.contains(root)
+            || (!published_top_level_surface_files.is_empty()
+                && !is_allowed_non_surface_root(root));
     }
     !published_top_level_surface_files.is_empty() && path != "setup.py"
+}
+
+fn is_allowed_non_surface_root(root: &str) -> bool {
+    matches!(root, "tests" | "docs")
 }
 
 fn read_supplied_artifact_entries(
