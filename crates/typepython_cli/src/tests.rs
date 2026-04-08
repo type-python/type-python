@@ -1506,7 +1506,6 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_w
                 ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
                 ("docs/conf.py", "pass\n"),
-                ("scripts/tool.py", "pass\n"),
                 ("type_python-0.1.0.data/scripts/tool.py", "pass\n"),
             ],
         );
@@ -1600,7 +1599,6 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_s
                 ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
                 ("docs/conf.py", "pass\n"),
-                ("scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
@@ -1720,7 +1718,6 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_wheel() {
                 ("setup.py", "pass\n"),
                 ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
-                ("scripts/tool.py", "pass\n"),
                 ("type_python-0.1.0.data/scripts/tool.py", "pass\n"),
             ],
         );
@@ -1739,6 +1736,43 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_wheel() {
     remove_temp_project_dir(&project_dir);
 
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn verify_packaged_artifacts_reports_top_level_scripts_python_file() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_reports_top_level_scripts_python_file");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[("app.py", "pass\n"), ("app.pyi", "pass\n"), ("scripts/tool.py", "pass\n")],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("scripts/tool.py"));
 }
 
 #[test]
@@ -1853,7 +1887,6 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_sdist() {
                 ("setup.py", "pass\n"),
                 ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
-                ("scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
