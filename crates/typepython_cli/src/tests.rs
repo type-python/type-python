@@ -1913,7 +1913,7 @@ if [ "$1" = "-c" ] && printf '%s' "$2" | grep -q 'version_info'; then
   exit 0
 fi
 if printf '%s' "$*" | grep -q 'importlib.import_module'; then
-  if printf ' %s ' "$*" | grep -q ' -S '; then
+  if printf ' %s ' "$*" | grep -Eq ' -(I|S) '; then
     printf '{"importable": false, "error": "ModuleNotFoundError: No module named demo_dep"}\n'
   else
     printf '{"importable": true}\n'

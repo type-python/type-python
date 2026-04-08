@@ -437,7 +437,7 @@ fn verify_runtime_module_importability(
     let interpreter = resolve_python_executable(config);
     let output = ProcessCommand::new(&interpreter)
         .current_dir(&probe_dir)
-        .args(["-I", "-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
+        .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
         .arg(out_root)
         .arg(module_name)
         .output()
