@@ -2109,6 +2109,96 @@ fn verify_packaged_artifacts_reports_unexpected_surface_for_scripts_package_root
 }
 
 #[test]
+fn verify_packaged_artifacts_reports_package_shaped_scripts_allowlist_entry() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_reports_package_shaped_scripts_allowlist_entry",
+    );
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("scripts/__init__.py", "pass\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("scripts/__init__.py"));
+}
+
+#[test]
+fn verify_packaged_artifacts_reports_package_shaped_tests_allowlist_entry() {
+    let project_dir =
+        temp_project_dir("verify_packaged_artifacts_reports_package_shaped_tests_allowlist_entry");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_tar_gz_archive(
+            &sdist_path,
+            "type-python-0.1.0",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("tests/__init__.py", "pass\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("tests/__init__.py"));
+}
+
+#[test]
 fn verify_packaged_artifacts_reports_divergent_runtime_in_sdist() {
     let project_dir =
         temp_project_dir("verify_packaged_artifacts_reports_divergent_runtime_in_sdist");
