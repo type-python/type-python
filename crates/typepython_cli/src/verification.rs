@@ -630,12 +630,6 @@ fn is_authoritative_publication_file(
 
 fn is_allowed_non_surface_path(path: &str) -> bool {
     if let Some((root, remainder)) = path.split_once('/') {
-        if matches!(root, "tests" | "docs") {
-            return !remainder.contains('/')
-                && remainder.ends_with(".py")
-                && !matches!(remainder, "__init__.py" | "__init__.pyi")
-                && !remainder.ends_with(".pyi");
-        }
         return root.ends_with(".data")
             && remainder.starts_with("scripts/")
             && remainder["scripts/".len()..].ends_with(".py")
