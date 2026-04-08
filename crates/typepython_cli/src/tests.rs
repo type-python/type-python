@@ -848,14 +848,14 @@ fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
     remove_temp_project_dir(&project_dir);
 
     assert!(rendered.contains("TPY5003"));
-    assert!(rendered.contains("public names differ"));
+    assert!(rendered.contains("declaration surface differs"));
 }
 
 #[test]
-fn verify_build_artifacts_ignores_method_kind_surface_mismatch() {
+fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_reports_method_kind_surface_mismatch");
-    let diagnostics = {
+    let rendered = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join(".typepython/build/app"))
@@ -889,10 +889,58 @@ fn verify_build_artifacts_ignores_method_kind_surface_mismatch() {
                 stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
             }],
         )
+        .as_text()
     };
     remove_temp_project_dir(&project_dir);
 
-    assert!(diagnostics.is_empty());
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("declaration surface differs"));
+}
+
+#[test]
+fn verify_build_artifacts_reports_function_signature_surface_mismatch() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_reports_function_signature_surface_mismatch");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def build_user(name: str) -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "def build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("declaration surface differs"));
 }
 
 #[test]

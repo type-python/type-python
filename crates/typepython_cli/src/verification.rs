@@ -675,13 +675,22 @@ fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> 
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
 
-    if module_level_surface_names(&runtime_syntax) == module_level_surface_names(&stub_syntax) {
+    let runtime_surface = declaration_surface(&runtime_syntax)
+        .into_iter()
+        .filter(is_public_surface_entry)
+        .collect::<BTreeSet<_>>();
+    let stub_surface = declaration_surface(&stub_syntax)
+        .into_iter()
+        .filter(is_public_surface_entry)
+        .collect::<BTreeSet<_>>();
+
+    if runtime_surface == stub_surface {
         None
     } else {
         Some(Diagnostic::error(
             "TPY5003",
             format!(
-                "emitted runtime/stub public names differ between `{}` and `{}`",
+                "emitted runtime/stub declaration surface differs between `{}` and `{}`",
                 runtime_path.display(),
                 stub_path.display()
             ),
