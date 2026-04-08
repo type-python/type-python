@@ -8,7 +8,6 @@ use std::{
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
-use serde::Deserialize;
 use tar::Archive as TarArchive;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -24,8 +23,8 @@ use crate::pipeline::{
     ensure_output_dirs, materialize_build_outputs, py_typed_package_roots, run_pipeline,
 };
 use crate::{
-    CommandSummary, RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
-    exit_code, load_project, print_summary, resolve_python_executable,
+    CommandSummary, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for, exit_code, load_project,
+    print_summary, resolve_python_executable,
 };
 
 #[derive(Debug, Clone)]
@@ -325,7 +324,7 @@ pub(crate) fn verify_runtime_public_name_parity(
         else {
             continue;
         };
-        let runtime_names = match runtime_public_names(config, &out_root, &module_name) {
+        let runtime_names = match runtime_public_names(config, runtime_path) {
             Ok(names) => names,
             Err(error) => {
                 diagnostics.push(Diagnostic::error(
@@ -402,50 +401,21 @@ fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -
     Some(components.join("."))
 }
 
-#[derive(Debug, Deserialize)]
-struct RuntimePublicNameResult {
-    importable: bool,
-    names: Option<Vec<String>>,
-    error: Option<String>,
-}
-
 fn runtime_public_names(
     config: &ConfigHandle,
-    out_root: &Path,
-    module_name: &str,
+    runtime_path: &Path,
 ) -> std::result::Result<BTreeSet<String>, String> {
-    let interpreter = resolve_python_executable(config);
-    let output = ProcessCommand::new(&interpreter)
-        .args(["-c", RUNTIME_PUBLIC_NAMES_SCRIPT])
-        .arg(out_root)
-        .arg(module_name)
-        .output()
-        .map_err(|error| {
-            format!(
-                "unable to run runtime public-name probe with `{}`: {error}",
-                interpreter.display()
-            )
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr_suffix =
-            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
-        return Err(format!(
-            "runtime public-name probe exited with status {}{}",
-            output.status, stderr_suffix
-        ));
-    }
-    let result = serde_json::from_slice::<RuntimePublicNameResult>(&output.stdout)
-        .map_err(|error| format!("unable to parse runtime public-name output: {error}"))?;
-    if !result.importable {
-        return Err(result
-            .error
-            .unwrap_or_else(|| format!("module `{module_name}` could not be imported")));
-    }
-    Ok(result.names.unwrap_or_default().into_iter().collect::<BTreeSet<_>>())
+    public_names_from_module_file(config, runtime_path)
 }
 
 fn authoritative_public_names(
+    config: &ConfigHandle,
+    path: &Path,
+) -> std::result::Result<BTreeSet<String>, String> {
+    public_names_from_module_file(config, path)
+}
+
+fn public_names_from_module_file(
     config: &ConfigHandle,
     path: &Path,
 ) -> std::result::Result<BTreeSet<String>, String> {

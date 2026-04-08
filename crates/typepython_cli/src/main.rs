@@ -35,8 +35,6 @@ const CONFIG_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/typepython.toml"));
 const INIT_SOURCE_TEMPLATE: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../templates/src/app/__init__.tpy"));
-const RUNTIME_PUBLIC_NAMES_SCRIPT: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/runtime_public_names.py"));
 const STATIC_ALL_NAMES_SCRIPT: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/static_all_names.py"));
 
