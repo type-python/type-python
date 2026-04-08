@@ -106,12 +106,7 @@ pub(crate) fn run_build_like_command(
     let snapshot = run_pipeline(config)?;
     let mut diagnostics = build_diagnostics(config, &snapshot.diagnostics);
     if should_emit_build_outputs(config, &snapshot.diagnostics) {
-        let runtime_summary = match write_runtime_outputs(
-            &snapshot.emit_plan,
-            &snapshot.lowered_modules,
-            config.config.emit.runtime_validators,
-            Some(&snapshot.stub_contexts),
-        ) {
+        let materialize_notes = match materialize_build_outputs(config, &snapshot) {
             Ok(runtime_summary) => runtime_summary,
             Err(error) if error.to_string().contains("TPY5001") => {
                 diagnostics.push(Diagnostic::error("TPY5001", error.to_string()));
@@ -137,25 +132,7 @@ pub(crate) fn run_build_like_command(
                 });
             }
         };
-        notes.push(format!(
-            "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
-            runtime_summary.runtime_files_written,
-            runtime_summary.stub_files_written,
-            runtime_summary.py_typed_written
-        ));
-        if config.config.emit.emit_pyc {
-            let compiled_pyc = compile_runtime_bytecode(config, &snapshot.emit_plan)?;
-            notes.push(format!("compiled {} runtime artifact(s) to bytecode", compiled_pyc));
-        }
-        let snapshot_path = write_incremental_snapshot(
-            &config.resolve_relative_path(&config.config.project.cache_dir),
-            &snapshot.incremental,
-        )?;
-        notes.push(format!(
-            "cached {} module fingerprint(s) at {}",
-            snapshot.incremental.fingerprints.len(),
-            snapshot_path.display()
-        ));
+        notes.extend(materialize_notes);
     }
 
     let summary = CommandSummary {
@@ -173,7 +150,39 @@ pub(crate) fn run_build_like_command(
     Ok(exit_code(&diagnostics))
 }
 
-fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
+pub(crate) fn materialize_build_outputs(
+    config: &ConfigHandle,
+    snapshot: &PipelineSnapshot,
+) -> Result<Vec<String>> {
+    let runtime_summary = write_runtime_outputs(
+        &snapshot.emit_plan,
+        &snapshot.lowered_modules,
+        config.config.emit.runtime_validators,
+        Some(&snapshot.stub_contexts),
+    )?;
+    let mut notes = vec![format!(
+        "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
+        runtime_summary.runtime_files_written,
+        runtime_summary.stub_files_written,
+        runtime_summary.py_typed_written
+    )];
+    if config.config.emit.emit_pyc {
+        let compiled_pyc = compile_runtime_bytecode(config, &snapshot.emit_plan)?;
+        notes.push(format!("compiled {} runtime artifact(s) to bytecode", compiled_pyc));
+    }
+    let snapshot_path = write_incremental_snapshot(
+        &config.resolve_relative_path(&config.config.project.cache_dir),
+        &snapshot.incremental,
+    )?;
+    notes.push(format!(
+        "cached {} module fingerprint(s) at {}",
+        snapshot.incremental.fingerprints.len(),
+        snapshot_path.display()
+    ));
+    Ok(notes)
+}
+
+pub(crate) fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
     fs::create_dir_all(config.resolve_relative_path(&config.config.project.out_dir)).with_context(
         || {
             format!(

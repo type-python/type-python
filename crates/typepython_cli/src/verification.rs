@@ -20,7 +20,7 @@ use zip::ZipArchive;
 
 use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
-use crate::pipeline::run_pipeline;
+use crate::pipeline::{ensure_output_dirs, materialize_build_outputs, run_pipeline};
 use crate::{
     CommandSummary, RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
     exit_code, load_project, print_summary, resolve_python_executable,
@@ -65,11 +65,32 @@ pub(crate) fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerify
 
 pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
+    ensure_output_dirs(&config)?;
     let snapshot = run_pipeline(&config)?;
+    let mut notes = vec![String::from(
+        "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
+    )];
     let diagnostics = if snapshot.diagnostics.has_errors() {
         snapshot.diagnostics.clone()
     } else {
-        let mut diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+        let mut diagnostics = DiagnosticReport::default();
+        match materialize_build_outputs(&config, &snapshot) {
+            Ok(materialize_notes) => notes.extend(materialize_notes),
+            Err(error) if error.to_string().contains("TPY5001") => {
+                diagnostics.push(Diagnostic::error("TPY5001", error.to_string()));
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "unable to write runtime artifacts under {}",
+                        config.resolve_relative_path(&config.config.project.out_dir).display()
+                    )
+                });
+            }
+        }
+        if !diagnostics.has_errors() {
+            diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+        }
         if !diagnostics.has_errors() {
             diagnostics.diagnostics.extend(
                 verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
@@ -89,9 +110,6 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     };
 
     let supplied_artifact_count = args.wheels.len() + args.sdists.len();
-    let mut notes = vec![String::from(
-        "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
-    )];
     if supplied_artifact_count > 0 {
         notes.push(format!(
             "verified {} supplied wheel/sdist artifact(s) against the authoritative build tree",

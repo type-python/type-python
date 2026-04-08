@@ -5,14 +5,16 @@ use super::discovery::{
 };
 use super::migration::{build_migration_report, emit_migration_stubs};
 use super::pipeline::{
-    build_diagnostics, compile_runtime_bytecode, format_watch_rebuild_note, load_syntax_trees,
-    run_pipeline, should_emit_build_outputs, watch_targets, write_incremental_snapshot,
+    build_diagnostics, clean_project, compile_runtime_bytecode, format_watch_rebuild_note,
+    load_syntax_trees, run_pipeline, should_emit_build_outputs, watch_targets,
+    write_incremental_snapshot,
 };
 use super::verification::{
-    SuppliedArtifactKind, SuppliedVerifyArtifact, supplied_verify_artifacts,
+    SuppliedArtifactKind, SuppliedVerifyArtifact, run_verify, supplied_verify_artifacts,
     verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
 };
-use super::{Cli, embedded_config_template, exit_code_for_error, init_project};
+use super::{Cli, bytecode_path_for, embedded_config_template, exit_code_for_error, init_project};
+use crate::cli::{CleanArgs, VerifyArgs};
 use clap::Parser;
 use flate2::{Compression, write::GzEncoder};
 use notify::RecursiveMode;
@@ -640,6 +642,107 @@ fn verify_build_artifacts_reports_missing_runtime_and_marker_files() {
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("missing runtime artifact"));
     assert!(rendered.contains("missing package marker"));
+}
+
+#[test]
+fn run_verify_bootstraps_outputs_after_clean_project() {
+    let project_dir = temp_project_dir("run_verify_bootstraps_outputs_after_clean_project");
+    let result = {
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        assert_eq!(init_result, ExitCode::SUCCESS);
+
+        let out_dir = project_dir.join(".typepython/build");
+        let cache_dir = project_dir.join(".typepython/cache");
+        let runtime_path = out_dir.join("app/__init__.py");
+        let stub_path = out_dir.join("app/__init__.pyi");
+        let marker_path = out_dir.join("app/py.typed");
+        let snapshot_path = cache_dir.join("snapshot.json");
+
+        let clean_result = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+            .expect("clean should succeed");
+        assert_eq!(clean_result, ExitCode::SUCCESS);
+        assert!(!out_dir.exists());
+        assert!(!cache_dir.exists());
+
+        let verify_result = run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+        })
+        .expect("verify should succeed");
+
+        (
+            verify_result,
+            runtime_path.exists(),
+            stub_path.exists(),
+            marker_path.exists(),
+            snapshot_path.exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (verify_result, runtime_exists, stub_exists, marker_exists, snapshot_exists) = result;
+    assert_eq!(verify_result, ExitCode::SUCCESS);
+    assert!(runtime_exists);
+    assert!(stub_exists);
+    assert!(marker_exists);
+    assert!(snapshot_exists);
+}
+
+#[test]
+fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
+    let project_dir =
+        temp_project_dir("run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled");
+    let result = {
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        assert_eq!(init_result, ExitCode::SUCCESS);
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nemit_pyc = true\n",
+        )
+        .expect("test setup should succeed");
+
+        let runtime_path = project_dir.join(".typepython/build/app/__init__.py");
+        let bytecode_path =
+            bytecode_path_for(&runtime_path).expect("bytecode path should be computed");
+
+        let clean_result = clean_project(CleanArgs { project: Some(project_dir.clone()) })
+            .expect("clean should succeed");
+        assert_eq!(clean_result, ExitCode::SUCCESS);
+        assert!(!runtime_path.exists());
+        assert!(!bytecode_path.exists());
+
+        let verify_result = run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+        })
+        .expect("verify should succeed");
+
+        (verify_result, runtime_path.exists(), bytecode_path.exists())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (verify_result, runtime_exists, bytecode_exists) = result;
+    assert_eq!(verify_result, ExitCode::SUCCESS);
+    assert!(runtime_exists);
+    assert!(bytecode_exists);
 }
 
 #[test]
