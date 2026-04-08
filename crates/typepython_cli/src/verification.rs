@@ -256,6 +256,7 @@ pub(crate) fn verify_packaged_artifacts(
             return diagnostics;
         }
     };
+    let published_package_roots = published_package_roots(&expected_files);
 
     for artifact in supplied_artifacts {
         match read_supplied_artifact_entries(artifact) {
@@ -283,9 +284,9 @@ pub(crate) fn verify_packaged_artifacts(
                         Some(_) => {}
                     }
                 }
-                for relative_path in
-                    entries.keys().filter(|path| is_authoritative_publication_file(path))
-                {
+                for relative_path in entries.keys().filter(|path| {
+                    is_authoritative_publication_file(path, &published_package_roots)
+                }) {
                     if !expected_files.contains_key(relative_path) {
                         diagnostics.push(Diagnostic::error(
                             "TPY5003",
@@ -565,8 +566,19 @@ fn relative_publish_path(out_root: &Path, path: &Path) -> Result<String> {
     Ok(normalize_glob_path(relative))
 }
 
-fn is_authoritative_publication_file(path: &str) -> bool {
-    path.ends_with(".py") || path.ends_with(".pyi")
+fn published_package_roots(expected_files: &BTreeMap<String, Vec<u8>>) -> BTreeSet<String> {
+    expected_files
+        .keys()
+        .filter_map(|path| path.split_once('/').map(|(root, _)| root.to_owned()))
+        .collect()
+}
+
+fn is_authoritative_publication_file(
+    path: &str,
+    published_package_roots: &BTreeSet<String>,
+) -> bool {
+    (path.ends_with(".py") || path.ends_with(".pyi"))
+        && published_package_roots.iter().any(|root| path.starts_with(&format!("{root}/")))
 }
 
 fn read_supplied_artifact_entries(
