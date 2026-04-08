@@ -597,11 +597,13 @@ fn is_authoritative_publication_file(
         return false;
     }
     if let Some((root, _)) = path.split_once('/') {
-        return published_package_roots.contains(root)
-            || (!published_top_level_surface_files.is_empty()
-                && !is_allowed_non_surface_root(root));
+        return !is_allowed_non_surface_root(root)
+            && (published_package_roots.contains(root)
+                || !published_top_level_surface_files.is_empty()
+                || !published_package_roots.is_empty());
     }
-    !published_top_level_surface_files.is_empty() && path != "setup.py"
+    path != "setup.py"
+        && (!published_top_level_surface_files.is_empty() || !published_package_roots.is_empty())
 }
 
 fn is_allowed_non_surface_root(root: &str) -> bool {
