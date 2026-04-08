@@ -597,10 +597,15 @@ fn is_authoritative_publication_file(
         return false;
     }
     if let Some((root, _)) = path.split_once('/') {
+        if published_package_roots.contains(root) {
+            return true;
+        }
         return !is_allowed_non_surface_path(path)
-            && (published_package_roots.contains(root)
-                || !published_top_level_surface_files.is_empty()
+            && (!published_top_level_surface_files.is_empty()
                 || !published_package_roots.is_empty());
+    }
+    if published_top_level_surface_files.contains(path) {
+        return true;
     }
     !is_allowed_non_surface_file(path)
         && (!published_top_level_surface_files.is_empty() || !published_package_roots.is_empty())
