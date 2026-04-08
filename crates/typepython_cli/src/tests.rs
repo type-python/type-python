@@ -1480,6 +1480,59 @@ fn verify_packaged_artifacts_reports_unexpected_runtime_file_in_wheel() {
 }
 
 #[test]
+fn verify_packaged_artifacts_reports_unexpected_importable_artifact_shapes_in_wheel() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_reports_unexpected_importable_artifact_shapes_in_wheel",
+    );
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("app/__pycache__/evil.cpython-311.pyc", "x"),
+                ("app/evil.pyo", "x"),
+                ("evil.pth", "x"),
+                ("type_python-0.1.0.data/purelib/evil.abi3.so", "x"),
+                ("type_python-0.1.0.data/platlib/evil.cp311-win_amd64.pyd", "x"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("app/__pycache__/evil.cpython-311.pyc"));
+    assert!(rendered.contains("app/evil.pyo"));
+    assert!(rendered.contains("evil.pth"));
+    assert!(rendered.contains("type_python-0.1.0.data/purelib/evil.abi3.so"));
+    assert!(rendered.contains("type_python-0.1.0.data/platlib/evil.cp311-win_amd64.pyd"));
+}
+
+#[test]
 fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_wheel() {
     let project_dir = temp_project_dir(
         "verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_wheel",
@@ -1565,6 +1618,60 @@ fn verify_packaged_artifacts_reports_unexpected_runtime_file_in_sdist() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("unexpected published file `app/extra.py`"));
+}
+
+#[test]
+fn verify_packaged_artifacts_reports_unexpected_importable_artifact_shapes_in_sdist() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_reports_unexpected_importable_artifact_shapes_in_sdist",
+    );
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/__init__.pyi"), "pass\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        let sdist_path = project_dir.join("dist/type-python-0.1.0.tar.gz");
+        write_tar_gz_archive(
+            &sdist_path,
+            "type-python-0.1.0",
+            &[
+                ("app/__init__.py", "pass\n"),
+                ("app/__init__.pyi", "pass\n"),
+                ("app/py.typed", ""),
+                ("app/__pycache__/evil.cpython-311.pyc", "x"),
+                ("app/evil.pyo", "x"),
+                ("evil.pth", "x"),
+                ("app/evil.abi3.so", "x"),
+                ("app/evil.pyd", "x"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Sdist, path: sdist_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("app/__pycache__/evil.cpython-311.pyc"));
+    assert!(rendered.contains("app/evil.pyo"));
+    assert!(rendered.contains("evil.pth"));
+    assert!(rendered.contains("app/evil.abi3.so"));
+    assert!(rendered.contains("app/evil.pyd"));
 }
 
 #[test]

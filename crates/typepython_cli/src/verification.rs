@@ -584,9 +584,20 @@ fn published_top_level_surface_files(
 ) -> BTreeSet<String> {
     expected_files
         .keys()
-        .filter(|path| !path.contains('/') && (path.ends_with(".py") || path.ends_with(".pyi")))
+        .filter(|path| !path.contains('/') && is_importable_publication_file_name(path))
         .cloned()
         .collect()
+}
+
+fn is_importable_publication_file_name(path: &str) -> bool {
+    let leaf = path.rsplit('/').next().unwrap_or(path);
+    leaf.ends_with(".py")
+        || leaf.ends_with(".pyi")
+        || leaf.ends_with(".pyc")
+        || leaf.ends_with(".pyo")
+        || leaf.ends_with(".pth")
+        || leaf.ends_with(".pyd")
+        || leaf.ends_with(".so")
 }
 
 fn is_authoritative_publication_file(
@@ -595,7 +606,7 @@ fn is_authoritative_publication_file(
     published_package_roots: &BTreeSet<String>,
     published_top_level_surface_files: &BTreeSet<String>,
 ) -> bool {
-    if !(path.ends_with(".py") || path.ends_with(".pyi")) {
+    if !is_importable_publication_file_name(path) {
         return false;
     }
     if matches!(artifact_kind, SuppliedArtifactKind::Wheel) {
