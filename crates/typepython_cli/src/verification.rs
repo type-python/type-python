@@ -315,8 +315,19 @@ pub(crate) fn verify_runtime_public_name_parity(
         else {
             continue;
         };
-        let Some(runtime_names) = runtime_public_names(config, &out_root, &module_name) else {
-            continue;
+        let runtime_names = match runtime_public_names(config, &out_root, &module_name) {
+            Ok(names) => names,
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!(
+                        "unable to inspect runtime public names for `{}` from `{}`: {error}",
+                        module_name,
+                        runtime_path.display(),
+                    ),
+                ));
+                continue;
+            }
         };
         let authoritative_names = match authoritative_public_names(config, stub_path) {
             Ok(names) => names,
@@ -385,25 +396,43 @@ fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -
 struct RuntimePublicNameResult {
     importable: bool,
     names: Option<Vec<String>>,
+    error: Option<String>,
 }
 
 fn runtime_public_names(
     config: &ConfigHandle,
     out_root: &Path,
     module_name: &str,
-) -> Option<BTreeSet<String>> {
+) -> std::result::Result<BTreeSet<String>, String> {
     let interpreter = resolve_python_executable(config);
     let output = ProcessCommand::new(&interpreter)
         .args(["-c", RUNTIME_PUBLIC_NAMES_SCRIPT])
         .arg(out_root)
         .arg(module_name)
         .output()
-        .ok()?;
+        .map_err(|error| {
+            format!(
+                "unable to run runtime public-name probe with `{}`: {error}",
+                interpreter.display()
+            )
+        })?;
     if !output.status.success() {
-        return None;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_suffix =
+            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
+        return Err(format!(
+            "runtime public-name probe exited with status {}{}",
+            output.status, stderr_suffix
+        ));
     }
-    let result = serde_json::from_slice::<RuntimePublicNameResult>(&output.stdout).ok()?;
-    result.importable.then(|| result.names.unwrap_or_default().into_iter().collect::<BTreeSet<_>>())
+    let result = serde_json::from_slice::<RuntimePublicNameResult>(&output.stdout)
+        .map_err(|error| format!("unable to parse runtime public-name output: {error}"))?;
+    if !result.importable {
+        return Err(result
+            .error
+            .unwrap_or_else(|| format!("module `{module_name}` could not be imported")));
+    }
+    Ok(result.names.unwrap_or_default().into_iter().collect::<BTreeSet<_>>())
 }
 
 fn authoritative_public_names(

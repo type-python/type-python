@@ -1437,6 +1437,44 @@ fn verify_runtime_public_name_parity_reports_stub_missing_runtime_export() {
 }
 
 #[test]
+fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_reports_runtime_import_failure");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "raise RuntimeError(\"boom\")\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("unable to inspect runtime public names for `app`"));
+    assert!(rendered.contains("RuntimeError: boom"));
+}
+
+#[test]
 fn verify_command_parses_supplied_artifact_flags() {
     let cli = Cli::parse_from([
         "typepython",
