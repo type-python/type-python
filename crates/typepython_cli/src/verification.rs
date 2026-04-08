@@ -1,9 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    env, fs,
     io::Read,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, ExitCode},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -23,9 +24,15 @@ use crate::pipeline::{
     ensure_output_dirs, materialize_build_outputs, py_typed_package_roots, run_pipeline,
 };
 use crate::{
-    CommandSummary, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for, exit_code, load_project,
-    print_summary, resolve_python_executable,
+    CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
+    exit_code, load_project, print_summary, resolve_python_executable,
 };
+
+#[derive(Debug, serde::Deserialize)]
+struct RuntimeImportabilityResult {
+    importable: bool,
+    error: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct SuppliedVerifyArtifact {
@@ -324,6 +331,18 @@ pub(crate) fn verify_runtime_public_name_parity(
         else {
             continue;
         };
+        if let Err(error) = verify_runtime_module_importability(config, &out_root, &module_name) {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "runtime module `{}` from `{}` is not importable: {}",
+                    module_name,
+                    runtime_path.display(),
+                    error,
+                ),
+            ));
+            continue;
+        }
         let runtime_names = match runtime_public_names(config, runtime_path) {
             Ok(names) => names,
             Err(error) => {
@@ -406,6 +425,61 @@ fn runtime_public_names(
     runtime_path: &Path,
 ) -> std::result::Result<BTreeSet<String>, String> {
     public_names_from_module_file(config, runtime_path)
+}
+
+fn verify_runtime_module_importability(
+    config: &ConfigHandle,
+    out_root: &Path,
+    module_name: &str,
+) -> std::result::Result<(), String> {
+    let probe_dir = runtime_import_probe_dir(module_name)?;
+    let interpreter = resolve_python_executable(config);
+    let output = ProcessCommand::new(&interpreter)
+        .current_dir(&probe_dir)
+        .args(["-I", "-B", "-S", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
+        .arg(out_root)
+        .arg(module_name)
+        .output()
+        .map_err(|error| {
+            format!(
+                "unable to run runtime importability probe with `{}`: {error}",
+                interpreter.display()
+            )
+        });
+    let _ = fs::remove_dir_all(&probe_dir);
+    let output = output?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_suffix =
+            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
+        return Err(format!(
+            "runtime importability probe exited with status {}{}",
+            output.status, stderr_suffix
+        ));
+    }
+    let result = serde_json::from_slice::<RuntimeImportabilityResult>(&output.stdout)
+        .map_err(|error| format!("unable to parse runtime importability output: {error}"))?;
+    if result.importable {
+        Ok(())
+    } else {
+        Err(result.error.unwrap_or_else(|| format!("module `{module_name}` could not be imported")))
+    }
+}
+
+fn runtime_import_probe_dir(module_name: &str) -> std::result::Result<PathBuf, String> {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system time should be after epoch: {error}"))?
+        .as_nanos();
+    let sanitized = module_name
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>();
+    let directory = env::temp_dir().join(format!("typepython-runtime-import-{sanitized}-{unique}"));
+    fs::create_dir_all(&directory).map_err(|error| {
+        format!("unable to create runtime probe dir {}: {error}", directory.display())
+    })?;
+    Ok(directory)
 }
 
 fn authoritative_public_names(

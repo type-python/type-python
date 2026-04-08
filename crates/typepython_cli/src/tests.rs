@@ -1682,9 +1682,9 @@ fn verify_runtime_public_name_parity_reports_stub_missing_runtime_export() {
 }
 
 #[test]
-fn verify_runtime_public_name_parity_does_not_execute_top_level_runtime_code() {
+fn verify_runtime_public_name_parity_isolates_top_level_runtime_side_effects() {
     let project_dir = temp_project_dir(
-        "verify_runtime_public_name_parity_does_not_execute_top_level_runtime_code",
+        "verify_runtime_public_name_parity_isolates_top_level_runtime_side_effects",
     );
     let diagnostics = {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
@@ -1694,10 +1694,7 @@ fn verify_runtime_public_name_parity_does_not_execute_top_level_runtime_code() {
         let side_effect_path = project_dir.join("import_side_effect.txt");
         fs::write(
             project_dir.join(".typepython/build/app/__init__.py"),
-            format!(
-                "from pathlib import Path\nPath({:?}).write_text(\"verify imported me\", encoding=\"utf-8\")\n__all__ = [\"build_user\"]\n\ndef build_user() -> int:\n    return 1\n",
-                side_effect_path,
-            ),
+            "from pathlib import Path\nPath(\"import_side_effect.txt\").write_text(\"verify imported me\", encoding=\"utf-8\")\n__all__ = [\"build_user\"]\n\ndef build_user() -> int:\n    return 1\n",
         )
         .expect("test setup should succeed");
         fs::write(
@@ -1736,7 +1733,7 @@ fn verify_runtime_public_name_parity_uses_top_level_non_underscore_names_when_al
             .expect("test setup should succeed");
         fs::write(
             project_dir.join(".typepython/build/app/__init__.py"),
-            "explode()\n\ndef build_user() -> int:\n    return 1\n\n_hidden = 1\n",
+            "def build_user() -> int:\n    return 1\n\n_hidden = 1\n",
         )
         .expect("test setup should succeed");
         fs::write(
@@ -1758,6 +1755,45 @@ fn verify_runtime_public_name_parity_uses_top_level_non_underscore_names_when_al
     remove_temp_project_dir(&project_dir);
 
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_reports_runtime_import_failure");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "raise RuntimeError(\"boom\")\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("runtime module `app`"));
+    assert!(rendered.contains("not importable"));
+    assert!(rendered.contains("RuntimeError: boom"));
 }
 
 #[test]
