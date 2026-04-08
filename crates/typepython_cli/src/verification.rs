@@ -288,6 +288,7 @@ pub(crate) fn verify_packaged_artifacts(
                 for relative_path in entries.keys().filter(|path| {
                     is_authoritative_publication_file(
                         path,
+                        artifact.kind,
                         &published_package_roots,
                         &published_top_level_surface_files,
                     )
@@ -590,11 +591,27 @@ fn published_top_level_surface_files(
 
 fn is_authoritative_publication_file(
     path: &str,
+    artifact_kind: SuppliedArtifactKind,
     published_package_roots: &BTreeSet<String>,
     published_top_level_surface_files: &BTreeSet<String>,
 ) -> bool {
     if !(path.ends_with(".py") || path.ends_with(".pyi")) {
         return false;
+    }
+    if matches!(artifact_kind, SuppliedArtifactKind::Wheel) {
+        if let Some((root, remainder)) = path.split_once('/') {
+            if published_package_roots.contains(root) {
+                return true;
+            }
+            if root.ends_with(".dist-info") {
+                return false;
+            }
+            if root.ends_with(".data") {
+                return remainder.starts_with("purelib/") || remainder.starts_with("platlib/");
+            }
+            return true;
+        }
+        return true;
     }
     if let Some((root, _)) = path.split_once('/') {
         if published_package_roots.contains(root) {
