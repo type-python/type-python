@@ -1166,6 +1166,51 @@ fn verify_build_artifacts_requires_py_typed_for_stub_only_package() {
 }
 
 #[test]
+fn verify_build_artifacts_requires_py_typed_for_implicit_namespace_package() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_requires_py_typed_for_implicit_namespace_package");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/ns"))
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/ns/mod.py"),
+            "def build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/ns/mod.pyi"),
+            "def build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/ns/mod.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/ns/mod.py")),
+                stub_path: Some(project_dir.join(".typepython/build/ns/mod.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("missing package marker"));
+    assert!(rendered.contains("ns/py.typed"));
+}
+
+#[test]
 fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
     let project_dir =
         temp_project_dir("verify_packaged_artifacts_accepts_matching_wheel_and_sdist");
@@ -1299,6 +1344,55 @@ fn verify_packaged_artifacts_reports_missing_py_typed_in_wheel() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("missing published file `app/py.typed`"));
+}
+
+#[test]
+fn verify_packaged_artifacts_reports_missing_py_typed_for_implicit_namespace_package_in_wheel() {
+    let project_dir = temp_project_dir(
+        "verify_packaged_artifacts_reports_missing_py_typed_for_implicit_namespace_package_in_wheel",
+    );
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/ns"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/ns/mod.py"),
+            "def build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/ns/mod.pyi"),
+            "def build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/ns/py.typed"), "")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/type_python-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("ns/mod.py", "def build_user() -> int:\n    return 1\n"),
+                ("ns/mod.pyi", "def build_user() -> int: ...\n"),
+            ],
+        );
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_packaged_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/ns/mod.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/ns/mod.py")),
+                stub_path: Some(project_dir.join(".typepython/build/ns/mod.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("missing published file `ns/py.typed`"));
 }
 
 #[test]

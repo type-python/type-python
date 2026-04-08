@@ -20,7 +20,9 @@ use zip::ZipArchive;
 
 use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
-use crate::pipeline::{ensure_output_dirs, materialize_build_outputs, run_pipeline};
+use crate::pipeline::{
+    ensure_output_dirs, materialize_build_outputs, py_typed_package_roots, run_pipeline,
+};
 use crate::{
     CommandSummary, RUNTIME_PUBLIC_NAMES_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
     exit_code, load_project, print_summary, resolve_python_executable,
@@ -137,7 +139,7 @@ pub(crate) fn verify_build_artifacts(
     artifacts: &[EmitArtifact],
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
-    let mut package_roots = BTreeSet::new();
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
     for artifact in artifacts {
         if let Some(runtime_path) = &artifact.runtime_path {
@@ -170,11 +172,6 @@ pub(crate) fn verify_build_artifacts(
                     ));
                 }
             }
-            if is_package_init_path(runtime_path) {
-                if let Some(parent) = runtime_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
-            }
         }
 
         if let Some(stub_path) = &artifact.stub_path {
@@ -185,11 +182,6 @@ pub(crate) fn verify_build_artifacts(
                 ));
             } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
                 diagnostics.push(diagnostic);
-            }
-            if is_package_init_path(stub_path) {
-                if let Some(parent) = stub_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
             }
         }
 
@@ -206,7 +198,7 @@ pub(crate) fn verify_build_artifacts(
     }
 
     if config.config.emit.write_py_typed {
-        for package_root in package_roots {
+        for package_root in py_typed_package_roots(&out_root, artifacts) {
             let marker_path = package_root.join("py.typed");
             if !marker_path.exists() {
                 diagnostics.push(Diagnostic::error(
@@ -498,26 +490,16 @@ fn expected_published_files(
 ) -> Result<BTreeMap<String, Vec<u8>>> {
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
     let mut expected_files = BTreeMap::new();
-    let mut package_roots = BTreeSet::new();
+    let package_roots = py_typed_package_roots(&out_root, artifacts);
 
     for artifact in artifacts {
         if let Some(runtime_path) = &artifact.runtime_path {
             expected_files
                 .insert(relative_publish_path(&out_root, runtime_path)?, fs::read(runtime_path)?);
-            if is_package_init_path(runtime_path) {
-                if let Some(parent) = runtime_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
-            }
         }
         if let Some(stub_path) = &artifact.stub_path {
             expected_files
                 .insert(relative_publish_path(&out_root, stub_path)?, fs::read(stub_path)?);
-            if is_package_init_path(stub_path) {
-                if let Some(parent) = stub_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
-            }
         }
     }
 
@@ -541,10 +523,6 @@ fn relative_publish_path(out_root: &Path, path: &Path) -> Result<String> {
 
 fn is_authoritative_publication_file(path: &str) -> bool {
     path.ends_with(".py") || path.ends_with(".pyi")
-}
-
-fn is_package_init_path(path: &Path) -> bool {
-    path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.pyi")
 }
 
 fn read_supplied_artifact_entries(

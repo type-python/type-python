@@ -154,17 +154,28 @@ pub(crate) fn materialize_build_outputs(
     config: &ConfigHandle,
     snapshot: &PipelineSnapshot,
 ) -> Result<Vec<String>> {
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
     let runtime_summary = write_runtime_outputs(
         &snapshot.emit_plan,
         &snapshot.lowered_modules,
         config.config.emit.runtime_validators,
         Some(&snapshot.stub_contexts),
     )?;
+    let mut py_typed_written = runtime_summary.py_typed_written;
+    if config.config.emit.write_py_typed {
+        for package_root in py_typed_package_roots(&out_root, &snapshot.emit_plan) {
+            let marker_path = package_root.join("py.typed");
+            if !marker_path.exists() {
+                fs::write(&marker_path, "").with_context(|| {
+                    format!("unable to write package marker {}", marker_path.display())
+                })?;
+                py_typed_written += 1;
+            }
+        }
+    }
     let mut notes = vec![format!(
         "wrote {} runtime artifact(s), {} stub artifact(s), {} `py.typed` marker(s)",
-        runtime_summary.runtime_files_written,
-        runtime_summary.stub_files_written,
-        runtime_summary.py_typed_written
+        runtime_summary.runtime_files_written, runtime_summary.stub_files_written, py_typed_written
     )];
     if config.config.emit.emit_pyc {
         let compiled_pyc = compile_runtime_bytecode(config, &snapshot.emit_plan)?;
@@ -180,6 +191,32 @@ pub(crate) fn materialize_build_outputs(
         snapshot_path.display()
     ));
     Ok(notes)
+}
+
+pub(crate) fn py_typed_package_roots(
+    out_root: &Path,
+    artifacts: &[EmitArtifact],
+) -> BTreeSet<PathBuf> {
+    let mut package_roots = BTreeSet::new();
+
+    for artifact in artifacts {
+        for path in
+            [artifact.runtime_path.as_ref(), artifact.stub_path.as_ref()].into_iter().flatten()
+        {
+            let Some(parent) = path.parent() else {
+                continue;
+            };
+            let is_package_init = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "__init__.py" || name == "__init__.pyi");
+            if is_package_init || parent != out_root {
+                package_roots.insert(parent.to_path_buf());
+            }
+        }
+    }
+
+    package_roots
 }
 
 pub(crate) fn ensure_output_dirs(config: &ConfigHandle) -> Result<()> {
