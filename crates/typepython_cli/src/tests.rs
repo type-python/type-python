@@ -1888,6 +1888,68 @@ fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
 }
 
 #[test]
+fn verify_runtime_public_name_parity_uses_configured_interpreter_environment() {
+    let project_dir = temp_project_dir(
+        "verify_runtime_public_name_parity_uses_configured_interpreter_environment",
+    );
+    let diagnostics = {
+        fs::create_dir_all(project_dir.join("bin")).expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        let fake_python = project_dir.join("bin/fake-python.sh");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"bin{}fake-python.sh\"\n",
+                MAIN_SEPARATOR
+            ),
+        )
+        .expect("test setup should succeed");
+        write_executable_script(
+            &fake_python,
+            r#"#!/bin/sh
+if [ "$1" = "-c" ] && printf '%s' "$2" | grep -q 'version_info'; then
+  printf '3.10\n'
+  exit 0
+fi
+if printf '%s' "$*" | grep -q 'importlib.import_module'; then
+  if printf ' %s ' "$*" | grep -q ' -S '; then
+    printf '{"importable": false, "error": "ModuleNotFoundError: No module named demo_dep"}\n'
+  else
+    printf '{"importable": true}\n'
+  fi
+  exit 0
+fi
+exec python3 "$@"
+"#,
+        );
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "import demo_dep\n__all__ = [\"build_user\"]\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
 fn verify_command_parses_supplied_artifact_flags() {
     let cli = Cli::parse_from([
         "typepython",
