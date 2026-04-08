@@ -313,7 +313,9 @@ fn finalize_generic_solution_detailed(
                         .map(typepython_syntax::TypeExpr::render)
                         .or_else(|| type_param.default.clone())
                 {
-                    substitutions.types.insert(type_param.name.clone(), lower_type_text_or_name(&default));
+                    substitutions
+                        .types
+                        .insert(type_param.name.clone(), lower_type_text_or_name(&default));
                 }
                 let Some(actual) = substitutions.types.get(&type_param.name) else {
                     continue;
@@ -325,7 +327,10 @@ fn finalize_generic_solution_detailed(
                         kind: type_param.kind.clone(),
                         name: type_param.name.clone(),
                         bound: type_param.bound.clone(),
-                        bound_expr: type_param.bound_expr.clone().map(|expr| typepython_binding::BoundTypeExpr { expr }),
+                        bound_expr: type_param
+                            .bound_expr
+                            .clone()
+                            .map(|expr| typepython_binding::BoundTypeExpr { expr }),
                         constraints: type_param.constraints.clone(),
                         constraint_exprs: type_param
                             .constraint_exprs
@@ -334,7 +339,10 @@ fn finalize_generic_solution_detailed(
                             .map(|expr| typepython_binding::BoundTypeExpr { expr })
                             .collect(),
                         default: type_param.default.clone(),
-                        default_expr: type_param.default_expr.clone().map(|expr| typepython_binding::BoundTypeExpr { expr }),
+                        default_expr: type_param
+                            .default_expr
+                            .clone()
+                            .map(|expr| typepython_binding::BoundTypeExpr { expr }),
                     },
                     actual,
                 ) {
@@ -821,7 +829,12 @@ pub(crate) fn instantiate_direct_function_signature(
                 typepython_syntax::DirectFunctionParamSite {
                     name: format!("{}{}", param.name, index),
                     annotation: Some(render_semantic_type(element_type)),
-                    annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(element_type)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(element_type)))),
+                    annotation_expr: Some(
+                        typepython_syntax::TypeExpr::parse(&render_semantic_type(element_type))
+                            .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
+                                element_type,
+                            ))),
+                    ),
                     has_default: false,
                     positional_only: true,
                     keyword_only: false,
@@ -833,7 +846,12 @@ pub(crate) fn instantiate_direct_function_signature(
                 instantiated.push(typepython_syntax::DirectFunctionParamSite {
                     name: param.name.clone(),
                     annotation: Some(render_semantic_type(variadic_tail)),
-                    annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(variadic_tail)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(variadic_tail)))),
+                    annotation_expr: Some(
+                        typepython_syntax::TypeExpr::parse(&render_semantic_type(variadic_tail))
+                            .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
+                                variadic_tail,
+                            ))),
+                    ),
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -853,7 +871,8 @@ pub(crate) fn instantiate_direct_function_param(
     mut param: typepython_syntax::DirectFunctionParamSite,
     substitutions: &GenericTypeParamSubstitutions,
 ) -> typepython_syntax::DirectFunctionParamSite {
-    let instantiated_annotation = instantiate_direct_function_param_annotation(&param, substitutions);
+    let instantiated_annotation =
+        instantiate_direct_function_param_annotation(&param, substitutions);
     param.annotation = instantiated_annotation.as_ref().map(render_semantic_type);
     param.annotation_expr = instantiated_annotation
         .as_ref()
@@ -1060,7 +1079,12 @@ pub(crate) fn resolve_callable_shape_from_metadata(
             .map(|(param, annotation)| typepython_syntax::DirectFunctionParamSite {
                 name: param.name.clone(),
                 annotation: Some(render_semantic_type(annotation)),
-                annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(annotation)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(annotation)))),
+                annotation_expr: Some(
+                    typepython_syntax::TypeExpr::parse(&render_semantic_type(annotation))
+                        .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
+                            annotation,
+                        ))),
+                ),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -1118,7 +1142,11 @@ pub(crate) fn synthesize_semantic_param_list_binding(
         .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
             name: format!("arg{index}"),
             annotation: Some(render_semantic_type(&annotation)),
-            annotation_expr: Some(typepython_syntax::TypeExpr::parse(&render_semantic_type(&annotation)).unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(&annotation)))),
+            annotation_expr: Some(
+                typepython_syntax::TypeExpr::parse(&render_semantic_type(&annotation)).unwrap_or(
+                    typepython_syntax::TypeExpr::Name(render_semantic_type(&annotation)),
+                ),
+            ),
             has_default: false,
             positional_only: false,
             keyword_only: false,

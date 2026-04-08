@@ -214,8 +214,7 @@ pub(super) fn collect_typed_dict_openness(
         if let Some(parsed) = annotation
             .annotation_expr
             .as_ref()
-            .map(parse_typed_dict_extra_items_expr)
-            .flatten()
+            .and_then(parse_typed_dict_extra_items_expr)
             .or_else(|| parse_typed_dict_extra_items(node, &annotation.rendered_annotation()))
         {
             if parsed.rendered_value_type() == "Never" {

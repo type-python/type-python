@@ -685,10 +685,8 @@ pub(super) fn literal_match_exhaustiveness_diagnostics(
                 }
             }
 
-            let missing = literals
-                .into_iter()
-                .filter(|value| !covered.contains(value))
-                .collect::<Vec<_>>();
+            let missing =
+                literals.into_iter().filter(|value| !covered.contains(value)).collect::<Vec<_>>();
             if missing.is_empty() {
                 return None;
             }
@@ -701,10 +699,8 @@ pub(super) fn literal_match_exhaustiveness_diagnostics(
                     missing.join(", ")
                 ),
             );
-            let rendered_cases = missing
-                .iter()
-                .map(|value| format!("case {value}:\n    ..."))
-                .collect::<Vec<_>>();
+            let rendered_cases =
+                missing.iter().map(|value| format!("case {value}:\n    ...")).collect::<Vec<_>>();
             Some(attach_match_case_suggestion(
                 diagnostic,
                 &node.module_path,
@@ -830,9 +826,9 @@ pub(super) fn resolve_match_subject_enum_type(subject_type: &SemanticType) -> St
 
 fn literal_match_subject_values(subject_type: &SemanticType) -> Option<Vec<String>> {
     match subject_type.strip_annotated() {
-        SemanticType::Generic { head, args } if head == "Literal" && !args.is_empty() => Some(
-            args.iter().map(render_semantic_type).collect(),
-        ),
+        SemanticType::Generic { head, args } if head == "Literal" && !args.is_empty() => {
+            Some(args.iter().map(render_semantic_type).collect())
+        }
         SemanticType::Union(branches) => {
             let mut values = Vec::new();
             for branch in branches {

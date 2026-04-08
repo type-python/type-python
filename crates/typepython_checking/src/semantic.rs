@@ -1233,7 +1233,11 @@ pub(super) fn resolve_contextual_yield_type(
             Some(yield_site.owner_name.as_str()),
             yield_site.owner_type_name.as_deref(),
             yield_site.line,
-        yield_site.value_metadata().as_ref().and_then(typepython_syntax::DirectExprMetadata::rendered_value_type).as_deref(),
+            yield_site
+                .value_metadata()
+                .as_ref()
+                .and_then(typepython_syntax::DirectExprMetadata::rendered_value_type)
+                .as_deref(),
             false,
             yield_site.value_callee.as_deref(),
             yield_site.value_name.as_deref(),

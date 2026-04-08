@@ -1,7 +1,7 @@
 use super::discovery::{
-    bundled_stdlib_snapshot_identity_for_root, bundled_stdlib_sources_for_root,
-    collect_source_paths, external_resolution_sources, python_type_roots_from_interpreter,
-    ExternalSupportRoot,
+    ExternalSupportRoot, bundled_stdlib_snapshot_identity_for_root,
+    bundled_stdlib_sources_for_root, collect_source_paths, external_resolution_sources,
+    python_type_roots_from_interpreter,
 };
 use super::migration::{build_migration_report, emit_migration_stubs};
 use super::pipeline::{
@@ -9,12 +9,12 @@ use super::pipeline::{
     run_pipeline, should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
 use super::verification::{
-    supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
-    verify_runtime_public_name_parity, SuppliedArtifactKind, SuppliedVerifyArtifact,
+    SuppliedArtifactKind, SuppliedVerifyArtifact, supplied_verify_artifacts,
+    verify_build_artifacts, verify_packaged_artifacts, verify_runtime_public_name_parity,
 };
-use super::{embedded_config_template, exit_code_for_error, init_project, Cli};
+use super::{Cli, embedded_config_template, exit_code_for_error, init_project};
 use clap::Parser;
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use notify::RecursiveMode;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -30,10 +30,10 @@ use typepython_binding::bind;
 use typepython_checking::check as check_graph;
 use typepython_config::load;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
-use typepython_emit::{write_runtime_outputs, EmitArtifact};
+use typepython_emit::{EmitArtifact, write_runtime_outputs};
 use typepython_graph::build as build_graph;
 use typepython_incremental::IncrementalState;
-use zip::{write::FileOptions, ZipWriter};
+use zip::{ZipWriter, write::FileOptions};
 
 #[test]
 fn collect_source_paths_includes_implicit_namespace_packages() {
@@ -1858,9 +1858,11 @@ fn watch_targets_include_config_and_existing_source_roots() {
     assert!(targets.iter().any(|(path, mode)| {
         path.ends_with("typepython.toml") && *mode == RecursiveMode::NonRecursive
     }));
-    assert!(targets
-        .iter()
-        .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive));
+    assert!(
+        targets
+            .iter()
+            .any(|(path, mode)| path.ends_with("src") && *mode == RecursiveMode::Recursive)
+    );
 }
 
 #[test]

@@ -364,7 +364,10 @@ fn build_cached_semantic_declaration_facts(
             let annotation_text = declaration
                 .value_annotation()
                 .map(typepython_binding::BoundTypeExpr::render)
-                .or_else(|| (!declaration.rendered_detail().trim().is_empty()).then(|| declaration.rendered_detail()));
+                .or_else(|| {
+                    (!declaration.rendered_detail().trim().is_empty())
+                        .then(|| declaration.rendered_detail())
+                });
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
@@ -385,12 +388,14 @@ fn build_cached_semantic_declaration_facts(
                 body_id: type_store.intern(lower_type_text_or_name(&body_text)),
             }
         }),
-        import_target: (declaration.kind == DeclarationKind::Import).then(|| {
-            declaration
-                .import_target()
-                .map(semantic_import_target_from_bound_target)
-                .or_else(|| parse_import_target_ref(&declaration.rendered_detail()))
-        }).flatten(),
+        import_target: (declaration.kind == DeclarationKind::Import)
+            .then(|| {
+                declaration
+                    .import_target()
+                    .map(semantic_import_target_from_bound_target)
+                    .or_else(|| parse_import_target_ref(&declaration.rendered_detail()))
+            })
+            .flatten(),
     }
 }
 
@@ -413,14 +418,10 @@ fn semantic_callable_from_bound_signature(
             keyword_variadic: param.keyword_variadic,
         })
         .collect::<Vec<_>>();
-    let return_annotation_text = signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render);
+    let return_annotation_text =
+        signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render);
     let return_type = return_annotation_text.as_deref().map(lower_type_text_or_name);
-    SemanticCallableDeclaration {
-        params,
-        semantic_params,
-        return_annotation_text,
-        return_type,
-    }
+    SemanticCallableDeclaration { params, semantic_params, return_annotation_text, return_type }
 }
 
 fn semantic_import_target_from_bound_target(
@@ -429,13 +430,10 @@ fn semantic_import_target_from_bound_target(
     SemanticImportTargetRef {
         raw_target: target.raw_target.clone(),
         module_target: target.module_target.clone(),
-        symbol_target: target
-            .symbol_target
-            .as_ref()
-            .map(|symbol| SemanticImportSymbolTargetRef {
-                module_key: symbol.module_key.clone(),
-                symbol_name: symbol.symbol_name.clone(),
-            }),
+        symbol_target: target.symbol_target.as_ref().map(|symbol| SemanticImportSymbolTargetRef {
+            module_key: symbol.module_key.clone(),
+            symbol_name: symbol.symbol_name.clone(),
+        }),
     }
 }
 

@@ -8,22 +8,22 @@ use std::{
 use anyhow::{Context, Result};
 use glob::Pattern;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
-use typepython_binding::{bind, BindingTable};
+use typepython_binding::{BindingTable, bind};
 use typepython_checking::{
     check_modules_with_binding_metadata, semantic_incremental_state_with_binding_metadata,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
-use typepython_graph::{build, ModuleGraph, ModuleNode};
+use typepython_graph::{ModuleGraph, ModuleNode, build};
 use typepython_incremental::{
-    affected_modules, dependency_index, diff, snapshot_diff_modules, IncrementalState,
-    ModuleDependencyIndex,
+    IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
+    snapshot_diff_modules,
 };
 use typepython_syntax::{
-    apply_type_ignore_directives, parse_with_options, prepare_syntax_tree_for_external_formatter,
     NamedBlockStatement, ParseOptions, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
+    apply_type_ignore_directives, parse_with_options, prepare_syntax_tree_for_external_formatter,
 };
 use url::Url;
 

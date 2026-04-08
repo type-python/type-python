@@ -15,24 +15,24 @@ use typepython_checking::{
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
-    generate_inferred_stub_source, plan_emits, plan_emits_for_sources, write_runtime_outputs,
     EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSyntheticMethod,
-    StubValueOverride, TypePythonStubContext,
+    StubValueOverride, TypePythonStubContext, generate_inferred_stub_source, plan_emits,
+    plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
-use typepython_incremental::{decode_snapshot, diff, encode_snapshot, IncrementalState};
-use typepython_lowering::{lower_with_options, LoweredModule, LoweringOptions, LoweringResult};
-use typepython_syntax::{apply_type_ignore_directives, SourceFile, SourceKind};
+use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot};
+use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
+use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
 use crate::cli::{CleanArgs, OutputFormat, RunArgs};
 use crate::discovery::{
-    bundled_stdlib_snapshot_identity, bundled_stdlib_sources, collect_source_paths,
-    external_resolution_sources, DiscoveredSource,
+    DiscoveredSource, bundled_stdlib_snapshot_identity, bundled_stdlib_sources,
+    collect_source_paths, external_resolution_sources,
 };
 use crate::verification::{public_surface_completeness_diagnostics, verify_build_artifacts};
 use crate::{
-    bytecode_path_for, exit_code, load_project, print_summary, remove_dir_if_exists,
-    resolve_python_executable, CommandSummary,
+    CommandSummary, bytecode_path_for, exit_code, load_project, print_summary,
+    remove_dir_if_exists, resolve_python_executable,
 };
 
 #[derive(Debug)]

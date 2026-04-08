@@ -1564,7 +1564,9 @@ pub(super) fn resolve_writable_member_semantic_type(
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
     match declaration.kind {
-        DeclarationKind::Value => resolve_readable_member_semantic_type(node, nodes, declaration, owner_type),
+        DeclarationKind::Value => {
+            resolve_readable_member_semantic_type(node, nodes, declaration, owner_type)
+        }
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::PropertySetter) =>
         {

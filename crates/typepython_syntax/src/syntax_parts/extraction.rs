@@ -4740,15 +4740,304 @@ fn find_top_level_char(input: &str, target: u8) -> Option<usize> {
 mod tests {
     use super::{
         AssertStatement, CallStatement, ClassMember, ClassMemberKind, ComprehensionKind,
-        DirectExprMetadata, ExceptionHandlerStatement, ForStatement, FunctionParam,
-        FunctionStatement, GuardCondition, IfStatement, ImportBinding, ImportStatement,
-        InvalidationKind, InvalidationStatement, LambdaMetadata, MatchCaseStatement, MatchPattern,
-        MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind,
-        NamedBlockStatement, ParseOptions, ReturnStatement, SourceFile, SourceKind,
-        SyntaxStatement, TypeAliasStatement, TypeIgnoreDirective, TypeParam, TypeParamKind,
-        UnsafeStatement, ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
+        ComprehensionMetadata, DirectExprMetadata, ExceptionHandlerStatement, ForStatement,
+        FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
+        ImportStatement, InvalidationKind, InvalidationStatement, LambdaMetadata,
+        MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
+        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
+        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeExpr,
+        TypeIgnoreDirective, TypeParam, TypeParamKind, TypedDictLiteralEntry, UnsafeStatement,
+        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
     use std::path::PathBuf;
+
+    macro_rules! assert_eq {
+        ($tree:ident . statements, $expected:expr $(,)?) => {{
+            let actual = normalize_expected_statements($tree.statements.clone());
+            let expected = normalize_expected_statements($expected);
+            ::std::assert_eq!(actual, expected);
+        }};
+        ($actual:expr, $expected:expr $(,)?) => {{
+            ::std::assert_eq!($actual, $expected);
+        }};
+    }
+
+    fn normalize_expected_statements(statements: Vec<SyntaxStatement>) -> Vec<SyntaxStatement> {
+        statements.into_iter().map(normalize_statement).collect()
+    }
+
+    fn normalize_statement(statement: SyntaxStatement) -> SyntaxStatement {
+        match statement {
+            SyntaxStatement::TypeAlias(mut statement) => {
+                statement.type_params =
+                    statement.type_params.into_iter().map(normalize_type_param).collect();
+                if statement.value_expr.is_none() {
+                    statement.value_expr = TypeExpr::parse(&statement.value);
+                }
+                SyntaxStatement::TypeAlias(statement)
+            }
+            SyntaxStatement::Interface(statement) => {
+                SyntaxStatement::Interface(normalize_named_block(statement))
+            }
+            SyntaxStatement::DataClass(statement) => {
+                SyntaxStatement::DataClass(normalize_named_block(statement))
+            }
+            SyntaxStatement::SealedClass(statement) => {
+                SyntaxStatement::SealedClass(normalize_named_block(statement))
+            }
+            SyntaxStatement::OverloadDef(statement) => {
+                SyntaxStatement::OverloadDef(normalize_function_statement(statement))
+            }
+            SyntaxStatement::ClassDef(statement) => {
+                SyntaxStatement::ClassDef(normalize_named_block(statement))
+            }
+            SyntaxStatement::FunctionDef(statement) => {
+                SyntaxStatement::FunctionDef(normalize_function_statement(statement))
+            }
+            SyntaxStatement::Import(statement) => SyntaxStatement::Import(statement),
+            SyntaxStatement::Value(statement) => SyntaxStatement::Value(normalize_value_statement(statement)),
+            SyntaxStatement::Call(statement) => {
+                SyntaxStatement::Call(normalize_call_statement(statement))
+            }
+            SyntaxStatement::MemberAccess(statement) => SyntaxStatement::MemberAccess(statement),
+            SyntaxStatement::MethodCall(statement) => {
+                SyntaxStatement::MethodCall(normalize_method_call_statement(statement))
+            }
+            SyntaxStatement::Return(statement) => {
+                SyntaxStatement::Return(normalize_return_statement(statement))
+            }
+            SyntaxStatement::Yield(statement) => {
+                SyntaxStatement::Yield(normalize_yield_statement(statement))
+            }
+            SyntaxStatement::If(statement) => SyntaxStatement::If(statement),
+            SyntaxStatement::Assert(statement) => SyntaxStatement::Assert(statement),
+            SyntaxStatement::Invalidate(statement) => SyntaxStatement::Invalidate(statement),
+            SyntaxStatement::Match(statement) => SyntaxStatement::Match(statement),
+            SyntaxStatement::For(statement) => SyntaxStatement::For(statement),
+            SyntaxStatement::With(statement) => SyntaxStatement::With(statement),
+            SyntaxStatement::ExceptHandler(statement) => SyntaxStatement::ExceptHandler(statement),
+            SyntaxStatement::Unsafe(statement) => SyntaxStatement::Unsafe(statement),
+        }
+    }
+
+    fn normalize_named_block(mut statement: NamedBlockStatement) -> NamedBlockStatement {
+        statement.type_params =
+            statement.type_params.into_iter().map(normalize_type_param).collect();
+        statement.members = statement.members.into_iter().map(normalize_class_member).collect();
+        statement
+    }
+
+    fn normalize_function_statement(mut statement: FunctionStatement) -> FunctionStatement {
+        statement.type_params =
+            statement.type_params.into_iter().map(normalize_type_param).collect();
+        statement.params = statement.params.into_iter().map(normalize_function_param).collect();
+        if statement.returns_expr.is_none() {
+            statement.returns_expr = statement.returns.as_deref().and_then(TypeExpr::parse);
+        }
+        statement
+    }
+
+    fn normalize_function_param(mut param: FunctionParam) -> FunctionParam {
+        if param.annotation_expr.is_none() {
+            param.annotation_expr = param.annotation.as_deref().and_then(TypeExpr::parse);
+        }
+        param
+    }
+
+    fn normalize_type_param(mut param: TypeParam) -> TypeParam {
+        if param.bound_expr.is_none() {
+            param.bound_expr = param.bound.as_deref().and_then(TypeExpr::parse);
+        }
+        if param.constraint_exprs.is_empty() {
+            param.constraint_exprs =
+                param.constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect();
+        }
+        if param.default_expr.is_none() {
+            param.default_expr = param.default.as_deref().and_then(TypeExpr::parse);
+        }
+        param
+    }
+
+    fn normalize_class_member(mut member: ClassMember) -> ClassMember {
+        member.params = member.params.into_iter().map(normalize_function_param).collect();
+        if member.annotation_expr.is_none() {
+            member.annotation_expr = member.annotation.as_deref().and_then(TypeExpr::parse);
+        }
+        if member.returns_expr.is_none() {
+            member.returns_expr = member.returns.as_deref().and_then(TypeExpr::parse);
+        }
+        member
+    }
+
+    fn normalize_value_statement(mut statement: ValueStatement) -> ValueStatement {
+        if statement.annotation_expr.is_none() {
+            statement.annotation_expr = statement.annotation.as_deref().and_then(TypeExpr::parse);
+        }
+        if statement.value_type_expr.is_none() {
+            statement.value_type_expr = statement.value_type.as_deref().and_then(TypeExpr::parse);
+        }
+        statement.value_subscript_target =
+            normalize_direct_expr_option(statement.value_subscript_target);
+        statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
+        statement.value_if_false = normalize_direct_expr_option(statement.value_if_false);
+        statement.value_bool_left = normalize_direct_expr_option(statement.value_bool_left);
+        statement.value_bool_right = normalize_direct_expr_option(statement.value_bool_right);
+        statement.value_binop_left = normalize_direct_expr_option(statement.value_binop_left);
+        statement.value_binop_right = normalize_direct_expr_option(statement.value_binop_right);
+        statement.value_lambda = normalize_lambda_option(statement.value_lambda);
+        statement.value_list_comprehension =
+            normalize_comprehension_option(statement.value_list_comprehension);
+        statement.value_generator_comprehension =
+            normalize_comprehension_option(statement.value_generator_comprehension);
+        statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
+        statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
+        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement
+    }
+
+    fn normalize_call_statement(mut statement: CallStatement) -> CallStatement {
+        statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.starred_arg_values =
+            statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.keyword_arg_values =
+            statement.keyword_arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.keyword_expansion_values = statement
+            .keyword_expansion_values
+            .into_iter()
+            .map(normalize_direct_expr)
+            .collect();
+        statement
+    }
+
+    fn normalize_method_call_statement(mut statement: MethodCallStatement) -> MethodCallStatement {
+        statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.starred_arg_values =
+            statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.keyword_arg_values =
+            statement.keyword_arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.keyword_expansion_values = statement
+            .keyword_expansion_values
+            .into_iter()
+            .map(normalize_direct_expr)
+            .collect();
+        statement
+    }
+
+    fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement {
+        statement.value_subscript_target =
+            normalize_direct_expr_option(statement.value_subscript_target);
+        statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
+        statement.value_if_false = normalize_direct_expr_option(statement.value_if_false);
+        statement.value_bool_left = normalize_direct_expr_option(statement.value_bool_left);
+        statement.value_bool_right = normalize_direct_expr_option(statement.value_bool_right);
+        statement.value_binop_left = normalize_direct_expr_option(statement.value_binop_left);
+        statement.value_binop_right = normalize_direct_expr_option(statement.value_binop_right);
+        statement.value_lambda = normalize_lambda_option(statement.value_lambda);
+        statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
+        statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
+        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement
+    }
+
+    fn normalize_yield_statement(mut statement: YieldStatement) -> YieldStatement {
+        statement.value_subscript_target =
+            normalize_direct_expr_option(statement.value_subscript_target);
+        statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
+        statement.value_if_false = normalize_direct_expr_option(statement.value_if_false);
+        statement.value_bool_left = normalize_direct_expr_option(statement.value_bool_left);
+        statement.value_bool_right = normalize_direct_expr_option(statement.value_bool_right);
+        statement.value_binop_left = normalize_direct_expr_option(statement.value_binop_left);
+        statement.value_binop_right = normalize_direct_expr_option(statement.value_binop_right);
+        statement.value_lambda = normalize_lambda_option(statement.value_lambda);
+        statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
+        statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
+        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement
+    }
+
+    fn normalize_lambda_option(
+        metadata: Option<Box<LambdaMetadata>>,
+    ) -> Option<Box<LambdaMetadata>> {
+        metadata.map(|metadata| Box::new(normalize_lambda_metadata(*metadata)))
+    }
+
+    fn normalize_lambda_metadata(mut metadata: LambdaMetadata) -> LambdaMetadata {
+        metadata.params = metadata.params.into_iter().map(normalize_function_param).collect();
+        metadata.body = Box::new(normalize_direct_expr(*metadata.body));
+        metadata
+    }
+
+    fn normalize_comprehension_option(
+        metadata: Option<Box<ComprehensionMetadata>>,
+    ) -> Option<Box<ComprehensionMetadata>> {
+        metadata.map(|metadata| Box::new(normalize_comprehension_metadata(*metadata)))
+    }
+
+    fn normalize_comprehension_metadata(mut metadata: ComprehensionMetadata) -> ComprehensionMetadata {
+        metadata.clauses = metadata
+            .clauses
+            .into_iter()
+            .map(|mut clause| {
+                clause.iter = Box::new(normalize_direct_expr(*clause.iter));
+                clause
+            })
+            .collect();
+        metadata.key = metadata.key.map(|key| Box::new(normalize_direct_expr(*key)));
+        metadata.element = Box::new(normalize_direct_expr(*metadata.element));
+        metadata
+    }
+
+    fn normalize_direct_expr_option(
+        metadata: Option<Box<DirectExprMetadata>>,
+    ) -> Option<Box<DirectExprMetadata>> {
+        metadata.map(|metadata| Box::new(normalize_direct_expr(*metadata)))
+    }
+
+    fn normalize_direct_expr_vec(
+        values: Option<Vec<DirectExprMetadata>>,
+    ) -> Option<Vec<DirectExprMetadata>> {
+        values.map(|values| values.into_iter().map(normalize_direct_expr).collect())
+    }
+
+    fn normalize_typed_dict_literal_entries(
+        entries: Option<Vec<TypedDictLiteralEntry>>,
+    ) -> Option<Vec<TypedDictLiteralEntry>> {
+        entries.map(|entries| {
+            entries
+                .into_iter()
+                .map(|mut entry| {
+                    entry.key_value = entry
+                        .key_value
+                        .map(|value| Box::new(normalize_direct_expr(*value)));
+                    entry.value = normalize_direct_expr(entry.value);
+                    entry
+                })
+                .collect()
+        })
+    }
+
+    fn normalize_direct_expr(mut metadata: DirectExprMetadata) -> DirectExprMetadata {
+        if metadata.value_type_expr.is_none() {
+            metadata.value_type_expr = metadata.value_type.as_deref().and_then(TypeExpr::parse);
+        }
+        metadata.value_subscript_target =
+            normalize_direct_expr_option(metadata.value_subscript_target);
+        metadata.value_if_true = normalize_direct_expr_option(metadata.value_if_true);
+        metadata.value_if_false = normalize_direct_expr_option(metadata.value_if_false);
+        metadata.value_bool_left = normalize_direct_expr_option(metadata.value_bool_left);
+        metadata.value_bool_right = normalize_direct_expr_option(metadata.value_bool_right);
+        metadata.value_binop_left = normalize_direct_expr_option(metadata.value_binop_left);
+        metadata.value_binop_right = normalize_direct_expr_option(metadata.value_binop_right);
+        metadata.value_lambda = normalize_lambda_option(metadata.value_lambda);
+        metadata.value_list_comprehension =
+            normalize_comprehension_option(metadata.value_list_comprehension);
+        metadata.value_generator_comprehension =
+            normalize_comprehension_option(metadata.value_generator_comprehension);
+        metadata.value_list_elements = normalize_direct_expr_vec(metadata.value_list_elements);
+        metadata.value_set_elements = normalize_direct_expr_vec(metadata.value_set_elements);
+        metadata.value_dict_entries = normalize_typed_dict_literal_entries(metadata.value_dict_entries);
+        metadata
+    }
 
     #[test]
     fn parse_recognizes_typepython_extension_headers() {

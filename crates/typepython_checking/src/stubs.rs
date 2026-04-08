@@ -5,13 +5,13 @@ use typepython_graph::ModuleGraph;
 use typepython_syntax::{FunctionParam, MethodKind, SourceKind};
 
 use crate::{
+    CheckerContext, EffectiveCallableStubOverride, SyntheticMethodStub,
     decorated_function_return_type_from_callable_annotation,
     direct_function_signature_sites_from_callable_annotation,
     resolve_dataclass_transform_class_shape_from_decl_with_context,
     resolve_decorated_callable_annotation_for_declaration_with_context,
     resolve_decorated_callable_site_with_context,
-    resolve_plain_dataclass_class_shape_from_decl_with_context, CheckerContext,
-    EffectiveCallableStubOverride, SyntheticMethodStub,
+    resolve_plain_dataclass_class_shape_from_decl_with_context,
 };
 
 #[must_use]

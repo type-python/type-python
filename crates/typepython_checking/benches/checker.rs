@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use typepython_binding::{
     AssignmentSite, BindingTable, BoundCallableSignature, BoundImportTarget, CallSite, Declaration,
     DeclarationKind, DeclarationMetadata, GenericTypeParam, GenericTypeParamKind,

@@ -204,7 +204,7 @@ pub fn snapshot_with_summaries(
 }
 
 fn snapshot_from_summaries(
-    summaries: &mut Vec<PublicSummary>,
+    summaries: &mut [PublicSummary],
     stdlib_snapshot: Option<String>,
 ) -> IncrementalState {
     summaries.sort_by(|left, right| left.module.cmp(&right.module));
@@ -214,7 +214,7 @@ fn snapshot_from_summaries(
         .map(|summary| (summary.module.clone(), summary_fingerprint(summary)))
         .collect();
 
-    IncrementalState { fingerprints, summaries: summaries.clone(), stdlib_snapshot }
+    IncrementalState { fingerprints, summaries: summaries.to_vec(), stdlib_snapshot }
 }
 
 #[must_use]
@@ -463,11 +463,7 @@ fn summary_type_repr(declaration: &Declaration) -> String {
                 DeclarationKind::Class | DeclarationKind::Value => None,
             };
             let detail = structured.unwrap_or_else(|| declaration.detail.clone());
-            if detail.is_empty() {
-                declaration.name.clone()
-            } else {
-                detail
-            }
+            if detail.is_empty() { declaration.name.clone() } else { detail }
         }
     }
 }
@@ -546,10 +542,10 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
-        snapshot_diff_modules, Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary,
+        Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
         SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
-        SNAPSHOT_SCHEMA_VERSION,
+        affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
+        snapshot_diff_modules,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
