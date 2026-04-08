@@ -257,6 +257,7 @@ pub(crate) fn verify_packaged_artifacts(
         }
     };
     let published_package_roots = published_package_roots(&expected_files);
+    let published_top_level_surface_files = published_top_level_surface_files(&expected_files);
 
     for artifact in supplied_artifacts {
         match read_supplied_artifact_entries(artifact) {
@@ -285,7 +286,11 @@ pub(crate) fn verify_packaged_artifacts(
                     }
                 }
                 for relative_path in entries.keys().filter(|path| {
-                    is_authoritative_publication_file(path, &published_package_roots)
+                    is_authoritative_publication_file(
+                        path,
+                        &published_package_roots,
+                        &published_top_level_surface_files,
+                    )
                 }) {
                     if !expected_files.contains_key(relative_path) {
                         diagnostics.push(Diagnostic::error(
@@ -573,12 +578,28 @@ fn published_package_roots(expected_files: &BTreeMap<String, Vec<u8>>) -> BTreeS
         .collect()
 }
 
+fn published_top_level_surface_files(
+    expected_files: &BTreeMap<String, Vec<u8>>,
+) -> BTreeSet<String> {
+    expected_files
+        .keys()
+        .filter(|path| !path.contains('/') && (path.ends_with(".py") || path.ends_with(".pyi")))
+        .cloned()
+        .collect()
+}
+
 fn is_authoritative_publication_file(
     path: &str,
     published_package_roots: &BTreeSet<String>,
+    published_top_level_surface_files: &BTreeSet<String>,
 ) -> bool {
-    (path.ends_with(".py") || path.ends_with(".pyi"))
-        && published_package_roots.iter().any(|root| path.starts_with(&format!("{root}/")))
+    if !(path.ends_with(".py") || path.ends_with(".pyi")) {
+        return false;
+    }
+    if let Some((root, _)) = path.split_once('/') {
+        return published_package_roots.contains(root);
+    }
+    !published_top_level_surface_files.is_empty() && path != "setup.py"
 }
 
 fn read_supplied_artifact_entries(
