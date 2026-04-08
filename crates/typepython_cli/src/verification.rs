@@ -602,12 +602,16 @@ fn is_authoritative_publication_file(
                 || !published_top_level_surface_files.is_empty()
                 || !published_package_roots.is_empty());
     }
-    path != "setup.py"
+    !is_allowed_non_surface_file(path)
         && (!published_top_level_surface_files.is_empty() || !published_package_roots.is_empty())
 }
 
 fn is_allowed_non_surface_root(root: &str) -> bool {
-    matches!(root, "tests" | "docs")
+    matches!(root, "tests" | "docs" | "scripts") || root.ends_with(".data")
+}
+
+fn is_allowed_non_surface_file(path: &str) -> bool {
+    matches!(path, "setup.py" | "conftest.py" | "noxfile.py" | "toxfile.py")
 }
 
 fn read_supplied_artifact_entries(

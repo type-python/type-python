@@ -1503,8 +1503,11 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_w
                 ("app/__init__.pyi", "pass\n"),
                 ("app/py.typed", ""),
                 ("setup.py", "pass\n"),
+                ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
                 ("docs/conf.py", "pass\n"),
+                ("scripts/tool.py", "pass\n"),
+                ("type_python-0.1.0.data/scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
@@ -1594,8 +1597,10 @@ fn verify_packaged_artifacts_allows_extra_python_files_outside_package_root_in_s
                 ("app/__init__.pyi", "pass\n"),
                 ("app/py.typed", ""),
                 ("setup.py", "pass\n"),
+                ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
                 ("docs/conf.py", "pass\n"),
+                ("scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
@@ -1713,7 +1718,10 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_wheel() {
                 ("app.py", "pass\n"),
                 ("app.pyi", "pass\n"),
                 ("setup.py", "pass\n"),
+                ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
+                ("scripts/tool.py", "pass\n"),
+                ("type_python-0.1.0.data/scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
@@ -1755,7 +1763,9 @@ fn verify_packaged_artifacts_allows_top_level_backend_files_for_module_sdist() {
                 ("app.py", "pass\n"),
                 ("app.pyi", "pass\n"),
                 ("setup.py", "pass\n"),
+                ("conftest.py", "pass\n"),
                 ("tests/test_api.py", "pass\n"),
+                ("scripts/tool.py", "pass\n"),
             ],
         );
         let config = load(&project_dir).expect("test setup should succeed");
