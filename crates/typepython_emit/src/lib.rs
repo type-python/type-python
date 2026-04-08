@@ -96,35 +96,57 @@ pub fn plan_emits_for_sources(
     config: &ConfigHandle,
     sources: &[PlannedModuleSource],
 ) -> Vec<EmitArtifact> {
-    sources
-        .iter()
-        .map(|source| {
-            let relative = relative_module_path(config, &source.source_path);
-            let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    let mut artifacts = Vec::new();
+    let mut paired_by_module: BTreeMap<PathBuf, usize> = BTreeMap::new();
 
-            match source.source_kind {
-                SourceKind::TypePython => EmitArtifact {
-                    source_path: source.source_path.clone(),
-                    runtime_path: Some(out_root.join(&relative).with_extension("py")),
-                    stub_path: config
-                        .config
-                        .emit
-                        .emit_pyi
-                        .then(|| out_root.join(relative).with_extension("pyi")),
-                },
-                SourceKind::Python => EmitArtifact {
-                    source_path: source.source_path.clone(),
-                    runtime_path: Some(out_root.join(relative)),
-                    stub_path: None,
-                },
-                SourceKind::Stub => EmitArtifact {
-                    source_path: source.source_path.clone(),
-                    runtime_path: None,
-                    stub_path: Some(out_root.join(relative)),
-                },
+    for source in sources {
+        let relative = relative_module_path(config, &source.source_path);
+        let module_key = relative.with_extension("");
+
+        match source.source_kind {
+            SourceKind::TypePython => artifacts.push(EmitArtifact {
+                source_path: source.source_path.clone(),
+                runtime_path: Some(out_root.join(&relative).with_extension("py")),
+                stub_path: config
+                    .config
+                    .emit
+                    .emit_pyi
+                    .then(|| out_root.join(relative).with_extension("pyi")),
+            }),
+            SourceKind::Python => {
+                let runtime_path = out_root.join(relative.with_extension("py"));
+                if let Some(index) = paired_by_module.get(&module_key).copied() {
+                    artifacts[index].source_path = source.source_path.clone();
+                    artifacts[index].runtime_path = Some(runtime_path);
+                } else {
+                    let index = artifacts.len();
+                    artifacts.push(EmitArtifact {
+                        source_path: source.source_path.clone(),
+                        runtime_path: Some(runtime_path),
+                        stub_path: None,
+                    });
+                    paired_by_module.insert(module_key, index);
+                }
             }
-        })
-        .collect()
+            SourceKind::Stub => {
+                let stub_path = out_root.join(relative.with_extension("pyi"));
+                if let Some(index) = paired_by_module.get(&module_key).copied() {
+                    artifacts[index].stub_path = Some(stub_path);
+                } else {
+                    let index = artifacts.len();
+                    artifacts.push(EmitArtifact {
+                        source_path: source.source_path.clone(),
+                        runtime_path: None,
+                        stub_path: Some(stub_path),
+                    });
+                    paired_by_module.insert(module_key, index);
+                }
+            }
+        }
+    }
+
+    artifacts
 }
 
 pub fn write_runtime_outputs(
@@ -182,6 +204,13 @@ pub fn write_runtime_outputs(
                         ),
                     )
                 })?
+            } else if module.source_kind == SourceKind::Python {
+                let companion_stub = artifact.source_path.with_extension("pyi");
+                modules_by_source
+                    .get(companion_stub.as_path())
+                    .filter(|stub_module| stub_module.source_kind == SourceKind::Stub)
+                    .map(|stub_module| stub_module.python_source.clone())
+                    .unwrap_or_else(|| module.python_source.clone())
             } else {
                 module.python_source.clone()
             };
@@ -2558,13 +2587,11 @@ mod tests {
             ],
         );
 
-        assert_eq!(artifacts.len(), 3);
+        assert_eq!(artifacts.len(), 2);
         assert_eq!(artifacts[0].runtime_path, Some(temp_dir.join("build/pkg/__init__.py")));
         assert_eq!(artifacts[0].stub_path, Some(temp_dir.join("build/pkg/__init__.pyi")));
         assert_eq!(artifacts[1].runtime_path, Some(temp_dir.join("build/pkg/helpers.py")));
-        assert_eq!(artifacts[1].stub_path, None);
-        assert_eq!(artifacts[2].runtime_path, None);
-        assert_eq!(artifacts[2].stub_path, Some(temp_dir.join("build/pkg/helpers.pyi")));
+        assert_eq!(artifacts[1].stub_path, Some(temp_dir.join("build/pkg/helpers.pyi")));
         fs::remove_dir_all(&temp_dir).expect("temp dir cleanup should succeed");
     }
 
@@ -2632,7 +2659,7 @@ mod tests {
             EmitArtifact {
                 source_path: PathBuf::from("src/app/helpers.py"),
                 runtime_path: Some(temp_dir.join("build/app/helpers.py")),
-                stub_path: None,
+                stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
             },
             EmitArtifact {
                 source_path: PathBuf::from("src/app/parse.tpy"),
@@ -2643,11 +2670,6 @@ mod tests {
                 source_path: PathBuf::from("src/app/empty.tpy"),
                 runtime_path: Some(temp_dir.join("build/app/empty.py")),
                 stub_path: Some(temp_dir.join("build/app/empty.pyi")),
-            },
-            EmitArtifact {
-                source_path: PathBuf::from("src/app/helpers.pyi"),
-                runtime_path: None,
-                stub_path: Some(temp_dir.join("build/app/helpers.pyi")),
             },
         ];
 

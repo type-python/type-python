@@ -746,6 +746,71 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
 }
 
 #[test]
+fn run_verify_reports_python_companion_stub_signature_mismatch() {
+    let project_dir =
+        temp_project_dir("run_verify_reports_python_companion_stub_signature_mismatch");
+    let verify_result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.py"), "def build_user() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.pyi"), "def build_user(name: str) -> str: ...\n")
+            .expect("test setup should succeed");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
+}
+
+#[test]
+fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
+    let project_dir =
+        temp_project_dir("run_verify_reports_python_companion_stub_signature_mismatch_in_wheel");
+    let verify_result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join("dist")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.py"), "def build_user() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.pyi"), "def build_user(name: str) -> str: ...\n")
+            .expect("test setup should succeed");
+        let wheel_path = project_dir.join("dist/demo_pkg-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[
+                ("app.py", "def build_user() -> int:\n    return 1\n"),
+                ("app.pyi", "def build_user(name: str) -> str: ...\n"),
+            ],
+        );
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: vec![wheel_path],
+            sdists: Vec::new(),
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
+}
+
+#[test]
 fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
