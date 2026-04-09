@@ -262,7 +262,7 @@ pub(crate) fn collect_member_completion_items(
     workspace: &WorkspaceState,
     document: &DocumentState,
     position: LspPosition,
-) -> Vec<Value> {
+) -> Vec<LspCompletionItem> {
     let owner_types = resolve_completion_member_owner_types(workspace, document, position);
     if owner_types.is_empty() {
         let mut seen = BTreeSet::new();
@@ -271,7 +271,7 @@ pub(crate) fn collect_member_completion_items(
             .values()
             .filter(|occurrence| occurrence.canonical.matches('.').count() >= 2)
             .filter(|occurrence| seen.insert(occurrence.name.clone()))
-            .map(|occurrence| json!({"label": occurrence.name, "detail": occurrence.detail}))
+            .map(completion_item_from_occurrence)
             .collect();
     }
 
@@ -289,7 +289,98 @@ pub(crate) fn collect_member_completion_items(
         visible.retain(|label, _| members.contains_key(label));
     }
 
-    visible.into_iter().map(|(label, detail)| json!({"label": label, "detail": detail})).collect()
+    visible
+        .into_iter()
+        .map(|(label, detail)| completion_item_from_detail(label, detail))
+        .collect()
+}
+
+pub(crate) fn completion_item_from_occurrence(occurrence: &SymbolOccurrence) -> LspCompletionItem {
+    completion_item(
+        occurrence.name.clone(),
+        Some(occurrence.detail.clone()),
+        completion_item_kind_from_detail(&occurrence.detail),
+    )
+}
+
+pub(crate) fn completion_item_from_canonical(
+    workspace: &WorkspaceState,
+    label: String,
+    canonical: &str,
+) -> LspCompletionItem {
+    let detail = workspace
+        .declarations_by_canonical
+        .get(canonical)
+        .map(|occurrence| occurrence.detail.clone())
+        .unwrap_or_else(|| canonical.to_owned());
+    let kind = binding_declaration_for_canonical(workspace, canonical)
+        .map(|(_, declaration)| completion_item_kind_for_declaration(declaration))
+        .unwrap_or_else(|| completion_item_kind_from_detail(&detail));
+    completion_item(label, Some(detail), kind)
+}
+
+pub(crate) fn completion_item_from_detail(label: String, detail: String) -> LspCompletionItem {
+    completion_item(
+        label,
+        Some(detail.clone()),
+        completion_item_kind_from_detail(&detail),
+    )
+}
+
+fn completion_item(label: String, detail: Option<String>, kind: u32) -> LspCompletionItem {
+    let normalized = label.to_lowercase();
+    LspCompletionItem {
+        filter_text: label.clone(),
+        sort_text: format!("{normalized}:{kind:02}"),
+        label,
+        detail,
+        kind,
+    }
+}
+
+fn completion_item_kind_for_declaration(declaration: &typepython_binding::Declaration) -> u32 {
+    match declaration.kind {
+        typepython_binding::DeclarationKind::TypeAlias => 25,
+        typepython_binding::DeclarationKind::Class => match declaration.class_kind {
+            Some(typepython_binding::DeclarationOwnerKind::Interface) => 8,
+            _ => 7,
+        },
+        typepython_binding::DeclarationKind::Function
+        | typepython_binding::DeclarationKind::Overload => {
+            if declaration.owner.is_some() {
+                match declaration.method_kind {
+                    Some(typepython_syntax::MethodKind::Property)
+                    | Some(typepython_syntax::MethodKind::PropertySetter) => 10,
+                    _ => 2,
+                }
+            } else {
+                3
+            }
+        }
+        typepython_binding::DeclarationKind::Value => {
+            if declaration.owner.is_some() { 5 } else { 6 }
+        }
+        typepython_binding::DeclarationKind::Import => 9,
+    }
+}
+
+fn completion_item_kind_from_detail(detail: &str) -> u32 {
+    let normalized = detail.trim_start();
+    if normalized.starts_with("method ") {
+        2
+    } else if normalized.starts_with("field ") {
+        5
+    } else if normalized.starts_with("function ") {
+        3
+    } else if normalized.starts_with("class ") {
+        7
+    } else if normalized.starts_with("typealias ") {
+        25
+    } else if normalized.starts_with("value ") {
+        6
+    } else {
+        9
+    }
 }
 
 pub(crate) fn collect_visible_member_details(

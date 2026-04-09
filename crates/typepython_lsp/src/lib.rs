@@ -223,6 +223,17 @@ struct LspWorkspaceSymbol {
     container_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LspCompletionItem {
+    label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    kind: u32,
+    filter_text: String,
+    sort_text: String,
+}
+
 #[derive(Debug, Clone)]
 struct FormatterCommand {
     label: String,

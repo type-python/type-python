@@ -464,13 +464,16 @@ fn completion_returns_local_symbols_and_member_symbols() {
             "position": {"line": 8, "character": 3}
         }))
         .expect("completion for local symbols should succeed");
-    assert!(
-        symbols["items"]
-            .as_array()
-            .expect("completion items should be an array")
-            .iter()
-            .any(|item| item["label"] == json!("build"))
-    );
+    let local_items = symbols["items"]
+        .as_array()
+        .expect("completion items should be an array");
+    let build_item = local_items
+        .iter()
+        .find(|item| item["label"] == json!("build"))
+        .expect("build should appear in local completion results");
+    assert_eq!(build_item["kind"], json!(3));
+    assert_eq!(build_item["filterText"], json!("build"));
+    assert_eq!(build_item["sortText"], json!("build:03"));
 
     let members = server
         .handle_completion(json!({
@@ -478,13 +481,16 @@ fn completion_returns_local_symbols_and_member_symbols() {
             "position": {"line": 9, "character": 4}
         }))
         .expect("completion for member symbols should succeed");
-    assert!(
-        members["items"]
-            .as_array()
-            .expect("member completion items should be an array")
-            .iter()
-            .any(|item| item["label"] == json!("method"))
-    );
+    let member_items = members["items"]
+        .as_array()
+        .expect("member completion items should be an array");
+    let method_item = member_items
+        .iter()
+        .find(|item| item["label"] == json!("method"))
+        .expect("method should appear in member completion results");
+    assert_eq!(method_item["kind"], json!(2));
+    assert_eq!(method_item["filterText"], json!("method"));
+    assert_eq!(method_item["sortText"], json!("method:02"));
 }
 
 #[test]

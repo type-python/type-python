@@ -397,15 +397,7 @@ impl AnalysisHost {
             let mut keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
             keys.sort();
             keys.into_iter()
-                .map(|name| {
-                    let canonical = &document.local_symbols[&name];
-                    let detail = workspace
-                        .declarations_by_canonical
-                        .get(canonical)
-                        .map(|occurrence| occurrence.detail.clone())
-                        .unwrap_or_else(|| canonical.clone());
-                    json!({"label": name, "detail": detail})
-                })
+                .map(|name| completion_item_from_canonical(workspace, name.clone(), &document.local_symbols[&name]))
                 .collect::<Vec<_>>()
         };
 
