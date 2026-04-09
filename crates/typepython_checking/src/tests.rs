@@ -256,6 +256,61 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
 }
 
 #[test]
+fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    let source_text = concat!(
+        "class Animal:\n    pass\n\n",
+        "class Cat(Animal):\n    pass\n\n",
+        "def choose[T](first: T, second: T) -> T:\n    return first\n",
+    );
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let function = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "choose" && declaration.kind == DeclarationKind::Function)
+        .expect("choose function should be present");
+    let call = typepython_binding::CallSite {
+        callee: String::from("choose"),
+        arg_count: 2,
+        arg_types: vec![String::from("Animal"), String::from("Cat")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let instantiated_return = super::resolve_instantiated_callable_return_type_from_declaration(
+        node,
+        &graph.nodes,
+        function,
+        &call,
+    )
+    .expect("instantiated return type");
+
+    assert_eq!(instantiated_return, "Animal");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_resolves_imports_inside_type_checking_guards() {
     let root = create_temp_typepython_root();
     let main_path = root.join("main.tpy");

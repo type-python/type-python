@@ -810,7 +810,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 )
             })?,
         };
-        merge_nested_generic_bindings(&mut substitutions, param_spec_bindings).ok_or_else(|| {
+        merge_nested_generic_bindings(node, nodes, &mut substitutions, param_spec_bindings).ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(
                 GenericSolveFailure::ParamSpecBindingConflict {
                     param_name: declaration.name.clone(),
@@ -832,7 +832,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 actual: actual_return.clone(),
             })
         })?;
-        merge_nested_generic_bindings(&mut substitutions, return_bindings).ok_or_else(|| {
+        merge_nested_generic_bindings(node, nodes, &mut substitutions, return_bindings).ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(
                 GenericSolveFailure::ParamSpecBindingConflict {
                     param_name: declaration.name.clone(),
@@ -856,7 +856,7 @@ fn infer_direct_single_semantic_argument_substitutions_detailed(
                 actual: actual.clone(),
             })
         })?;
-        merge_nested_generic_bindings(&mut substitutions, generic_bindings)
+        merge_nested_generic_bindings(node, nodes, &mut substitutions, generic_bindings)
         .ok_or_else(|| {
             DirectCallResolutionFailure::GenericSolve(GenericSolveFailure::TypeVarTupleBindingConflict {
                 param_name: declaration.name.clone(),
@@ -932,7 +932,7 @@ fn augment_semantic_callable_paramlist_substitutions(
     ) else {
         return substitutions;
     };
-    let _ = merge_nested_generic_bindings(&mut substitutions, bindings);
+    let _ = merge_nested_generic_bindings(node, nodes, &mut substitutions, bindings);
     substitutions
 }
 

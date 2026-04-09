@@ -211,8 +211,12 @@ impl GenericSolverState {
         }
     }
 
-    fn current_bindings_detailed(&self) -> Result<GenericSolution, GenericSolveFailure> {
-        solve_collected_generic_constraints_detailed(&self.constraints)
+    fn current_bindings_detailed(
+        &self,
+        node: &typepython_graph::ModuleNode,
+        nodes: &[typepython_graph::ModuleNode],
+    ) -> Result<GenericSolution, GenericSolveFailure> {
+        solve_collected_generic_constraints_detailed(node, nodes, &self.constraints)
     }
 
     fn record_bindings(&mut self, bindings: GenericSolution) {
@@ -233,6 +237,8 @@ impl GenericSolverState {
 }
 
 fn solve_collected_generic_constraints_detailed(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     constraints: &GenericConstraintSet,
 ) -> Result<GenericSolution, GenericSolveFailure> {
     let mut solution = GenericSolution::default();
@@ -252,7 +258,12 @@ fn solve_collected_generic_constraints_detailed(
                         .get(constraint.candidate_id)
                         .cloned()
                         .expect("candidate interned type should be available");
-                    let merged = merge_generic_type_candidates(&existing, &candidate);
+                    let merged = merge_generic_type_candidates_with_context(
+                        node,
+                        nodes,
+                        &existing,
+                        &candidate,
+                    );
                     let merged_id = type_store.intern(merged);
                     type_ids.insert(constraint.name.clone(), merged_id);
                 }
@@ -363,7 +374,7 @@ fn finalize_generic_solution_detailed(
     metadata: &GenericSolverMetadata,
     constraints: &GenericConstraintSet,
 ) -> Result<GenericSolution, GenericSolveFailure> {
-    let mut substitutions = solve_collected_generic_constraints_detailed(constraints)?;
+    let mut substitutions = solve_collected_generic_constraints_detailed(node, nodes, constraints)?;
 
     for type_param in &metadata.params {
         match type_param.kind {
@@ -541,7 +552,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
                 positional_index = positional_types.len();
                 continue;
             }
-            let existing = solver.current_bindings_detailed()?;
+            let existing = solver.current_bindings_detailed(node, nodes)?;
             for actual in positional_types.iter().skip(positional_index) {
                 let actual_type = lower_type_text_or_name(actual);
                 let bindings = infer_generic_type_param_bindings(
@@ -574,7 +585,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
                     &solver.metadata.param_spec_names,
                 )
             });
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
         let bindings = infer_callable_param_spec_bindings(
             node,
@@ -595,7 +606,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
             positional_index += 1;
             continue;
         }
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
@@ -630,7 +641,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
                     &solver.metadata.param_spec_names,
                 )
             });
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
         let bindings = infer_callable_param_spec_bindings(
             node,
@@ -650,7 +661,7 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
         if annotation_mentions_param_spec {
             continue;
         }
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
@@ -723,7 +734,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
                 positional_index = positional_types.len();
                 continue;
             }
-            let existing = solver.current_bindings_detailed()?;
+            let existing = solver.current_bindings_detailed(node, nodes)?;
             for actual in positional_types.iter().skip(positional_index) {
                 let actual_type = lower_type_text_or_name(actual);
                 let bindings = infer_generic_type_param_bindings(
@@ -756,7 +767,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
                     &solver.metadata.param_spec_names,
                 )
             });
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
         let bindings = infer_callable_param_spec_bindings(
             node,
@@ -777,7 +788,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
             positional_index += 1;
             continue;
         }
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
@@ -811,7 +822,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
                     &solver.metadata.param_spec_names,
                 )
             });
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
         let bindings = infer_callable_param_spec_bindings(
             node,
@@ -831,7 +842,7 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         if annotation_mentions_param_spec {
             continue;
         }
-        let existing = solver.current_bindings_detailed()?;
+        let existing = solver.current_bindings_detailed(node, nodes)?;
         let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
@@ -995,6 +1006,8 @@ pub(crate) fn infer_callable_param_spec_bindings(
     )?;
     let combined = combine_generic_substitutions(existing, &bindings);
     merge_nested_generic_bindings(
+        node,
+        nodes,
         &mut bindings,
         infer_generic_type_param_bindings(
             node,
@@ -1058,6 +1071,8 @@ pub(crate) fn infer_callable_param_expr_bindings(
             {
                 let combined = combine_generic_substitutions(existing, &bindings);
                 merge_nested_generic_bindings(
+                    node,
+                    nodes,
                     &mut bindings,
                     infer_generic_type_param_bindings(
                         node,
@@ -1313,7 +1328,7 @@ fn infer_generic_type_param_bindings_full(
         let candidate = substitutions
             .types
             .get(name)
-            .map(|existing| merge_generic_type_candidates(existing, actual))
+            .map(|existing| merge_generic_type_candidates_with_context(node, nodes, existing, actual))
             .unwrap_or_else(|| actual.clone());
         let mut inferred = GenericTypeParamSubstitutions::default();
         inferred.types.insert(name.clone(), candidate);
@@ -1463,6 +1478,21 @@ pub(crate) fn merge_generic_type_candidates(
     } else {
         join_semantic_type_candidates(vec![existing.clone(), actual.clone()])
     }
+}
+
+pub(crate) fn merge_generic_type_candidates_with_context(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    existing: &SemanticType,
+    actual: &SemanticType,
+) -> SemanticType {
+    if semantic_type_is_assignable(node, nodes, actual, existing) {
+        return actual.clone();
+    }
+    if semantic_type_is_assignable(node, nodes, existing, actual) {
+        return existing.clone();
+    }
+    merge_generic_type_candidates(existing, actual)
 }
 
 pub(crate) fn substitute_semantic_type_params(
@@ -1683,6 +1713,8 @@ pub(crate) fn infer_generic_type_arg_bindings(
             expected_args[..pack_index].iter().zip(actual_args[..pack_index].iter())
         {
             merge_nested_generic_bindings(
+                node,
+                nodes,
                 &mut inferred,
                 infer_generic_type_param_bindings_full(
                     node,
@@ -1708,6 +1740,8 @@ pub(crate) fn infer_generic_type_arg_bindings(
             expected_args[pack_index + 1..].iter().zip(actual_args[actual_pack_end..].iter())
         {
             merge_nested_generic_bindings(
+                node,
+                nodes,
                 &mut inferred,
                 infer_generic_type_param_bindings_full(
                     node,
@@ -1728,6 +1762,8 @@ pub(crate) fn infer_generic_type_arg_bindings(
     }
     for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
         merge_nested_generic_bindings(
+            node,
+            nodes,
             &mut inferred,
             infer_generic_type_param_bindings_full(
                 node,
@@ -1744,13 +1780,16 @@ pub(crate) fn infer_generic_type_arg_bindings(
 }
 
 pub(crate) fn merge_nested_generic_bindings(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
     inferred: &mut GenericTypeParamSubstitutions,
     nested: GenericTypeParamSubstitutions,
 ) -> Option<()> {
     for (name, actual_type) in nested.types {
         match inferred.types.get(&name) {
             Some(existing) if existing != &actual_type => {
-                let merged = merge_generic_type_candidates(existing, &actual_type);
+                let merged =
+                    merge_generic_type_candidates_with_context(node, nodes, existing, &actual_type);
                 inferred.types.insert(name, merged);
             }
             Some(_) => {}
