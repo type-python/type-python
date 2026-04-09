@@ -53,6 +53,7 @@ fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree 
                 &mut statements,
             );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
+            collect_nested_method_call_statements(&source.text, parsed.suite(), &mut statements);
             collect_nested_member_access_statements(
                 &source.text,
                 parsed.suite(),
@@ -230,6 +231,11 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                         &mut statements,
                     );
                     collect_nested_call_statements(&normalized, parsed.suite(), &mut statements);
+                    collect_nested_method_call_statements(
+                        &normalized,
+                        parsed.suite(),
+                        &mut statements,
+                    );
                     collect_function_body_assignments(
                         &normalized,
                         parsed.suite(),

@@ -959,6 +959,7 @@ fn extract_method_call_statement(
         Stmt::Expr(expr) => expr.value.as_ref(),
         Stmt::Assign(assign) => &assign.value,
         Stmt::AnnAssign(assign) => assign.value.as_deref()?,
+        Stmt::Return(ret) => ret.value.as_deref()?,
         _ => return None,
     };
 
@@ -1136,6 +1137,32 @@ fn extract_method_call_statement(
             }))
         }
         _ => None,
+    }
+}
+
+fn collect_nested_method_call_statements(
+    source: &str,
+    suite: &[Stmt],
+    statements: &mut Vec<SyntaxStatement>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::FunctionDef(function) => {
+                collect_nested_method_call_statements(source, &function.body, statements);
+            }
+            Stmt::ClassDef(class_def) => {
+                collect_nested_method_call_statements(source, &class_def.body, statements);
+            }
+            _ => {
+                for_each_nested_suite(stmt, |nested_suite| {
+                    collect_nested_method_call_statements(source, nested_suite, statements);
+                });
+                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
+                    statements.push(method_call);
+                }
+            }
+        }
     }
 }
 
@@ -9239,17 +9266,17 @@ mod tests {
         assert!(
             tree.statements
                 .iter()
-                .filter(|statement| matches!(
+                .any(|statement| matches!(
                     statement,
                     SyntaxStatement::MethodCall(MethodCallStatement {
                         owner_name,
                         method,
                         through_instance: false,
+                        line,
                         ..
-                    }) if owner_name == "box" && method == "get"
+                    }) if owner_name == "box" && method == "get" && *line == 3
                 ))
-                .count()
-                >= 1
+            , "{:?}", tree.statements
         );
     }
 
@@ -9263,53 +9290,30 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert_eq!(
-            tree.statements,
-            vec![
-                SyntaxStatement::FunctionDef(FunctionStatement {
-                    name: String::from("build"),
-                    type_params: Vec::new(),
-                    params: Vec::new(),
-                    returns: Some(String::from("str")),
-                    returns_expr: None,
-                    is_async: false,
-                    is_override: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    line: 1,
-                }),
-                SyntaxStatement::Return(ReturnStatement {
-                    owner_name: String::from("build"),
-                    owner_type_name: None,
-                    value_type: Some(String::new()),
-                    is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: Some(String::from("make_box")),
-                    value_method_name: Some(String::from("get")),
-                    value_method_through_instance: true,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None,
-                    line: 2,
-                }),
-            ]
-        );
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Return(ReturnStatement {
+                owner_name,
+                value_method_owner_name,
+                value_method_name,
+                value_method_through_instance: true,
+                line,
+                ..
+            }) if owner_name == "build"
+                && value_method_owner_name.as_deref() == Some("make_box")
+                && value_method_name.as_deref() == Some("get")
+                && *line == 2
+        )), "{:?}", tree.statements);
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::MethodCall(MethodCallStatement {
+                owner_name,
+                method,
+                through_instance: true,
+                line,
+                ..
+            }) if owner_name == "make_box" && method == "get" && *line == 2
+        )), "{:?}", tree.statements);
     }
 
     #[test]
