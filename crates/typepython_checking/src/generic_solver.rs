@@ -140,7 +140,7 @@ struct TypeVarConstraint {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ParamSpecConstraint {
     name: String,
-    binding: ParamListBinding,
+    binding: InternedParamListBinding,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -162,6 +162,23 @@ struct InternedTypePackBinding {
     variadic_tail: Option<TypeId>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+struct InternedParamListBinding {
+    params: Vec<InternedDirectFunctionParam>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct InternedDirectFunctionParam {
+    name: String,
+    annotation_text: Option<String>,
+    annotation_id: Option<TypeId>,
+    has_default: bool,
+    positional_only: bool,
+    keyword_only: bool,
+    variadic: bool,
+    keyword_variadic: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 struct GenericConstraintSet {
     constraints: Vec<GenericConstraint>,
@@ -178,8 +195,10 @@ impl GenericConstraintSet {
             }));
         }
         for (name, binding) in bindings.param_lists {
-            self.constraints
-                .push(GenericConstraint::ParamSpec(ParamSpecConstraint { name, binding }));
+            self.constraints.push(GenericConstraint::ParamSpec(ParamSpecConstraint {
+                name,
+                binding: intern_param_list_binding(&mut self.type_store, binding),
+            }));
         }
         for (name, binding) in bindings.type_packs {
             self.constraints.push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint {
@@ -282,7 +301,7 @@ fn solve_collected_generic_constraints_detailed(
                 insert_param_spec_binding(
                     &mut solution,
                     &constraint.name,
-                    constraint.binding.clone(),
+                    materialize_param_list_binding(&constraints.type_store, &constraint.binding),
                 )
                 .ok_or_else(|| GenericSolveFailure::ParamSpecBindingConflict {
                     param_name: constraint.name.clone(),
@@ -324,6 +343,28 @@ fn intern_type_pack_binding(store: &mut TypeStore, binding: TypePackBinding) -> 
     }
 }
 
+fn intern_param_list_binding(
+    store: &mut TypeStore,
+    binding: ParamListBinding,
+) -> InternedParamListBinding {
+    InternedParamListBinding {
+        params: binding
+            .params
+            .into_iter()
+            .map(|param| InternedDirectFunctionParam {
+                name: param.name,
+                annotation_text: param.annotation.clone(),
+                annotation_id: param.annotation.as_deref().map(lower_type_text_or_name).map(|ty| store.intern(ty)),
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
+            })
+            .collect(),
+    }
+}
+
 fn materialize_type_pack_binding(
     store: &TypeStore,
     binding: &InternedTypePackBinding,
@@ -335,6 +376,36 @@ fn materialize_type_pack_binding(
             .filter_map(|type_id| store.get(*type_id).cloned())
             .collect(),
         variadic_tail: binding.variadic_tail.and_then(|type_id| store.get(type_id).cloned()),
+    }
+}
+
+fn materialize_param_list_binding(
+    store: &TypeStore,
+    binding: &InternedParamListBinding,
+) -> ParamListBinding {
+    ParamListBinding {
+        params: binding
+            .params
+            .iter()
+            .map(|param| typepython_syntax::DirectFunctionParamSite {
+                name: param.name.clone(),
+                annotation: param
+                    .annotation_id
+                    .and_then(|type_id| store.get(type_id).cloned())
+                    .map(|ty| render_semantic_type(&ty))
+                    .or_else(|| param.annotation_text.clone()),
+                annotation_expr: param
+                    .annotation_id
+                    .and_then(|type_id| store.get(type_id).cloned())
+                    .map(|ty| render_semantic_type(&ty))
+                    .and_then(|annotation| typepython_syntax::TypeExpr::parse(&annotation)),
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
+            })
+            .collect(),
     }
 }
 
