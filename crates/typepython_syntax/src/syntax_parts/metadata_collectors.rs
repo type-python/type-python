@@ -9,7 +9,7 @@ pub fn parse(source: SourceFile) -> SyntaxTree {
 pub fn parse_with_options(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     match source.kind {
         SourceKind::TypePython => parse_typepython_source(source, options),
-        SourceKind::Python | SourceKind::Stub => parse_python_source(source),
+        SourceKind::Python | SourceKind::Stub => parse_python_source(source, options),
     }
 }
 

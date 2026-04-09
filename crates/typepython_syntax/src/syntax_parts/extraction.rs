@@ -42,66 +42,74 @@ fn extract_ast_backed_statements(
     statements
 }
 
-fn collect_type_checking_import_statements_from_suite(
+fn collect_guarded_import_statements_from_suite(
     path: &Path,
     current_module_key: &str,
     source: &str,
     normalized: &str,
     suite: &[Stmt],
+    options: ParseOptions,
     statements: &mut Vec<SyntaxStatement>,
     diagnostics: &mut DiagnosticReport,
 ) {
     for stmt in suite {
         let line = offset_to_line_column(normalized, stmt.range().start().to_usize()).0;
         match stmt {
-            Stmt::If(if_stmt) if is_type_checking_guard_expr(&if_stmt.test) => {
-                collect_type_checking_import_statements_from_suite(
-                    path,
-                    current_module_key,
-                    source,
-                    normalized,
-                    &if_stmt.body,
-                    statements,
-                    diagnostics,
-                );
+            Stmt::If(if_stmt) => {
+                if let Some(selected_suite) = selected_guarded_import_suite(if_stmt, source, options) {
+                    collect_guarded_import_statements_from_suite(
+                        path,
+                        current_module_key,
+                        source,
+                        normalized,
+                        selected_suite,
+                        options,
+                        statements,
+                        diagnostics,
+                    );
+                }
             }
             Stmt::Try(try_stmt) => {
-                collect_type_checking_import_statements_from_suite(
+                collect_guarded_import_statements_from_suite(
                     path,
                     current_module_key,
                     source,
                     normalized,
                     &try_stmt.body,
+                    options,
                     statements,
                     diagnostics,
                 );
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_type_checking_import_statements_from_suite(
+                    collect_guarded_import_statements_from_suite(
                         path,
                         current_module_key,
                         source,
                         normalized,
                         &handler.body,
+                        options,
                         statements,
                         diagnostics,
                     );
                 }
-                collect_type_checking_import_statements_from_suite(
+                collect_guarded_import_statements_from_suite(
                     path,
                     current_module_key,
                     source,
                     normalized,
                     &try_stmt.orelse,
+                    options,
                     statements,
                     diagnostics,
                 );
-                collect_type_checking_import_statements_from_suite(
+                collect_guarded_import_statements_from_suite(
                     path,
                     current_module_key,
                     source,
                     normalized,
                     &try_stmt.finalbody,
+                    options,
                     statements,
                     diagnostics,
                 );
@@ -128,6 +136,37 @@ fn collect_type_checking_import_statements_from_suite(
     }
 }
 
+fn selected_guarded_import_suite<'a>(
+    stmt: &'a ruff_python_ast::StmtIf,
+    source: &str,
+    options: ParseOptions,
+) -> Option<&'a [Stmt]> {
+    if evaluate_guarded_import_expr(source, &stmt.test, options)? {
+        return Some(&stmt.body);
+    }
+
+    for clause in &stmt.elif_else_clauses {
+        match clause.test.as_ref() {
+            Some(test) => {
+                if evaluate_guarded_import_expr(source, test, options)? {
+                    return Some(&clause.body);
+                }
+            }
+            None => return Some(&clause.body),
+        }
+    }
+
+    Some(&[])
+}
+
+fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+    if is_type_checking_guard_expr(expr) {
+        return Some(true);
+    }
+    evaluate_version_guard_expr(expr, options)
+        .or_else(|| evaluate_platform_guard_expr(source, expr, options))
+}
+
 fn is_type_checking_guard_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "TYPE_CHECKING",
@@ -141,6 +180,102 @@ fn is_type_checking_guard_expr(expr: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+fn evaluate_version_guard_expr(expr: &Expr, options: ParseOptions) -> Option<bool> {
+    let target = options.target_python?;
+    let Expr::Compare(compare) = expr else {
+        return None;
+    };
+    if compare.ops.len() != 1 || compare.comparators.len() != 1 {
+        return None;
+    }
+    let Expr::Attribute(attribute) = compare.left.as_ref() else {
+        return None;
+    };
+    if attribute.attr.as_str() != "version_info" {
+        return None;
+    }
+    let Expr::Name(module) = attribute.value.as_ref() else {
+        return None;
+    };
+    if module.id.as_str() != "sys" {
+        return None;
+    }
+    let expected = parse_guarded_python_version(compare.comparators.first()?)?;
+    let op = compare.ops.first()?;
+    Some(match op {
+        ruff_python_ast::CmpOp::Eq => target == expected,
+        ruff_python_ast::CmpOp::NotEq => target != expected,
+        ruff_python_ast::CmpOp::Lt => target < expected,
+        ruff_python_ast::CmpOp::LtE => target <= expected,
+        ruff_python_ast::CmpOp::Gt => target > expected,
+        ruff_python_ast::CmpOp::GtE => target >= expected,
+        _ => return None,
+    })
+}
+
+fn parse_guarded_python_version(expr: &Expr) -> Option<ParsePythonVersion> {
+    match expr {
+        Expr::Tuple(tuple) => {
+            let major_number = &tuple.elts.first()?.as_number_literal_expr()?.value;
+            let major = parse_small_python_version_component(major_number)?;
+            let minor = tuple
+                .elts
+                .get(1)
+                .and_then(|expr| expr.as_number_literal_expr())
+                .and_then(|number| parse_small_python_version_component(&number.value))
+                .unwrap_or(0);
+            Some(ParsePythonVersion { major, minor })
+        }
+        Expr::NumberLiteral(number) => {
+            Some(ParsePythonVersion {
+                major: parse_small_python_version_component(&number.value)?,
+                minor: 0,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_small_python_version_component(number: &ruff_python_ast::Number) -> Option<u8> {
+    match number {
+        ruff_python_ast::Number::Int(value) => value.as_u8(),
+        _ => None,
+    }
+}
+
+fn evaluate_platform_guard_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+    let platform = options.target_platform?;
+    let Expr::Compare(compare) = expr else {
+        return None;
+    };
+    if compare.ops.len() != 1 || compare.comparators.len() != 1 {
+        return None;
+    }
+    let Expr::Attribute(attribute) = compare.left.as_ref() else {
+        return None;
+    };
+    if attribute.attr.as_str() != "platform" {
+        return None;
+    }
+    let Expr::Name(module) = attribute.value.as_ref() else {
+        return None;
+    };
+    if module.id.as_str() != "sys" {
+        return None;
+    }
+    let comparator = compare.comparators.first()?;
+    let Expr::StringLiteral(_) = comparator else {
+        return None;
+    };
+    let expected = extract_string_literal_value(source, comparator)?;
+    let op = compare.ops.first()?;
+    Some(match op {
+        ruff_python_ast::CmpOp::Eq => platform.sys_platform_name() == expected,
+        ruff_python_ast::CmpOp::NotEq => platform.sys_platform_name() != expected,
+        _ => return None,
+    })
 }
 
 fn extract_ast_backed_statement(
@@ -4845,8 +4980,9 @@ mod tests {
         FunctionParam, FunctionStatement, GuardCondition, IfStatement, ImportBinding,
         ImportStatement, InvalidationKind, InvalidationStatement, LambdaMetadata,
         MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
-        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ReturnStatement,
-        SourceFile, SourceKind, SyntaxStatement, TypeAliasStatement, TypeExpr,
+        MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ParsePythonVersion,
+        ParseTargetPlatform, ReturnStatement, SourceFile, SourceKind, SyntaxStatement,
+        TypeAliasStatement, TypeExpr,
         TypeIgnoreDirective, TypeParam, TypeParamKind, TypedDictLiteralEntry, UnsafeStatement,
         ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
     };
@@ -8326,6 +8462,73 @@ mod tests {
     }
 
     #[test]
+    fn parse_collects_imports_inside_version_guards_for_selected_target() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("version-guard-imports.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::from(
+                    "import sys\nif sys.version_info >= (3, 11):\n    from app.models import NewUser\nelse:\n    from app.models import OldUser\n",
+                ),
+            },
+            ParseOptions {
+                target_python: Some(ParsePythonVersion { major: 3, minor: 11 }),
+                ..ParseOptions::default()
+            },
+        );
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Import(ImportStatement { bindings, line })
+                if *line == 3
+                    && bindings == &vec![ImportBinding {
+                        local_name: String::from("NewUser"),
+                        source_path: String::from("app.models.NewUser"),
+                    }]
+        )), "{:?}", tree.statements);
+        assert!(!tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Import(ImportStatement { bindings, line })
+                if *line == 5
+                    && bindings == &vec![ImportBinding {
+                        local_name: String::from("OldUser"),
+                        source_path: String::from("app.models.OldUser"),
+                    }]
+        )), "{:?}", tree.statements);
+    }
+
+    #[test]
+    fn parse_collects_imports_inside_platform_guards_for_selected_target() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("platform-guard-imports.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::from(
+                    "import sys\nif sys.platform == \"darwin\":\n    from app.models import MacOnly\nelse:\n    from app.models import Other\n",
+                ),
+            },
+            ParseOptions {
+                target_platform: Some(ParseTargetPlatform::Darwin),
+                ..ParseOptions::default()
+            },
+        );
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Import(ImportStatement { bindings, line })
+                if *line == 3
+                    && bindings == &vec![ImportBinding {
+                        local_name: String::from("MacOnly"),
+                        source_path: String::from("app.models.MacOnly"),
+                    }]
+        )), "{:?}", tree.statements);
+    }
+
+    #[test]
     fn parse_marks_final_decorated_classes_and_methods() {
         let tree = parse(SourceFile {
             path: PathBuf::from("final-decorators.py"),
@@ -10056,7 +10259,7 @@ mod tests {
                     "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
                 ),
             },
-            ParseOptions { enable_conditional_returns: true },
+            ParseOptions { enable_conditional_returns: true, ..ParseOptions::default() },
         );
 
         assert!(tree.diagnostics.is_empty());
@@ -10088,7 +10291,7 @@ mod tests {
                     "def decode(\n    x: str | bytes | None,\n) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n\nvalue: int = 1\n",
                 ),
             },
-            ParseOptions { enable_conditional_returns: true },
+            ParseOptions { enable_conditional_returns: true, ..ParseOptions::default() },
         );
 
         assert!(tree.diagnostics.is_empty(), "{}", tree.diagnostics.as_text());

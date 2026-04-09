@@ -285,6 +285,7 @@ struct ShadowStub {
 pub(crate) fn load_syntax_trees(
     sources: &[DiscoveredSource],
     enable_conditional_returns: bool,
+    target_python: &str,
 ) -> Result<Vec<typepython_syntax::SyntaxTree>> {
     sources
         .iter()
@@ -294,7 +295,11 @@ pub(crate) fn load_syntax_trees(
             source_file.logical_module = source.logical_module.clone();
             Ok(typepython_syntax::parse_with_options(
                 source_file,
-                typepython_syntax::ParseOptions { enable_conditional_returns },
+                typepython_syntax::ParseOptions {
+                    enable_conditional_returns,
+                    target_python: typepython_syntax::ParsePythonVersion::parse(target_python),
+                    target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
+                },
             ))
         })
         .collect::<Result<Vec<_>>>()
@@ -371,6 +376,10 @@ fn load_support_syntax_trees(
                     },
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
+                        target_python: typepython_syntax::ParsePythonVersion::parse(
+                            &config.config.project.target_python,
+                        ),
+                        target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },
                 )
             } else {
@@ -381,6 +390,10 @@ fn load_support_syntax_trees(
                     source_file,
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
+                        target_python: typepython_syntax::ParsePythonVersion::parse(
+                            &config.config.project.target_python,
+                        ),
+                        target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },
                 )
             };
@@ -514,6 +527,7 @@ fn shadow_stub_relative_path(source: &SourceFile) -> PathBuf {
 fn load_shadow_stub_syntax_trees(
     shadow_stubs: &[ShadowStub],
     enable_conditional_returns: bool,
+    target_python: &str,
 ) -> Result<Vec<typepython_syntax::SyntaxTree>> {
     shadow_stubs
         .iter()
@@ -523,7 +537,11 @@ fn load_shadow_stub_syntax_trees(
             source_file.logical_module = shadow_stub.logical_module.clone();
             Ok(typepython_syntax::parse_with_options(
                 source_file,
-                typepython_syntax::ParseOptions { enable_conditional_returns },
+                typepython_syntax::ParseOptions {
+                    enable_conditional_returns,
+                    target_python: typepython_syntax::ParsePythonVersion::parse(target_python),
+                    target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
+                },
             ))
         })
         .collect()
@@ -595,8 +613,11 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees =
-        load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
+    let syntax_trees = load_syntax_trees(
+        &discovery.sources,
+        config.config.typing.conditional_returns,
+        &config.config.project.target_python,
+    )?;
     let shadow_stubs = if config.config.typing.infer_passthrough {
         write_shadow_stubs(config, &syntax_trees)?
     } else {
@@ -604,8 +625,11 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     };
     let mut all_syntax_trees = if config.config.typing.infer_passthrough && !shadow_stubs.is_empty()
     {
-        let shadow_stub_syntax =
-            load_shadow_stub_syntax_trees(&shadow_stubs, config.config.typing.conditional_returns)?;
+        let shadow_stub_syntax = load_shadow_stub_syntax_trees(
+            &shadow_stubs,
+            config.config.typing.conditional_returns,
+            &config.config.project.target_python,
+        )?;
         replace_local_python_surfaces_with_shadow_stubs(&syntax_trees, shadow_stub_syntax)
     } else {
         syntax_trees.clone()

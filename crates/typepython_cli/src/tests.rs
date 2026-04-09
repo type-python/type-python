@@ -319,8 +319,8 @@ fn run_pipeline_prefers_local_companion_stub_surfaces() {
 
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
-        let syntax =
-            load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
+        let syntax = load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+            .expect("test setup should succeed");
         let bindings = syntax.iter().map(bind).collect::<Vec<_>>();
         check_graph(&build_graph(&bindings)).diagnostics
     };
@@ -3494,7 +3494,8 @@ fn build_migration_report_counts_file_coverage_and_boundaries() {
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
         let syntax_trees =
-            load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
+            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+                .expect("test setup should succeed");
         build_migration_report(&config, &syntax_trees)
     };
     remove_temp_project_dir(&project_dir);
@@ -3531,7 +3532,8 @@ fn build_migration_report_ranks_high_impact_untyped_files() {
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
         let syntax_trees =
-            load_syntax_trees(&discovery.sources, false).expect("test setup should succeed");
+            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+                .expect("test setup should succeed");
         build_migration_report(&config, &syntax_trees)
     };
     remove_temp_project_dir(&project_dir);

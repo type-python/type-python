@@ -23,8 +23,9 @@ use typepython_incremental::{
     snapshot_diff_modules,
 };
 use typepython_syntax::{
-    NamedBlockStatement, ParseOptions, SourceFile, SourceKind, SyntaxStatement, SyntaxTree,
-    apply_type_ignore_directives, parse_with_options, prepare_syntax_tree_for_external_formatter,
+    NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
+    SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
+    prepare_syntax_tree_for_external_formatter,
 };
 use url::Url;
 

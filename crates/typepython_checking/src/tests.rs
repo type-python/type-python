@@ -316,6 +316,60 @@ fn check_accepts_direct_type_checking_import_from_typing() {
     assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
 }
 
+#[test]
+fn check_resolves_imports_inside_version_guards() {
+    let root = create_temp_typepython_root();
+    let main_path = root.join("main.tpy");
+    let models_path = root.join("models.tpy");
+    fs::write(
+        &main_path,
+        "import sys\nif sys.version_info >= (3, 11):\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .expect("temp source should be written");
+    fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
+
+    let trees = vec![
+        parse_with_options(
+            SourceFile {
+                path: main_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.main"),
+                text: String::from(
+                    "import sys\nif sys.version_info >= (3, 11):\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+                ),
+            },
+            ParseOptions {
+                target_python: Some(typepython_syntax::ParsePythonVersion { major: 3, minor: 11 }),
+                ..ParseOptions::default()
+            },
+        ),
+        parse_with_options(
+            SourceFile {
+                path: models_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.models"),
+                text: String::from("class User:\n    pass\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let diagnostics = check_with_options(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources
@@ -1961,7 +2015,7 @@ fn check_reports_positional_only_constructor_parameter_passed_as_keyword() {
 fn check_reports_incomplete_conditional_return_coverage() {
     let result = check_temp_typepython_source_with_options(
         "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",
-        ParseOptions { enable_conditional_returns: true },
+        ParseOptions { enable_conditional_returns: true, ..ParseOptions::default() },
     );
 
     let rendered = result.diagnostics.as_text();
@@ -1973,7 +2027,7 @@ fn check_reports_incomplete_conditional_return_coverage() {
 fn check_accepts_complete_conditional_return_coverage() {
     let result = check_temp_typepython_source_with_options(
         "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n    case None: None\n",
-        ParseOptions { enable_conditional_returns: true },
+        ParseOptions { enable_conditional_returns: true, ..ParseOptions::default() },
     );
 
     let rendered = result.diagnostics.as_text();

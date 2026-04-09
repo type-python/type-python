@@ -67,11 +67,18 @@ struct CoverageTally {
 pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let config = load_project(args.run.project.as_ref())?;
     let discovery = collect_source_paths(&config)?;
-    let mut syntax_trees =
-        load_syntax_trees(&discovery.sources, config.config.typing.conditional_returns)?;
+    let mut syntax_trees = load_syntax_trees(
+        &discovery.sources,
+        config.config.typing.conditional_returns,
+        &config.config.project.target_python,
+    )?;
     let bundled_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
     syntax_trees
-        .extend(load_syntax_trees(&bundled_sources, config.config.typing.conditional_returns)?);
+        .extend(load_syntax_trees(
+            &bundled_sources,
+            config.config.typing.conditional_returns,
+            &config.config.project.target_python,
+        )?);
     let mut diagnostics = discovery.diagnostics.clone();
     let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);

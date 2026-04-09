@@ -939,4 +939,55 @@ pub struct UnsafeOperationSite {
 pub struct ParseOptions {
     /// Enables collection of conditional-return rule sites.
     pub enable_conditional_returns: bool,
+    /// Target Python version used for parser-side guard evaluation.
+    pub target_python: Option<ParsePythonVersion>,
+    /// Target platform used for parser-side guard evaluation.
+    pub target_platform: Option<ParseTargetPlatform>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ParsePythonVersion {
+    pub major: u8,
+    pub minor: u8,
+}
+
+impl ParsePythonVersion {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (major, minor) = text.trim().split_once('.')?;
+        Some(Self {
+            major: major.parse().ok()?,
+            minor: minor.parse().ok()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ParseTargetPlatform {
+    Darwin,
+    Linux,
+    Win32,
+    Other,
+}
+
+impl ParseTargetPlatform {
+    #[must_use]
+    pub fn current() -> Self {
+        match std::env::consts::OS {
+            "macos" => Self::Darwin,
+            "linux" => Self::Linux,
+            "windows" => Self::Win32,
+            _ => Self::Other,
+        }
+    }
+
+    #[must_use]
+    pub fn sys_platform_name(self) -> &'static str {
+        match self {
+            Self::Darwin => "darwin",
+            Self::Linux => "linux",
+            Self::Win32 => "win32",
+            Self::Other => "other",
+        }
+    }
 }

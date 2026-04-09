@@ -13,6 +13,7 @@ pub(super) fn parse_discovered_source(
     source: &DiscoveredSource,
     overlay_text: Option<&str>,
     enable_conditional_returns: bool,
+    target_python: &str,
 ) -> Result<SyntaxTree, LspError> {
     let mut source_file = if let Some(text) = overlay_text {
         SourceFile {
@@ -28,7 +29,14 @@ pub(super) fn parse_discovered_source(
         source_file
     };
     source_file.logical_module = source.logical_module.clone();
-    Ok(parse_with_options(source_file, ParseOptions { enable_conditional_returns }))
+    Ok(parse_with_options(
+        source_file,
+        ParseOptions {
+            enable_conditional_returns,
+            target_python: ParsePythonVersion::parse(target_python),
+            target_platform: Some(ParseTargetPlatform::current()),
+        },
+    ))
 }
 
 pub(super) fn source_root_for_path_from_roots(
@@ -182,4 +190,3 @@ pub(super) fn remove_workspace_query_occurrences_for_uri(
         queries.occurrences_by_canonical.remove(&canonical);
     }
 }
-
