@@ -42,6 +42,7 @@ pub struct TypePythonStubContext {
     pub value_overrides: Vec<StubValueOverride>,
     pub callable_overrides: Vec<StubCallableOverride>,
     pub synthetic_methods: Vec<StubSyntheticMethod>,
+    pub sealed_classes: Vec<StubSealedClass>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -66,6 +67,13 @@ pub struct StubSyntheticMethod {
     pub method_kind: MethodKind,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StubSealedClass {
+    pub line: usize,
+    pub name: String,
+    pub members: Vec<String>,
 }
 
 /// Generated stub flavor for inferred pass-through Python surfaces.
@@ -1936,6 +1944,7 @@ struct LoweredStubContext {
     value_overrides: BTreeMap<usize, String>,
     callable_overrides: BTreeMap<usize, LoweredCallableOverride>,
     synthetic_methods: BTreeMap<usize, Vec<StubSyntheticMethod>>,
+    sealed_classes: BTreeMap<usize, StubSealedClass>,
 }
 
 #[derive(Debug, Clone)]
@@ -1972,6 +1981,12 @@ impl LoweredStubContext {
                 .entry(original_to_lowered_line(module, method.class_line))
                 .or_default()
                 .push(method.clone());
+        }
+        for sealed_class in &context.sealed_classes {
+            lowered.sealed_classes.insert(
+                original_to_lowered_line(module, sealed_class.line),
+                sealed_class.clone(),
+            );
         }
         lowered
     }
@@ -2132,6 +2147,10 @@ fn render_authoritative_class_stub(
     let indent = format!("{}    ", indentation);
     let class_line = offset_to_line(source, class_def.name.range.start().to_usize());
     let mut body_lines = render_authoritative_class_body(source, class_def, context, &indent);
+    let sealed_comment = context
+        .sealed_classes
+        .get(&class_line)
+        .map(|sealed| render_sealed_stub_comment(sealed, &indentation));
 
     if let Some(extra_methods) = context.synthetic_methods.get(&class_line) {
         for method in extra_methods {
@@ -2140,6 +2159,9 @@ fn render_authoritative_class_stub(
     }
 
     let mut lines = decorators;
+    if let Some(sealed_comment) = sealed_comment {
+        lines.push(sealed_comment);
+    }
     if body_lines.is_empty() {
         lines.push(rewrite_stub_header_text(&header));
         lines.join("\n")
@@ -2148,6 +2170,15 @@ fn render_authoritative_class_stub(
         lines.push(body_lines.join("\n"));
         lines.join("\n")
     }
+}
+
+fn render_sealed_stub_comment(sealed: &StubSealedClass, indentation: &str) -> String {
+    let members = if sealed.members.is_empty() {
+        String::new()
+    } else {
+        sealed.members.join(", ")
+    };
+    format!("{indentation}# tpy:sealed {} -> {{{members}}}", sealed.name)
 }
 
 fn render_authoritative_class_body(
@@ -2545,7 +2576,8 @@ fn relative_module_path(config: &ConfigHandle, source_path: &Path) -> PathBuf {
 mod tests {
     use super::{
         EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary,
-        StubCallableOverride, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
+        StubCallableOverride, StubSealedClass, StubSyntheticMethod, StubValueOverride,
+        TypePythonStubContext,
         generate_inferred_stub_source, generate_typepython_stub_source, plan_emits_for_sources,
         write_runtime_outputs,
     };
@@ -3017,6 +3049,7 @@ mod tests {
                 ],
                 returns: Some(String::from("None")),
             }],
+            sealed_classes: Vec::new(),
         };
 
         let stub = generate_typepython_stub_source(&module, &context)
@@ -3026,6 +3059,44 @@ mod tests {
         assert!(stub.contains("def build(name: str) -> str: ..."));
         assert!(!stub.contains("@model"));
         assert!(stub.contains("def __init__(self, name: str) -> None: ..."));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_preserves_detailed_sealed_metadata_comments() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class Expr:  # tpy:sealed\n    ...\n\nclass Num(Expr):\n    ...\n\nclass Add(Expr):\n    ...\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+                SourceMapEntry { original_line: 7, lowered_line: 7 },
+                SourceMapEntry { original_line: 8, lowered_line: 8 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+        let context = TypePythonStubContext {
+            value_overrides: Vec::new(),
+            callable_overrides: Vec::new(),
+            synthetic_methods: Vec::new(),
+            sealed_classes: vec![StubSealedClass {
+                line: 1,
+                name: String::from("Expr"),
+                members: vec![String::from("Add"), String::from("Num")],
+            }],
+        };
+
+        let stub = generate_typepython_stub_source(&module, &context)
+            .expect("sealed metadata stub should generate");
+
+        assert!(stub.contains("# tpy:sealed Expr -> {Add, Num}"));
+        assert!(stub.contains("class Expr:  # tpy:sealed"));
     }
 
     #[test]
@@ -3217,6 +3288,7 @@ mod tests {
             }],
             callable_overrides: Vec::new(),
             synthetic_methods: Vec::new(),
+            sealed_classes: Vec::new(),
         };
 
         let stub = generate_typepython_stub_source(&module, &context)

@@ -15,8 +15,9 @@ use typepython_checking::{
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
-    EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSyntheticMethod,
-    StubValueOverride, TypePythonStubContext, generate_inferred_stub_source, plan_emits,
+    EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSealedClass,
+    StubSyntheticMethod, StubValueOverride, TypePythonStubContext, generate_inferred_stub_source,
+    plan_emits,
     plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
@@ -757,6 +758,7 @@ fn build_typepython_stub_contexts(
         .map(|tree| {
             let mut context = TypePythonStubContext::default();
             collect_value_stub_overrides(&tree.statements, &mut context.value_overrides);
+            collect_sealed_stub_metadata(&tree.statements, &mut context.sealed_classes);
             (tree.source.path.clone(), context)
         })
         .collect::<BTreeMap<_, _>>();
@@ -841,6 +843,45 @@ fn collect_class_member_value_stub_overrides(
                 annotation: member.value_type.clone().unwrap_or_default(),
             });
         }
+    }
+}
+
+fn collect_sealed_stub_metadata(
+    statements: &[typepython_syntax::SyntaxStatement],
+    sealed_classes: &mut Vec<StubSealedClass>,
+) {
+    let class_like = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::Interface(statement)
+            | typepython_syntax::SyntaxStatement::DataClass(statement)
+            | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
+                Some((statement.name.clone(), statement.bases.clone()))
+            }
+            typepython_syntax::SyntaxStatement::SealedClass(statement) => {
+                Some((statement.name.clone(), statement.bases.clone()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for statement in statements.iter().filter_map(|statement| match statement {
+        typepython_syntax::SyntaxStatement::SealedClass(statement) => Some(statement),
+        _ => None,
+    }) {
+        let mut members = class_like
+            .iter()
+            .filter(|(candidate_name, bases)| {
+                candidate_name != &statement.name && bases.iter().any(|base| base == &statement.name)
+            })
+            .map(|(candidate_name, _)| candidate_name.clone())
+            .collect::<Vec<_>>();
+        members.sort();
+        sealed_classes.push(StubSealedClass {
+            line: statement.line,
+            name: statement.name.clone(),
+            members,
+        });
     }
 }
 
