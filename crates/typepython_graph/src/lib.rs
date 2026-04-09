@@ -293,6 +293,7 @@ fn typing_prelude_declarations() -> Vec<Declaration> {
         vec![prelude_type_alias("Callable", "Callable")],
         vec![prelude_type_alias("Literal", "Literal")],
         vec![prelude_type_alias("Concatenate", "Concatenate")],
+        vec![prelude_value("TYPE_CHECKING", "bool")],
         vec![prelude_class("TypedDict")],
         vec![prelude_protocol_class("Protocol")],
         prelude_protocol_class_with_methods(
@@ -579,6 +580,29 @@ fn prelude_function(
         kind: DeclarationKind::Function,
         detail: signature.rendered(),
         value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    }
+}
+
+fn prelude_value(name: &str, annotation: &str) -> Declaration {
+    Declaration {
+        metadata: DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new(annotation)) },
+        name: String::from(name),
+        kind: DeclarationKind::Value,
+        detail: String::from(annotation),
+        value_type: Some(String::from(annotation)),
         method_kind: None,
         class_kind: None,
         owner: None,

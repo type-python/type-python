@@ -306,6 +306,16 @@ fn check_resolves_imports_inside_type_checking_guards() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn check_accepts_direct_type_checking_import_from_typing() {
+    let diagnostics = check_temp_typepython_source(
+        "from typing import TYPE_CHECKING\nflag: bool = TYPE_CHECKING\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources
