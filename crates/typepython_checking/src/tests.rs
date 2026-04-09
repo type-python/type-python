@@ -255,6 +255,57 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn check_resolves_imports_inside_type_checking_guards() {
+    let root = create_temp_typepython_root();
+    let main_path = root.join("main.tpy");
+    let models_path = root.join("models.tpy");
+    fs::write(
+        &main_path,
+        "import typing\nif typing.TYPE_CHECKING:\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .expect("temp source should be written");
+    fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
+
+    let trees = vec![
+        parse_with_options(
+            SourceFile {
+                path: main_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.main"),
+                text: String::from(
+                    "import typing\nif typing.TYPE_CHECKING:\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+                ),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: models_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.models"),
+                text: String::from("class User:\n    pass\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let diagnostics = check_with_options(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources

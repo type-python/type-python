@@ -42,6 +42,107 @@ fn extract_ast_backed_statements(
     statements
 }
 
+fn collect_type_checking_import_statements_from_suite(
+    path: &Path,
+    current_module_key: &str,
+    source: &str,
+    normalized: &str,
+    suite: &[Stmt],
+    statements: &mut Vec<SyntaxStatement>,
+    diagnostics: &mut DiagnosticReport,
+) {
+    for stmt in suite {
+        let line = offset_to_line_column(normalized, stmt.range().start().to_usize()).0;
+        match stmt {
+            Stmt::If(if_stmt) if is_type_checking_guard_expr(&if_stmt.test) => {
+                collect_type_checking_import_statements_from_suite(
+                    path,
+                    current_module_key,
+                    source,
+                    normalized,
+                    &if_stmt.body,
+                    statements,
+                    diagnostics,
+                );
+            }
+            Stmt::Try(try_stmt) => {
+                collect_type_checking_import_statements_from_suite(
+                    path,
+                    current_module_key,
+                    source,
+                    normalized,
+                    &try_stmt.body,
+                    statements,
+                    diagnostics,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_type_checking_import_statements_from_suite(
+                        path,
+                        current_module_key,
+                        source,
+                        normalized,
+                        &handler.body,
+                        statements,
+                        diagnostics,
+                    );
+                }
+                collect_type_checking_import_statements_from_suite(
+                    path,
+                    current_module_key,
+                    source,
+                    normalized,
+                    &try_stmt.orelse,
+                    statements,
+                    diagnostics,
+                );
+                collect_type_checking_import_statements_from_suite(
+                    path,
+                    current_module_key,
+                    source,
+                    normalized,
+                    &try_stmt.finalbody,
+                    statements,
+                    diagnostics,
+                );
+            }
+            _ => {
+                let existing_lines: std::collections::BTreeSet<_> =
+                    statements.iter().map(statement_line).collect();
+                if existing_lines.contains(&line) {
+                    continue;
+                }
+                if let Some(SyntaxStatement::Import(statement)) = extract_ast_backed_statement(
+                    path,
+                    current_module_key,
+                    source,
+                    normalized,
+                    stmt,
+                    line,
+                    diagnostics,
+                ) {
+                    statements.push(SyntaxStatement::Import(statement));
+                }
+            }
+        }
+    }
+}
+
+fn is_type_checking_guard_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Name(name) => name.id.as_str() == "TYPE_CHECKING",
+        Expr::Attribute(attribute) => {
+            attribute.attr.as_str() == "TYPE_CHECKING"
+                && matches!(
+                    attribute.value.as_ref(),
+                    Expr::Name(name)
+                        if matches!(name.id.as_str(), "typing" | "typing_extensions")
+                )
+        }
+        _ => false,
+    }
+}
+
 fn extract_ast_backed_statement(
     path: &Path,
     current_module_key: &str,
@@ -8176,6 +8277,52 @@ mod tests {
                 }),
             ]
         );
+    }
+
+    #[test]
+    fn parse_collects_imports_inside_type_checking_guards() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("type-checking-imports.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from app.models import User\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Import(ImportStatement { bindings, line })
+                if *line == 3
+                    && bindings == &vec![ImportBinding {
+                        local_name: String::from("User"),
+                        source_path: String::from("app.models.User"),
+                    }]
+        )), "{:?}", tree.statements);
+    }
+
+    #[test]
+    fn parse_collects_imports_inside_qualified_type_checking_guards() {
+        let tree = parse(SourceFile {
+            path: PathBuf::from("qualified-type-checking-imports.py"),
+            kind: SourceKind::Python,
+            logical_module: String::new(),
+            text: String::from(
+                "import typing\nif typing.TYPE_CHECKING:\n    from app.models import User\n",
+            ),
+        });
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::Import(ImportStatement { bindings, line })
+                if *line == 3
+                    && bindings == &vec![ImportBinding {
+                        local_name: String::from("User"),
+                        source_path: String::from("app.models.User"),
+                    }]
+        )), "{:?}", tree.statements);
     }
 
     #[test]
