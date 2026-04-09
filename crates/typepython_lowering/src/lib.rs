@@ -5,6 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use ruff_python_ast::{Expr, Stmt};
+use ruff_python_parser::parse_module;
+use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_syntax::{SourceKind, SyntaxStatement, SyntaxTree};
 
@@ -356,6 +359,21 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         ));
         lowered_line_number += 1;
     }
+    if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
+        push_required_import(
+            &mut lowered_lines,
+            &mut required_imports,
+            String::from("from typing import Any"),
+        );
+        span_map.push(inserted_span_map_entry(
+            &source_path,
+            &emitted_path,
+            lowered_line_number,
+            lowered_lines.last().expect("inserted line should exist"),
+            LoweringSegmentKind::Inserted,
+        ));
+        lowered_line_number += 1;
+    }
     for (name, type_param) in &runtime_type_params {
         lowered_lines.push(rewrite_typevar_line(name, type_param));
         span_map.push(inserted_span_map_entry(
@@ -547,7 +565,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered_lines.extend(replacement_lines);
     }
 
-    let mut lowered = lowered_lines.join("\n");
+    let mut lowered = normalize_runtime_intrinsic_types(&lowered_lines.join("\n"));
     if normalized_source.ends_with('\n') {
         lowered.push('\n');
     }
@@ -576,6 +594,10 @@ fn push_required_import(
 
 fn line_span(line_number: usize, text: &str) -> SpanMapRange {
     SpanMapRange { line: line_number, start_col: 1, end_col: text.chars().count() + 1 }
+}
+
+fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
+    source.get(range.start().to_usize()..range.end().to_usize())
 }
 
 fn inserted_span_map_entry(
@@ -733,6 +755,182 @@ fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) ->
     }
 
     normalized
+}
+
+fn normalize_runtime_intrinsic_types(source: &str) -> String {
+    let Ok(parsed) = parse_module(source) else {
+        return source.to_owned();
+    };
+    let mut replacements = Vec::new();
+    collect_intrinsic_type_replacements(source, parsed.suite(), &mut replacements);
+    replacements.sort_by(|(left_range, _), (right_range, _)| {
+        right_range.start().cmp(&left_range.start())
+    });
+
+    let mut normalized = source.to_owned();
+    for (range, replacement) in replacements {
+        if let Some(existing) = slice_range(&normalized, range) && existing == replacement {
+            continue;
+        }
+        normalized.replace_range(range.start().to_usize()..range.end().to_usize(), &replacement);
+    }
+    normalized
+}
+
+fn collect_intrinsic_type_replacements(
+    source: &str,
+    suite: &[Stmt],
+    replacements: &mut Vec<(ruff_text_size::TextRange, String)>,
+) {
+    for statement in suite {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                collect_parameter_intrinsic_type_replacements(source, &function.parameters, replacements);
+                if let Some(returns) = function.returns.as_deref()
+                    && let Some(replacement) = normalize_intrinsic_type_text(
+                        slice_range(source, returns.range()).unwrap_or_default(),
+                    )
+                {
+                    replacements.push((returns.range(), replacement));
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                if let Some(replacement) = normalize_intrinsic_type_text(
+                    slice_range(source, assign.annotation.range()).unwrap_or_default(),
+                ) {
+                    replacements.push((assign.annotation.range(), replacement));
+                }
+                if let Some(value) = assign.value.as_deref()
+                    && slice_range(source, assign.annotation.range())
+                        .is_some_and(|annotation| annotation.trim_end() == "TypeAlias")
+                    && let Some(replacement) =
+                        normalize_intrinsic_type_text(slice_range(source, value.range()).unwrap_or_default())
+                {
+                    replacements.push((value.range(), replacement));
+                }
+            }
+            Stmt::ClassDef(class_def) => {
+                if let Some(arguments) = class_def.arguments.as_ref() {
+                    for argument in &arguments.args {
+                        if let Some(replacement) = normalize_intrinsic_type_text(
+                            slice_range(source, argument.range()).unwrap_or_default(),
+                        ) {
+                            replacements.push((argument.range(), replacement));
+                        }
+                    }
+                }
+                collect_intrinsic_type_replacements(source, &class_def.body, replacements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_parameter_intrinsic_type_replacements(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    replacements: &mut Vec<(ruff_text_size::TextRange, String)>,
+) {
+    let mut collect_annotation = |annotation: Option<&Expr>| {
+        if let Some(annotation) = annotation
+            && let Some(replacement) = normalize_intrinsic_type_text(
+                slice_range(source, annotation.range()).unwrap_or_default(),
+            )
+        {
+            replacements.push((annotation.range(), replacement));
+        }
+    };
+    for parameter in &parameters.posonlyargs {
+        collect_annotation(parameter.annotation());
+    }
+    for parameter in &parameters.args {
+        collect_annotation(parameter.annotation());
+    }
+    if let Some(parameter) = parameters.vararg.as_ref() {
+        collect_annotation(parameter.annotation());
+    }
+    for parameter in &parameters.kwonlyargs {
+        collect_annotation(parameter.annotation());
+    }
+    if let Some(parameter) = parameters.kwarg.as_ref() {
+        collect_annotation(parameter.annotation());
+    }
+}
+
+fn normalize_intrinsic_type_text(text: &str) -> Option<String> {
+    let mut normalized = String::new();
+    let mut token = String::new();
+    let mut changed = false;
+
+    let flush_token = |token: &mut String, normalized: &mut String, changed: &mut bool| {
+        if token.is_empty() {
+            return;
+        }
+        match token.as_str() {
+            "unknown" => {
+                normalized.push_str("object");
+                *changed = true;
+            }
+            "dynamic" => {
+                normalized.push_str("Any");
+                *changed = true;
+            }
+            _ => normalized.push_str(token),
+        }
+        token.clear();
+    };
+
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+        } else {
+            flush_token(&mut token, &mut normalized, &mut changed);
+            normalized.push(character);
+        }
+    }
+    flush_token(&mut token, &mut normalized, &mut changed);
+
+    changed.then_some(normalized)
+}
+
+fn has_any_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Any"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Any"))
+    })
+}
+
+fn tree_uses_dynamic_intrinsic(tree: &SyntaxTree) -> bool {
+    tree.statements
+        .iter()
+        .any(statement_uses_dynamic_intrinsic)
+}
+
+fn statement_uses_dynamic_intrinsic(statement: &SyntaxStatement) -> bool {
+    match statement {
+        SyntaxStatement::TypeAlias(statement) => statement.value.contains("dynamic"),
+        SyntaxStatement::Interface(statement)
+        | SyntaxStatement::DataClass(statement)
+        | SyntaxStatement::SealedClass(statement)
+        | SyntaxStatement::ClassDef(statement) => {
+            statement.header_suffix.contains("dynamic")
+                || statement
+                    .members
+                    .iter()
+                    .any(|member| member.annotation.as_deref().is_some_and(|annotation| annotation.contains("dynamic")))
+        }
+        SyntaxStatement::FunctionDef(statement) | SyntaxStatement::OverloadDef(statement) => {
+            statement.returns.as_deref().is_some_and(|returns| returns.contains("dynamic"))
+                || statement.params.iter().any(|param| {
+                    param.annotation.as_deref().is_some_and(|annotation| annotation.contains("dynamic"))
+                })
+        }
+        SyntaxStatement::Value(statement) => {
+            statement.annotation.as_deref().is_some_and(|annotation| annotation.contains("dynamic"))
+        }
+        _ => false,
+    }
 }
 
 fn prefers_typing_notrequired(target_python: &str) -> bool {
@@ -1794,8 +1992,9 @@ mod tests {
     use std::path::PathBuf;
     use typepython_diagnostics::DiagnosticReport;
     use typepython_syntax::{
-        ClassMember, ClassMemberKind, NamedBlockStatement, SourceFile, SourceKind, SyntaxStatement,
-        SyntaxTree, TypeAliasStatement, TypeParam, TypeParamKind, UnsafeStatement, parse,
+        ClassMember, ClassMemberKind, FunctionParam, FunctionStatement, NamedBlockStatement,
+        SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
+        TypeParamKind, UnsafeStatement, parse,
     };
 
     #[test]
@@ -2204,6 +2403,71 @@ mod tests {
         println!("{}", lowered.module.python_source);
         assert!(lowered.diagnostics.is_empty());
         assert_eq!(lowered.module.python_source, "class Expr:  # tpy:sealed\n    ...\n");
+    }
+
+    #[test]
+    fn lower_normalizes_intrinsic_boundary_types_for_runtime_output() {
+        let lowered = lower(&SyntaxTree {
+            source: SourceFile {
+                path: PathBuf::from("intrinsics.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "typealias Alias = dynamic\n\ndef take(value: unknown, other: dynamic) -> unknown:\n    return value\n",
+                ),
+            },
+            statements: vec![
+                SyntaxStatement::TypeAlias(TypeAliasStatement {
+                    name: String::from("Alias"),
+                    type_params: Vec::new(),
+                    value: String::from("dynamic"),
+                    value_expr: None,
+                    line: 1,
+                }),
+                SyntaxStatement::FunctionDef(FunctionStatement {
+                    name: String::from("take"),
+                    type_params: Vec::new(),
+                    params: vec![
+                        FunctionParam {
+                            name: String::from("value"),
+                            annotation: Some(String::from("unknown")),
+                            annotation_expr: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false,
+                        },
+                        FunctionParam {
+                            name: String::from("other"),
+                            annotation: Some(String::from("dynamic")),
+                            annotation_expr: None,
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false,
+                        },
+                    ],
+                    returns: Some(String::from("unknown")),
+                    returns_expr: None,
+                    is_async: false,
+                    is_override: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    line: 3,
+                }),
+            ],
+            type_ignore_directives: Vec::new(),
+            diagnostics: DiagnosticReport::default(),
+        });
+
+        assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("from typing import Any"));
+        assert!(lowered.module.python_source.contains("Alias: TypeAlias = Any"));
+        assert!(lowered.module.python_source.contains("def take(value: object, other: Any) -> object:"));
+        assert!(!lowered.module.python_source.contains("unknown"));
+        assert!(!lowered.module.python_source.contains("dynamic"));
     }
 
     #[test]
