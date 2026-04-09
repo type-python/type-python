@@ -370,6 +370,16 @@ fn check_resolves_imports_inside_version_guards() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn check_resolves_class_declarations_inside_type_checking_guards() {
+    let diagnostics = check_temp_typepython_source(
+        "import typing\nif typing.TYPE_CHECKING:\n    class User:\n        pass\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources

@@ -120,7 +120,7 @@ fn collect_guarded_import_statements_from_suite(
                 if existing_lines.contains(&line) {
                     continue;
                 }
-                if let Some(SyntaxStatement::Import(statement)) = extract_ast_backed_statement(
+                if let Some(statement) = extract_ast_backed_statement(
                     path,
                     current_module_key,
                     source,
@@ -129,7 +129,13 @@ fn collect_guarded_import_statements_from_suite(
                     line,
                     diagnostics,
                 ) {
-                    statements.push(SyntaxStatement::Import(statement));
+                    match statement {
+                        SyntaxStatement::Import(_)
+                        | SyntaxStatement::ClassDef(_)
+                        | SyntaxStatement::FunctionDef(_)
+                        | SyntaxStatement::OverloadDef(_) => statements.push(statement),
+                        _ => {}
+                    }
                 }
             }
         }
@@ -8525,6 +8531,28 @@ mod tests {
                         local_name: String::from("MacOnly"),
                         source_path: String::from("app.models.MacOnly"),
                     }]
+        )), "{:?}", tree.statements);
+    }
+
+    #[test]
+    fn parse_collects_class_declarations_inside_type_checking_guards() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("type-checking-class.py"),
+                kind: SourceKind::Python,
+                logical_module: String::new(),
+                text: String::from(
+                    "import typing\nif typing.TYPE_CHECKING:\n    class User:\n        pass\n",
+                ),
+            },
+            ParseOptions::default(),
+        );
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::ClassDef(NamedBlockStatement { name, line, .. })
+                if name == "User" && *line == 3
         )), "{:?}", tree.statements);
     }
 
