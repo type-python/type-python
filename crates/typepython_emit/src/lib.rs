@@ -677,7 +677,7 @@ pub fn generate_typepython_stub_source(
     if python.ends_with('\n') {
         rewritten.push('\n');
     }
-    Ok(rewritten)
+    Ok(normalize_emitted_stub_intrinsic_types(&rewritten)?)
 }
 
 /// Generates a best-effort `.pyi` surface for a pass-through Python module.
@@ -2525,6 +2525,158 @@ fn source_header_text(source: &str, start_offset: usize, body: &[Stmt]) -> Strin
         .join("\n")
 }
 
+fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Error> {
+    let parsed = parse_module(source).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unable to parse stub source for intrinsic type normalization: {}", error.error),
+        )
+    })?;
+    let mut replacements = Vec::new();
+    collect_intrinsic_type_replacements(source, parsed.suite(), &mut replacements);
+    replacements.sort_by(|(left_range, _), (right_range, _)| {
+        right_range.start().cmp(&left_range.start())
+    });
+
+    let mut normalized = source.to_owned();
+    let mut introduced_any = false;
+    for (range, replacement) in replacements {
+        if let Some(existing) = slice_range(&normalized, range) && existing == replacement {
+            continue;
+        }
+        introduced_any |= replacement.contains("Any");
+        normalized.replace_range(range.start().to_usize()..range.end().to_usize(), &replacement);
+    }
+    if introduced_any && !has_typing_any_import(&normalized) {
+        normalized = format!("from typing import Any\n{normalized}");
+    }
+    Ok(normalized)
+}
+
+fn collect_intrinsic_type_replacements(
+    source: &str,
+    suite: &[Stmt],
+    replacements: &mut Vec<(ruff_text_size::TextRange, String)>,
+) {
+    for statement in suite {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                collect_parameter_intrinsic_type_replacements(source, &function.parameters, replacements);
+                if let Some(returns) = function.returns.as_deref()
+                    && let Some(replacement) = normalize_intrinsic_type_text(
+                        slice_range(source, returns.range()).unwrap_or_default(),
+                    )
+                {
+                    replacements.push((returns.range(), replacement));
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                if let Some(replacement) = normalize_intrinsic_type_text(
+                    slice_range(source, assign.annotation.range()).unwrap_or_default(),
+                ) {
+                    replacements.push((assign.annotation.range(), replacement));
+                }
+                if let Some(value) = assign.value.as_deref()
+                    && slice_range(source, assign.annotation.range())
+                        .is_some_and(|annotation| annotation.trim_end() == "TypeAlias")
+                    && let Some(replacement) =
+                        normalize_intrinsic_type_text(slice_range(source, value.range()).unwrap_or_default())
+                {
+                    replacements.push((value.range(), replacement));
+                }
+            }
+            Stmt::ClassDef(class_def) => {
+                if let Some(arguments) = class_def.arguments.as_ref() {
+                    for argument in &arguments.args {
+                        if let Some(replacement) = normalize_intrinsic_type_text(
+                            slice_range(source, argument.range()).unwrap_or_default(),
+                        ) {
+                            replacements.push((argument.range(), replacement));
+                        }
+                    }
+                }
+                collect_intrinsic_type_replacements(source, &class_def.body, replacements);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_parameter_intrinsic_type_replacements(
+    source: &str,
+    parameters: &ruff_python_ast::Parameters,
+    replacements: &mut Vec<(ruff_text_size::TextRange, String)>,
+) {
+    let mut collect_annotation = |annotation: Option<&Expr>| {
+        if let Some(annotation) = annotation
+            && let Some(replacement) = normalize_intrinsic_type_text(
+                slice_range(source, annotation.range()).unwrap_or_default(),
+            )
+        {
+            replacements.push((annotation.range(), replacement));
+        }
+    };
+    for parameter in &parameters.posonlyargs {
+        collect_annotation(parameter.annotation());
+    }
+    for parameter in &parameters.args {
+        collect_annotation(parameter.annotation());
+    }
+    if let Some(parameter) = parameters.vararg.as_ref() {
+        collect_annotation(parameter.annotation());
+    }
+    for parameter in &parameters.kwonlyargs {
+        collect_annotation(parameter.annotation());
+    }
+    if let Some(parameter) = parameters.kwarg.as_ref() {
+        collect_annotation(parameter.annotation());
+    }
+}
+
+fn normalize_intrinsic_type_text(text: &str) -> Option<String> {
+    let mut normalized = String::new();
+    let mut token = String::new();
+    let mut changed = false;
+
+    let flush_token = |token: &mut String, normalized: &mut String, changed: &mut bool| {
+        if token.is_empty() {
+            return;
+        }
+        match token.as_str() {
+            "unknown" => {
+                normalized.push_str("object");
+                *changed = true;
+            }
+            "dynamic" => {
+                normalized.push_str("Any");
+                *changed = true;
+            }
+            _ => normalized.push_str(token),
+        }
+        token.clear();
+    };
+
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+        } else {
+            flush_token(&mut token, &mut normalized, &mut changed);
+            normalized.push(character);
+        }
+    }
+    flush_token(&mut token, &mut normalized, &mut changed);
+
+    changed.then_some(normalized)
+}
+
+fn has_typing_any_import(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == "from typing import Any"
+            || (trimmed.starts_with("from typing import ") && trimmed.contains("Any"))
+    })
+}
+
 #[allow(dead_code)]
 fn is_empty_stub_class_body(body: &[Stmt]) -> bool {
     body.iter().all(|statement| match statement {
@@ -3124,6 +3276,35 @@ mod tests {
 
         assert!(stub.contains("# tpy:derived Partial[User]"));
         assert!(stub.contains("class UserCreate(TypedDict):"));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_normalizes_intrinsic_boundary_types() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "from typing import TypeAlias\nAlias: TypeAlias = dynamic\n\ndef take(value: unknown, other: dynamic) -> unknown:\n    return value\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("intrinsic type normalization should succeed");
+
+        assert!(stub.contains("from typing import Any"));
+        assert!(stub.contains("Alias: TypeAlias = Any"));
+        assert!(stub.contains("def take(value: object, other: Any) -> object: ..."));
+        assert!(!stub.contains("unknown"));
+        assert!(!stub.contains("dynamic"));
     }
 
     #[test]
