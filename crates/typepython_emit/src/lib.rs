@@ -2532,6 +2532,7 @@ fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Er
             format!("unable to parse stub source for intrinsic type normalization: {}", error.error),
         )
     })?;
+    let unknown_comments = collect_unknown_boundary_comments(source, parsed.suite());
     let mut replacements = Vec::new();
     collect_intrinsic_type_replacements(source, parsed.suite(), &mut replacements);
     replacements.sort_by(|(left_range, _), (right_range, _)| {
@@ -2550,6 +2551,7 @@ fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Er
     if introduced_any && !has_typing_any_import(&normalized) {
         normalized = format!("from typing import Any\n{normalized}");
     }
+    normalized = insert_unknown_boundary_comments(&normalized, &unknown_comments, usize::from(introduced_any));
     Ok(normalized)
 }
 
@@ -2675,6 +2677,116 @@ fn has_typing_any_import(source: &str) -> bool {
         trimmed == "from typing import Any"
             || (trimmed.starts_with("from typing import ") && trimmed.contains("Any"))
     })
+}
+
+fn collect_unknown_boundary_comments(source: &str, suite: &[Stmt]) -> Vec<(usize, String)> {
+    let mut comments = Vec::new();
+    for statement in suite {
+        match statement {
+            Stmt::FunctionDef(function) => {
+                let has_unknown = function
+                    .returns
+                    .as_deref()
+                    .and_then(|returns| slice_range(source, returns.range()))
+                    .is_some_and(type_text_contains_unknown)
+                    || parameters_contain_unknown(source, &function.parameters);
+                if has_unknown {
+                    comments.push((
+                        offset_to_line(source, function.name.range.start().to_usize()),
+                        format!("# tpy:unknown {}", function.name.as_str()),
+                    ));
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                let line = offset_to_line(source, assign.range.start().to_usize());
+                if slice_range(source, assign.annotation.range())
+                    .is_some_and(|annotation| annotation.trim_end() == "TypeAlias")
+                    && assign
+                        .value
+                        .as_deref()
+                        .and_then(|value| slice_range(source, value.range()))
+                        .is_some_and(type_text_contains_unknown)
+                    && let Expr::Name(name) = assign.target.as_ref()
+                {
+                    comments.push((line, format!("# tpy:unknown {}", name.id.as_str())));
+                } else if slice_range(source, assign.annotation.range()).is_some_and(type_text_contains_unknown)
+                    && let Expr::Name(name) = assign.target.as_ref()
+                {
+                    comments.push((line, format!("# tpy:unknown {}", name.id.as_str())));
+                }
+            }
+            Stmt::ClassDef(class_def) => {
+                comments.extend(collect_unknown_boundary_comments(source, &class_def.body));
+            }
+            _ => {}
+        }
+    }
+    comments
+}
+
+fn parameters_contain_unknown(source: &str, parameters: &ruff_python_ast::Parameters) -> bool {
+    let contains_unknown = |annotation: Option<&Expr>| {
+        annotation
+            .and_then(|annotation| slice_range(source, annotation.range()))
+            .is_some_and(type_text_contains_unknown)
+    };
+    parameters.posonlyargs.iter().any(|parameter| contains_unknown(parameter.annotation()))
+        || parameters.args.iter().any(|parameter| contains_unknown(parameter.annotation()))
+        || parameters
+            .vararg
+            .as_ref()
+            .is_some_and(|parameter| contains_unknown(parameter.annotation()))
+        || parameters
+            .kwonlyargs
+            .iter()
+            .any(|parameter| contains_unknown(parameter.annotation()))
+        || parameters
+            .kwarg
+            .as_ref()
+            .is_some_and(|parameter| contains_unknown(parameter.annotation()))
+}
+
+fn type_text_contains_unknown(text: &str) -> bool {
+    contains_type_token(text, "unknown")
+}
+
+fn contains_type_token(text: &str, token: &str) -> bool {
+    let mut current = String::new();
+    for character in text.chars().chain(std::iter::once(' ')) {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            current.push(character);
+            continue;
+        }
+        if current == token {
+            return true;
+        }
+        current.clear();
+    }
+    false
+}
+
+fn insert_unknown_boundary_comments(
+    source: &str,
+    comments: &[(usize, String)],
+    line_offset: usize,
+) -> String {
+    if comments.is_empty() {
+        return source.to_owned();
+    }
+    let mut lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
+    let mut comments = comments.to_vec();
+    comments.sort_by(|left, right| right.0.cmp(&left.0));
+    for (line, comment) in comments {
+        let insert_at = line.saturating_sub(1) + line_offset;
+        if insert_at <= lines.len() {
+            lines.insert(insert_at, comment);
+        }
+    }
+    let mut rewritten = lines.join("\n");
+    if source.ends_with('\n') {
+        rewritten.push('\n');
+    }
+    rewritten
 }
 
 #[allow(dead_code)]
@@ -3301,9 +3413,11 @@ mod tests {
             .expect("intrinsic type normalization should succeed");
 
         assert!(stub.contains("from typing import Any"));
+        assert!(stub.contains("# tpy:unknown take"));
         assert!(stub.contains("Alias: TypeAlias = Any"));
         assert!(stub.contains("def take(value: object, other: Any) -> object: ..."));
-        assert!(!stub.contains("unknown"));
+        assert!(!stub.contains("value: unknown"));
+        assert!(!stub.contains("-> unknown"));
         assert!(!stub.contains("dynamic"));
     }
 

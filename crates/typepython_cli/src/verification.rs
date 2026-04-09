@@ -969,6 +969,9 @@ fn stub_metadata_expectation_warnings(path: &Path) -> Vec<Diagnostic> {
     if rendered.contains("# tpy:derived") {
         markers.push("tpy:derived");
     }
+    if rendered.contains("# tpy:unknown") {
+        markers.push("tpy:unknown");
+    }
     if markers.is_empty() {
         return Vec::new();
     }
