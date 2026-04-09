@@ -199,12 +199,15 @@ impl AnalysisHost {
         let Some(active_call) = active_call(document, position, uri)? else {
             return Ok(Value::Null);
         };
-        let signatures =
-            resolve_signature_information(workspace, document, position, &active_call.callee);
-        if signatures.is_empty() {
+        let candidates =
+            resolve_signature_candidates(workspace, document, position, &active_call.callee);
+        if candidates.is_empty() {
             return Ok(Value::Null);
         }
-        let active_signature = select_active_signature(&signatures, active_call.active_parameter);
+        let call_site = active_call_site(document, position, &active_call.callee);
+        let active_signature =
+            select_active_signature(&candidates, active_call.active_parameter, call_site.as_ref());
+        let signatures = candidates.into_iter().map(|candidate| candidate.info).collect::<Vec<_>>();
         let active_parameter = signatures[active_signature]
             .parameters
             .len()
@@ -317,25 +320,6 @@ fn fuzzy_symbol_match(query: &str, candidate: &str) -> Option<WorkspaceSymbolMat
         gap_count,
         candidate_len: candidate.len(),
     })
-}
-
-fn select_active_signature(
-    signatures: &[LspSignatureInformation],
-    active_parameter: usize,
-) -> usize {
-    signatures
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, signature)| {
-            let last_parameter_index = signature.parameters.len().saturating_sub(1);
-            (
-                usize::from(active_parameter > last_parameter_index),
-                active_parameter.abs_diff(last_parameter_index),
-                last_parameter_index,
-            )
-        })
-        .map(|(index, _)| index)
-        .unwrap_or(0)
 }
 
 impl AnalysisHost {
