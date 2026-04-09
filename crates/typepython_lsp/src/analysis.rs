@@ -394,7 +394,7 @@ impl AnalysisHost {
         let items = if is_member_access {
             collect_member_completion_items(workspace, document, position)
         } else {
-            let mut items = Vec::new();
+            let mut items = keyword_snippet_completion_items();
             let mut seen = BTreeSet::new();
 
             let mut local_keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
@@ -402,7 +402,7 @@ impl AnalysisHost {
             for name in local_keys {
                 let mut item =
                     completion_item_from_canonical(workspace, name.clone(), &document.local_symbols[&name]);
-                item.sort_text = format!("0:{}", item.sort_text);
+                item.sort_text = format!("1:{}", item.sort_text);
                 seen.insert(item.label.clone());
                 items.push(item);
             }
@@ -420,7 +420,7 @@ impl AnalysisHost {
             workspace_candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
             for (label, canonical) in workspace_candidates {
                 let mut item = completion_item_from_canonical(workspace, label, &canonical);
-                item.sort_text = format!("1:{}", item.sort_text);
+                item.sort_text = format!("2:{}", item.sort_text);
                 items.push(item);
             }
 

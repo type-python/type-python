@@ -335,7 +335,51 @@ fn completion_item(label: String, detail: Option<String>, kind: u32) -> LspCompl
         label,
         detail,
         kind,
+        insert_text: None,
+        insert_text_format: None,
     }
+}
+
+pub(crate) fn keyword_snippet_completion_items() -> Vec<LspCompletionItem> {
+    [
+        (
+            "class",
+            "snippet class Name",
+            "class ${1:Name}:\n    ${0:pass}",
+        ),
+        (
+            "def",
+            "snippet def name(...)",
+            "def ${1:name}(${2:args}) -> ${3:None}:\n    ${0:pass}",
+        ),
+        (
+            "typealias",
+            "snippet typealias Name = ...",
+            "typealias ${1:Name} = ${0:object}",
+        ),
+        (
+            "overload def",
+            "snippet overload def name(...)",
+            "overload def ${1:name}(${2:args}) -> ${0:object}: ...",
+        ),
+        (
+            "unsafe",
+            "snippet unsafe block",
+            "unsafe:\n    ${0:pass}",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (label, detail, insert_text))| LspCompletionItem {
+        label: label.to_owned(),
+        detail: Some(detail.to_owned()),
+        kind: 15,
+        filter_text: label.to_owned(),
+        sort_text: format!("0:{index:02}:{}", label.to_lowercase()),
+        insert_text: Some(insert_text.to_owned()),
+        insert_text_format: Some(2),
+    })
+    .collect()
 }
 
 fn completion_item_kind_for_declaration(declaration: &typepython_binding::Declaration) -> u32 {

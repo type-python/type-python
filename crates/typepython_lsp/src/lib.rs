@@ -233,6 +233,10 @@ struct LspCompletionItem {
     kind: u32,
     filter_text: String,
     sort_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    insert_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    insert_text_format: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

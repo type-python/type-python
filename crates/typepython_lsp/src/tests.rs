@@ -473,7 +473,7 @@ fn completion_returns_local_symbols_and_member_symbols() {
         .expect("build should appear in local completion results");
     assert_eq!(build_item["kind"], json!(3));
     assert_eq!(build_item["filterText"], json!("build"));
-    assert_eq!(build_item["sortText"], json!("0:build:03"));
+    assert_eq!(build_item["sortText"], json!("1:build:03"));
 
     let members = server
         .handle_completion(json!({
@@ -528,7 +528,14 @@ fn completion_includes_workspace_top_level_symbols_for_non_member_access() {
         .find(|item| item["label"] == json!("helper"))
         .expect("workspace helper symbol should appear in completion");
     assert_eq!(helper["kind"], json!(3));
-    assert_eq!(helper["sortText"], json!("1:helper:03"));
+    assert_eq!(helper["sortText"], json!("2:helper:03"));
+    let class_snippet = items
+        .iter()
+        .find(|item| item["label"] == json!("class"))
+        .expect("class snippet should appear in completion");
+    assert_eq!(class_snippet["kind"], json!(15));
+    assert_eq!(class_snippet["insertTextFormat"], json!(2));
+    assert_eq!(class_snippet["insertText"], json!("class ${1:Name}:\n    ${0:pass}"));
 }
 
 #[test]
