@@ -1324,6 +1324,7 @@ fn try_expand_typeddict_transform(
         .to_owned();
 
     let mut lines = Vec::with_capacity(2 + members.len());
+    lines.push(format!("{}# tpy:derived {}", indent, value));
     lines.push(format!("{}class {}(TypedDict):", indent, alias_name));
     for member in members {
         let ann = member.annotation.as_deref().unwrap_or("object");
@@ -2837,6 +2838,7 @@ mod tests {
         });
 
         assert!(lowered.diagnostics.is_empty());
+        assert!(lowered.module.python_source.contains("# tpy:derived Partial[User]"));
         assert!(lowered.module.python_source.contains("class UserCreate(TypedDict):"));
         assert!(lowered.module.python_source.contains("id: NotRequired[int]"));
         assert!(lowered.module.python_source.contains("name: NotRequired[str]"));

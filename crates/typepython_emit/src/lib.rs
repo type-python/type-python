@@ -3100,6 +3100,33 @@ mod tests {
     }
 
     #[test]
+    fn generate_typepython_stub_source_preserves_typeddict_transform_provenance_comment() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "class User(TypedDict):\n    id: int\n\n# tpy:derived Partial[User]\nclass UserCreate(TypedDict):\n    id: NotRequired[int]\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 5, lowered_line: 5 },
+                SourceMapEntry { original_line: 6, lowered_line: 6 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+            .expect("TypedDict provenance stub should generate");
+
+        assert!(stub.contains("# tpy:derived Partial[User]"));
+        assert!(stub.contains("class UserCreate(TypedDict):"));
+    }
+
+    #[test]
     fn generate_typepython_stub_source_drops_runtime_control_flow_and_rewrites_assignments() {
         let module = LoweredModule {
             source_path: PathBuf::from("src/app/__init__.tpy"),
