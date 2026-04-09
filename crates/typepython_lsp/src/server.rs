@@ -2,9 +2,10 @@ use super::*;
 
 impl Server {
     pub(super) fn new(config: ConfigHandle) -> Self {
+        let diagnostic_debounce_ms = config.config.watch.debounce_ms;
         Self {
             analysis: AnalysisHost::new(config),
-            scheduler: LspScheduler::default(),
+            scheduler: LspScheduler::new(diagnostic_debounce_ms),
             shutdown_requested: false,
             exited: false,
         }

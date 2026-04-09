@@ -1,15 +1,15 @@
 use super::*;
 use std::time::{Duration, Instant};
 
-const DIAGNOSTIC_DEBOUNCE_MS: u64 = 40;
 const MAX_HIGH_PRIORITY_DEFERRALS: usize = 3;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct LspScheduler {
     background_mode: bool,
     canceled_request_ids: BTreeSet<String>,
     pending_diagnostics: Option<PendingDiagnostics>,
     next_revision: u64,
+    diagnostic_debounce: Duration,
 }
 
 #[derive(Debug)]
@@ -21,6 +21,16 @@ struct PendingDiagnostics {
 }
 
 impl LspScheduler {
+    pub(super) fn new(debounce_ms: u64) -> Self {
+        Self {
+            background_mode: false,
+            canceled_request_ids: BTreeSet::new(),
+            pending_diagnostics: None,
+            next_revision: 0,
+            diagnostic_debounce: Duration::from_millis(debounce_ms),
+        }
+    }
+
     pub(super) fn enable_background_mode(&mut self) {
         self.background_mode = true;
     }
@@ -35,7 +45,7 @@ impl LspScheduler {
         self.next_revision += 1;
         self.pending_diagnostics = Some(PendingDiagnostics {
             revision: self.next_revision,
-            due_at: Instant::now() + Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS),
+            due_at: Instant::now() + self.diagnostic_debounce,
             notifications,
             high_priority_deferrals: 0,
         });
@@ -101,6 +111,12 @@ impl LspScheduler {
             return false;
         };
         self.canceled_request_ids.remove(&key)
+    }
+}
+
+impl Default for LspScheduler {
+    fn default() -> Self {
+        Self::new(40)
     }
 }
 

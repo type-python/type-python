@@ -962,6 +962,7 @@ fn background_scheduler_debounces_and_discards_stale_diagnostics() {
         "background_scheduler_debounces_and_discards_stale_diagnostics",
         "def ok() -> int:\n    return 1\n",
     );
+    let debounce_wait = Duration::from_millis(config.config.watch.debounce_ms + 20);
     let mut server = Server::new(config.clone());
     server.scheduler.enable_background_mode();
     let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
@@ -994,7 +995,7 @@ fn background_scheduler_debounces_and_discards_stale_diagnostics() {
         .expect("didChange should coalesce diagnostics");
     assert!(change_responses.is_empty());
 
-    std::thread::sleep(Duration::from_millis(60));
+    std::thread::sleep(debounce_wait);
     let notifications = server.scheduler.flush_due_timeout();
     assert_eq!(notifications.len(), 1);
     let payload = notifications
@@ -1013,6 +1014,7 @@ fn background_scheduler_defers_diagnostics_for_hover_requests() {
         "background_scheduler_defers_diagnostics_for_hover_requests",
         "def ok() -> int:\n    return 1\n",
     );
+    let debounce_wait = Duration::from_millis(config.config.watch.debounce_ms + 20);
     let mut server = Server::new(config.clone());
     server.scheduler.enable_background_mode();
     let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
@@ -1032,7 +1034,7 @@ fn background_scheduler_defers_diagnostics_for_hover_requests() {
         }))
         .expect("didOpen should schedule diagnostics");
 
-    std::thread::sleep(Duration::from_millis(60));
+    std::thread::sleep(debounce_wait);
     for request_id in 1..=3 {
         let responses = server
             .handle_message(json!({
