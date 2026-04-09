@@ -82,6 +82,12 @@ pub(crate) struct VerifyArgs {
         help = "Verify a published source distribution against the build output"
     )]
     pub(crate) sdists: Vec<PathBuf>,
+    #[arg(
+        long = "checker",
+        value_name = "COMMAND",
+        help = "Run an external type checker against the emitted build output (repeatable)"
+    )]
+    pub(crate) checkers: Vec<String>,
 }
 
 #[derive(Debug, Args)]

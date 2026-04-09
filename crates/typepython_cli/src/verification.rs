@@ -114,6 +114,11 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
                 .diagnostics,
             );
         }
+        if !diagnostics.has_errors() {
+            diagnostics
+                .diagnostics
+                .extend(verify_external_checkers(&config, &args.checkers).diagnostics);
+        }
         diagnostics
     };
 
@@ -122,6 +127,12 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
         notes.push(format!(
             "verified {} supplied wheel/sdist artifact(s) against the authoritative build tree",
             supplied_artifact_count
+        ));
+    }
+    if !args.checkers.is_empty() {
+        notes.push(format!(
+            "ran {} external checker invocation(s) against the emitted build output",
+            args.checkers.len()
         ));
     }
 
@@ -314,6 +325,59 @@ pub(crate) fn verify_packaged_artifacts(
                 ),
             )),
         }
+    }
+
+    diagnostics
+}
+
+pub(crate) fn verify_external_checkers(
+    config: &ConfigHandle,
+    checkers: &[String],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    if checkers.is_empty() {
+        return diagnostics;
+    }
+
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    for checker in checkers {
+        let output = match ProcessCommand::new(checker)
+            .arg(&out_root)
+            .current_dir(&config.config_dir)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!("unable to run external checker `{checker}`: {error}"),
+                ));
+                continue;
+            }
+        };
+        if output.status.success() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let details = [stdout, stderr]
+            .into_iter()
+            .filter(|stream| !stream.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let suffix = if details.is_empty() {
+            String::new()
+        } else {
+            format!(":\n{details}")
+        };
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "external checker `{checker}` rejected emitted build output under `{}`{}",
+                out_root.display(),
+                suffix
+            ),
+        ));
     }
 
     diagnostics

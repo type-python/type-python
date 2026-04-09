@@ -676,6 +676,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            checkers: Vec::new(),
         })
         .expect("verify should succeed");
 
@@ -732,6 +733,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            checkers: Vec::new(),
         })
         .expect("verify should succeed");
 
@@ -743,6 +745,85 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
     assert_eq!(verify_result, ExitCode::SUCCESS);
     assert!(runtime_exists);
     assert!(bytecode_exists);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_verify_invokes_external_checker_on_emitted_output() {
+    let project_dir = temp_project_dir("run_verify_invokes_external_checker_on_emitted_output");
+    let checker_path = project_dir.join("fake-checker.sh");
+    let invoked_path = project_dir.join("checker-args.txt");
+    let result = {
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        assert_eq!(init_result, ExitCode::SUCCESS);
+        write_executable_script(
+            &checker_path,
+            &format!(
+                "#!/bin/sh\nprintf '%s' \"$1\" > \"{}\"\n",
+                invoked_path.display()
+            ),
+        );
+
+        let verify_result = run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: vec![checker_path.display().to_string()],
+        })
+        .expect("verify should succeed with a passing checker");
+
+        (
+            verify_result,
+            fs::read_to_string(&invoked_path).expect("checker args should be recorded"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (verify_result, invoked) = result;
+    assert_eq!(verify_result, ExitCode::SUCCESS);
+    assert!(invoked.ends_with(".typepython/build"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_verify_reports_external_checker_failure() {
+    let project_dir = temp_project_dir("run_verify_reports_external_checker_failure");
+    let checker_path = project_dir.join("fake-checker.sh");
+    let verify_result = {
+        let init_result = init_project(super::InitArgs {
+            dir: project_dir.clone(),
+            force: false,
+            embed_pyproject: false,
+        })
+        .expect("init should succeed");
+        assert_eq!(init_result, ExitCode::SUCCESS);
+        write_executable_script(
+            &checker_path,
+            "#!/bin/sh\necho 'checker failed' >&2\nexit 1\n",
+        );
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: vec![checker_path.display().to_string()],
+        })
+        .expect("verify should complete with checker diagnostics")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
 }
 
 #[test]
@@ -765,6 +846,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             },
             wheels: Vec::new(),
             sdists: Vec::new(),
+            checkers: Vec::new(),
         })
         .expect("verify should run")
     };
@@ -802,6 +884,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             },
             wheels: vec![wheel_path],
             sdists: Vec::new(),
+            checkers: Vec::new(),
         })
         .expect("verify should run")
     };
@@ -2916,12 +2999,15 @@ fn verify_command_parses_supplied_artifact_flags() {
         "dist/pkg.whl",
         "--sdist",
         "dist/pkg.tar.gz",
+        "--checker",
+        "pyright",
     ]);
 
     let super::Command::Verify(args) = cli.command else {
         panic!("expected verify command");
     };
     let supplied = supplied_verify_artifacts(&args);
+    assert_eq!(args.checkers, vec![String::from("pyright")]);
     assert_eq!(supplied.len(), 2);
     assert!(supplied.iter().any(|artifact| {
         matches!(artifact.kind, SuppliedArtifactKind::Wheel)
