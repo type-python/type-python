@@ -30,7 +30,7 @@ fn extract_ast_backed_statements(
         if let Some(call_statement) = extract_supplemental_call_statement(source, stmt, line) {
             statements.push(call_statement);
         }
-        if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
+        if let Some(method_call) = extract_method_call_statement(source, stmt, line, None, None) {
             statements.push(method_call);
         }
         if let Some(member_access) = extract_member_access_statement(source, stmt, line, None, None)
@@ -42,6 +42,94 @@ fn extract_ast_backed_statements(
     statements
 }
 
+struct GuardedStatementCollector<'a> {
+    path: &'a Path,
+    current_module_key: &'a str,
+    source: &'a str,
+    normalized: &'a str,
+    options: ParseOptions,
+    diagnostics: &'a mut DiagnosticReport,
+}
+
+impl<'a> GuardedStatementCollector<'a> {
+    fn collect_from_suite(
+        &mut self,
+        suite: &[Stmt],
+        statements: &mut Vec<SyntaxStatement>,
+        include_selected_statements: bool,
+    ) {
+        for stmt in suite {
+            let line = offset_to_line_column(self.normalized, stmt.range().start().to_usize()).0;
+            match stmt {
+                Stmt::If(if_stmt) => {
+                    if let Some(selected_suite) =
+                        selected_guarded_import_suite(if_stmt, self.source, self.options)
+                    {
+                        self.collect_from_suite(selected_suite, statements, true);
+                    } else {
+                        self.collect_from_suite(&if_stmt.body, statements, include_selected_statements);
+                        for clause in &if_stmt.elif_else_clauses {
+                            self.collect_from_suite(
+                                &clause.body,
+                                statements,
+                                include_selected_statements,
+                            );
+                        }
+                    }
+                }
+                Stmt::Try(try_stmt) => {
+                    self.collect_from_suite(&try_stmt.body, statements, include_selected_statements);
+                    for handler in &try_stmt.handlers {
+                        let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                        self.collect_from_suite(
+                            &handler.body,
+                            statements,
+                            include_selected_statements,
+                        );
+                    }
+                    self.collect_from_suite(
+                        &try_stmt.orelse,
+                        statements,
+                        include_selected_statements,
+                    );
+                    self.collect_from_suite(
+                        &try_stmt.finalbody,
+                        statements,
+                        include_selected_statements,
+                    );
+                }
+                _ => {
+                    if !include_selected_statements {
+                        continue;
+                    }
+                    let existing_lines: std::collections::BTreeSet<_> =
+                        statements.iter().map(statement_line).collect();
+                    if existing_lines.contains(&line) {
+                        continue;
+                    }
+                    if let Some(statement) = extract_ast_backed_statement(
+                        self.path,
+                        self.current_module_key,
+                        self.source,
+                        self.normalized,
+                        stmt,
+                        line,
+                        self.diagnostics,
+                    ) {
+                        match statement {
+                            SyntaxStatement::Import(_)
+                            | SyntaxStatement::ClassDef(_)
+                            | SyntaxStatement::FunctionDef(_)
+                            | SyntaxStatement::OverloadDef(_) => statements.push(statement),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn collect_guarded_import_statements_from_suite(
     path: &Path,
     current_module_key: &str,
@@ -49,97 +137,19 @@ fn collect_guarded_import_statements_from_suite(
     normalized: &str,
     suite: &[Stmt],
     options: ParseOptions,
-    statements: &mut Vec<SyntaxStatement>,
     diagnostics: &mut DiagnosticReport,
-) {
-    for stmt in suite {
-        let line = offset_to_line_column(normalized, stmt.range().start().to_usize()).0;
-        match stmt {
-            Stmt::If(if_stmt) => {
-                if let Some(selected_suite) = selected_guarded_import_suite(if_stmt, source, options) {
-                    collect_guarded_import_statements_from_suite(
-                        path,
-                        current_module_key,
-                        source,
-                        normalized,
-                        selected_suite,
-                        options,
-                        statements,
-                        diagnostics,
-                    );
-                }
-            }
-            Stmt::Try(try_stmt) => {
-                collect_guarded_import_statements_from_suite(
-                    path,
-                    current_module_key,
-                    source,
-                    normalized,
-                    &try_stmt.body,
-                    options,
-                    statements,
-                    diagnostics,
-                );
-                for handler in &try_stmt.handlers {
-                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    collect_guarded_import_statements_from_suite(
-                        path,
-                        current_module_key,
-                        source,
-                        normalized,
-                        &handler.body,
-                        options,
-                        statements,
-                        diagnostics,
-                    );
-                }
-                collect_guarded_import_statements_from_suite(
-                    path,
-                    current_module_key,
-                    source,
-                    normalized,
-                    &try_stmt.orelse,
-                    options,
-                    statements,
-                    diagnostics,
-                );
-                collect_guarded_import_statements_from_suite(
-                    path,
-                    current_module_key,
-                    source,
-                    normalized,
-                    &try_stmt.finalbody,
-                    options,
-                    statements,
-                    diagnostics,
-                );
-            }
-            _ => {
-                let existing_lines: std::collections::BTreeSet<_> =
-                    statements.iter().map(statement_line).collect();
-                if existing_lines.contains(&line) {
-                    continue;
-                }
-                if let Some(statement) = extract_ast_backed_statement(
-                    path,
-                    current_module_key,
-                    source,
-                    normalized,
-                    stmt,
-                    line,
-                    diagnostics,
-                ) {
-                    match statement {
-                        SyntaxStatement::Import(_)
-                        | SyntaxStatement::ClassDef(_)
-                        | SyntaxStatement::FunctionDef(_)
-                        | SyntaxStatement::OverloadDef(_) => statements.push(statement),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
+) -> Vec<SyntaxStatement> {
+    let mut statements = Vec::new();
+    let mut collector = GuardedStatementCollector {
+        path,
+        current_module_key,
+        source,
+        normalized,
+        options,
+        diagnostics,
+    };
+    collector.collect_from_suite(suite, &mut statements, false);
+    statements
 }
 
 fn selected_guarded_import_suite<'a>(
@@ -954,6 +964,8 @@ fn extract_method_call_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
 ) -> Option<SyntaxStatement> {
     let expr = match stmt {
         Stmt::Expr(expr) => expr.value.as_ref(),
@@ -972,6 +984,8 @@ fn extract_method_call_statement(
 
     match attribute.value.as_ref() {
         Expr::Name(name) => Some(SyntaxStatement::MethodCall(MethodCallStatement {
+            current_owner_name: current_owner_name.map(str::to_owned),
+            current_owner_type_name: current_owner_type_name.map(str::to_owned),
             owner_name: name.id.as_str().to_owned(),
             method: attribute.attr.as_str().to_owned(),
             through_instance: false,
@@ -1056,6 +1070,8 @@ fn extract_method_call_statement(
                 return None;
             };
             Some(SyntaxStatement::MethodCall(MethodCallStatement {
+                current_owner_name: current_owner_name.map(str::to_owned),
+                current_owner_type_name: current_owner_type_name.map(str::to_owned),
                 owner_name: name.id.as_str().to_owned(),
                 method: attribute.attr.as_str().to_owned(),
                 through_instance: true,
@@ -1143,23 +1159,51 @@ fn extract_method_call_statement(
 fn collect_nested_method_call_statements(
     source: &str,
     suite: &[Stmt],
+    owner_name: Option<&str>,
+    owner_type_name: Option<&str>,
     statements: &mut Vec<SyntaxStatement>,
 ) {
     for stmt in suite {
         match stmt {
             Stmt::FunctionDef(function) => {
-                collect_nested_method_call_statements(source, &function.body, statements);
+                collect_nested_method_call_statements(
+                    source,
+                    &function.body,
+                    Some(function.name.as_str()),
+                    owner_type_name,
+                    statements,
+                );
             }
             Stmt::ClassDef(class_def) => {
-                collect_nested_method_call_statements(source, &class_def.body, statements);
+                collect_nested_method_call_statements(
+                    source,
+                    &class_def.body,
+                    owner_name,
+                    Some(class_def.name.as_str()),
+                    statements,
+                );
             }
             _ => {
                 for_each_nested_suite(stmt, |nested_suite| {
-                    collect_nested_method_call_statements(source, nested_suite, statements);
+                    collect_nested_method_call_statements(
+                        source,
+                        nested_suite,
+                        owner_name,
+                        owner_type_name,
+                        statements,
+                    );
                 });
-                let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
-                if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
-                    statements.push(method_call);
+                if owner_name.is_some() || owner_type_name.is_some() {
+                    let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
+                    if let Some(method_call) = extract_method_call_statement(
+                        source,
+                        stmt,
+                        line,
+                        owner_name,
+                        owner_type_name,
+                    ) {
+                        statements.push(method_call);
+                    }
                 }
             }
         }
@@ -2923,9 +2967,6 @@ fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<S
             })
         {
             statements.push(call);
-        }
-        if let Some(method_call) = extract_method_call_statement(source, stmt, line) {
-            statements.push(method_call);
         }
     }
 }
@@ -8104,6 +8145,8 @@ mod tests {
             tree.statements,
             vec![
                 SyntaxStatement::MethodCall(MethodCallStatement {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("Box"),
                     method: String::from("run"),
                     through_instance: false,
@@ -8149,6 +8192,8 @@ mod tests {
                     line: 1,
                 }),
                 SyntaxStatement::MethodCall(MethodCallStatement {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("Box"),
                     method: String::from("build"),
                     through_instance: true,

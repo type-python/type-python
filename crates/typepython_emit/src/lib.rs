@@ -675,11 +675,12 @@ pub fn generate_typepython_stub_source(
     }
 
     let mut rewritten = output.join("\n");
-    rewritten = inject_guarded_declaration_stubs(python, parsed.suite(), &lowered_context, &rewritten);
+    rewritten =
+        inject_guarded_declaration_stubs(python, parsed.suite(), &lowered_context, &rewritten);
     if python.ends_with('\n') {
         rewritten.push('\n');
     }
-    Ok(normalize_emitted_stub_intrinsic_types(&rewritten)?)
+    normalize_emitted_stub_intrinsic_types(&rewritten)
 }
 
 /// Generates a best-effort `.pyi` surface for a pass-through Python module.
@@ -1986,10 +1987,9 @@ impl LoweredStubContext {
                 .push(method.clone());
         }
         for sealed_class in &context.sealed_classes {
-            lowered.sealed_classes.insert(
-                original_to_lowered_line(module, sealed_class.line),
-                sealed_class.clone(),
-            );
+            lowered
+                .sealed_classes
+                .insert(original_to_lowered_line(module, sealed_class.line), sealed_class.clone());
         }
         lowered.guarded_declaration_lines = context
             .guarded_declaration_lines
@@ -2171,7 +2171,14 @@ fn render_authoritative_class_stub(
         lines.push(sealed_comment);
     }
     if body_lines.is_empty() {
-        lines.push(rewrite_stub_header_text(&header));
+        let header_has_inline_comment =
+            header.lines().last().is_some_and(|line| line.contains('#'));
+        if header_has_inline_comment {
+            lines.push(header);
+            lines.push(format!("{indent}..."));
+        } else {
+            lines.push(rewrite_stub_header_text(&header));
+        }
         lines.join("\n")
     } else {
         lines.push(header);
@@ -2181,11 +2188,7 @@ fn render_authoritative_class_stub(
 }
 
 fn render_sealed_stub_comment(sealed: &StubSealedClass, indentation: &str) -> String {
-    let members = if sealed.members.is_empty() {
-        String::new()
-    } else {
-        sealed.members.join(", ")
-    };
+    let members = if sealed.members.is_empty() { String::new() } else { sealed.members.join(", ") };
     format!("{indentation}# tpy:sealed {} -> {{{members}}}", sealed.name)
 }
 
@@ -2568,36 +2571,65 @@ fn collect_guarded_declaration_stub_blocks(
     for statement in suite {
         match statement {
             Stmt::If(if_stmt) => {
-                blocks.extend(collect_guarded_declaration_stub_blocks(source, &if_stmt.body, context));
+                blocks.extend(collect_guarded_declaration_stub_blocks(
+                    source,
+                    &if_stmt.body,
+                    context,
+                ));
                 for clause in &if_stmt.elif_else_clauses {
-                    blocks.extend(collect_guarded_declaration_stub_blocks(source, &clause.body, context));
+                    blocks.extend(collect_guarded_declaration_stub_blocks(
+                        source,
+                        &clause.body,
+                        context,
+                    ));
                 }
             }
             Stmt::Try(try_stmt) => {
-                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.body, context));
+                blocks.extend(collect_guarded_declaration_stub_blocks(
+                    source,
+                    &try_stmt.body,
+                    context,
+                ));
                 for handler in &try_stmt.handlers {
                     let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
-                    blocks.extend(collect_guarded_declaration_stub_blocks(source, &handler.body, context));
+                    blocks.extend(collect_guarded_declaration_stub_blocks(
+                        source,
+                        &handler.body,
+                        context,
+                    ));
                 }
-                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.orelse, context));
-                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.finalbody, context));
+                blocks.extend(collect_guarded_declaration_stub_blocks(
+                    source,
+                    &try_stmt.orelse,
+                    context,
+                ));
+                blocks.extend(collect_guarded_declaration_stub_blocks(
+                    source,
+                    &try_stmt.finalbody,
+                    context,
+                ));
             }
             Stmt::ClassDef(class_def) => {
                 let line = offset_to_line(source, class_def.name.range.start().to_usize());
                 if context.guarded_declaration_lines.contains(&line) {
-                    blocks.push(dedent_stub_block(&render_authoritative_class_stub(source, class_def, context)));
+                    blocks.push(dedent_stub_block(&render_authoritative_class_stub(
+                        source, class_def, context,
+                    )));
                 }
             }
             Stmt::FunctionDef(function) => {
                 let line = offset_to_line(source, function.name.range.start().to_usize());
                 if context.guarded_declaration_lines.contains(&line) {
-                    blocks.push(dedent_stub_block(&render_authoritative_function_stub(source, function, context)));
+                    blocks.push(dedent_stub_block(&render_authoritative_function_stub(
+                        source, function, context,
+                    )));
                 }
             }
             Stmt::AnnAssign(assign) => {
                 let line = offset_to_line(source, assign.range.start().to_usize());
                 if context.guarded_declaration_lines.contains(&line)
-                    && let Some(block) = render_authoritative_annotated_assignment_stub(source, assign)
+                    && let Some(block) =
+                        render_authoritative_annotated_assignment_stub(source, assign)
                 {
                     blocks.push(dedent_stub_block(&block));
                 }
@@ -2617,11 +2649,7 @@ fn dedent_stub_block(block: &str) -> String {
     block
         .lines()
         .map(|line| {
-            if line.trim().is_empty() {
-                String::new()
-            } else {
-                line.chars().skip(indent).collect()
-            }
+            if line.trim().is_empty() { String::new() } else { line.chars().skip(indent).collect() }
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -2631,20 +2659,24 @@ fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Er
     let parsed = parse_module(source).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("unable to parse stub source for intrinsic type normalization: {}", error.error),
+            format!(
+                "unable to parse stub source for intrinsic type normalization: {}",
+                error.error
+            ),
         )
     })?;
     let unknown_comments = collect_unknown_boundary_comments(source, parsed.suite());
     let mut replacements = Vec::new();
     collect_intrinsic_type_replacements(source, parsed.suite(), &mut replacements);
-    replacements.sort_by(|(left_range, _), (right_range, _)| {
-        right_range.start().cmp(&left_range.start())
-    });
+    replacements
+        .sort_by(|(left_range, _), (right_range, _)| right_range.start().cmp(&left_range.start()));
 
     let mut normalized = source.to_owned();
     let mut introduced_any = false;
     for (range, replacement) in replacements {
-        if let Some(existing) = slice_range(&normalized, range) && existing == replacement {
+        if let Some(existing) = slice_range(&normalized, range)
+            && existing == replacement
+        {
             continue;
         }
         introduced_any |= replacement.contains("Any");
@@ -2653,7 +2685,11 @@ fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Er
     if introduced_any && !has_typing_any_import(&normalized) {
         normalized = format!("from typing import Any\n{normalized}");
     }
-    normalized = insert_unknown_boundary_comments(&normalized, &unknown_comments, usize::from(introduced_any));
+    normalized = insert_unknown_boundary_comments(
+        &normalized,
+        &unknown_comments,
+        usize::from(introduced_any),
+    );
     Ok(normalized)
 }
 
@@ -2665,7 +2701,11 @@ fn collect_intrinsic_type_replacements(
     for statement in suite {
         match statement {
             Stmt::FunctionDef(function) => {
-                collect_parameter_intrinsic_type_replacements(source, &function.parameters, replacements);
+                collect_parameter_intrinsic_type_replacements(
+                    source,
+                    &function.parameters,
+                    replacements,
+                );
                 if let Some(returns) = function.returns.as_deref()
                     && let Some(replacement) = normalize_intrinsic_type_text(
                         slice_range(source, returns.range()).unwrap_or_default(),
@@ -2683,8 +2723,9 @@ fn collect_intrinsic_type_replacements(
                 if let Some(value) = assign.value.as_deref()
                     && slice_range(source, assign.annotation.range())
                         .is_some_and(|annotation| annotation.trim_end() == "TypeAlias")
-                    && let Some(replacement) =
-                        normalize_intrinsic_type_text(slice_range(source, value.range()).unwrap_or_default())
+                    && let Some(replacement) = normalize_intrinsic_type_text(
+                        slice_range(source, value.range()).unwrap_or_default(),
+                    )
                 {
                     replacements.push((value.range(), replacement));
                 }
@@ -2811,7 +2852,8 @@ fn collect_unknown_boundary_comments(source: &str, suite: &[Stmt]) -> Vec<(usize
                     && let Expr::Name(name) = assign.target.as_ref()
                 {
                     comments.push((line, format!("# tpy:unknown {}", name.id.as_str())));
-                } else if slice_range(source, assign.annotation.range()).is_some_and(type_text_contains_unknown)
+                } else if slice_range(source, assign.annotation.range())
+                    .is_some_and(type_text_contains_unknown)
                     && let Expr::Name(name) = assign.target.as_ref()
                 {
                     comments.push((line, format!("# tpy:unknown {}", name.id.as_str())));
@@ -2838,10 +2880,7 @@ fn parameters_contain_unknown(source: &str, parameters: &ruff_python_ast::Parame
             .vararg
             .as_ref()
             .is_some_and(|parameter| contains_unknown(parameter.annotation()))
-        || parameters
-            .kwonlyargs
-            .iter()
-            .any(|parameter| contains_unknown(parameter.annotation()))
+        || parameters.kwonlyargs.iter().any(|parameter| contains_unknown(parameter.annotation()))
         || parameters
             .kwarg
             .as_ref()
@@ -2943,9 +2982,8 @@ mod tests {
     use super::{
         EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary,
         StubCallableOverride, StubSealedClass, StubSyntheticMethod, StubValueOverride,
-        TypePythonStubContext,
-        generate_inferred_stub_source, generate_typepython_stub_source, plan_emits_for_sources,
-        write_runtime_outputs,
+        TypePythonStubContext, generate_inferred_stub_source, generate_typepython_stub_source,
+        plan_emits_for_sources, write_runtime_outputs,
     };
     use std::{
         collections::BTreeSet,

@@ -206,10 +206,7 @@ fn signature_help_selects_overload_by_active_parameter() {
         .expect("signatureHelp should succeed");
     assert_eq!(signature_help["activeParameter"], json!(1));
     assert_eq!(signature_help["activeSignature"], json!(1));
-    assert_eq!(
-        signature_help["signatures"][1]["label"],
-        json!("target(a: int, b: str) -> int")
-    );
+    assert_eq!(signature_help["signatures"][1]["label"], json!("target(a: int, b: str) -> int"));
 }
 
 #[test]
@@ -241,10 +238,7 @@ fn signature_help_prefers_overload_matching_argument_types() {
         .expect("signatureHelp should succeed");
     assert_eq!(signature_help["activeParameter"], json!(0));
     assert_eq!(signature_help["activeSignature"], json!(1));
-    assert_eq!(
-        signature_help["signatures"][1]["label"],
-        json!("target(value: str) -> str")
-    );
+    assert_eq!(signature_help["signatures"][1]["label"], json!("target(value: str) -> str"));
 }
 
 #[test]
@@ -328,19 +322,20 @@ fn workspace_symbol_supports_fuzzy_queries() {
             "query": "hv"
         }))
         .expect("workspace/symbol should support fuzzy handler query");
-    let fuzzy_handlers = fuzzy_handlers
-        .as_array()
-        .expect("workspace symbols should be returned as an array");
-    assert_eq!(fuzzy_handlers.first().and_then(|symbol| symbol["name"].as_str()), Some("handle_value"));
+    let fuzzy_handlers =
+        fuzzy_handlers.as_array().expect("workspace symbols should be returned as an array");
+    assert_eq!(
+        fuzzy_handlers.first().and_then(|symbol| symbol["name"].as_str()),
+        Some("handle_value")
+    );
 
     let fuzzy_config = server
         .handle_workspace_symbol(json!({
             "query": "confg"
         }))
         .expect("workspace/symbol should support fuzzy config query");
-    let fuzzy_config = fuzzy_config
-        .as_array()
-        .expect("workspace symbols should be returned as an array");
+    let fuzzy_config =
+        fuzzy_config.as_array().expect("workspace symbols should be returned as an array");
     assert!(fuzzy_config.iter().any(|symbol| symbol["name"] == json!("Config")));
 }
 
@@ -499,9 +494,7 @@ fn completion_returns_local_symbols_and_member_symbols() {
             "position": {"line": 8, "character": 3}
         }))
         .expect("completion for local symbols should succeed");
-    let local_items = symbols["items"]
-        .as_array()
-        .expect("completion items should be an array");
+    let local_items = symbols["items"].as_array().expect("completion items should be an array");
     let build_item = local_items
         .iter()
         .find(|item| item["label"] == json!("build"))
@@ -516,9 +509,8 @@ fn completion_returns_local_symbols_and_member_symbols() {
             "position": {"line": 9, "character": 4}
         }))
         .expect("completion for member symbols should succeed");
-    let member_items = members["items"]
-        .as_array()
-        .expect("member completion items should be an array");
+    let member_items =
+        members["items"].as_array().expect("member completion items should be an array");
     let method_item = member_items
         .iter()
         .find(|item| item["label"] == json!("method"))
@@ -555,9 +547,7 @@ fn completion_includes_workspace_top_level_symbols_for_non_member_access() {
             "position": {"line": 0, "character": 0}
         }))
         .expect("completion should include workspace top-level symbols");
-    let items = completion["items"]
-        .as_array()
-        .expect("completion items should be an array");
+    let items = completion["items"].as_array().expect("completion items should be an array");
     let helper = items
         .iter()
         .find(|item| item["label"] == json!("helper"))

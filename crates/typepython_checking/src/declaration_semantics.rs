@@ -1,4 +1,7 @@
-use std::{cell::RefCell, collections::{BTreeSet, HashMap}};
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashMap},
+};
 
 use super::*;
 

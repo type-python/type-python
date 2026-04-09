@@ -1,6 +1,7 @@
 use super::{
     check, check_with_binding_metadata, check_with_options,
-    semantic_incremental_state_with_binding_metadata, semantic_incremental_state_with_reused_summaries,
+    semantic_incremental_state_with_binding_metadata,
+    semantic_incremental_state_with_reused_summaries,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -91,10 +92,12 @@ fn semantic_incremental_state_reuses_unchanged_public_summaries() {
     let root = create_temp_typepython_root();
     let a_path = root.join("a.tpy");
     let b_path = root.join("b.tpy");
-    fs::write(&a_path, "def produce() -> int:\n    return 1\n").expect("temp source should be written");
-    fs::write(&b_path, "def helper() -> int:\n    return 2\n").expect("temp source should be written");
+    fs::write(&a_path, "def produce() -> int:\n    return 1\n")
+        .expect("temp source should be written");
+    fs::write(&b_path, "def helper() -> int:\n    return 2\n")
+        .expect("temp source should be written");
 
-    let trees = vec![
+    let trees = [
         parse_with_options(
             SourceFile {
                 path: a_path,
@@ -209,6 +212,37 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
     let binding = bind(&tree);
     let graph = build(&[binding]);
     let node = &graph.nodes[0];
+    assert_eq!(node.method_calls.len(), 1, "expected a single nested method call site");
+    assert_eq!(node.method_calls[0].current_owner_name.as_deref(), Some("read"));
+    assert_eq!(node.method_calls[0].current_owner_type_name.as_deref(), None);
+    let context = super::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    let resolved_receiver = super::resolve_direct_name_reference_semantic_type_with_context(
+        &context,
+        node,
+        &graph.nodes,
+        None,
+        None,
+        node.method_calls[0].current_owner_name.as_deref(),
+        node.method_calls[0].current_owner_type_name.as_deref(),
+        node.method_calls[0].line,
+        &node.method_calls[0].owner_name,
+    );
+    assert_eq!(
+        resolved_receiver.as_ref().map(crate::render_semantic_type),
+        Some(String::from("Box[int]")),
+    );
+    assert!(
+        !super::name_is_unknown_boundary_with_context(
+            &context,
+            node,
+            &graph.nodes,
+            node.method_calls[0].current_owner_name.as_deref(),
+            node.method_calls[0].current_owner_type_name.as_deref(),
+            node.method_calls[0].line,
+            &node.method_calls[0].owner_name,
+        ),
+        "method receiver should not be treated as an unknown boundary",
+    );
     let class_decl = node
         .declarations
         .iter()
@@ -281,7 +315,9 @@ fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
     let function = node
         .declarations
         .iter()
-        .find(|declaration| declaration.name == "choose" && declaration.kind == DeclarationKind::Function)
+        .find(|declaration| {
+            declaration.name == "choose" && declaration.kind == DeclarationKind::Function
+        })
         .expect("choose function should be present");
     let call = typepython_binding::CallSite {
         callee: String::from("choose"),
@@ -322,7 +358,7 @@ fn check_resolves_imports_inside_type_checking_guards() {
     .expect("temp source should be written");
     fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
 
-    let trees = vec![
+    let trees = [
         parse_with_options(
             SourceFile {
                 path: main_path,
@@ -383,7 +419,7 @@ fn check_resolves_imports_inside_version_guards() {
     .expect("temp source should be written");
     fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
 
-    let trees = vec![
+    let trees = [
         parse_with_options(
             SourceFile {
                 path: main_path,
@@ -3482,6 +3518,8 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                 }],
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("helpers"),
                     method: String::from("box_value"),
                     through_instance: false,
@@ -4430,6 +4468,8 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                 ],
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("user"),
                     method: String::from("parse"),
                     through_instance: false,
@@ -4674,6 +4714,8 @@ fn check_accepts_stub_overloaded_method_return_type() {
                 summary_fingerprint: 1,
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("user"),
                     method: String::from("parse"),
                     through_instance: false,
@@ -4866,6 +4908,8 @@ fn check_accepts_generic_method_overload_specificity() {
                 ],
                 calls: Vec::new(),
                 method_calls: vec![typepython_binding::MethodCallSite {
+                    current_owner_name: None,
+                    current_owner_type_name: None,
                     owner_name: String::from("user"),
                     method: String::from("parse"),
                     through_instance: false,
@@ -11269,6 +11313,8 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
             ],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                current_owner_name: None,
+                current_owner_type_name: None,
                 owner_name: String::from("box"),
                 method: String::from("collect"),
                 through_instance: false,
@@ -17625,6 +17671,8 @@ fn check_reports_unknown_method_call() {
             }],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                current_owner_name: None,
+                current_owner_type_name: None,
                 owner_name: String::from("value"),
                 method: String::from("run"),
                 through_instance: false,
@@ -18126,6 +18174,8 @@ fn check_reports_direct_method_call_arity_mismatch() {
             ],
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                current_owner_name: None,
+                current_owner_type_name: None,
                 owner_name: String::from("Box"),
                 method: String::from("run"),
                 through_instance: false,
@@ -24232,6 +24282,8 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
             summary_fingerprint: 1,
             calls: Vec::new(),
             method_calls: vec![typepython_binding::MethodCallSite {
+                current_owner_name: None,
+                current_owner_type_name: None,
                 owner_name: String::from("Box"),
                 method: String::from("merge"),
                 through_instance: true,

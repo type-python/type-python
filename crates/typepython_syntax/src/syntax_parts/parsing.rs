@@ -24,16 +24,15 @@ fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree 
             collect_return_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_yield_statements(&source.text, parsed.suite(), None, &mut statements);
             collect_if_statements(&source.text, parsed.suite(), None, None, &mut statements);
-            collect_guarded_import_statements_from_suite(
+            statements.extend(collect_guarded_import_statements_from_suite(
                 &source.path,
                 &source.logical_module,
                 &source.text,
                 &source.text,
                 parsed.suite(),
                 options,
-                &mut statements,
                 &mut diagnostics,
-            );
+            ));
             collect_assert_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_invalidation_statements(
                 &source.text,
@@ -53,7 +52,7 @@ fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree 
                 &mut statements,
             );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
-            collect_nested_method_call_statements(&source.text, parsed.suite(), &mut statements);
+            collect_nested_method_call_statements(&source.text, parsed.suite(), None, None, &mut statements);
             collect_nested_member_access_statements(
                 &source.text,
                 parsed.suite(),
@@ -178,16 +177,15 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                     );
                     collect_yield_statements(&normalized, parsed.suite(), None, &mut statements);
                     collect_if_statements(&normalized, parsed.suite(), None, None, &mut statements);
-                    collect_guarded_import_statements_from_suite(
+                    statements.extend(collect_guarded_import_statements_from_suite(
                         &source.path,
                         &source.logical_module,
                         &normalized,
                         &normalized,
                         parsed.suite(),
                         options,
-                        &mut statements,
                         &mut diagnostics,
-                    );
+                    ));
                     collect_assert_statements(
                         &normalized,
                         parsed.suite(),
@@ -234,6 +232,8 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                     collect_nested_method_call_statements(
                         &normalized,
                         parsed.suite(),
+                        None,
+                        None,
                         &mut statements,
                     );
                     collect_function_body_assignments(

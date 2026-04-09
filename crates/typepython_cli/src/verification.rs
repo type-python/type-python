@@ -367,11 +367,7 @@ pub(crate) fn verify_external_checkers(
             .filter(|stream| !stream.is_empty())
             .collect::<Vec<_>>()
             .join("\n");
-        let suffix = if details.is_empty() {
-            String::new()
-        } else {
-            format!(":\n{details}")
-        };
+        let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
         diagnostics.push(Diagnostic::error(
             "TPY5003",
             format!(
@@ -1158,6 +1154,13 @@ pub(crate) fn public_surface_completeness_diagnostics(
         .collect::<BTreeMap<_, _>>();
 
     for syntax in syntax_trees {
+        let source_incomplete_entries = declaration_surface(syntax)
+            .into_iter()
+            .filter(is_public_surface_entry)
+            .filter(|entry| entry.kind != "import")
+            .filter(|entry| surface_detail_is_incomplete(&entry.detail))
+            .map(|entry| display_surface_entry(&entry))
+            .collect::<BTreeSet<_>>();
         let surface_syntax = if syntax.source.kind == SourceKind::TypePython {
             let Some(module) = lowered_by_source.get(&syntax.source.path) else {
                 continue;
@@ -1182,7 +1185,10 @@ pub(crate) fn public_surface_completeness_diagnostics(
             .filter(is_public_surface_entry)
             .filter(|entry| entry.kind != "import")
         {
-            if !surface_detail_is_incomplete(&entry.detail) {
+            let display = display_surface_entry(&entry);
+            if !surface_detail_is_incomplete(&entry.detail)
+                && !source_incomplete_entries.contains(&display)
+            {
                 continue;
             }
 
@@ -1191,7 +1197,7 @@ pub(crate) fn public_surface_completeness_diagnostics(
                 format!(
                     "module `{}` exports incomplete type surface for `{}`",
                     syntax.source.path.display(),
-                    display_surface_entry(&entry)
+                    display
                 ),
             ));
         }

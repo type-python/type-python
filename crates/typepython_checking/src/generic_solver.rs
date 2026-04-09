@@ -189,10 +189,8 @@ impl GenericConstraintSet {
     fn extend_bindings(&mut self, bindings: GenericSolution) {
         for (name, candidate) in bindings.types {
             let candidate_id = self.type_store.intern(candidate);
-            self.constraints.push(GenericConstraint::TypeVar(TypeVarConstraint {
-                name,
-                candidate_id,
-            }));
+            self.constraints
+                .push(GenericConstraint::TypeVar(TypeVarConstraint { name, candidate_id }));
         }
         for (name, binding) in bindings.param_lists {
             self.constraints.push(GenericConstraint::ParamSpec(ParamSpecConstraint {
@@ -265,7 +263,8 @@ fn solve_collected_generic_constraints_detailed(
     let mut type_store = TypeStore::default();
     for constraint in &constraints.constraints {
         match constraint {
-            GenericConstraint::TypeVar(constraint) => match type_ids.get(&constraint.name).copied() {
+            GenericConstraint::TypeVar(constraint) => match type_ids.get(&constraint.name).copied()
+            {
                 Some(existing_id) if existing_id != constraint.candidate_id => {
                     let existing = type_store
                         .get(existing_id)
@@ -278,10 +277,7 @@ fn solve_collected_generic_constraints_detailed(
                         .cloned()
                         .expect("candidate interned type should be available");
                     let merged = merge_generic_type_candidates_with_context(
-                        node,
-                        nodes,
-                        &existing,
-                        &candidate,
+                        node, nodes, &existing, &candidate,
                     );
                     let merged_id = type_store.intern(merged);
                     type_ids.insert(constraint.name.clone(), merged_id);
@@ -336,7 +332,10 @@ fn solve_collected_generic_constraints_detailed(
     Ok(solution)
 }
 
-fn intern_type_pack_binding(store: &mut TypeStore, binding: TypePackBinding) -> InternedTypePackBinding {
+fn intern_type_pack_binding(
+    store: &mut TypeStore,
+    binding: TypePackBinding,
+) -> InternedTypePackBinding {
     InternedTypePackBinding {
         types: binding.types.into_iter().map(|ty| store.intern(ty)).collect(),
         variadic_tail: binding.variadic_tail.map(|ty| store.intern(ty)),
@@ -354,7 +353,11 @@ fn intern_param_list_binding(
             .map(|param| InternedDirectFunctionParam {
                 name: param.name,
                 annotation_text: param.annotation.clone(),
-                annotation_id: param.annotation.as_deref().map(lower_type_text_or_name).map(|ty| store.intern(ty)),
+                annotation_id: param
+                    .annotation
+                    .as_deref()
+                    .map(lower_type_text_or_name)
+                    .map(|ty| store.intern(ty)),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -370,11 +373,7 @@ fn materialize_type_pack_binding(
     binding: &InternedTypePackBinding,
 ) -> TypePackBinding {
     TypePackBinding {
-        types: binding
-            .types
-            .iter()
-            .filter_map(|type_id| store.get(*type_id).cloned())
-            .collect(),
+        types: binding.types.iter().filter_map(|type_id| store.get(*type_id).cloned()).collect(),
         variadic_tail: binding.variadic_tail.and_then(|type_id| store.get(type_id).cloned()),
     }
 }
@@ -1399,7 +1398,9 @@ fn infer_generic_type_param_bindings_full(
         let candidate = substitutions
             .types
             .get(name)
-            .map(|existing| merge_generic_type_candidates_with_context(node, nodes, existing, actual))
+            .map(|existing| {
+                merge_generic_type_candidates_with_context(node, nodes, existing, actual)
+            })
             .unwrap_or_else(|| actual.clone());
         let mut inferred = GenericTypeParamSubstitutions::default();
         inferred.types.insert(name.clone(), candidate);

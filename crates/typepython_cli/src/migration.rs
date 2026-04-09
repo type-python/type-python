@@ -73,12 +73,11 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
         &config.config.project.target_python,
     )?;
     let bundled_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
-    syntax_trees
-        .extend(load_syntax_trees(
-            &bundled_sources,
-            config.config.typing.conditional_returns,
-            &config.config.project.target_python,
-        )?);
+    syntax_trees.extend(load_syntax_trees(
+        &bundled_sources,
+        config.config.typing.conditional_returns,
+        &config.config.project.target_python,
+    )?);
     let mut diagnostics = discovery.diagnostics.clone();
     let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);

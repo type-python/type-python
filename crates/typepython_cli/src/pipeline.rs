@@ -17,8 +17,7 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
     EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSealedClass,
     StubSyntheticMethod, StubValueOverride, TypePythonStubContext, generate_inferred_stub_source,
-    plan_emits,
-    plan_emits_for_sources, write_runtime_outputs,
+    plan_emits, plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
 use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot};
@@ -897,7 +896,8 @@ fn collect_sealed_stub_metadata(
         let mut members = class_like
             .iter()
             .filter(|(candidate_name, bases)| {
-                candidate_name != &statement.name && bases.iter().any(|base| base == &statement.name)
+                candidate_name != &statement.name
+                    && bases.iter().any(|base| base == &statement.name)
             })
             .map(|(candidate_name, _)| candidate_name.clone())
             .collect::<Vec<_>>();

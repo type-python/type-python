@@ -245,6 +245,8 @@ pub struct MemberAccessStatement {
 /// Method call statement with receiver metadata.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MethodCallStatement {
+    pub current_owner_name: Option<String>,
+    pub current_owner_type_name: Option<String>,
     pub owner_name: String,
     pub method: String,
     pub through_instance: bool,

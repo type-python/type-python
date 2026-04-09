@@ -252,14 +252,12 @@ impl AnalysisHost {
             })
             .collect::<Vec<_>>();
         symbols.sort_by(|(left_score, left), (right_score, right)| {
-            left_score
-                .cmp(right_score)
-                .then_with(|| {
-                    left.name
-                        .cmp(&right.name)
-                        .then_with(|| left.container_name.cmp(&right.container_name))
-                        .then_with(|| left.location.uri.cmp(&right.location.uri))
-                })
+            left_score.cmp(right_score).then_with(|| {
+                left.name
+                    .cmp(&right.name)
+                    .then_with(|| left.container_name.cmp(&right.container_name))
+                    .then_with(|| left.location.uri.cmp(&right.location.uri))
+            })
         });
         Ok(json!(symbols.into_iter().map(|(_, symbol)| symbol).collect::<Vec<_>>()))
     }
@@ -301,19 +299,17 @@ fn fuzzy_symbol_match(query: &str, candidate: &str) -> Option<WorkspaceSymbolMat
     let mut search_start = 0usize;
     for query_ch in query.chars() {
         let remainder = &candidate[search_start..];
-        let (relative_offset, _) = remainder.char_indices().find(|(_, candidate_ch)| {
-            candidate_ch.eq_ignore_ascii_case(&query_ch)
-        })?;
+        let (relative_offset, _) = remainder
+            .char_indices()
+            .find(|(_, candidate_ch)| candidate_ch.eq_ignore_ascii_case(&query_ch))?;
         let absolute_offset = search_start + relative_offset;
         matched_offsets.push(absolute_offset);
         search_start = absolute_offset + query_ch.len_utf8();
     }
 
     let start_index = *matched_offsets.first()?;
-    let gap_count = matched_offsets
-        .windows(2)
-        .map(|window| window[1].saturating_sub(window[0] + 1))
-        .sum();
+    let gap_count =
+        matched_offsets.windows(2).map(|window| window[1].saturating_sub(window[0] + 1)).sum();
     Some(WorkspaceSymbolMatch {
         exact_substring_rank: 1,
         start_index,
@@ -384,8 +380,11 @@ impl AnalysisHost {
             let mut local_keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
             local_keys.sort();
             for name in local_keys {
-                let mut item =
-                    completion_item_from_canonical(workspace, name.clone(), &document.local_symbols[&name]);
+                let mut item = completion_item_from_canonical(
+                    workspace,
+                    name.clone(),
+                    &document.local_symbols[&name],
+                );
                 item.sort_text = format!("1:{}", item.sort_text);
                 seen.insert(item.label.clone());
                 items.push(item);
@@ -401,7 +400,8 @@ impl AnalysisHost {
                 })
                 .map(|(canonical, occurrence)| (occurrence.name.clone(), canonical.clone()))
                 .collect::<Vec<_>>();
-            workspace_candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+            workspace_candidates
+                .sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
             for (label, canonical) in workspace_candidates {
                 let mut item = completion_item_from_canonical(workspace, label, &canonical);
                 item.sort_text = format!("2:{}", item.sort_text);

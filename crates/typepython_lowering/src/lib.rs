@@ -763,13 +763,14 @@ fn normalize_runtime_intrinsic_types(source: &str) -> String {
     };
     let mut replacements = Vec::new();
     collect_intrinsic_type_replacements(source, parsed.suite(), &mut replacements);
-    replacements.sort_by(|(left_range, _), (right_range, _)| {
-        right_range.start().cmp(&left_range.start())
-    });
+    replacements
+        .sort_by(|(left_range, _), (right_range, _)| right_range.start().cmp(&left_range.start()));
 
     let mut normalized = source.to_owned();
     for (range, replacement) in replacements {
-        if let Some(existing) = slice_range(&normalized, range) && existing == replacement {
+        if let Some(existing) = slice_range(&normalized, range)
+            && existing == replacement
+        {
             continue;
         }
         normalized.replace_range(range.start().to_usize()..range.end().to_usize(), &replacement);
@@ -785,7 +786,11 @@ fn collect_intrinsic_type_replacements(
     for statement in suite {
         match statement {
             Stmt::FunctionDef(function) => {
-                collect_parameter_intrinsic_type_replacements(source, &function.parameters, replacements);
+                collect_parameter_intrinsic_type_replacements(
+                    source,
+                    &function.parameters,
+                    replacements,
+                );
                 if let Some(returns) = function.returns.as_deref()
                     && let Some(replacement) = normalize_intrinsic_type_text(
                         slice_range(source, returns.range()).unwrap_or_default(),
@@ -803,8 +808,9 @@ fn collect_intrinsic_type_replacements(
                 if let Some(value) = assign.value.as_deref()
                     && slice_range(source, assign.annotation.range())
                         .is_some_and(|annotation| annotation.trim_end() == "TypeAlias")
-                    && let Some(replacement) =
-                        normalize_intrinsic_type_text(slice_range(source, value.range()).unwrap_or_default())
+                    && let Some(replacement) = normalize_intrinsic_type_text(
+                        slice_range(source, value.range()).unwrap_or_default(),
+                    )
                 {
                     replacements.push((value.range(), replacement));
                 }
@@ -902,9 +908,7 @@ fn has_any_import(source: &str) -> bool {
 }
 
 fn tree_uses_dynamic_intrinsic(tree: &SyntaxTree) -> bool {
-    tree.statements
-        .iter()
-        .any(statement_uses_dynamic_intrinsic)
+    tree.statements.iter().any(statement_uses_dynamic_intrinsic)
 }
 
 fn statement_uses_dynamic_intrinsic(statement: &SyntaxStatement) -> bool {
@@ -915,15 +919,20 @@ fn statement_uses_dynamic_intrinsic(statement: &SyntaxStatement) -> bool {
         | SyntaxStatement::SealedClass(statement)
         | SyntaxStatement::ClassDef(statement) => {
             statement.header_suffix.contains("dynamic")
-                || statement
-                    .members
-                    .iter()
-                    .any(|member| member.annotation.as_deref().is_some_and(|annotation| annotation.contains("dynamic")))
+                || statement.members.iter().any(|member| {
+                    member
+                        .annotation
+                        .as_deref()
+                        .is_some_and(|annotation| annotation.contains("dynamic"))
+                })
         }
         SyntaxStatement::FunctionDef(statement) | SyntaxStatement::OverloadDef(statement) => {
             statement.returns.as_deref().is_some_and(|returns| returns.contains("dynamic"))
                 || statement.params.iter().any(|param| {
-                    param.annotation.as_deref().is_some_and(|annotation| annotation.contains("dynamic"))
+                    param
+                        .annotation
+                        .as_deref()
+                        .is_some_and(|annotation| annotation.contains("dynamic"))
                 })
         }
         SyntaxStatement::Value(statement) => {
@@ -2465,7 +2474,9 @@ mod tests {
         assert!(lowered.diagnostics.is_empty());
         assert!(lowered.module.python_source.contains("from typing import Any"));
         assert!(lowered.module.python_source.contains("Alias: TypeAlias = Any"));
-        assert!(lowered.module.python_source.contains("def take(value: object, other: Any) -> object:"));
+        assert!(
+            lowered.module.python_source.contains("def take(value: object, other: Any) -> object:")
+        );
         assert!(!lowered.module.python_source.contains("unknown"));
         assert!(!lowered.module.python_source.contains("dynamic"));
     }

@@ -319,8 +319,9 @@ fn run_pipeline_prefers_local_companion_stub_surfaces() {
 
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
-        let syntax = load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
-            .expect("test setup should succeed");
+        let syntax =
+            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+                .expect("test setup should succeed");
         let bindings = syntax.iter().map(bind).collect::<Vec<_>>();
         check_graph(&build_graph(&bindings)).diagnostics
     };
@@ -763,10 +764,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
         assert_eq!(init_result, ExitCode::SUCCESS);
         write_executable_script(
             &checker_path,
-            &format!(
-                "#!/bin/sh\nprintf '%s' \"$1\" > \"{}\"\n",
-                invoked_path.display()
-            ),
+            &format!("#!/bin/sh\nprintf '%s' \"$1\" > \"{}\"\n", invoked_path.display()),
         );
 
         let verify_result = run_verify(VerifyArgs {
@@ -780,10 +778,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
         })
         .expect("verify should succeed with a passing checker");
 
-        (
-            verify_result,
-            fs::read_to_string(&invoked_path).expect("checker args should be recorded"),
-        )
+        (verify_result, fs::read_to_string(&invoked_path).expect("checker args should be recorded"))
     };
     remove_temp_project_dir(&project_dir);
 
@@ -805,10 +800,7 @@ fn run_verify_reports_external_checker_failure() {
         })
         .expect("init should succeed");
         assert_eq!(init_result, ExitCode::SUCCESS);
-        write_executable_script(
-            &checker_path,
-            "#!/bin/sh\necho 'checker failed' >&2\nexit 1\n",
-        );
+        write_executable_script(&checker_path, "#!/bin/sh\necho 'checker failed' >&2\nexit 1\n");
 
         run_verify(VerifyArgs {
             run: super::RunArgs {
@@ -1006,8 +998,11 @@ fn verify_build_artifacts_warns_about_unknown_boundary_metadata() {
             .expect("test setup should succeed");
         fs::create_dir_all(project_dir.join(".typepython/cache"))
             .expect("test setup should succeed");
-        fs::write(project_dir.join(".typepython/build/app/__init__.py"), "def take(value: object) -> object:\n    return value\n")
-            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def take(value: object) -> object:\n    return value\n",
+        )
+        .expect("test setup should succeed");
         fs::write(
             project_dir.join(".typepython/build/app/__init__.pyi"),
             "# tpy:unknown take\ndef take(value: object) -> object: ...\n",

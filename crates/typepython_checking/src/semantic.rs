@@ -705,7 +705,15 @@ pub(super) fn direct_unknown_operation_diagnostics(
     }
 
     for call in &node.method_calls {
-        if name_is_unknown_boundary(context, node, nodes, &call.owner_name) {
+        if name_is_unknown_boundary_with_context(
+            context,
+            node,
+            nodes,
+            call.current_owner_name.as_deref(),
+            call.current_owner_type_name.as_deref(),
+            call.line,
+            &call.owner_name,
+        ) {
             diagnostics.push(Diagnostic::error(
                 "TPY4003",
                 format!(
@@ -821,6 +829,18 @@ pub(super) fn name_is_unknown_boundary(
     nodes: &[typepython_graph::ModuleNode],
     name: &str,
 ) -> bool {
+    name_is_unknown_boundary_with_context(context, node, nodes, None, None, usize::MAX, name)
+}
+
+pub(super) fn name_is_unknown_boundary_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    line: usize,
+    name: &str,
+) -> bool {
     if resolve_typing_callable_signature(name).is_some()
         || resolve_builtin_return_type(name).is_some()
         || matches!(name, "eval" | "exec" | "setattr" | "delattr")
@@ -840,22 +860,18 @@ pub(super) fn name_is_unknown_boundary(
         return false;
     }
 
-    if resolve_direct_name_reference_semantic_type_with_context(
+    if let Some(resolved) = resolve_direct_name_reference_semantic_type_with_context(
         context,
         node,
         nodes,
         None,
         None,
-        None,
-        None,
-        usize::MAX,
+        current_owner_name,
+        current_owner_type_name,
+        line,
         name,
-    )
-    .is_some_and(|resolved| {
-        matches!(resolved.strip_annotated(), SemanticType::Name(name) if name == "unknown")
-    })
-    {
-        return true;
+    ) {
+        return matches!(resolved.strip_annotated(), SemanticType::Name(name) if name == "unknown");
     }
 
     if let Some((head, _)) = name.split_once('.')

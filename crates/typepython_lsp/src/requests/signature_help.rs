@@ -407,7 +407,9 @@ pub(crate) fn select_active_signature(
     candidates
         .iter()
         .enumerate()
-        .min_by_key(|(_, candidate)| signature_match_sort_key(candidate, active_parameter, call_site))
+        .min_by_key(|(_, candidate)| {
+            signature_match_sort_key(candidate, active_parameter, call_site)
+        })
         .map(|(index, _)| index)
         .unwrap_or(0)
 }
@@ -418,8 +420,9 @@ fn signature_match_sort_key(
     call_site: Option<&ActiveCallSite>,
 ) -> (usize, usize, usize, Reverse<usize>, usize) {
     let last_parameter_index = candidate.info.parameters.len().saturating_sub(1);
-    let (mismatches, exact_matches) =
-        call_site.map(|call_site| signature_type_match_score(candidate, call_site)).unwrap_or((0, 0));
+    let (mismatches, exact_matches) = call_site
+        .map(|call_site| signature_type_match_score(candidate, call_site))
+        .unwrap_or((0, 0));
     (
         usize::from(active_parameter > last_parameter_index),
         active_parameter.abs_diff(last_parameter_index),
@@ -446,7 +449,12 @@ fn signature_type_match_score(
 
     for (index, actual) in call_site.arg_types.iter().enumerate() {
         let expected = positional_params.get(index).copied().or(variadic_param);
-        score_signature_type_match(expected.and_then(|param| param.annotation.as_deref()), actual, &mut mismatches, &mut exact_matches);
+        score_signature_type_match(
+            expected.and_then(|param| param.annotation.as_deref()),
+            actual,
+            &mut mismatches,
+            &mut exact_matches,
+        );
     }
 
     for (keyword, actual) in call_site.keyword_names.iter().zip(&call_site.keyword_arg_types) {
@@ -455,7 +463,12 @@ fn signature_type_match_score(
             .iter()
             .find(|param| param.name == *keyword && !param.positional_only)
             .or(keyword_variadic_param);
-        score_signature_type_match(expected.and_then(|param| param.annotation.as_deref()), actual, &mut mismatches, &mut exact_matches);
+        score_signature_type_match(
+            expected.and_then(|param| param.annotation.as_deref()),
+            actual,
+            &mut mismatches,
+            &mut exact_matches,
+        );
     }
 
     (mismatches, exact_matches)
