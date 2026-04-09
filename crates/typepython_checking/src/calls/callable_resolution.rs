@@ -1169,9 +1169,25 @@ pub(super) fn resolve_decorated_callable_semantic_type_for_declaration_with_cont
     };
     let mut current = semantic_callable_type_from_signature_sites_in_module(node, &base_signature, &base_return);
     for decorator in decorated.decorators.iter().rev() {
-        current = apply_named_callable_decorator_transform_semantic_with_context(
-            context, node, nodes, decorator, &current,
-        )?;
+        let Some(next) = apply_named_callable_decorator_transform_semantic_with_context(
+            context,
+            node,
+            nodes,
+            decorator,
+            &current,
+        ) else {
+            if context.strict {
+                return None;
+            }
+            return Some(dynamic_callable_boundary());
+        };
+        if next.callable_parts().is_none() {
+            if context.strict {
+                return Some(next);
+            }
+            return Some(dynamic_callable_boundary());
+        }
+        current = next;
     }
     Some(current)
 }
@@ -1222,6 +1238,13 @@ pub(super) fn decorated_function_return_type_from_callable_annotation(
     callable_annotation: &str,
 ) -> Option<String> {
     parse_callable_annotation(callable_annotation).map(|(_, return_type)| return_type)
+}
+
+fn dynamic_callable_boundary() -> SemanticType {
+    SemanticType::Callable {
+        params: SemanticCallableParams::Ellipsis,
+        return_type: Box::new(SemanticType::Name(String::from("dynamic"))),
+    }
 }
 
 pub(super) fn resolve_metaclass_call_declaration_with_context<'a>(

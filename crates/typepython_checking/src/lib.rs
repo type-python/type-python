@@ -359,6 +359,7 @@ impl<'a> CheckerSourceFactsProvider<'a> {
 struct CheckerContext<'a> {
     nodes: &'a [typepython_graph::ModuleNode],
     import_fallback: ImportFallback,
+    strict: bool,
     source_facts: CheckerSourceFactsProvider<'a>,
 }
 
@@ -377,9 +378,26 @@ impl<'a> CheckerContext<'a> {
         source_overrides: Option<&'a BTreeMap<String, String>>,
         bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
     ) -> Self {
+        Self::new_with_bound_surface_facts_and_strict(
+            nodes,
+            import_fallback,
+            source_overrides,
+            bound_surface_facts,
+            false,
+        )
+    }
+
+    fn new_with_bound_surface_facts_and_strict(
+        nodes: &'a [typepython_graph::ModuleNode],
+        import_fallback: ImportFallback,
+        source_overrides: Option<&'a BTreeMap<String, String>>,
+        bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
+        strict: bool,
+    ) -> Self {
         Self {
             nodes,
             import_fallback,
+            strict,
             source_facts: CheckerSourceFactsProvider::new(source_overrides, bound_surface_facts),
         }
     }
@@ -679,11 +697,12 @@ fn check_modules_internal(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
 ) -> ModuleCheckResult {
-    let context = CheckerContext::new_with_bound_surface_facts(
+    let context = CheckerContext::new_with_bound_surface_facts_and_strict(
         &graph.nodes,
         import_fallback,
         source_overrides,
         bound_surface_facts,
+        strict,
     );
     let mut diagnostics_by_module = BTreeMap::new();
     let options = CheckerPassOptions {
