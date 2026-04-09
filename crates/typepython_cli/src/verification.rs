@@ -199,6 +199,8 @@ pub(crate) fn verify_build_artifacts(
                 ));
             } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
                 diagnostics.push(diagnostic);
+            } else {
+                diagnostics.diagnostics.extend(stub_metadata_expectation_warnings(stub_path));
             }
         }
 
@@ -954,6 +956,31 @@ fn verify_stub_syntax_rules(
     }
 
     None
+}
+
+fn stub_metadata_expectation_warnings(path: &Path) -> Vec<Diagnostic> {
+    let Ok(rendered) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut markers = Vec::new();
+    if rendered.contains("# tpy:sealed") {
+        markers.push("tpy:sealed");
+    }
+    if rendered.contains("# tpy:derived") {
+        markers.push("tpy:derived");
+    }
+    if markers.is_empty() {
+        return Vec::new();
+    }
+
+    vec![Diagnostic::warning(
+        "TPY5003",
+        format!(
+            "emitted stub artifact `{}` uses TypePython metadata comments ({}) that external type checkers ignore; use `typepython verify --checker ...` to validate downstream behavior",
+            path.display(),
+            markers.join(", ")
+        ),
+    )]
 }
 
 fn stub_statement_is_runtime(statement: &typepython_syntax::SyntaxStatement) -> bool {
