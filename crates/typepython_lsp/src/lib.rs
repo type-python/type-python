@@ -13,6 +13,7 @@ use thiserror::Error;
 use typepython_binding::{BindingTable, bind};
 use typepython_checking::{
     check_modules_with_binding_metadata, semantic_incremental_state_with_binding_metadata,
+    semantic_incremental_state_with_reused_summaries,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};

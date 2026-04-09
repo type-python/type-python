@@ -530,6 +530,46 @@ pub fn semantic_incremental_state_with_binding_metadata(
 }
 
 #[must_use]
+pub fn semantic_incremental_state_with_reused_summaries(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    previous_summaries: &[PublicSummary],
+    summary_rebuild_modules: &BTreeSet<String>,
+    stdlib_snapshot: Option<String>,
+) -> IncrementalState {
+    let bound_surface_facts = binding_surface_facts_by_module(bindings);
+    let context = CheckerContext::new_with_bound_surface_facts(
+        &graph.nodes,
+        import_fallback,
+        source_overrides,
+        Some(&bound_surface_facts),
+    );
+    let previous_by_module = previous_summaries
+        .iter()
+        .map(|summary| (summary.module.clone(), summary.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let summaries = graph
+        .nodes
+        .iter()
+        .map(|node| {
+            if summary_rebuild_modules.contains(&node.module_key)
+                || !previous_by_module.contains_key(&node.module_key)
+            {
+                semantic_public_summary(&context, node)
+            } else {
+                previous_by_module
+                    .get(&node.module_key)
+                    .cloned()
+                    .unwrap_or_else(|| semantic_public_summary(&context, node))
+            }
+        })
+        .collect();
+    snapshot_with_summaries(summaries, stdlib_snapshot)
+}
+
+#[must_use]
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while adding LSP source overrides"

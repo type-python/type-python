@@ -1,6 +1,9 @@
-use super::{check, check_with_binding_metadata, check_with_options};
+use super::{
+    check, check_with_binding_metadata, check_with_options,
+    semantic_incremental_state_with_binding_metadata, semantic_incremental_state_with_reused_summaries,
+};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::ErrorKind,
     path::PathBuf,
@@ -81,6 +84,90 @@ fn check_temp_typepython_source_with_check_options(
 
     let _ = fs::remove_dir_all(&root);
     result
+}
+
+#[test]
+fn semantic_incremental_state_reuses_unchanged_public_summaries() {
+    let root = create_temp_typepython_root();
+    let a_path = root.join("a.tpy");
+    let b_path = root.join("b.tpy");
+    fs::write(&a_path, "def produce() -> int:\n    return 1\n").expect("temp source should be written");
+    fs::write(&b_path, "def helper() -> int:\n    return 2\n").expect("temp source should be written");
+
+    let trees = vec![
+        parse_with_options(
+            SourceFile {
+                path: a_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.a"),
+                text: String::from("def produce() -> int:\n    return 1\n"),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: b_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.b"),
+                text: String::from("def helper() -> int:\n    return 2\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let baseline = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        None,
+    );
+    let mut previous_summaries = baseline.summaries.clone();
+    let sentinel_summary = {
+        let summary = previous_summaries
+            .iter_mut()
+            .find(|summary| summary.module == "app.b")
+            .expect("baseline should contain app.b summary");
+        summary.exports[0].type_repr = String::from("sentinel");
+        summary.clone()
+    };
+    let changed_sentinel = {
+        let summary = previous_summaries
+            .iter_mut()
+            .find(|summary| summary.module == "app.a")
+            .expect("baseline should contain app.a summary");
+        summary.exports[0].type_repr = String::from("stale");
+        summary.clone()
+    };
+
+    let rebuilt = semantic_incremental_state_with_reused_summaries(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        &previous_summaries,
+        &BTreeSet::from([String::from("app.a")]),
+        None,
+    );
+
+    let reused_b = rebuilt
+        .summaries
+        .iter()
+        .find(|summary| summary.module == "app.b")
+        .cloned()
+        .expect("rebuilt summaries should contain app.b");
+    let refreshed_a = rebuilt
+        .summaries
+        .iter()
+        .find(|summary| summary.module == "app.a")
+        .cloned()
+        .expect("rebuilt summaries should contain app.a");
+
+    assert_eq!(reused_b, sentinel_summary);
+    assert_ne!(refreshed_a, changed_sentinel);
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {

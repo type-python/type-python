@@ -278,13 +278,26 @@ impl IncrementalWorkspace {
         let graph = build(&bindings);
         let current_module_keys =
             graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
-        let current_incremental = semantic_incremental_state_with_binding_metadata(
-            &graph,
-            &bindings,
-            self.config.config.typing.imports,
-            Some(&self.active_source_overrides()),
-            None,
-        );
+        let source_overrides = self.active_source_overrides();
+        let current_incremental = if force_full_check || self.incremental.summaries.is_empty() {
+            semantic_incremental_state_with_binding_metadata(
+                &graph,
+                &bindings,
+                self.config.config.typing.imports,
+                Some(&source_overrides),
+                None,
+            )
+        } else {
+            semantic_incremental_state_with_reused_summaries(
+                &graph,
+                &bindings,
+                self.config.config.typing.imports,
+                Some(&source_overrides),
+                &self.incremental.summaries,
+                &direct_changes,
+                None,
+            )
+        };
         let current_dependency_index = dependency_index(&graph);
         let snapshot_diff = diff(&self.incremental, &current_incremental);
         let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
@@ -295,7 +308,6 @@ impl IncrementalWorkspace {
             .retain(|module_key, _| current_module_keys.contains(module_key));
 
         if !has_parse_errors {
-            let source_overrides = self.active_source_overrides();
             if force_full_check || self.parse_blocked {
                 self.check_diagnostics_by_module = check_modules_with_binding_metadata(
                     &graph,
