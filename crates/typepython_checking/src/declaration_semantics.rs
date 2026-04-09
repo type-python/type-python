@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::{BTreeSet, HashMap}};
 
 use super::*;
 
@@ -222,6 +222,97 @@ pub(crate) fn method_signature_sites_from_semantics(
         | typepython_syntax::MethodKind::Class
         | typepython_syntax::MethodKind::PropertySetter => params.into_iter().skip(1).collect(),
     }
+}
+
+pub(crate) fn owner_generic_substitutions(
+    owner_type: &SemanticType,
+    class_declaration: &Declaration,
+) -> GenericTypeParamSubstitutions {
+    if class_declaration.type_params.is_empty() {
+        return GenericTypeParamSubstitutions::default();
+    }
+    let Some((head, args)) = owner_type.generic_parts() else {
+        return GenericTypeParamSubstitutions::default();
+    };
+    if head != class_declaration.name {
+        return GenericTypeParamSubstitutions::default();
+    }
+
+    let type_pack_names = class_declaration
+        .type_params
+        .iter()
+        .filter(|type_param| {
+            type_param.kind == typepython_binding::GenericTypeParamKind::TypeVarTuple
+        })
+        .map(|type_param| type_param.name.clone())
+        .collect::<BTreeSet<_>>();
+    let expanded_args = expand_inferred_generic_args(args, &type_pack_names);
+    let mut substitutions = GenericTypeParamSubstitutions::default();
+    let mut arg_index = 0usize;
+
+    for (index, type_param) in class_declaration.type_params.iter().enumerate() {
+        match type_param.kind {
+            typepython_binding::GenericTypeParamKind::TypeVar => {
+                let Some(actual) = expanded_args.get(arg_index) else {
+                    break;
+                };
+                substitutions.types.insert(type_param.name.clone(), actual.clone());
+                arg_index += 1;
+            }
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
+                let trailing_non_pack_params = class_declaration
+                    .type_params
+                    .iter()
+                    .skip(index + 1)
+                    .filter(|candidate| {
+                        candidate.kind != typepython_binding::GenericTypeParamKind::TypeVarTuple
+                    })
+                    .count();
+                let pack_end = expanded_args.len().saturating_sub(trailing_non_pack_params);
+                substitutions.type_packs.insert(
+                    type_param.name.clone(),
+                    TypePackBinding {
+                        types: expanded_args[arg_index..pack_end].to_vec(),
+                        variadic_tail: None,
+                    },
+                );
+                arg_index = pack_end;
+            }
+            typepython_binding::GenericTypeParamKind::ParamSpec => {}
+        }
+    }
+
+    substitutions
+}
+
+pub(crate) fn without_shadowed_generic_params(
+    mut substitutions: GenericTypeParamSubstitutions,
+    declaration: &Declaration,
+) -> GenericTypeParamSubstitutions {
+    for type_param in &declaration.type_params {
+        substitutions.types.remove(&type_param.name);
+        substitutions.param_lists.remove(&type_param.name);
+        substitutions.type_packs.remove(&type_param.name);
+    }
+    substitutions
+}
+
+pub(crate) fn substitute_semantic_callable_params(
+    params: &[SemanticCallableParam],
+    substitutions: &GenericTypeParamSubstitutions,
+) -> Vec<SemanticCallableParam> {
+    params
+        .iter()
+        .cloned()
+        .map(|mut param| {
+            param.annotation = param
+                .annotation
+                .as_ref()
+                .map(|annotation| substitute_semantic_type_params(annotation, substitutions));
+            param.annotation_text = param.annotation.as_ref().map(render_semantic_type);
+            param
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

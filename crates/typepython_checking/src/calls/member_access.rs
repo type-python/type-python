@@ -153,8 +153,10 @@ pub(super) fn direct_method_call_diagnostics(
             continue;
         }
 
-        let Some(owner_type_name) = resolve_method_call_owner_type(context, node, nodes, call)
-        else {
+        let Some(owner_type) = resolve_method_call_owner_type(context, node, nodes, call) else {
+            continue;
+        };
+        let Some(owner_type_name) = semantic_nominal_owner_name(&owner_type) else {
             continue;
         };
         let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &owner_type_name)
@@ -192,7 +194,7 @@ pub(super) fn direct_method_call_diagnostics(
                 node,
                 nodes,
                 &direct_call,
-                &owner_type_name,
+                &owner_type,
                 &overloads,
             ) {
                 ResolvedOverloadSelection::Selected(candidate) => {
@@ -256,7 +258,7 @@ pub(super) fn direct_method_call_diagnostics(
             nodes,
             target,
             &direct_call,
-            &owner_type_name,
+            &owner_type,
             target_callable.as_ref(),
         ) {
             Ok(resolved) => {
@@ -335,11 +337,10 @@ pub(super) fn resolve_method_call_owner_type(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::MethodCallSite,
-) -> Option<String> {
+) -> Option<SemanticType> {
     if call.through_instance {
         return resolve_direct_callable_return_semantic_type(node, nodes, &call.owner_name)
-            .and_then(|return_type| semantic_nominal_owner_name(&return_type))
-            .or_else(|| Some(call.owner_name.clone()));
+            .or_else(|| Some(SemanticType::Name(call.owner_name.clone())));
     }
 
     resolve_direct_name_reference_semantic_type_with_context(
@@ -353,6 +354,5 @@ pub(super) fn resolve_method_call_owner_type(
         call.line,
         &call.owner_name,
     )
-    .and_then(|resolved| semantic_nominal_owner_name(&resolved))
-    .or_else(|| Some(call.owner_name.clone()))
+    .or_else(|| Some(SemanticType::Name(call.owner_name.clone())))
 }

@@ -750,6 +750,8 @@ pub(super) fn resolve_readable_member_semantic_type(
     owner_type: &SemanticType,
 ) -> Option<SemanticType> {
     let owner_type_name = semantic_nominal_owner_name(owner_type)?;
+    let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+    let owner_substitutions = owner_generic_substitutions(owner_type, owner_class_decl);
     match declaration.kind {
         DeclarationKind::Value => {
             if let Some(descriptor_return) =
@@ -757,28 +759,38 @@ pub(super) fn resolve_readable_member_semantic_type(
             {
                 return Some(rewrite_imported_typing_semantic_type(node, &descriptor_return));
             }
-            let detail = rewrite_imported_typing_aliases(
-                node,
-                &substitute_self_annotation(
-                    &declaration_value_annotation_text(declaration)?,
-                    Some(&owner_type_name),
-                ),
-            );
-            normalized_direct_return_annotation(&detail).map(lower_type_text_or_name).or_else(|| {
-                declaration.value_type.as_deref().map(|value| {
-                    lower_type_text_or_name(&rewrite_imported_typing_aliases(
+            declaration_value_annotation_text(declaration)
+                .map(|annotation| {
+                    rewrite_imported_typing_aliases(
                         node,
-                        &substitute_self_annotation(value, Some(&owner_type_name)),
-                    ))
+                        &substitute_self_annotation(&annotation, Some(&owner_type_name)),
+                    )
                 })
-            })
+                .as_deref()
+                .and_then(normalized_direct_return_annotation)
+                .map(lower_type_text_or_name)
+                .or_else(|| {
+                    declaration.value_type.as_deref().map(|value| {
+                        lower_type_text_or_name(&rewrite_imported_typing_aliases(
+                            node,
+                            &substitute_self_annotation(value, Some(&owner_type_name)),
+                        ))
+                    })
+                })
+                .map(|ty| substitute_semantic_type_params(&ty, &owner_substitutions))
         }
         DeclarationKind::Function
             if declaration.method_kind == Some(typepython_syntax::MethodKind::Property) =>
         {
             Some(rewrite_imported_typing_semantic_type(
                 node,
-                &declaration_signature_return_semantic_type_with_self(declaration, &owner_type_name)?,
+                &substitute_semantic_type_params(
+                    &declaration_signature_return_semantic_type_with_self(
+                        declaration,
+                        &owner_type_name,
+                    )?,
+                    &owner_substitutions,
+                ),
             ))
         }
         _ => None,

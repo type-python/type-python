@@ -135,6 +135,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
 
     let owner_type_name = semantic_nominal_owner_name(&owner_type)?;
     let (class_node, class_decl) = resolve_direct_base(nodes, node, &owner_type_name)?;
+    let owner_substitutions = owner_generic_substitutions(&owner_type, class_decl);
     let methods = find_owned_callable_declarations(nodes, class_node, class_decl, method_name);
     if methods.is_empty() {
         return None;
@@ -170,7 +171,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
             node,
             nodes,
             &call,
-            &owner_type_name,
+            &owner_type,
             &overloads,
         ) {
             ResolvedOverloadSelection::Selected(candidate) => candidate.return_type,
@@ -203,7 +204,7 @@ pub(super) fn resolve_direct_method_return_semantic_type(
                 nodes,
                 method,
                 &call,
-                &owner_type_name,
+                &owner_type,
                 declaration_callable_semantics(method).as_ref(),
             )
             .ok()
@@ -215,7 +216,10 @@ pub(super) fn resolve_direct_method_return_semantic_type(
 
         Some(rewrite_imported_typing_semantic_type(
             node,
-            &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
+            &substitute_semantic_type_params(
+                &declaration_signature_return_semantic_type_with_self(method, &owner_type_name)?,
+                &owner_substitutions,
+            ),
         ))
     }
 }

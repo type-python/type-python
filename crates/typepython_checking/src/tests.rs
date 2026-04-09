@@ -170,6 +170,91 @@ fn semantic_incremental_state_reuses_unchanged_public_summaries() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn check_propagates_generic_owner_arguments_into_member_reads() {
+    let diagnostics = check_temp_typepython_source(
+        "class Box[T]:\n    value: T\n\ndef read(box: Box[int]) -> int:\n    return box.value\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_propagates_generic_owner_arguments_into_method_returns() {
+    let diagnostics = check_temp_typepython_source(
+        "class Box[T]:\n    value: T\n    def get(self) -> T:\n        return self.value\n\ndef read(box: Box[int]) -> int:\n    return box.get()\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    let source_text = "class Box[T]:\n    value: T\n    def get(self) -> T:\n        return self.value\n\ndef read(box: Box[int]) -> int:\n    return box.get()\n";
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let class_decl = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Box" && declaration.kind == DeclarationKind::Class)
+        .expect("Box class should be present");
+    let method = node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == "get"
+                && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+        })
+        .expect("get method should be present");
+    let direct_call = typepython_binding::CallSite {
+        callee: String::from("Box.get"),
+        arg_count: 0,
+        arg_types: Vec::new(),
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let resolved = super::resolve_method_call_candidate_detailed(
+        node,
+        &graph.nodes,
+        method,
+        &direct_call,
+        &crate::lower_type_text_or_name("Box[int]"),
+        super::declaration_callable_semantics(method).as_ref(),
+    )
+    .expect("generic method call should resolve");
+
+    assert_eq!(
+        resolved.return_type.map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("int"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources

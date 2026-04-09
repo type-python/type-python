@@ -291,9 +291,23 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
     nodes: &[typepython_graph::ModuleNode],
     declaration: &'a Declaration,
     call: &typepython_binding::CallSite,
-    owner_type_name: &str,
+    owner_type: &SemanticType,
     callable: Option<&SemanticCallableDeclaration>,
 ) -> Result<ResolvedDirectCallCandidate<'a>, DirectCallResolutionFailure> {
+    let owner_type_name = semantic_nominal_owner_name(owner_type).ok_or_else(|| {
+        DirectCallResolutionFailure::SignatureInstantiationFailed {
+            declaration_name: declaration.name.clone(),
+            unresolved: Vec::new(),
+        }
+    })?;
+    let (_, owner_class_decl) = resolve_direct_base(nodes, node, &owner_type_name).ok_or_else(|| {
+        DirectCallResolutionFailure::SignatureInstantiationFailed {
+            declaration_name: declaration.name.clone(),
+            unresolved: Vec::new(),
+        }
+    })?;
+    let owner_substitutions =
+        without_shadowed_generic_params(owner_generic_substitutions(owner_type, owner_class_decl), declaration);
     let callable = match callable {
         Some(callable) => callable.clone(),
         None => declaration_callable_semantics(declaration).ok_or_else(|| {
@@ -311,9 +325,16 @@ pub(super) fn resolve_method_call_candidate_detailed<'a>(
         nodes,
         declaration,
         call,
-        method_signature_sites_from_semantics(declaration, &callable, owner_type_name),
-        method_semantic_params_from_semantics(declaration, &callable, owner_type_name),
-        callable_return_semantic_type_with_self_from_semantics(&callable, owner_type_name),
+        method_signature_sites_from_semantics(declaration, &callable, &owner_type_name)
+            .into_iter()
+            .map(|param| instantiate_direct_function_param(param, &owner_substitutions))
+            .collect(),
+        substitute_semantic_callable_params(
+            &method_semantic_params_from_semantics(declaration, &callable, &owner_type_name),
+            &owner_substitutions,
+        ),
+        callable_return_semantic_type_with_self_from_semantics(&callable, &owner_type_name)
+            .map(|return_type| substitute_semantic_type_params(&return_type, &owner_substitutions)),
     )
 }
 
@@ -321,7 +342,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     call: &typepython_binding::CallSite,
-    owner_type_name: &str,
+    owner_type: &SemanticType,
     overloads: &[(&'a Declaration, Option<SemanticCallableDeclaration>)],
 ) -> ResolvedOverloadSelection<'a> {
     let attempts = overloads
@@ -334,7 +355,7 @@ pub(super) fn resolve_method_overload_selection<'a>(
                     nodes,
                     declaration,
                     call,
-                    owner_type_name,
+                    owner_type,
                     callable.as_ref(),
                 ),
             )
