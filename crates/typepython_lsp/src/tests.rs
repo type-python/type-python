@@ -473,7 +473,7 @@ fn completion_returns_local_symbols_and_member_symbols() {
         .expect("build should appear in local completion results");
     assert_eq!(build_item["kind"], json!(3));
     assert_eq!(build_item["filterText"], json!("build"));
-    assert_eq!(build_item["sortText"], json!("build:03"));
+    assert_eq!(build_item["sortText"], json!("0:build:03"));
 
     let members = server
         .handle_completion(json!({
@@ -491,6 +491,44 @@ fn completion_returns_local_symbols_and_member_symbols() {
     assert_eq!(method_item["kind"], json!(2));
     assert_eq!(method_item["filterText"], json!("method"));
     assert_eq!(method_item["sortText"], json!("method:02"));
+}
+
+#[test]
+fn completion_includes_workspace_top_level_symbols_for_non_member_access() {
+    let config = temp_workspace(
+        "completion_includes_workspace_top_level_symbols_for_non_member_access",
+        &[
+            ("src/app/__init__.tpy", "value = 1\n"),
+            ("src/app/helpers.tpy", "def helper() -> int:\n    return 1\n"),
+        ],
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+        .expect("source file should be readable");
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+        }))
+        .expect("didOpen should succeed");
+
+    let completion = server
+        .handle_completion(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 0, "character": 0}
+        }))
+        .expect("completion should include workspace top-level symbols");
+    let items = completion["items"]
+        .as_array()
+        .expect("completion items should be an array");
+    let helper = items
+        .iter()
+        .find(|item| item["label"] == json!("helper"))
+        .expect("workspace helper symbol should appear in completion");
+    assert_eq!(helper["kind"], json!(3));
+    assert_eq!(helper["sortText"], json!("1:helper:03"));
 }
 
 #[test]

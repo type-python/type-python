@@ -394,11 +394,37 @@ impl AnalysisHost {
         let items = if is_member_access {
             collect_member_completion_items(workspace, document, position)
         } else {
-            let mut keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
-            keys.sort();
-            keys.into_iter()
-                .map(|name| completion_item_from_canonical(workspace, name.clone(), &document.local_symbols[&name]))
-                .collect::<Vec<_>>()
+            let mut items = Vec::new();
+            let mut seen = BTreeSet::new();
+
+            let mut local_keys = document.local_symbols.keys().cloned().collect::<Vec<_>>();
+            local_keys.sort();
+            for name in local_keys {
+                let mut item =
+                    completion_item_from_canonical(workspace, name.clone(), &document.local_symbols[&name]);
+                item.sort_text = format!("0:{}", item.sort_text);
+                seen.insert(item.label.clone());
+                items.push(item);
+            }
+
+            let mut workspace_candidates = workspace
+                .declarations_by_canonical
+                .iter()
+                .filter(|(canonical, occurrence)| {
+                    binding_declaration_for_canonical(workspace, canonical)
+                        .is_some_and(|(_, declaration)| declaration.owner.is_none())
+                        && !seen.contains(&occurrence.name)
+                })
+                .map(|(canonical, occurrence)| (occurrence.name.clone(), canonical.clone()))
+                .collect::<Vec<_>>();
+            workspace_candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+            for (label, canonical) in workspace_candidates {
+                let mut item = completion_item_from_canonical(workspace, label, &canonical);
+                item.sort_text = format!("1:{}", item.sort_text);
+                items.push(item);
+            }
+
+            items
         };
 
         Ok(json!({"isIncomplete": false, "items": items}))
