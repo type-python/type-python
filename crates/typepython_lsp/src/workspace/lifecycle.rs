@@ -28,11 +28,12 @@ impl IncrementalWorkspace {
 
         let mut project_documents = BTreeMap::new();
         for source in collect_project_source_paths(&config, overlays)? {
-            let syntax = parse_discovered_source(
-                &source,
-                overlays.get(&source.path).map(|overlay| overlay.text.as_str()),
-                config.config.typing.conditional_returns,
-            )?;
+                let syntax = parse_discovered_source(
+                    &source,
+                    overlays.get(&source.path).map(|overlay| overlay.text.as_str()),
+                    config.config.typing.conditional_returns,
+                    &config.config.project.target_python,
+                )?;
             let binding = bind(&syntax);
             let (document, declarations) = index_document_state(syntax);
             project_documents.insert(
@@ -98,6 +99,7 @@ impl IncrementalWorkspace {
                     &source,
                     overlay.map(|document| document.text.as_str()),
                     self.config.config.typing.conditional_returns,
+                    &self.config.config.project.target_python,
                 )?;
                 let binding = bind(&syntax);
                 let (document, declarations) = index_document_state(syntax);
@@ -214,7 +216,12 @@ impl IncrementalWorkspace {
         }
 
         let syntax =
-            parse_discovered_source(source, None, self.config.config.typing.conditional_returns)?;
+            parse_discovered_source(
+                source,
+                None,
+                self.config.config.typing.conditional_returns,
+                &self.config.config.project.target_python,
+            )?;
         let binding = bind(&syntax);
         let (document, declarations) = index_document_state(syntax);
         self.support_documents.insert(
