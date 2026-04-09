@@ -22,7 +22,7 @@ pub(crate) enum SemanticCallableParams {
     Single(Box<SemanticType>),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct TypeStore {
     arena: Vec<SemanticType>,
     ids_by_type: BTreeMap<SemanticType, TypeId>,

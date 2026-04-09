@@ -134,7 +134,7 @@ impl GenericSolverMetadata {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TypeVarConstraint {
     name: String,
-    candidate: SemanticType,
+    candidate_id: TypeId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -156,16 +156,20 @@ enum GenericConstraint {
     TypeVarTuple(TypeVarTupleConstraint),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Default)]
 struct GenericConstraintSet {
     constraints: Vec<GenericConstraint>,
+    type_store: TypeStore,
 }
 
 impl GenericConstraintSet {
     fn extend_bindings(&mut self, bindings: GenericSolution) {
         for (name, candidate) in bindings.types {
-            self.constraints
-                .push(GenericConstraint::TypeVar(TypeVarConstraint { name, candidate }));
+            let candidate_id = self.type_store.intern(candidate);
+            self.constraints.push(GenericConstraint::TypeVar(TypeVarConstraint {
+                name,
+                candidate_id,
+            }));
         }
         for (name, binding) in bindings.param_lists {
             self.constraints
@@ -224,18 +228,35 @@ fn solve_collected_generic_constraints_detailed(
     constraints: &GenericConstraintSet,
 ) -> Result<GenericSolution, GenericSolveFailure> {
     let mut solution = GenericSolution::default();
+    let mut type_ids = BTreeMap::<String, TypeId>::new();
+    let mut type_store = TypeStore::default();
     for constraint in &constraints.constraints {
         match constraint {
-            GenericConstraint::TypeVar(constraint) => match solution.types.get(&constraint.name) {
-                Some(existing) if existing != &constraint.candidate => {
-                    solution.types.insert(
-                        constraint.name.clone(),
-                        merge_generic_type_candidates(existing, &constraint.candidate),
-                    );
+            GenericConstraint::TypeVar(constraint) => match type_ids.get(&constraint.name).copied() {
+                Some(existing_id) if existing_id != constraint.candidate_id => {
+                    let existing = type_store
+                        .get(existing_id)
+                        .cloned()
+                        .or_else(|| constraints.type_store.get(existing_id).cloned())
+                        .expect("existing interned type should be available");
+                    let candidate = constraints
+                        .type_store
+                        .get(constraint.candidate_id)
+                        .cloned()
+                        .expect("candidate interned type should be available");
+                    let merged = merge_generic_type_candidates(&existing, &candidate);
+                    let merged_id = type_store.intern(merged);
+                    type_ids.insert(constraint.name.clone(), merged_id);
                 }
                 Some(_) => {}
                 None => {
-                    solution.types.insert(constraint.name.clone(), constraint.candidate.clone());
+                    let candidate = constraints
+                        .type_store
+                        .get(constraint.candidate_id)
+                        .cloned()
+                        .expect("candidate interned type should be available");
+                    let candidate_id = type_store.intern(candidate);
+                    type_ids.insert(constraint.name.clone(), candidate_id);
                 }
             },
             GenericConstraint::ParamSpec(constraint) => {
@@ -262,6 +283,18 @@ fn solve_collected_generic_constraints_detailed(
             }
         }
     }
+    solution.types = type_ids
+        .into_iter()
+        .map(|(name, type_id)| {
+            (
+                name,
+                type_store
+                    .get(type_id)
+                    .cloned()
+                    .expect("interned solution type should be available"),
+            )
+        })
+        .collect();
     Ok(solution)
 }
 
