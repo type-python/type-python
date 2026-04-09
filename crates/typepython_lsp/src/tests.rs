@@ -178,6 +178,41 @@ fn signature_help_returns_member_signature_without_self() {
 }
 
 #[test]
+fn signature_help_selects_overload_by_active_parameter() {
+    let config = temp_config(
+        "signature_help_selects_overload_by_active_parameter",
+        "overload def target(a: int) -> int: ...\n\
+         overload def target(a: int, b: str) -> int: ...\n\
+         def target(a: int, b: str = \"x\") -> int:\n    return a\n\n\
+         value = target(1, )\n",
+    );
+    let mut server = Server::new(config.clone());
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+        .expect("source file should be readable");
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+        }))
+        .expect("didOpen should succeed");
+
+    let signature_help = server
+        .handle_signature_help(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 5, "character": 18}
+        }))
+        .expect("signatureHelp should succeed");
+    assert_eq!(signature_help["activeParameter"], json!(1));
+    assert_eq!(signature_help["activeSignature"], json!(1));
+    assert_eq!(
+        signature_help["signatures"][1]["label"],
+        json!("target(a: int, b: str) -> int")
+    );
+}
+
+#[test]
 fn document_symbol_returns_hierarchical_symbols() {
     let config = temp_config(
         "document_symbol_returns_hierarchical_symbols",
