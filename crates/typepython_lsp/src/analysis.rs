@@ -6,6 +6,14 @@ pub(super) struct AnalysisHost {
     pub(super) cached_workspace: Option<IncrementalWorkspace>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct WorkspaceSymbolMatch {
+    exact_substring_rank: u8,
+    start_index: usize,
+    gap_count: usize,
+    candidate_len: usize,
+}
+
 impl AnalysisHost {
     pub(super) fn new(config: ConfigHandle) -> Self {
         Self { config, overlays: BTreeMap::new(), cached_workspace: None }
@@ -220,34 +228,98 @@ impl AnalysisHost {
             .declarations_by_canonical
             .iter()
             .filter_map(|(canonical, declaration)| {
-                if !query.is_empty() {
-                    let name = declaration.name.to_lowercase();
-                    let canonical_name = canonical.to_lowercase();
-                    if !name.contains(&query) && !canonical_name.contains(&query) {
-                        return None;
-                    }
-                }
+                let match_score = workspace_symbol_match(
+                    &query,
+                    &declaration.name.to_lowercase(),
+                    &canonical.to_lowercase(),
+                )?;
                 let (kind, container_name) = workspace_symbol_metadata(workspace, canonical)?;
-                Some(LspWorkspaceSymbol {
-                    name: declaration.name.clone(),
-                    kind,
-                    location: LspLocation {
-                        uri: declaration.uri.clone(),
-                        range: declaration.range,
+                Some((
+                    match_score,
+                    LspWorkspaceSymbol {
+                        name: declaration.name.clone(),
+                        kind,
+                        location: LspLocation {
+                            uri: declaration.uri.clone(),
+                            range: declaration.range,
+                        },
+                        container_name,
                     },
-                    container_name,
-                })
+                ))
             })
             .collect::<Vec<_>>();
-        symbols.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
-                .then_with(|| left.container_name.cmp(&right.container_name))
-                .then_with(|| left.location.uri.cmp(&right.location.uri))
+        symbols.sort_by(|(left_score, left), (right_score, right)| {
+            left_score
+                .cmp(right_score)
+                .then_with(|| {
+                    left.name
+                        .cmp(&right.name)
+                        .then_with(|| left.container_name.cmp(&right.container_name))
+                        .then_with(|| left.location.uri.cmp(&right.location.uri))
+                })
         });
-        Ok(json!(symbols))
+        Ok(json!(symbols.into_iter().map(|(_, symbol)| symbol).collect::<Vec<_>>()))
+    }
+}
+
+fn workspace_symbol_match(
+    query: &str,
+    name: &str,
+    canonical_name: &str,
+) -> Option<WorkspaceSymbolMatch> {
+    if query.is_empty() {
+        return Some(WorkspaceSymbolMatch {
+            exact_substring_rank: 1,
+            start_index: 0,
+            gap_count: 0,
+            candidate_len: name.len(),
+        });
+    }
+    let name_match = fuzzy_symbol_match(query, name);
+    let canonical_match = fuzzy_symbol_match(query, canonical_name);
+    match (name_match, canonical_match) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(score), None) | (None, Some(score)) => Some(score),
+        (None, None) => None,
+    }
+}
+
+fn fuzzy_symbol_match(query: &str, candidate: &str) -> Option<WorkspaceSymbolMatch> {
+    if let Some(start_index) = candidate.find(query) {
+        return Some(WorkspaceSymbolMatch {
+            exact_substring_rank: 0,
+            start_index,
+            gap_count: 0,
+            candidate_len: candidate.len(),
+        });
     }
 
+    let mut matched_offsets = Vec::with_capacity(query.len());
+    let mut search_start = 0usize;
+    for query_ch in query.chars() {
+        let remainder = &candidate[search_start..];
+        let (relative_offset, _) = remainder.char_indices().find(|(_, candidate_ch)| {
+            candidate_ch.eq_ignore_ascii_case(&query_ch)
+        })?;
+        let absolute_offset = search_start + relative_offset;
+        matched_offsets.push(absolute_offset);
+        search_start = absolute_offset + query_ch.len_utf8();
+    }
+
+    let start_index = *matched_offsets.first()?;
+    let gap_count = matched_offsets
+        .windows(2)
+        .map(|window| window[1].saturating_sub(window[0] + 1))
+        .sum();
+    Some(WorkspaceSymbolMatch {
+        exact_substring_rank: 1,
+        start_index,
+        gap_count,
+        candidate_len: candidate.len(),
+    })
+}
+
+impl AnalysisHost {
     pub(super) fn rename(
         &mut self,
         uri: &str,

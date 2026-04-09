@@ -239,6 +239,41 @@ fn workspace_symbol_returns_matching_declarations() {
     assert!(symbols.iter().any(|symbol| symbol["name"] == json!("handle_user")));
 }
 
+#[test]
+fn workspace_symbol_supports_fuzzy_queries() {
+    let config = temp_workspace(
+        "workspace_symbol_supports_fuzzy_queries",
+        &[
+            ("src/app/config.tpy", "class Config:\n    value: int\n"),
+            (
+                "src/app/handlers.tpy",
+                "def handle_value() -> int:\n    return 1\n\ndef render_value() -> int:\n    return 2\n",
+            ),
+        ],
+    );
+    let mut server = Server::new(config);
+
+    let fuzzy_handlers = server
+        .handle_workspace_symbol(json!({
+            "query": "hv"
+        }))
+        .expect("workspace/symbol should support fuzzy handler query");
+    let fuzzy_handlers = fuzzy_handlers
+        .as_array()
+        .expect("workspace symbols should be returned as an array");
+    assert_eq!(fuzzy_handlers.first().and_then(|symbol| symbol["name"].as_str()), Some("handle_value"));
+
+    let fuzzy_config = server
+        .handle_workspace_symbol(json!({
+            "query": "confg"
+        }))
+        .expect("workspace/symbol should support fuzzy config query");
+    let fuzzy_config = fuzzy_config
+        .as_array()
+        .expect("workspace symbols should be returned as an array");
+    assert!(fuzzy_config.iter().any(|symbol| symbol["name"] == json!("Config")));
+}
+
 #[cfg(unix)]
 #[test]
 fn formatting_returns_restored_typepython_source_edits() {
