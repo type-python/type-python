@@ -145,6 +145,20 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
                         &mut statements,
                         &mut diagnostics,
                     );
+                    let mut guarded_lines = std::collections::BTreeSet::new();
+                    let mut selected_guarded_lines = std::collections::BTreeSet::new();
+                    collect_supported_guarded_branch_statement_lines(
+                        &normalized,
+                        parsed.suite(),
+                        options,
+                        &mut guarded_lines,
+                        &mut selected_guarded_lines,
+                    );
+                    statements.retain(|statement| {
+                        !is_custom_guard_filtered_statement(statement)
+                            || !guarded_lines.contains(&statement_line(statement))
+                            || selected_guarded_lines.contains(&statement_line(statement))
+                    });
                     statements.extend(extract_ast_backed_statements(
                         &source.path,
                         &source.logical_module,

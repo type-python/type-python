@@ -165,6 +165,123 @@ fn selected_guarded_import_suite<'a>(
     Some(&[])
 }
 
+fn collect_supported_guarded_branch_statement_lines(
+    source: &str,
+    suite: &[Stmt],
+    options: ParseOptions,
+    guarded_lines: &mut std::collections::BTreeSet<usize>,
+    selected_lines: &mut std::collections::BTreeSet<usize>,
+) {
+    for stmt in suite {
+        match stmt {
+            Stmt::If(if_stmt) => {
+                if let Some(selected_suite) = selected_guarded_import_suite(if_stmt, source, options) {
+                    collect_statement_start_lines(source, &if_stmt.body, guarded_lines);
+                    for clause in &if_stmt.elif_else_clauses {
+                        collect_statement_start_lines(source, &clause.body, guarded_lines);
+                    }
+                    collect_statement_start_lines(source, selected_suite, selected_lines);
+                    collect_supported_guarded_branch_statement_lines(
+                        source,
+                        selected_suite,
+                        options,
+                        guarded_lines,
+                        selected_lines,
+                    );
+                    continue;
+                }
+                collect_supported_guarded_branch_statement_lines(
+                    source,
+                    &if_stmt.body,
+                    options,
+                    guarded_lines,
+                    selected_lines,
+                );
+                for clause in &if_stmt.elif_else_clauses {
+                    collect_supported_guarded_branch_statement_lines(
+                        source,
+                        &clause.body,
+                        options,
+                        guarded_lines,
+                        selected_lines,
+                    );
+                }
+            }
+            Stmt::Try(try_stmt) => {
+                collect_supported_guarded_branch_statement_lines(
+                    source,
+                    &try_stmt.body,
+                    options,
+                    guarded_lines,
+                    selected_lines,
+                );
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    collect_supported_guarded_branch_statement_lines(
+                        source,
+                        &handler.body,
+                        options,
+                        guarded_lines,
+                        selected_lines,
+                    );
+                }
+                collect_supported_guarded_branch_statement_lines(
+                    source,
+                    &try_stmt.orelse,
+                    options,
+                    guarded_lines,
+                    selected_lines,
+                );
+                collect_supported_guarded_branch_statement_lines(
+                    source,
+                    &try_stmt.finalbody,
+                    options,
+                    guarded_lines,
+                    selected_lines,
+                );
+            }
+            Stmt::FunctionDef(function) => collect_supported_guarded_branch_statement_lines(
+                source,
+                &function.body,
+                options,
+                guarded_lines,
+                selected_lines,
+            ),
+            Stmt::ClassDef(class_def) => collect_supported_guarded_branch_statement_lines(
+                source,
+                &class_def.body,
+                options,
+                guarded_lines,
+                selected_lines,
+            ),
+            _ => {}
+        }
+    }
+}
+
+fn collect_statement_start_lines(
+    source: &str,
+    suite: &[Stmt],
+    lines: &mut std::collections::BTreeSet<usize>,
+) {
+    for stmt in suite {
+        lines.insert(offset_to_line_column(source, stmt.range().start().to_usize()).0);
+        for_each_nested_suite(stmt, |nested| collect_statement_start_lines(source, nested, lines));
+    }
+}
+
+fn is_custom_guard_filtered_statement(statement: &SyntaxStatement) -> bool {
+    matches!(
+        statement,
+        SyntaxStatement::TypeAlias(_)
+            | SyntaxStatement::Interface(_)
+            | SyntaxStatement::DataClass(_)
+            | SyntaxStatement::SealedClass(_)
+            | SyntaxStatement::OverloadDef(_)
+            | SyntaxStatement::Unsafe(_)
+    )
+}
+
 fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
     if is_type_checking_guard_expr(expr) {
         return Some(true);
@@ -8553,6 +8670,33 @@ mod tests {
             statement,
             SyntaxStatement::ClassDef(NamedBlockStatement { name, line, .. })
                 if name == "User" && *line == 3
+        )), "{:?}", tree.statements);
+    }
+
+    #[test]
+    fn parse_filters_guarded_typealias_declarations_by_selected_branch() {
+        let tree = parse_with_options(
+            SourceFile {
+                path: PathBuf::from("guarded-typealias.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(
+                    "import typing\nif typing.TYPE_CHECKING:\n    typealias UserId = int\nelse:\n    typealias UserId = str\n",
+                ),
+            },
+            ParseOptions::default(),
+        );
+
+        assert!(tree.diagnostics.is_empty());
+        assert!(tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
+                if name == "UserId" && value == "int" && *line == 3
+        )), "{:?}", tree.statements);
+        assert!(!tree.statements.iter().any(|statement| matches!(
+            statement,
+            SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
+                if name == "UserId" && value == "str" && *line == 5
         )), "{:?}", tree.statements);
     }
 

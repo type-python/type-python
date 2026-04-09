@@ -380,6 +380,16 @@ fn check_resolves_class_declarations_inside_type_checking_guards() {
     assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
 }
 
+#[test]
+fn check_resolves_typealiases_inside_type_checking_guards() {
+    let diagnostics = check_temp_typepython_source(
+        "import typing\nif typing.TYPE_CHECKING:\n    typealias UserId = int\n\ndef take(user: UserId) -> UserId:\n    return user\nvalue: int = take(1)\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
 fn check_temp_project_sources(sources: &[(&str, &str, SourceKind, &str)]) -> super::CheckResult {
     let root = create_temp_typepython_root();
     let bindings = sources
