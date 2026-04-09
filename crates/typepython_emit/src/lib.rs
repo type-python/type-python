@@ -1,7 +1,7 @@
 //! Output planning boundary for TypePython.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -43,6 +43,7 @@ pub struct TypePythonStubContext {
     pub callable_overrides: Vec<StubCallableOverride>,
     pub synthetic_methods: Vec<StubSyntheticMethod>,
     pub sealed_classes: Vec<StubSealedClass>,
+    pub guarded_declaration_lines: BTreeSet<usize>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -674,6 +675,7 @@ pub fn generate_typepython_stub_source(
     }
 
     let mut rewritten = output.join("\n");
+    rewritten = inject_guarded_declaration_stubs(python, parsed.suite(), &lowered_context, &rewritten);
     if python.ends_with('\n') {
         rewritten.push('\n');
     }
@@ -1945,6 +1947,7 @@ struct LoweredStubContext {
     callable_overrides: BTreeMap<usize, LoweredCallableOverride>,
     synthetic_methods: BTreeMap<usize, Vec<StubSyntheticMethod>>,
     sealed_classes: BTreeMap<usize, StubSealedClass>,
+    guarded_declaration_lines: BTreeSet<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -1988,6 +1991,11 @@ impl LoweredStubContext {
                 sealed_class.clone(),
             );
         }
+        lowered.guarded_declaration_lines = context
+            .guarded_declaration_lines
+            .iter()
+            .map(|line| original_to_lowered_line(module, *line))
+            .collect();
         lowered
     }
 }
@@ -2525,6 +2533,100 @@ fn source_header_text(source: &str, start_offset: usize, body: &[Stmt]) -> Strin
         .join("\n")
 }
 
+fn inject_guarded_declaration_stubs(
+    source: &str,
+    suite: &[Stmt],
+    context: &LoweredStubContext,
+    rewritten: &str,
+) -> String {
+    if context.guarded_declaration_lines.is_empty() {
+        return rewritten.to_owned();
+    }
+    let extras = collect_guarded_declaration_stub_blocks(source, suite, context);
+    if extras.is_empty() {
+        return rewritten.to_owned();
+    }
+
+    let mut lines = rewritten.lines().map(str::to_owned).collect::<Vec<_>>();
+    let insert_at = lines
+        .iter()
+        .position(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with("from ") && !trimmed.starts_with("import ")
+        })
+        .unwrap_or(lines.len());
+    lines.splice(insert_at..insert_at, extras);
+    lines.join("\n")
+}
+
+fn collect_guarded_declaration_stub_blocks(
+    source: &str,
+    suite: &[Stmt],
+    context: &LoweredStubContext,
+) -> Vec<String> {
+    let mut blocks = Vec::new();
+    for statement in suite {
+        match statement {
+            Stmt::If(if_stmt) => {
+                blocks.extend(collect_guarded_declaration_stub_blocks(source, &if_stmt.body, context));
+                for clause in &if_stmt.elif_else_clauses {
+                    blocks.extend(collect_guarded_declaration_stub_blocks(source, &clause.body, context));
+                }
+            }
+            Stmt::Try(try_stmt) => {
+                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.body, context));
+                for handler in &try_stmt.handlers {
+                    let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
+                    blocks.extend(collect_guarded_declaration_stub_blocks(source, &handler.body, context));
+                }
+                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.orelse, context));
+                blocks.extend(collect_guarded_declaration_stub_blocks(source, &try_stmt.finalbody, context));
+            }
+            Stmt::ClassDef(class_def) => {
+                let line = offset_to_line(source, class_def.name.range.start().to_usize());
+                if context.guarded_declaration_lines.contains(&line) {
+                    blocks.push(dedent_stub_block(&render_authoritative_class_stub(source, class_def, context)));
+                }
+            }
+            Stmt::FunctionDef(function) => {
+                let line = offset_to_line(source, function.name.range.start().to_usize());
+                if context.guarded_declaration_lines.contains(&line) {
+                    blocks.push(dedent_stub_block(&render_authoritative_function_stub(source, function, context)));
+                }
+            }
+            Stmt::AnnAssign(assign) => {
+                let line = offset_to_line(source, assign.range.start().to_usize());
+                if context.guarded_declaration_lines.contains(&line)
+                    && let Some(block) = render_authoritative_annotated_assignment_stub(source, assign)
+                {
+                    blocks.push(dedent_stub_block(&block));
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+fn dedent_stub_block(block: &str) -> String {
+    let indent = block
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|character| character.is_whitespace()).count())
+        .unwrap_or(0);
+    block
+        .lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                line.chars().skip(indent).collect()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn normalize_emitted_stub_intrinsic_types(source: &str) -> Result<String, io::Error> {
     let parsed = parse_module(source).map_err(|error| {
         io::Error::new(
@@ -2846,6 +2948,7 @@ mod tests {
         write_runtime_outputs,
     };
     use std::{
+        collections::BTreeSet,
         env, fs,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
@@ -3314,6 +3417,7 @@ mod tests {
                 returns: Some(String::from("None")),
             }],
             sealed_classes: Vec::new(),
+            guarded_declaration_lines: BTreeSet::new(),
         };
 
         let stub = generate_typepython_stub_source(&module, &context)
@@ -3354,6 +3458,7 @@ mod tests {
                 name: String::from("Expr"),
                 members: vec![String::from("Add"), String::from("Num")],
             }],
+            guarded_declaration_lines: BTreeSet::new(),
         };
 
         let stub = generate_typepython_stub_source(&module, &context)
@@ -3388,6 +3493,36 @@ mod tests {
 
         assert!(stub.contains("# tpy:derived Partial[User]"));
         assert!(stub.contains("class UserCreate(TypedDict):"));
+    }
+
+    #[test]
+    fn generate_typepython_stub_source_lifts_selected_guarded_declarations() {
+        let module = LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from(
+                "import typing\nif typing.TYPE_CHECKING:\n    class User:\n        pass\n\ndef take(user: User) -> User:\n    return user\n",
+            ),
+            source_map: vec![
+                SourceMapEntry { original_line: 1, lowered_line: 1 },
+                SourceMapEntry { original_line: 2, lowered_line: 2 },
+                SourceMapEntry { original_line: 3, lowered_line: 3 },
+                SourceMapEntry { original_line: 4, lowered_line: 4 },
+                SourceMapEntry { original_line: 6, lowered_line: 6 },
+                SourceMapEntry { original_line: 7, lowered_line: 7 },
+            ],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        };
+
+        let mut context = TypePythonStubContext::default();
+        context.guarded_declaration_lines.insert(3);
+        let stub = generate_typepython_stub_source(&module, &context)
+            .expect("guarded declaration stub generation should succeed");
+
+        assert!(stub.contains("class User:"));
+        assert!(stub.contains("def take(user: User) -> User: ..."));
     }
 
     #[test]
@@ -3611,6 +3746,7 @@ mod tests {
             callable_overrides: Vec::new(),
             synthetic_methods: Vec::new(),
             sealed_classes: Vec::new(),
+            guarded_declaration_lines: BTreeSet::new(),
         };
 
         let stub = generate_typepython_stub_source(&module, &context)

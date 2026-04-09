@@ -783,6 +783,7 @@ fn build_typepython_stub_contexts(
             let mut context = TypePythonStubContext::default();
             collect_value_stub_overrides(&tree.statements, &mut context.value_overrides);
             collect_sealed_stub_metadata(&tree.statements, &mut context.sealed_classes);
+            context.guarded_declaration_lines = collect_guarded_declaration_lines(&tree.statements);
             (tree.source.path.clone(), context)
         })
         .collect::<BTreeMap<_, _>>();
@@ -907,6 +908,45 @@ fn collect_sealed_stub_metadata(
             members,
         });
     }
+}
+
+fn collect_guarded_declaration_lines(
+    statements: &[typepython_syntax::SyntaxStatement],
+) -> BTreeSet<usize> {
+    let guard_ranges = statements
+        .iter()
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::If(statement) => Some((
+                statement.true_start_line,
+                statement.true_end_line,
+                statement.false_start_line,
+                statement.false_end_line,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    statements
+        .iter()
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::TypeAlias(statement) => Some(statement.line),
+            typepython_syntax::SyntaxStatement::Interface(statement)
+            | typepython_syntax::SyntaxStatement::DataClass(statement)
+            | typepython_syntax::SyntaxStatement::SealedClass(statement)
+            | typepython_syntax::SyntaxStatement::ClassDef(statement) => Some(statement.line),
+            typepython_syntax::SyntaxStatement::FunctionDef(statement)
+            | typepython_syntax::SyntaxStatement::OverloadDef(statement) => Some(statement.line),
+            _ => None,
+        })
+        .filter(|line| {
+            guard_ranges.iter().any(|(true_start, true_end, false_start, false_end)| {
+                (*line >= *true_start && *line <= *true_end)
+                    || false_start
+                        .zip(*false_end)
+                        .is_some_and(|(start, end)| *line >= start && *line <= end)
+            })
+        })
+        .collect()
 }
 
 fn load_previous_incremental_state(config: &ConfigHandle) -> Result<Option<IncrementalState>> {
