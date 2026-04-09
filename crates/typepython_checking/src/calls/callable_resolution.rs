@@ -453,6 +453,76 @@ pub(super) fn resolve_decorated_callable_site_with_context(
     })
 }
 
+pub(super) fn undecidable_decorator_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    node.declarations
+        .iter()
+        .filter(|declaration| {
+            matches!(
+                declaration.kind,
+                DeclarationKind::Function | DeclarationKind::Overload
+            )
+        })
+        .filter_map(|declaration| {
+            let decorated = resolve_decorated_callable_site_with_context(context, node, declaration)?;
+            if decorated.decorators.is_empty() {
+                return None;
+            }
+            match resolve_decorated_callable_semantic_type_for_declaration_with_context(
+                context,
+                node,
+                nodes,
+                declaration,
+            ) {
+                Some(callable) if callable.callable_parts().is_some() => None,
+                Some(non_callable) => Some(Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "decorated declaration `{}` in module `{}` resolves to non-callable type `{}` after applying decorator{} `{}`",
+                        declaration.name,
+                        node.module_path.display(),
+                        diagnostic_type_text(&non_callable),
+                        if decorated.decorators.len() == 1 { "" } else { "s" },
+                        decorated.decorators.join("`, `"),
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    decorated.line,
+                    1,
+                    decorated.line,
+                    1,
+                ))),
+                None => Some(Diagnostic::error(
+                    "TPY4001",
+                    format!(
+                        "decorated declaration `{}` in module `{}` uses decorator{} `{}` that cannot be reduced to a statically known callable-to-callable transform",
+                        declaration.name,
+                        node.module_path.display(),
+                        if decorated.decorators.len() == 1 { "" } else { "s" },
+                        decorated.decorators.join("`, `"),
+                    ),
+                )
+                .with_span(Span::new(
+                    node.module_path.display().to_string(),
+                    decorated.line,
+                    1,
+                    decorated.line,
+                    1,
+                ))),
+            }
+        })
+        .collect()
+}
+
 pub(super) fn rewrite_imported_typing_semantic_callable_params(
     node: &typepython_graph::ModuleNode,
     params: &SemanticCallableParams,

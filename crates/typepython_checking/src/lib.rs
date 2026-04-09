@@ -1195,6 +1195,10 @@ fn collect_node_declaration_diagnostics(
     );
     push_diagnostics(diagnostics, override_diagnostics(node, context.nodes));
     push_diagnostics(diagnostics, override_compatibility_diagnostics(node, context.nodes));
+    push_diagnostics(
+        diagnostics,
+        undecidable_decorator_diagnostics(context, node, context.nodes, options.strict),
+    );
     if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
         push_diagnostics(diagnostics, missing_override_diagnostics(node, context.nodes));
     }

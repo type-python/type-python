@@ -1957,6 +1957,55 @@ fn check_accepts_method_callable_decorator_transform() {
 }
 
 #[test]
+fn check_reports_non_callable_decorator_transform_in_strict_mode() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "class Route:\n    pass\n\n",
+            "def route(fn: Callable[[int], int]) -> Route:\n",
+            "    return Route()\n\n",
+            "@route\n",
+            "def count(value: int) -> int:\n",
+            "    return value\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("resolves to non-callable type `Route`"));
+    assert!(rendered.contains("decorator `route`"));
+}
+
+#[test]
+fn check_allows_non_callable_decorator_transform_in_non_strict_mode() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "from typing import Callable\n\n",
+            "class Route:\n    pass\n\n",
+            "def route(fn: Callable[[int], int]) -> Route:\n",
+            "    return Route()\n\n",
+            "@route\n",
+            "def count(value: int) -> int:\n",
+            "    return value\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+    );
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn check_substitutes_source_authored_paramspec_in_return_type() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable\n\n",
