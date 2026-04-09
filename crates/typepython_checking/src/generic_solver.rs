@@ -146,7 +146,7 @@ struct ParamSpecConstraint {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct TypeVarTupleConstraint {
     name: String,
-    binding: TypePackBinding,
+    binding: InternedTypePackBinding,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -154,6 +154,12 @@ enum GenericConstraint {
     TypeVar(TypeVarConstraint),
     ParamSpec(ParamSpecConstraint),
     TypeVarTuple(TypeVarTupleConstraint),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+struct InternedTypePackBinding {
+    types: Vec<TypeId>,
+    variadic_tail: Option<TypeId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -176,15 +182,17 @@ impl GenericConstraintSet {
                 .push(GenericConstraint::ParamSpec(ParamSpecConstraint { name, binding }));
         }
         for (name, binding) in bindings.type_packs {
-            self.constraints
-                .push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint { name, binding }));
+            self.constraints.push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint {
+                name,
+                binding: intern_type_pack_binding(&mut self.type_store, binding),
+            }));
         }
     }
 
     fn push_type_pack_binding(&mut self, name: &str, binding: TypePackBinding) {
         self.constraints.push(GenericConstraint::TypeVarTuple(TypeVarTupleConstraint {
             name: name.to_owned(),
-            binding,
+            binding: intern_type_pack_binding(&mut self.type_store, binding),
         }));
     }
 }
@@ -273,7 +281,7 @@ fn solve_collected_generic_constraints_detailed(
                 insert_type_pack_binding(
                     &mut solution,
                     &constraint.name,
-                    constraint.binding.clone(),
+                    materialize_type_pack_binding(&constraints.type_store, &constraint.binding),
                 )
                 .ok_or_else(|| {
                     GenericSolveFailure::TypeVarTupleBindingConflict {
@@ -296,6 +304,27 @@ fn solve_collected_generic_constraints_detailed(
         })
         .collect();
     Ok(solution)
+}
+
+fn intern_type_pack_binding(store: &mut TypeStore, binding: TypePackBinding) -> InternedTypePackBinding {
+    InternedTypePackBinding {
+        types: binding.types.into_iter().map(|ty| store.intern(ty)).collect(),
+        variadic_tail: binding.variadic_tail.map(|ty| store.intern(ty)),
+    }
+}
+
+fn materialize_type_pack_binding(
+    store: &TypeStore,
+    binding: &InternedTypePackBinding,
+) -> TypePackBinding {
+    TypePackBinding {
+        types: binding
+            .types
+            .iter()
+            .filter_map(|type_id| store.get(*type_id).cloned())
+            .collect(),
+        variadic_tail: binding.variadic_tail.and_then(|type_id| store.get(type_id).cloned()),
+    }
 }
 
 fn generic_type_param_requirement(type_param: &GenericSolverParam) -> String {
