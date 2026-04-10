@@ -412,6 +412,7 @@ impl Config {
             )?;
         }
 
+        validate_emit_preserve_comments(config_path, self.emit.preserve_comments)?;
         validate_formatter_config(config_path, &self.format)?;
 
         Ok(())
@@ -762,6 +763,22 @@ fn validate_resolution_paths(
     Ok(())
 }
 
+fn validate_emit_preserve_comments(
+    config_path: &Path,
+    preserve_comments: bool,
+) -> Result<(), ConfigError> {
+    if !preserve_comments {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: String::from(
+                "emit.preserve_comments = false is not implemented yet; lowered output currently always preserves comments when available",
+            ),
+        });
+    }
+
+    Ok(())
+}
+
 fn normalize_project_path(config_dir: &Path, configured_path: &str) -> PathBuf {
     let configured_path = Path::new(configured_path);
     let resolved = if configured_path.is_absolute() {
@@ -1003,6 +1020,26 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("TPY1002"));
         assert!(message.contains("resolution.paths"));
+        assert!(message.contains("not implemented yet"));
+    }
+
+    #[test]
+    fn rejects_unsupported_emit_preserve_comments_override() {
+        let project_dir = temp_project_dir("rejects_unsupported_emit_preserve_comments_override");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\npreserve_comments = false\n",
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unsupported preserve_comments override");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("emit.preserve_comments = false"));
         assert!(message.contains("not implemented yet"));
     }
 

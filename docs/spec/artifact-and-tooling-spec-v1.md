@@ -95,7 +95,7 @@ python_executable = null                          # Interpreter used for install
 emit_pyi = true                                  # Emit .pyi stub files
 emit_pyc = false                                 # Emit .pyc files
 write_py_typed = true                            # Emit py.typed marker
-preserve_comments = true                         # Preserve comments
+preserve_comments = true                         # Current implementations always preserve comments when available
 no_emit_on_error = true                          # Block best-effort emit on semantic errors
 runtime_validators = false                       # Experimental: emit runtime validators for data class
 
@@ -152,7 +152,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `emit_pyi`           | bool | Emit `.pyi` declaration stubs for each compiled `.tpy` module   |
 | `emit_pyc`           | bool | Compile `.py` to `.pyc` using target interpreter                |
 | `write_py_typed`     | bool | Emit `py.typed` marker for typed packages                       |
-| `preserve_comments`  | bool | Retain user comments where lowering permits                     |
+| `preserve_comments`  | bool | Reserved toggle for future comment-stripping control; current implementations always preserve comments when available |
 | `no_emit_on_error`   | bool | Block best-effort output after semantic/public-surface errors; discovery/parse/lowering remain hard blockers |
 | `runtime_validators` | bool | Experimental: emit `validate` classmethod on `data class` types |
 

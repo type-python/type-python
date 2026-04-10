@@ -114,7 +114,8 @@ emit_pyc = false
 # Default: true
 write_py_typed = true
 
-# Preserve comments from source in lowered output.
+# Lowered output currently always preserves comments when available.
+# Setting this to false is reserved and rejected until comment-stripping support lands.
 # Default: true
 preserve_comments = true
 
