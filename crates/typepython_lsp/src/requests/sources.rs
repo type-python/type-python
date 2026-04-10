@@ -59,16 +59,6 @@ pub(crate) fn import_resolves_within_modules(
     module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
 }
 
-pub(crate) fn matching_support_module_keys(
-    import_path: &str,
-    sources_by_module: &BTreeMap<String, Vec<DiscoveredSource>>,
-) -> Vec<String> {
-    module_path_prefixes(import_path)
-        .filter(|module_key| sources_by_module.contains_key(*module_key))
-        .map(str::to_owned)
-        .collect()
-}
-
 pub(crate) fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
     let mut candidates = Vec::new();
     let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);

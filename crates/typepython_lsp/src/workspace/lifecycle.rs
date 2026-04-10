@@ -1,11 +1,10 @@
 impl SupportSourceCatalog {
     pub(super) fn new(config: &ConfigHandle) -> Result<Self, LspError> {
         Ok(Self {
-            sources_by_module: typepython_project::support_source_index(
+            index: typepython_project::support_source_index(
                 config,
                 &config.config.project.target_python,
-            )?
-            .into_sources_by_module(),
+            )?,
         })
     }
 }
@@ -228,9 +227,7 @@ impl IncrementalWorkspace {
         let mut queued_modules = BTreeSet::new();
         let mut queue = VecDeque::new();
         for import_path in external_import_paths {
-            for module_key in
-                matching_support_module_keys(&import_path, &self.support_catalog.sources_by_module)
-            {
+            for module_key in self.support_catalog.index.matching_module_keys(&import_path) {
                 if queued_modules.insert(module_key.clone()) {
                     queue.push_back(module_key);
                 }
@@ -239,8 +236,11 @@ impl IncrementalWorkspace {
 
         let mut active_support_paths = BTreeSet::new();
         while let Some(module_key) = queue.pop_front() {
-            let Some(module_sources) =
-                self.support_catalog.sources_by_module.get(&module_key).cloned()
+            let Some(module_sources) = self
+                .support_catalog
+                .index
+                .module_sources(&module_key)
+                .map(|sources| sources.to_vec())
             else {
                 continue;
             };
@@ -254,10 +254,9 @@ impl IncrementalWorkspace {
                 for import_path in
                     collect_import_source_paths(std::slice::from_ref(&document.document.syntax))
                 {
-                    for nested_module_key in matching_support_module_keys(
-                        &import_path,
-                        &self.support_catalog.sources_by_module,
-                    ) {
+                    for nested_module_key in
+                        self.support_catalog.index.matching_module_keys(&import_path)
+                    {
                         if queued_modules.insert(nested_module_key.clone()) {
                             queue.push_back(nested_module_key);
                         }

@@ -23,7 +23,7 @@ use typepython_incremental::{
     IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
     snapshot_diff_modules,
 };
-use typepython_project::DiscoveredSource;
+use typepython_project::{DiscoveredSource, SupportSourceIndex};
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
     SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
@@ -121,7 +121,7 @@ struct CachedDocument {
 
 #[derive(Debug, Clone, Default)]
 struct SupportSourceCatalog {
-    sources_by_module: BTreeMap<String, Vec<DiscoveredSource>>,
+    index: SupportSourceIndex,
 }
 
 #[derive(Debug)]

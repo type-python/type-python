@@ -61,6 +61,17 @@ impl SupportSourceIndex {
     pub fn into_sources_by_module(self) -> BTreeMap<String, Vec<DiscoveredSource>> {
         self.sources_by_module
     }
+
+    pub fn module_sources(&self, module_key: &str) -> Option<&[DiscoveredSource]> {
+        self.sources_by_module.get(module_key).map(Vec::as_slice)
+    }
+
+    pub fn matching_module_keys(&self, import_path: &str) -> Vec<String> {
+        module_path_prefixes(import_path)
+            .filter(|module_key| self.sources_by_module.contains_key(*module_key))
+            .map(str::to_owned)
+            .collect()
+    }
 }
 
 pub fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
@@ -240,6 +251,21 @@ pub fn normalize_glob_path(path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+pub fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
+    let mut candidates = Vec::new();
+    let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);
+    loop {
+        if !current.is_empty() {
+            candidates.push(current);
+        }
+        let Some((parent, _)) = current.rsplit_once('.') else {
+            break;
+        };
+        current = parent;
+    }
+    candidates.into_iter()
 }
 
 pub fn sort_sources_by_type_authority(sources: &mut [DiscoveredSource]) {
@@ -951,5 +977,30 @@ mod tests {
 
         assert_eq!(result.0, Some(1));
         assert_eq!(result.0, result.1);
+    }
+
+    #[test]
+    fn support_source_index_matches_module_prefixes() {
+        let index = SupportSourceIndex::from_sources(vec![
+            DiscoveredSource {
+                path: PathBuf::from("stdlib/typing.pyi"),
+                root: PathBuf::from("stdlib"),
+                kind: SourceKind::Stub,
+                logical_module: String::from("typing"),
+                load_as_inferred_stub: false,
+            },
+            DiscoveredSource {
+                path: PathBuf::from("site-packages/demo/__init__.pyi"),
+                root: PathBuf::from("site-packages"),
+                kind: SourceKind::Stub,
+                logical_module: String::from("demo"),
+                load_as_inferred_stub: false,
+            },
+        ]);
+
+        assert_eq!(index.matching_module_keys("typing.Final"), vec![String::from("typing")]);
+        assert_eq!(index.matching_module_keys("demo.submodule"), vec![String::from("demo")]);
+        assert!(index.module_sources("typing").is_some());
+        assert!(index.module_sources("collections").is_none());
     }
 }

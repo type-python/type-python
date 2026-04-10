@@ -326,13 +326,12 @@ fn load_support_syntax_trees(
         return Ok(Vec::new());
     }
 
-    let sources_by_module = support_source_index(config, &config.config.project.target_python)?
-        .into_sources_by_module();
+    let support_index = support_source_index(config, &config.config.project.target_python)?;
 
     let mut queued_modules = BTreeSet::new();
     let mut queue = VecDeque::new();
     for import_path in external_import_paths {
-        for module_key in matching_support_module_keys(&import_path, &sources_by_module) {
+        for module_key in support_index.matching_module_keys(&import_path) {
             if queued_modules.insert(module_key.clone()) {
                 queue.push_back(module_key);
             }
@@ -347,11 +346,11 @@ fn load_support_syntax_trees(
         if !loaded_modules.insert(module_key.clone()) {
             continue;
         }
-        let Some(module_sources) = sources_by_module.get(&module_key) else {
+        let Some(module_sources) = support_index.module_sources(&module_key) else {
             continue;
         };
 
-        for source in module_sources {
+        for source in module_sources.iter().cloned() {
             if !loaded_paths.insert(source.path.clone()) {
                 continue;
             }
@@ -398,9 +397,7 @@ fn load_support_syntax_trees(
                 )
             };
             for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
-                for nested_module_key in
-                    matching_support_module_keys(&import_path, &sources_by_module)
-                {
+                for nested_module_key in support_index.matching_module_keys(&import_path) {
                     if queued_modules.insert(nested_module_key.clone()) {
                         queue.push_back(nested_module_key);
                     }
@@ -434,16 +431,6 @@ fn collect_import_source_paths(syntax_trees: &[typepython_syntax::SyntaxTree]) -
 
 fn import_resolves_within_modules(import_path: &str, module_keys: &BTreeSet<String>) -> bool {
     module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
-}
-
-fn matching_support_module_keys(
-    import_path: &str,
-    sources_by_module: &BTreeMap<String, Vec<DiscoveredSource>>,
-) -> Vec<String> {
-    module_path_prefixes(import_path)
-        .filter(|module_key| sources_by_module.contains_key(*module_key))
-        .map(str::to_owned)
-        .collect()
 }
 
 fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
