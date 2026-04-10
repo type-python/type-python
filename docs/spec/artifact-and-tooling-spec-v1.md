@@ -84,7 +84,7 @@ cache_dir = ".typepython/cache"                  # Cache directory
 target_python = "3.10"                           # "3.10", "3.11", or "3.12"
 
 [resolution]
-base_url = "."                                    # Base for path resolution
+base_url = "."                                    # Reserved; only project-root default is supported today
 type_roots = []                                   # Extra stub directories
 python_executable = null                          # Interpreter used for installed-package resolution
 
@@ -136,7 +136,7 @@ When this schema is embedded in `pyproject.toml`, the same tables appear under `
 
 | Field               | Type           | Semantics                                                                                    |
 | ------------------- | -------------- | -------------------------------------------------------------------------------------------- |
-| `base_url`          | string         | Base directory for non-relative path resolution                                              |
+| `base_url`          | string         | Reserved for non-relative path resolution; current implementations only support the default project root (`.`) |
 | `type_roots`        | list[string]   | Directories searched for stub packages before installed packages                             |
 | `python_executable` | string \| null | Interpreter used to locate installed packages and, when supported, verification subprocesses |
 | `paths`             | table          | Alias mapping from module patterns to filesystem patterns                                    |

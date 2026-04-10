@@ -57,7 +57,8 @@ target_python = "3.10"
 # ============================================================================
 [resolution]
 
-# Base URL for non-relative module resolution.
+# Reserved for future non-relative module resolution support.
+# Current implementation only accepts the default project root (`.`).
 # Default: "."
 base_url = "."
 

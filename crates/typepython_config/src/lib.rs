@@ -400,6 +400,7 @@ impl Config {
             &self.project.out_dir,
             &self.project.cache_dir,
         )?;
+        validate_resolution_base_url(config_path, config_dir, &self.resolution.base_url)?;
 
         if let Some(python_executable) = &self.resolution.python_executable {
             validate_python_executable(
@@ -724,6 +725,26 @@ fn validate_project_paths(
     Ok(())
 }
 
+fn validate_resolution_base_url(
+    config_path: &Path,
+    config_dir: &Path,
+    base_url: &str,
+) -> Result<(), ConfigError> {
+    let normalized_config_dir = normalize_lexical_path(config_dir);
+    let normalized_base_url = normalize_project_path(config_dir, base_url);
+
+    if normalized_base_url != normalized_config_dir {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "resolution.base_url = `{base_url}` is not implemented yet; only the project root (`.`) is currently supported"
+            ),
+        });
+    }
+
+    Ok(())
+}
+
 fn normalize_project_path(config_dir: &Path, configured_path: &str) -> PathBuf {
     let configured_path = Path::new(configured_path);
     let resolved = if configured_path.is_absolute() {
@@ -922,6 +943,26 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("TPY1002"));
         assert!(message.contains("project.target_python = `3.9`"));
+    }
+
+    #[test]
+    fn rejects_unsupported_resolution_base_url() {
+        let project_dir = temp_project_dir("rejects_unsupported_resolution_base_url");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\nbase_url = \"src\"\n",
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unsupported base_url to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("resolution.base_url = `src`"));
+        assert!(message.contains("not implemented yet"));
     }
 
     #[test]
