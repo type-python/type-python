@@ -13,9 +13,6 @@ use ruff_python_parser::parse_module;
 use ruff_text_size::Ranged;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 
-include!("syntax_parts/surface.rs");
-include!("syntax_parts/metadata_collectors.rs");
-include!("syntax_parts/parsing.rs");
-include!("syntax_parts/formatting.rs");
-include!("syntax_parts/type_expr.rs");
-include!("syntax_parts/extraction.rs");
+mod syntax_parts;
+
+pub use syntax_parts::*;

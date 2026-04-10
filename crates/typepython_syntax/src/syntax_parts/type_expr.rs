@@ -1,3 +1,5 @@
+use super::*;
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TypeExpr {
     Name(String),
@@ -117,7 +119,9 @@ pub fn normalize_type_text(text: &str) -> String {
 
 pub fn union_branches(text: &str) -> Option<Vec<String>> {
     match TypeExpr::parse(text)? {
-        TypeExpr::Annotated { value, .. } => union_branches(&value.render()).or(Some(vec![value.render()])),
+        TypeExpr::Annotated { value, .. } => {
+            union_branches(&value.render()).or(Some(vec![value.render()]))
+        }
         TypeExpr::Generic { head, args } if head == "Optional" && args.len() == 1 => {
             Some(vec![args[0].render(), String::from("None")])
         }
@@ -201,7 +205,7 @@ pub fn split_top_level_type_args(args: &str) -> Vec<&str> {
     parts
 }
 
-fn parse_type_expr(text: &str) -> Option<TypeExpr> {
+pub(super) fn parse_type_expr(text: &str) -> Option<TypeExpr> {
     let text = normalize_name(text);
     if text.is_empty() {
         return None;
@@ -259,7 +263,7 @@ fn parse_type_expr(text: &str) -> Option<TypeExpr> {
     Some(TypeExpr::Name(text))
 }
 
-fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
+pub(super) fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
     let text = normalize_name(text);
     if text.is_empty() {
         return None;
@@ -278,7 +282,8 @@ fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
         };
         return Some(CallableParamExpr::ParamList(params));
     }
-    if let Some(inner) = text.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']')) {
+    if let Some(inner) = text.strip_prefix("Concatenate[").and_then(|inner| inner.strip_suffix(']'))
+    {
         let params = split_top_level_type_args(inner)
             .into_iter()
             .map(|arg| parse_type_expr(arg).unwrap_or(TypeExpr::Name(normalize_name(arg))))
@@ -288,7 +293,7 @@ fn parse_callable_param_expr(text: &str) -> Option<CallableParamExpr> {
     Some(CallableParamExpr::Single(Box::new(parse_type_expr(&text)?)))
 }
 
-fn normalize_name(text: &str) -> String {
+pub(super) fn normalize_name(text: &str) -> String {
     let trimmed = text.trim();
     trimmed
         .strip_prefix("typing.")
@@ -298,7 +303,7 @@ fn normalize_name(text: &str) -> String {
         .to_owned()
 }
 
-fn normalize_type_text_legacy(text: &str) -> String {
+pub(super) fn normalize_type_text_legacy(text: &str) -> String {
     let text = normalize_name(text);
     if text.is_empty() {
         return text;

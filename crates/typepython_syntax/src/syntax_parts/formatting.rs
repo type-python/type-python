@@ -1,4 +1,6 @@
-fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> String {
+use super::*;
+
+pub(super) fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> String {
     let statement_lines: std::collections::BTreeMap<usize, &SyntaxStatement> =
         statements.iter().map(|statement| (statement_line(statement), statement)).collect();
 
@@ -20,7 +22,7 @@ fn normalize_typepython_source(source: &str, statements: &[SyntaxStatement]) -> 
     normalized
 }
 
-fn statement_line(statement: &SyntaxStatement) -> usize {
+pub(super) fn statement_line(statement: &SyntaxStatement) -> usize {
     match statement {
         SyntaxStatement::TypeAlias(statement) => statement.line,
         SyntaxStatement::Interface(statement) => statement.line,
@@ -47,7 +49,7 @@ fn statement_line(statement: &SyntaxStatement) -> usize {
     }
 }
 
-fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) -> String {
+pub(super) fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) -> String {
     match statement {
         SyntaxStatement::TypeAlias(statement) => {
             let indentation = leading_indent(line);
@@ -93,15 +95,15 @@ fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) 
     }
 }
 
-fn normalize_generic_python_header_line(line: &str) -> String {
+pub(super) fn normalize_generic_python_header_line(line: &str) -> String {
     line.to_owned()
 }
 
-fn leading_indent(line: &str) -> &str {
+pub(super) fn leading_indent(line: &str) -> &str {
     &line[..line.len() - line.trim_start().len()]
 }
 
-fn render_type_params(type_params: &[TypeParam]) -> String {
+pub(super) fn render_type_params(type_params: &[TypeParam]) -> String {
     if type_params.is_empty() {
         return String::new();
     }
@@ -109,7 +111,7 @@ fn render_type_params(type_params: &[TypeParam]) -> String {
     format!("[{}]", type_params.iter().map(render_type_param).collect::<Vec<_>>().join(", "))
 }
 
-fn render_type_param(type_param: &TypeParam) -> String {
+pub(super) fn render_type_param(type_param: &TypeParam) -> String {
     let prefix = match type_param.kind {
         TypeParamKind::TypeVar => "",
         TypeParamKind::ParamSpec => "**",
@@ -263,7 +265,7 @@ pub fn prepare_syntax_tree_for_external_formatter(
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum FormattingSyntaxKind {
+pub(super) enum FormattingSyntaxKind {
     TypeAlias,
     Interface,
     DataClass,
@@ -297,7 +299,7 @@ impl FormattingSyntaxKind {
     }
 }
 
-fn prepare_typepython_source_for_external_formatter(
+pub(super) fn prepare_typepython_source_for_external_formatter(
     source: &str,
     statements: &[SyntaxStatement],
 ) -> String {
@@ -327,7 +329,7 @@ fn prepare_typepython_source_for_external_formatter(
     prepared
 }
 
-fn formatting_syntax_kind(statement: &SyntaxStatement) -> Option<FormattingSyntaxKind> {
+pub(super) fn formatting_syntax_kind(statement: &SyntaxStatement) -> Option<FormattingSyntaxKind> {
     Some(match statement {
         SyntaxStatement::TypeAlias(_) => FormattingSyntaxKind::TypeAlias,
         SyntaxStatement::Interface(_) => FormattingSyntaxKind::Interface,
@@ -339,7 +341,7 @@ fn formatting_syntax_kind(statement: &SyntaxStatement) -> Option<FormattingSynta
     })
 }
 
-fn normalize_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
+pub(super) fn normalize_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
     let indentation = leading_indent(line);
     let trimmed = line.trim_start();
     match kind {
@@ -368,7 +370,7 @@ fn normalize_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) 
     }
 }
 
-fn restore_typepython_formatting_markers(formatted: &str) -> String {
+pub(super) fn restore_typepython_formatting_markers(formatted: &str) -> String {
     let mut restored_lines = Vec::new();
     let mut pending_kind = None;
 
@@ -400,7 +402,7 @@ fn restore_typepython_formatting_markers(formatted: &str) -> String {
     restored
 }
 
-fn restore_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
+pub(super) fn restore_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
     let indentation = leading_indent(line);
     let trimmed = line.trim_start();
     match kind {
@@ -432,11 +434,11 @@ fn restore_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) ->
     }
 }
 
-fn previous_significant_char(text: &str, end: usize) -> Option<char> {
+pub(super) fn previous_significant_char(text: &str, end: usize) -> Option<char> {
     text[..end].chars().rev().find(|character| !character.is_whitespace())
 }
 
-fn variadic_unpack_operand_bounds(
+pub(super) fn variadic_unpack_operand_bounds(
     text: &str,
     start: usize,
 ) -> Option<(usize, usize, Option<char>)> {

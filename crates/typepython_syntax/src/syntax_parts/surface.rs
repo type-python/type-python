@@ -1,3 +1,5 @@
+use super::*;
+
 /// Supported input file kinds from the spec.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SourceKind {
@@ -568,9 +570,9 @@ impl TypeParam {
     }
 }
 
-struct ParsedTypeParams<'source> {
-    type_params: Vec<TypeParam>,
-    remainder: &'source str,
+pub(super) struct ParsedTypeParams<'source> {
+    pub(super) type_params: Vec<TypeParam>,
+    pub(super) remainder: &'source str,
 }
 
 /// Parsed lambda signature and body metadata.
@@ -581,7 +583,7 @@ pub struct LambdaMetadata {
 }
 
 #[derive(Debug, Clone)]
-struct AnnotatedLambdaSite {
+pub(super) struct AnnotatedLambdaSite {
     pub line: usize,
     pub column: usize,
     pub param_names: Vec<String>,
@@ -589,7 +591,7 @@ struct AnnotatedLambdaSite {
 }
 
 thread_local! {
-    static ACTIVE_ANNOTATED_LAMBDA_SITES: RefCell<Vec<AnnotatedLambdaSite>> =
+    pub(super) static ACTIVE_ANNOTATED_LAMBDA_SITES: RefCell<Vec<AnnotatedLambdaSite>> =
         const { RefCell::new(Vec::new()) };
 }
 
@@ -669,7 +671,7 @@ pub struct TypedDictLiteralEntry {
     pub value: DirectExprMetadata,
 }
 
-fn direct_operator_text(operator: ruff_python_ast::Operator) -> String {
+pub(super) fn direct_operator_text(operator: ruff_python_ast::Operator) -> String {
     match operator {
         ruff_python_ast::Operator::Add => String::from("+"),
         ruff_python_ast::Operator::Sub => String::from("-"),
@@ -957,10 +959,7 @@ impl ParsePythonVersion {
     #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let (major, minor) = text.trim().split_once('.')?;
-        Some(Self {
-            major: major.parse().ok()?,
-            minor: minor.parse().ok()?,
-        })
+        Some(Self { major: major.parse().ok()?, minor: minor.parse().ok()? })
     }
 }
 

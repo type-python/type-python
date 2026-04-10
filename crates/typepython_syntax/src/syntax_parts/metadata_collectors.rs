@@ -1,3 +1,5 @@
+use super::*;
+
 /// Parses a source file into a syntax tree.
 #[must_use]
 pub fn parse(source: SourceFile) -> SyntaxTree {
@@ -23,17 +25,18 @@ pub fn normalize_annotated_lambda_source_for_emission(source: &str) -> String {
 }
 
 #[derive(Debug)]
-struct ActiveSourceLineIndex {
-    ptr: usize,
-    len: usize,
-    line_starts: Vec<usize>,
+pub(super) struct ActiveSourceLineIndex {
+    pub(super) ptr: usize,
+    pub(super) len: usize,
+    pub(super) line_starts: Vec<usize>,
 }
 
 thread_local! {
-    static ACTIVE_SOURCE_LINE_INDICES: RefCell<Vec<ActiveSourceLineIndex>> = const { RefCell::new(Vec::new()) };
+    pub(super) static ACTIVE_SOURCE_LINE_INDICES: RefCell<Vec<ActiveSourceLineIndex>> =
+        const { RefCell::new(Vec::new()) };
 }
 
-fn build_source_line_starts(source: &str) -> Vec<usize> {
+pub(super) fn build_source_line_starts(source: &str) -> Vec<usize> {
     let mut line_starts = vec![0];
     line_starts.extend(
         source
@@ -45,7 +48,7 @@ fn build_source_line_starts(source: &str) -> Vec<usize> {
     line_starts
 }
 
-fn offset_to_line_column_from_line_starts(
+pub(super) fn offset_to_line_column_from_line_starts(
     source: &str,
     offset: usize,
     line_starts: &[usize],
@@ -58,7 +61,7 @@ fn offset_to_line_column_from_line_starts(
     (line_index + 1, column)
 }
 
-fn with_source_line_index<T>(source: &str, action: impl FnOnce() -> T) -> T {
+pub(super) fn with_source_line_index<T>(source: &str, action: impl FnOnce() -> T) -> T {
     struct LineIndexGuard;
 
     impl Drop for LineIndexGuard {
@@ -335,7 +338,7 @@ pub fn collect_direct_method_signature_sites(source: &str) -> Vec<DirectMethodSi
     collect_module_surface_metadata(source).direct_method_signatures
 }
 
-fn collect_direct_function_param_sites(
+pub(super) fn collect_direct_function_param_sites(
     source: &str,
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<DirectFunctionParamSite> {
@@ -448,7 +451,7 @@ pub fn collect_frozen_field_mutation_sites(source: &str) -> Vec<FrozenFieldMutat
     })
 }
 
-fn collect_frozen_field_mutation_sites_in_suite(
+pub(super) fn collect_frozen_field_mutation_sites_in_suite(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -592,7 +595,7 @@ fn collect_frozen_field_mutation_sites_in_suite(
     }
 }
 
-fn extract_frozen_field_mutation_sites_from_stmt(
+pub(super) fn extract_frozen_field_mutation_sites_from_stmt(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -644,13 +647,13 @@ fn extract_frozen_field_mutation_sites_from_stmt(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct MutationOwnerContext<'a> {
+pub(super) struct MutationOwnerContext<'a> {
     line: usize,
     owner_name: Option<&'a str>,
     owner_type_name: Option<&'a str>,
 }
 
-fn extract_frozen_field_mutation_site(
+pub(super) fn extract_frozen_field_mutation_site(
     source: &str,
     expr: &Expr,
     value: Option<&Expr>,
@@ -673,7 +676,7 @@ fn extract_frozen_field_mutation_site(
     })
 }
 
-fn collect_dataclass_transform_class_site(
+pub(super) fn collect_dataclass_transform_class_site(
     source: &str,
     class_def: &ruff_python_ast::StmtClassDef,
     import_bindings: &BTreeMap<String, String>,
@@ -730,7 +733,7 @@ fn collect_dataclass_transform_class_site(
     }
 }
 
-fn collect_decorated_callable_sites(
+pub(super) fn collect_decorated_callable_sites(
     source: &str,
     suite: &[Stmt],
     owner_type_name: Option<&str>,
@@ -770,7 +773,7 @@ fn collect_decorated_callable_sites(
     }
 }
 
-fn is_non_transform_builtin_decorator(name: &str) -> bool {
+pub(super) fn is_non_transform_builtin_decorator(name: &str) -> bool {
     matches!(
         name,
         "overload"
@@ -799,7 +802,7 @@ fn is_non_transform_builtin_decorator(name: &str) -> bool {
         || name.ends_with(".deleter")
 }
 
-fn extract_dataclass_transform_field(
+pub(super) fn extract_dataclass_transform_field(
     source: &str,
     stmt: &Stmt,
     import_bindings: &BTreeMap<String, String>,
@@ -834,7 +837,7 @@ fn extract_dataclass_transform_field(
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct FieldSpecifierSite {
+pub(super) struct FieldSpecifierSite {
     name: Option<String>,
     has_default: bool,
     has_default_factory: bool,
@@ -844,13 +847,13 @@ struct FieldSpecifierSite {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct DataclassDecoratorMetadata {
+pub(super) struct DataclassDecoratorMetadata {
     frozen: bool,
     kw_only: bool,
     init: bool,
 }
 
-fn extract_field_specifier_site(
+pub(super) fn extract_field_specifier_site(
     source: &str,
     expr: &Expr,
     import_bindings: &BTreeMap<String, String>,
@@ -883,7 +886,7 @@ fn extract_field_specifier_site(
     Some(result)
 }
 
-fn dataclass_transform_metadata(
+pub(super) fn dataclass_transform_metadata(
     source: &str,
     decorators: &[ruff_python_ast::Decorator],
     import_bindings: &BTreeMap<String, String>,
@@ -901,7 +904,7 @@ fn dataclass_transform_metadata(
     })
 }
 
-fn dataclass_decorator_metadata(
+pub(super) fn dataclass_decorator_metadata(
     decorators: &[ruff_python_ast::Decorator],
     import_bindings: &BTreeMap<String, String>,
 ) -> Option<DataclassDecoratorMetadata> {
@@ -914,7 +917,7 @@ fn dataclass_decorator_metadata(
     })
 }
 
-fn dataclass_decorator_metadata_from_expr(expr: &Expr) -> DataclassDecoratorMetadata {
+pub(super) fn dataclass_decorator_metadata_from_expr(expr: &Expr) -> DataclassDecoratorMetadata {
     let Expr::Call(call) = expr else {
         return DataclassDecoratorMetadata { frozen: false, kw_only: false, init: true };
     };
@@ -933,13 +936,13 @@ fn dataclass_decorator_metadata_from_expr(expr: &Expr) -> DataclassDecoratorMeta
     metadata
 }
 
-fn is_dataclass_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
+pub(super) fn is_dataclass_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
     decorator_target_name(expr)
         .map(|name| normalize_imported_name(&name, import_bindings))
         .is_some_and(|name| matches!(name.as_str(), "dataclass" | "dataclasses.dataclass"))
 }
 
-fn dataclass_transform_metadata_from_call(
+pub(super) fn dataclass_transform_metadata_from_call(
     source: &str,
     expr: &Expr,
     import_bindings: &BTreeMap<String, String>,
@@ -973,7 +976,7 @@ fn dataclass_transform_metadata_from_call(
     metadata
 }
 
-fn is_dataclass_transform_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
+pub(super) fn is_dataclass_transform_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
     decorator_target_name(expr)
         .map(|name| normalize_imported_name(&name, import_bindings))
         .is_some_and(|name| {
@@ -986,7 +989,7 @@ fn is_dataclass_transform_expr(expr: &Expr, import_bindings: &BTreeMap<String, S
         })
 }
 
-fn decorator_target_name(expr: &Expr) -> Option<String> {
+pub(super) fn decorator_target_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Name(name) => Some(name.id.as_str().to_owned()),
         Expr::Attribute(attribute) => Some(format!(
@@ -999,7 +1002,7 @@ fn decorator_target_name(expr: &Expr) -> Option<String> {
     }
 }
 
-fn expr_static_bool(expr: &Expr) -> Option<bool> {
+pub(super) fn expr_static_bool(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::BooleanLiteral(boolean) => Some(boolean.value),
         Expr::Name(name) if name.id.as_str() == "True" => Some(true),
@@ -1008,7 +1011,7 @@ fn expr_static_bool(expr: &Expr) -> Option<bool> {
     }
 }
 
-fn class_keyword_static_bool(
+pub(super) fn class_keyword_static_bool(
     class_def: &ruff_python_ast::StmtClassDef,
     keyword_name: &str,
 ) -> Option<bool> {
@@ -1019,7 +1022,7 @@ fn class_keyword_static_bool(
     })
 }
 
-fn class_keyword_source(
+pub(super) fn class_keyword_source(
     source: &str,
     class_def: &ruff_python_ast::StmtClassDef,
     keyword_name: &str,
@@ -1031,7 +1034,7 @@ fn class_keyword_source(
     })
 }
 
-fn expr_name_list(
+pub(super) fn expr_name_list(
     expr: &Expr,
     source: &str,
     import_bindings: &BTreeMap<String, String>,
@@ -1055,7 +1058,7 @@ fn expr_name_list(
     }
 }
 
-fn collect_import_bindings(suite: &[Stmt]) -> BTreeMap<String, String> {
+pub(super) fn collect_import_bindings(suite: &[Stmt]) -> BTreeMap<String, String> {
     let mut bindings = BTreeMap::new();
     for stmt in suite {
         match stmt {
@@ -1096,19 +1099,15 @@ fn collect_import_bindings(suite: &[Stmt]) -> BTreeMap<String, String> {
     bindings
 }
 
-fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String>) -> String {
+pub(super) fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String>) -> String {
     let mut parts = name.split('.');
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();
     let head = import_bindings.get(head).cloned().unwrap_or_else(|| head.to_owned());
-    if tail.is_empty() {
-        head
-    } else {
-        format!("{head}.{}", tail.join("."))
-    }
+    if tail.is_empty() { head } else { format!("{head}.{}", tail.join(".")) }
 }
 
-fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
+pub(super) fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
     split_top_level_commas(params).into_iter().find_map(|param| {
         let (name, annotation) = param.split_once(':')?;
         let name = name.split('=').next()?.trim();
@@ -1117,7 +1116,7 @@ fn parameter_annotation(params: &str, target_name: &str) -> Option<String> {
     })
 }
 
-fn normalize_conditional_return_source(source: &str) -> String {
+pub(super) fn normalize_conditional_return_source(source: &str) -> String {
     let blocks = conditional_return_blocks(source);
     if blocks.is_empty() {
         return source.to_owned();
@@ -1155,7 +1154,7 @@ fn normalize_conditional_return_source(source: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-struct ConditionalReturnBlock {
+pub(super) struct ConditionalReturnBlock {
     function_name: String,
     header: String,
     target_name: String,
@@ -1164,7 +1163,7 @@ struct ConditionalReturnBlock {
     end_line: usize,
 }
 
-fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
+pub(super) fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
     let lines: Vec<&str> = source.lines().collect();
     let mut blocks = Vec::new();
     let mut index = 0usize;
@@ -1264,7 +1263,7 @@ fn conditional_return_blocks(source: &str) -> Vec<ConditionalReturnBlock> {
     blocks
 }
 
-fn collect_typed_dict_mutation_sites_in_suite(
+pub(super) fn collect_typed_dict_mutation_sites_in_suite(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1408,7 +1407,7 @@ fn collect_typed_dict_mutation_sites_in_suite(
     }
 }
 
-fn extract_typed_dict_mutation_sites_from_stmt(
+pub(super) fn extract_typed_dict_mutation_sites_from_stmt(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -1459,7 +1458,7 @@ fn extract_typed_dict_mutation_sites_from_stmt(
     }
 }
 
-fn extract_typed_dict_mutation_site(
+pub(super) fn extract_typed_dict_mutation_site(
     source: &str,
     expr: &Expr,
     value: Option<&Expr>,
@@ -1483,7 +1482,7 @@ fn extract_typed_dict_mutation_site(
     })
 }
 
-fn collect_direct_call_context_sites_in_suite(
+pub(super) fn collect_direct_call_context_sites_in_suite(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1625,7 +1624,7 @@ fn collect_direct_call_context_sites_in_suite(
     }
 }
 
-fn extract_direct_call_context_site(
+pub(super) fn extract_direct_call_context_site(
     stmt: &Stmt,
     line: usize,
     owner_name: Option<&str>,
@@ -1651,7 +1650,7 @@ fn extract_direct_call_context_site(
     })
 }
 
-fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {
+pub(super) fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {
     if let Expr::Await(await_expr) = expr {
         return extract_direct_call_context_callee(&await_expr.value);
     }
@@ -1665,7 +1664,7 @@ fn extract_direct_call_context_callee(expr: &Expr) -> Option<String> {
     Some(name.id.as_str().to_owned())
 }
 
-fn extract_direct_call_positional_arg_count(expr: &Expr) -> Option<usize> {
+pub(super) fn extract_direct_call_positional_arg_count(expr: &Expr) -> Option<usize> {
     if let Expr::Await(await_expr) = expr {
         return extract_direct_call_positional_arg_count(&await_expr.value);
     }
@@ -1675,7 +1674,7 @@ fn extract_direct_call_positional_arg_count(expr: &Expr) -> Option<usize> {
     Some(call.arguments.args.iter().filter(|arg| !matches!(arg, Expr::Starred(_))).count())
 }
 
-fn extract_direct_call_keyword_arg_count(expr: &Expr) -> Option<usize> {
+pub(super) fn extract_direct_call_keyword_arg_count(expr: &Expr) -> Option<usize> {
     if let Expr::Await(await_expr) = expr {
         return extract_direct_call_keyword_arg_count(&await_expr.value);
     }
@@ -1685,7 +1684,7 @@ fn extract_direct_call_keyword_arg_count(expr: &Expr) -> Option<usize> {
     Some(call.arguments.keywords.iter().filter(|keyword| keyword.arg.is_some()).count())
 }
 
-fn direct_call_has_starred_args(expr: &Expr) -> Option<bool> {
+pub(super) fn direct_call_has_starred_args(expr: &Expr) -> Option<bool> {
     if let Expr::Await(await_expr) = expr {
         return direct_call_has_starred_args(&await_expr.value);
     }
@@ -1695,7 +1694,7 @@ fn direct_call_has_starred_args(expr: &Expr) -> Option<bool> {
     Some(call.arguments.args.iter().any(|arg| matches!(arg, Expr::Starred(_))))
 }
 
-fn direct_call_has_unpacked_kwargs(expr: &Expr) -> Option<bool> {
+pub(super) fn direct_call_has_unpacked_kwargs(expr: &Expr) -> Option<bool> {
     if let Expr::Await(await_expr) = expr {
         return direct_call_has_unpacked_kwargs(&await_expr.value);
     }
@@ -1705,7 +1704,7 @@ fn direct_call_has_unpacked_kwargs(expr: &Expr) -> Option<bool> {
     Some(call.arguments.keywords.iter().any(|keyword| keyword.arg.is_none()))
 }
 
-fn collect_typed_dict_literal_sites_in_suite(
+pub(super) fn collect_typed_dict_literal_sites_in_suite(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1852,7 +1851,7 @@ fn collect_typed_dict_literal_sites_in_suite(
     }
 }
 
-struct UnsafeOperationCollector<'source> {
+pub(super) struct UnsafeOperationCollector<'source> {
     source: &'source str,
     unsafe_ranges: Vec<(usize, usize)>,
     sites: Vec<UnsafeOperationSite>,
@@ -1919,7 +1918,7 @@ impl<'source> UnsafeOperationCollector<'source> {
     }
 }
 
-fn unsafe_write_target_kind(target: &Expr) -> Option<UnsafeOperationKind> {
+pub(super) fn unsafe_write_target_kind(target: &Expr) -> Option<UnsafeOperationKind> {
     match target {
         Expr::Subscript(subscript) => match subscript.value.as_ref() {
             Expr::Call(call) => {
@@ -1944,7 +1943,7 @@ fn unsafe_write_target_kind(target: &Expr) -> Option<UnsafeOperationKind> {
     }
 }
 
-fn collect_unsafe_block_ranges(
+pub(super) fn collect_unsafe_block_ranges(
     source: &str,
     statements: &[SyntaxStatement],
 ) -> Vec<(usize, usize)> {
@@ -1979,7 +1978,7 @@ fn collect_unsafe_block_ranges(
         .collect()
 }
 
-fn extract_typed_dict_literal_site(
+pub(super) fn extract_typed_dict_literal_site(
     source: &str,
     assign: &ruff_python_ast::StmtAnnAssign,
     line: usize,
@@ -1998,7 +1997,7 @@ fn extract_typed_dict_literal_site(
     })
 }
 
-fn extract_typed_dict_literal_entries(
+pub(super) fn extract_typed_dict_literal_entries(
     source: &str,
     value: &ruff_python_ast::ExprDict,
 ) -> Vec<TypedDictLiteralEntry> {
@@ -2016,7 +2015,7 @@ fn extract_typed_dict_literal_entries(
         .collect()
 }
 
-fn extract_string_literal_value(source: &str, expr: &Expr) -> Option<String> {
+pub(super) fn extract_string_literal_value(source: &str, expr: &Expr) -> Option<String> {
     let Expr::StringLiteral(_) = expr else {
         return None;
     };

@@ -1,4 +1,6 @@
-fn extract_ast_backed_statements(
+use super::*;
+
+pub(super) fn extract_ast_backed_statements(
     path: &Path,
     current_module_key: &str,
     source: &str,
@@ -42,7 +44,7 @@ fn extract_ast_backed_statements(
     statements
 }
 
-struct GuardedStatementCollector<'a> {
+pub(super) struct GuardedStatementCollector<'a> {
     path: &'a Path,
     current_module_key: &'a str,
     source: &'a str,
@@ -67,7 +69,11 @@ impl<'a> GuardedStatementCollector<'a> {
                     {
                         self.collect_from_suite(selected_suite, statements, true);
                     } else {
-                        self.collect_from_suite(&if_stmt.body, statements, include_selected_statements);
+                        self.collect_from_suite(
+                            &if_stmt.body,
+                            statements,
+                            include_selected_statements,
+                        );
                         for clause in &if_stmt.elif_else_clauses {
                             self.collect_from_suite(
                                 &clause.body,
@@ -78,7 +84,11 @@ impl<'a> GuardedStatementCollector<'a> {
                     }
                 }
                 Stmt::Try(try_stmt) => {
-                    self.collect_from_suite(&try_stmt.body, statements, include_selected_statements);
+                    self.collect_from_suite(
+                        &try_stmt.body,
+                        statements,
+                        include_selected_statements,
+                    );
                     for handler in &try_stmt.handlers {
                         let ruff_python_ast::ExceptHandler::ExceptHandler(handler) = handler;
                         self.collect_from_suite(
@@ -130,7 +140,7 @@ impl<'a> GuardedStatementCollector<'a> {
     }
 }
 
-fn collect_guarded_import_statements_from_suite(
+pub(super) fn collect_guarded_import_statements_from_suite(
     path: &Path,
     current_module_key: &str,
     source: &str,
@@ -152,7 +162,7 @@ fn collect_guarded_import_statements_from_suite(
     statements
 }
 
-fn selected_guarded_import_suite<'a>(
+pub(super) fn selected_guarded_import_suite<'a>(
     stmt: &'a ruff_python_ast::StmtIf,
     source: &str,
     options: ParseOptions,
@@ -175,7 +185,7 @@ fn selected_guarded_import_suite<'a>(
     Some(&[])
 }
 
-fn collect_supported_guarded_branch_statement_lines(
+pub(super) fn collect_supported_guarded_branch_statement_lines(
     source: &str,
     suite: &[Stmt],
     options: ParseOptions,
@@ -185,7 +195,9 @@ fn collect_supported_guarded_branch_statement_lines(
     for stmt in suite {
         match stmt {
             Stmt::If(if_stmt) => {
-                if let Some(selected_suite) = selected_guarded_import_suite(if_stmt, source, options) {
+                if let Some(selected_suite) =
+                    selected_guarded_import_suite(if_stmt, source, options)
+                {
                     collect_statement_start_lines(source, &if_stmt.body, guarded_lines);
                     for clause in &if_stmt.elif_else_clauses {
                         collect_statement_start_lines(source, &clause.body, guarded_lines);
@@ -269,7 +281,7 @@ fn collect_supported_guarded_branch_statement_lines(
     }
 }
 
-fn collect_statement_start_lines(
+pub(super) fn collect_statement_start_lines(
     source: &str,
     suite: &[Stmt],
     lines: &mut std::collections::BTreeSet<usize>,
@@ -280,7 +292,7 @@ fn collect_statement_start_lines(
     }
 }
 
-fn is_custom_guard_filtered_statement(statement: &SyntaxStatement) -> bool {
+pub(super) fn is_custom_guard_filtered_statement(statement: &SyntaxStatement) -> bool {
     matches!(
         statement,
         SyntaxStatement::TypeAlias(_)
@@ -292,7 +304,7 @@ fn is_custom_guard_filtered_statement(statement: &SyntaxStatement) -> bool {
     )
 }
 
-fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+pub(super) fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
     if is_type_checking_guard_expr(expr) {
         return Some(true);
     }
@@ -300,7 +312,7 @@ fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions
         .or_else(|| evaluate_platform_guard_expr(source, expr, options))
 }
 
-fn is_type_checking_guard_expr(expr: &Expr) -> bool {
+pub(super) fn is_type_checking_guard_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "TYPE_CHECKING",
         Expr::Attribute(attribute) => {
@@ -315,7 +327,7 @@ fn is_type_checking_guard_expr(expr: &Expr) -> bool {
     }
 }
 
-fn evaluate_version_guard_expr(expr: &Expr, options: ParseOptions) -> Option<bool> {
+pub(super) fn evaluate_version_guard_expr(expr: &Expr, options: ParseOptions) -> Option<bool> {
     let target = options.target_python?;
     let Expr::Compare(compare) = expr else {
         return None;
@@ -348,7 +360,7 @@ fn evaluate_version_guard_expr(expr: &Expr, options: ParseOptions) -> Option<boo
     })
 }
 
-fn parse_guarded_python_version(expr: &Expr) -> Option<ParsePythonVersion> {
+pub(super) fn parse_guarded_python_version(expr: &Expr) -> Option<ParsePythonVersion> {
     match expr {
         Expr::Tuple(tuple) => {
             let major_number = &tuple.elts.first()?.as_number_literal_expr()?.value;
@@ -361,24 +373,22 @@ fn parse_guarded_python_version(expr: &Expr) -> Option<ParsePythonVersion> {
                 .unwrap_or(0);
             Some(ParsePythonVersion { major, minor })
         }
-        Expr::NumberLiteral(number) => {
-            Some(ParsePythonVersion {
-                major: parse_small_python_version_component(&number.value)?,
-                minor: 0,
-            })
-        }
+        Expr::NumberLiteral(number) => Some(ParsePythonVersion {
+            major: parse_small_python_version_component(&number.value)?,
+            minor: 0,
+        }),
         _ => None,
     }
 }
 
-fn parse_small_python_version_component(number: &ruff_python_ast::Number) -> Option<u8> {
+pub(super) fn parse_small_python_version_component(number: &ruff_python_ast::Number) -> Option<u8> {
     match number {
         ruff_python_ast::Number::Int(value) => value.as_u8(),
         _ => None,
     }
 }
 
-fn evaluate_platform_guard_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+pub(super) fn evaluate_platform_guard_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
     let platform = options.target_platform?;
     let Expr::Compare(compare) = expr else {
         return None;
@@ -411,7 +421,7 @@ fn evaluate_platform_guard_expr(source: &str, expr: &Expr, options: ParseOptions
     })
 }
 
-fn extract_ast_backed_statement(
+pub(super) fn extract_ast_backed_statement(
     path: &Path,
     current_module_key: &str,
     source: &str,
@@ -601,37 +611,42 @@ fn extract_ast_backed_statement(
                     .value
                     .as_deref()
                     .map(|expr| extract_direct_expr_metadata(source, expr))
-                    .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
-                    value_callee: None,
-                    value_name: None,
-                    value_member_owner_name: None,
-                    value_member_name: None,
-                    value_member_through_instance: false,
-                    value_method_owner_name: None,
-                    value_method_name: None,
-                    value_method_through_instance: false,
-                    value_subscript_target: None,
-                    value_subscript_string_key: None,
-                    value_subscript_index: None,
-                    value_if_true: None,
-                    value_if_false: None,
-                    value_if_guard: None,
-                    value_bool_left: None,
-                    value_bool_right: None,
-                    value_binop_left: None,
-                    value_binop_right: None,
-                    value_binop_operator: None,
-                    value_lambda: None,
-                    value_list_comprehension: None,
-                    value_generator_comprehension: None,
-                    value_list_elements: None,
-                    value_set_elements: None,
-                    value_dict_entries: None, });
+                    .unwrap_or(DirectExprMetadata {
+                        value_type: None,
+                        value_type_expr: None,
+                        is_awaited: false,
+                        value_callee: None,
+                        value_name: None,
+                        value_member_owner_name: None,
+                        value_member_name: None,
+                        value_member_through_instance: false,
+                        value_method_owner_name: None,
+                        value_method_name: None,
+                        value_method_through_instance: false,
+                        value_subscript_target: None,
+                        value_subscript_string_key: None,
+                        value_subscript_index: None,
+                        value_if_true: None,
+                        value_if_false: None,
+                        value_if_guard: None,
+                        value_bool_left: None,
+                        value_bool_right: None,
+                        value_binop_left: None,
+                        value_binop_right: None,
+                        value_binop_operator: None,
+                        value_lambda: None,
+                        value_list_comprehension: None,
+                        value_generator_comprehension: None,
+                        value_list_elements: None,
+                        value_set_elements: None,
+                        value_dict_entries: None,
+                    });
                 Some(SyntaxStatement::Value(ValueStatement {
                     names,
                     destructuring_target_names: None,
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
-                    annotation_expr: slice_range(source, stmt.annotation.range()).and_then(TypeExpr::parse),
+                    annotation_expr: slice_range(source, stmt.annotation.range())
+                        .and_then(TypeExpr::parse),
                     value_type: value.value_type,
                     value_type_expr: value.value_type_expr,
                     is_awaited: value.is_awaited,
@@ -730,7 +745,7 @@ fn extract_ast_backed_statement(
     }
 }
 
-fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> {
+pub(super) fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> {
     match expr {
         Expr::UnaryOp(expr) if expr.op == ruff_python_ast::UnaryOp::Not => {
             extract_guard_condition(source, &expr.operand)
@@ -807,39 +822,39 @@ fn extract_guard_condition(source: &str, expr: &Expr) -> Option<GuardCondition> 
     }
 }
 
-fn suite_start_line(source: &str, suite: &[Stmt]) -> usize {
+pub(super) fn suite_start_line(source: &str, suite: &[Stmt]) -> usize {
     suite_start_line_optional(source, suite).unwrap_or(0)
 }
 
-fn suite_end_line(source: &str, suite: &[Stmt]) -> usize {
+pub(super) fn suite_end_line(source: &str, suite: &[Stmt]) -> usize {
     suite_end_line_optional(source, suite).unwrap_or(0)
 }
 
-fn suite_start_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
+pub(super) fn suite_start_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
     suite.first().map(|stmt| offset_to_line_column(source, stmt.range().start().to_usize()).0)
 }
 
-fn suite_end_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
+pub(super) fn suite_end_line_optional(source: &str, suite: &[Stmt]) -> Option<usize> {
     suite.last().map(|stmt| offset_to_line_column(source, stmt.range().end().to_usize()).0)
 }
 
-fn if_false_start_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
+pub(super) fn if_false_start_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
     stmt.elif_else_clauses
         .first()
         .and_then(|clause| suite_start_line_optional(source, &clause.body))
 }
 
-fn if_false_end_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
+pub(super) fn if_false_end_line(source: &str, stmt: &ruff_python_ast::StmtIf) -> Option<usize> {
     stmt.elif_else_clauses.last().and_then(|clause| suite_end_line_optional(source, &clause.body))
 }
 
-fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl FnMut(&[Stmt])) {
+pub(super) fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl FnMut(&[Stmt])) {
     for clause in &stmt.elif_else_clauses {
         callback(&clause.body);
     }
 }
 
-fn for_each_nested_suite(stmt: &Stmt, mut callback: impl FnMut(&[Stmt])) {
+pub(super) fn for_each_nested_suite(stmt: &Stmt, mut callback: impl FnMut(&[Stmt])) {
     match stmt {
         Stmt::If(if_stmt) => {
             callback(&if_stmt.body);
@@ -872,7 +887,7 @@ fn for_each_nested_suite(stmt: &Stmt, mut callback: impl FnMut(&[Stmt])) {
     }
 }
 
-fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+pub(super) fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<SyntaxStatement> {
     let Expr::Call(call) = expr else {
         return None;
     };
@@ -960,7 +975,7 @@ fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<Synt
     }))
 }
 
-fn extract_method_call_statement(
+pub(super) fn extract_method_call_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -1156,7 +1171,7 @@ fn extract_method_call_statement(
     }
 }
 
-fn collect_nested_method_call_statements(
+pub(super) fn collect_nested_method_call_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1210,11 +1225,11 @@ fn collect_nested_method_call_statements(
     }
 }
 
-fn infer_literal_arg_type(expr: &Expr) -> String {
+pub(super) fn infer_literal_arg_type(expr: &Expr) -> String {
     infer_direct_literal_type(expr).unwrap_or_default()
 }
 
-fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
+pub(super) fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
     match expr {
         Expr::NumberLiteral(_) => Some(String::from("int")),
         Expr::StringLiteral(_) => Some(String::from("str")),
@@ -1279,7 +1294,7 @@ fn infer_direct_literal_type(expr: &Expr) -> Option<String> {
     }
 }
 
-fn extract_list_comprehension_clauses(
+pub(super) fn extract_list_comprehension_clauses(
     source: &str,
     generators: &[ruff_python_ast::Comprehension],
 ) -> Vec<ComprehensionClauseMetadata> {
@@ -1301,7 +1316,7 @@ fn extract_list_comprehension_clauses(
         .collect()
 }
 
-fn infer_direct_binop_type(bin_op: &ruff_python_ast::ExprBinOp) -> Option<String> {
+pub(super) fn infer_direct_binop_type(bin_op: &ruff_python_ast::ExprBinOp) -> Option<String> {
     let left = infer_direct_literal_type(&bin_op.left)?;
     let right = infer_direct_literal_type(&bin_op.right)?;
     match bin_op.op {
@@ -1344,11 +1359,11 @@ fn infer_direct_binop_type(bin_op: &ruff_python_ast::ExprBinOp) -> Option<String
     }
 }
 
-fn is_direct_numeric_type(text: &str) -> bool {
+pub(super) fn is_direct_numeric_type(text: &str) -> bool {
     matches!(text, "int" | "float" | "complex")
 }
 
-fn join_numeric_type(left: &str, right: &str) -> String {
+pub(super) fn join_numeric_type(left: &str, right: &str) -> String {
     if left == "complex" || right == "complex" {
         String::from("complex")
     } else if left == "float" || right == "float" {
@@ -1358,18 +1373,18 @@ fn join_numeric_type(left: &str, right: &str) -> String {
     }
 }
 
-fn split_direct_generic_type(text: &str) -> Option<(String, Vec<String>)> {
+pub(super) fn split_direct_generic_type(text: &str) -> Option<(String, Vec<String>)> {
     let (head, inner) = text.split_once('[')?;
     let inner = inner.strip_suffix(']')?;
     Some((head.to_owned(), inner.split(',').map(|part| part.trim().to_owned()).collect()))
 }
 
-fn join_union_literal_type_candidates(types: Vec<String>) -> String {
+pub(super) fn join_union_literal_type_candidates(types: Vec<String>) -> String {
     let joined = join_literal_type_candidates(types);
     if joined.contains(" | ") { format!("Union[{}]", joined.replace(" | ", ", ")) } else { joined }
 }
 
-fn join_literal_type_candidates(types: Vec<String>) -> String {
+pub(super) fn join_literal_type_candidates(types: Vec<String>) -> String {
     let mut unique = Vec::new();
     for value in types {
         if !unique.contains(&value) {
@@ -1379,7 +1394,7 @@ fn join_literal_type_candidates(types: Vec<String>) -> String {
     if unique.is_empty() { String::from("Any") } else { unique.join(" | ") }
 }
 
-fn extract_supplemental_call_statement(
+pub(super) fn extract_supplemental_call_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -1393,7 +1408,7 @@ fn extract_supplemental_call_statement(
     }
 }
 
-fn extract_member_access_statement(
+pub(super) fn extract_member_access_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -1418,7 +1433,7 @@ fn extract_member_access_statement(
     }
 }
 
-fn extract_member_access_from_expr(
+pub(super) fn extract_member_access_from_expr(
     _source: &str,
     expr: &Expr,
     line: usize,
@@ -1455,7 +1470,7 @@ fn extract_member_access_from_expr(
     }
 }
 
-fn collect_nested_call_statements(
+pub(super) fn collect_nested_call_statements(
     source: &str,
     suite: &[Stmt],
     statements: &mut Vec<SyntaxStatement>,
@@ -1480,7 +1495,7 @@ fn collect_nested_call_statements(
     }
 }
 
-fn collect_nested_member_access_statements(
+pub(super) fn collect_nested_member_access_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1534,7 +1549,7 @@ fn collect_nested_member_access_statements(
     }
 }
 
-fn collect_return_statements(
+pub(super) fn collect_return_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1585,7 +1600,7 @@ fn collect_return_statements(
     }
 }
 
-fn collect_yield_statements(
+pub(super) fn collect_yield_statements(
     source: &str,
     suite: &[Stmt],
     owner_type_name: Option<&str>,
@@ -1633,7 +1648,7 @@ fn collect_yield_statements(
     }
 }
 
-fn collect_if_statements(
+pub(super) fn collect_if_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1734,7 +1749,7 @@ fn collect_if_statements(
     }
 }
 
-fn collect_assert_statements(
+pub(super) fn collect_assert_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1839,7 +1854,7 @@ fn collect_assert_statements(
     }
 }
 
-fn collect_invalidation_statements(
+pub(super) fn collect_invalidation_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -1988,7 +2003,7 @@ fn collect_invalidation_statements(
     }
 }
 
-fn collect_match_statements(
+pub(super) fn collect_match_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2060,7 +2075,7 @@ fn collect_match_statements(
     }
 }
 
-fn collect_for_statements(
+pub(super) fn collect_for_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2110,7 +2125,7 @@ fn collect_for_statements(
     }
 }
 
-fn collect_with_statements(
+pub(super) fn collect_with_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2162,7 +2177,7 @@ fn collect_with_statements(
     }
 }
 
-fn collect_except_handler_statements(
+pub(super) fn collect_except_handler_statements(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2248,7 +2263,7 @@ fn collect_except_handler_statements(
     }
 }
 
-fn collect_function_body_assignments(
+pub(super) fn collect_function_body_assignments(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2303,7 +2318,7 @@ fn collect_function_body_assignments(
     }
 }
 
-fn collect_function_body_bare_assignments(
+pub(super) fn collect_function_body_bare_assignments(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2358,7 +2373,7 @@ fn collect_function_body_bare_assignments(
     }
 }
 
-fn collect_function_body_namedexpr_assignments(
+pub(super) fn collect_function_body_namedexpr_assignments(
     source: &str,
     suite: &[Stmt],
     owner_name: Option<&str>,
@@ -2402,7 +2417,7 @@ fn collect_function_body_namedexpr_assignments(
     }
 }
 
-struct NamedExprAssignmentCollector<'a> {
+pub(super) struct NamedExprAssignmentCollector<'a> {
     source: &'a str,
     owner_name: &'a str,
     owner_type_name: Option<&'a str>,
@@ -2484,7 +2499,7 @@ impl<'a> visitor::Visitor<'a> for NamedExprAssignmentCollector<'a> {
     }
 }
 
-fn extract_function_body_assignment_statement(
+pub(super) fn extract_function_body_assignment_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2500,32 +2515,36 @@ fn extract_function_body_assignment_statement(
     }
     let value =
         assign.value.as_deref().map(|expr| extract_direct_expr_metadata(source, expr)).unwrap_or(
-            DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None, },
+            DirectExprMetadata {
+                value_type: None,
+                value_type_expr: None,
+                is_awaited: false,
+                value_callee: None,
+                value_name: None,
+                value_member_owner_name: None,
+                value_member_name: None,
+                value_member_through_instance: false,
+                value_method_owner_name: None,
+                value_method_name: None,
+                value_method_through_instance: false,
+                value_subscript_target: None,
+                value_subscript_string_key: None,
+                value_subscript_index: None,
+                value_if_true: None,
+                value_if_false: None,
+                value_if_guard: None,
+                value_bool_left: None,
+                value_bool_right: None,
+                value_binop_left: None,
+                value_binop_right: None,
+                value_binop_operator: None,
+                value_lambda: None,
+                value_list_comprehension: None,
+                value_generator_comprehension: None,
+                value_list_elements: None,
+                value_set_elements: None,
+                value_dict_entries: None,
+            },
         );
     Some(SyntaxStatement::Value(ValueStatement {
         names,
@@ -2568,7 +2587,7 @@ fn extract_function_body_assignment_statement(
     }))
 }
 
-fn extract_function_body_bare_assignment_statement(
+pub(super) fn extract_function_body_bare_assignment_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2640,7 +2659,7 @@ fn extract_function_body_bare_assignment_statement(
     }
 }
 
-fn extract_augmented_assignment_value_statement(
+pub(super) fn extract_augmented_assignment_value_statement(
     source: &str,
     target: &Expr,
     value: &Expr,
@@ -2695,7 +2714,7 @@ fn extract_augmented_assignment_value_statement(
     }))
 }
 
-fn extract_yield_statement(
+pub(super) fn extract_yield_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2712,32 +2731,36 @@ fn extract_yield_statement(
                 .value
                 .as_deref()
                 .map(|expr| extract_direct_expr_metadata(source, expr))
-                .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
-                value_callee: None,
-                value_name: None,
-                value_member_owner_name: None,
-                value_member_name: None,
-                value_member_through_instance: false,
-                value_method_owner_name: None,
-                value_method_name: None,
-                value_method_through_instance: false,
-                value_subscript_target: None,
-                value_subscript_string_key: None,
-                value_subscript_index: None,
-                value_if_true: None,
-                value_if_false: None,
-                value_if_guard: None,
-                value_bool_left: None,
-                value_bool_right: None,
-                value_binop_left: None,
-                value_binop_right: None,
-                value_binop_operator: None,
-                value_lambda: None,
-                value_list_comprehension: None,
-                value_generator_comprehension: None,
-                value_list_elements: None,
-                value_set_elements: None,
-                value_dict_entries: None, }),
+                .unwrap_or(DirectExprMetadata {
+                    value_type: None,
+                    value_type_expr: None,
+                    is_awaited: false,
+                    value_callee: None,
+                    value_name: None,
+                    value_member_owner_name: None,
+                    value_member_name: None,
+                    value_member_through_instance: false,
+                    value_method_owner_name: None,
+                    value_method_name: None,
+                    value_method_through_instance: false,
+                    value_subscript_target: None,
+                    value_subscript_string_key: None,
+                    value_subscript_index: None,
+                    value_if_true: None,
+                    value_if_false: None,
+                    value_if_guard: None,
+                    value_bool_left: None,
+                    value_bool_right: None,
+                    value_binop_left: None,
+                    value_binop_right: None,
+                    value_binop_operator: None,
+                    value_lambda: None,
+                    value_list_comprehension: None,
+                    value_generator_comprehension: None,
+                    value_list_elements: None,
+                    value_set_elements: None,
+                    value_dict_entries: None,
+                }),
             false,
         ),
         Expr::YieldFrom(yield_expr) => {
@@ -2778,7 +2801,7 @@ fn extract_yield_statement(
     }))
 }
 
-fn extract_match_statement(
+pub(super) fn extract_match_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2815,7 +2838,7 @@ fn extract_match_statement(
     }))
 }
 
-fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> Vec<MatchPattern> {
+pub(super) fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> Vec<MatchPattern> {
     use ruff_python_ast::Pattern;
 
     if pattern.is_wildcard() {
@@ -2841,7 +2864,7 @@ fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> V
     }
 }
 
-fn extract_for_statement(
+pub(super) fn extract_for_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2891,7 +2914,7 @@ fn extract_for_statement(
     }))
 }
 
-fn extract_with_statements(
+pub(super) fn extract_with_statements(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2934,7 +2957,7 @@ fn extract_with_statements(
         .collect()
 }
 
-fn extract_except_handler_statement(
+pub(super) fn extract_except_handler_statement(
     source: &str,
     handler: &ruff_python_ast::ExceptHandler,
     line: usize,
@@ -2957,7 +2980,7 @@ fn extract_except_handler_statement(
     }))
 }
 
-fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
+pub(super) fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
         if let Some(call) =
@@ -2971,7 +2994,7 @@ fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<S
     }
 }
 
-fn extract_return_statement(
+pub(super) fn extract_return_statement(
     source: &str,
     stmt: &Stmt,
     line: usize,
@@ -2986,32 +3009,36 @@ fn extract_return_statement(
         .value
         .as_deref()
         .map(|expr| extract_direct_expr_metadata(source, expr))
-        .unwrap_or(DirectExprMetadata { value_type: None, value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, });
+        .unwrap_or(DirectExprMetadata {
+            value_type: None,
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        });
 
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
@@ -3045,7 +3072,7 @@ fn extract_return_statement(
     }))
 }
 
-fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata {
+pub(super) fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata {
     if let Expr::Await(await_expr) = expr {
         let mut metadata = extract_direct_expr_metadata(source, &await_expr.value);
         metadata.is_awaited = true;
@@ -3057,94 +3084,106 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
     }
 
     if let Expr::Dict(dict) = expr {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: Some(extract_typed_dict_literal_entries(source, dict)), };
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: Some(extract_typed_dict_literal_entries(source, dict)),
+        };
     }
 
     if let Expr::List(list) = expr {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: Some(
-            list.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
-        ),
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: Some(
+                list.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+            ),
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::Set(set) = expr {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: Some(
-            set.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
-        ),
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: Some(
+                set.elts.iter().map(|item| extract_direct_expr_metadata(source, item)).collect(),
+            ),
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::Lambda(lambda) = expr {
@@ -3162,200 +3201,224 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
                 param.annotation = annotation;
             }
         }
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: Some(Box::new(LambdaMetadata {
-            params,
-            body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
-        })),
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: Some(Box::new(LambdaMetadata {
+                params,
+                body: Box::new(extract_direct_expr_metadata(source, &lambda.body)),
+            })),
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::ListComp(comp) = expr {
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-            kind: ComprehensionKind::List,
-            clauses: extract_list_comprehension_clauses(source, &comp.generators),
-            key: None,
-            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-        })),
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::List,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
+                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::SetComp(comp) = expr {
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-            kind: ComprehensionKind::Set,
-            clauses: extract_list_comprehension_clauses(source, &comp.generators),
-            key: None,
-            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-        })),
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Set,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
+                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::DictComp(comp) = expr {
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: Some(Box::new(ComprehensionMetadata {
-            kind: ComprehensionKind::Dict,
-            clauses: extract_list_comprehension_clauses(source, &comp.generators),
-            key: Some(Box::new(extract_direct_expr_metadata(source, &comp.key))),
-            element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
-        })),
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Dict,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: Some(Box::new(extract_direct_expr_metadata(source, &comp.key))),
+                element: Box::new(extract_direct_expr_metadata(source, &comp.value)),
+            })),
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::Generator(comp) = expr {
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
-            kind: ComprehensionKind::Generator,
-            clauses: extract_list_comprehension_clauses(source, &comp.generators),
-            key: None,
-            element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
-        })),
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: Some(Box::new(ComprehensionMetadata {
+                kind: ComprehensionKind::Generator,
+                clauses: extract_list_comprehension_clauses(source, &comp.generators),
+                key: None,
+                element: Box::new(extract_direct_expr_metadata(source, &comp.elt)),
+            })),
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: Some(owner_name),
-        value_method_name: Some(method_name),
-        value_method_through_instance: through_instance,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: Some(owner_name),
+            value_method_name: Some(method_name),
+            value_method_through_instance: through_instance,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::BoolOp(bool_op) = expr {
@@ -3364,114 +3427,165 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         let left_guard = left_expr.and_then(|expr| extract_guard_condition(source, expr));
         let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
         let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: left_guard,
-        value_bool_left: left.map(Box::new),
-        value_bool_right: right.map(Box::new),
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: Some(match bool_op.op {
-            ruff_python_ast::BoolOp::And => String::from("and"),
-            ruff_python_ast::BoolOp::Or => String::from("or"),
-        }),
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: left_guard,
+            value_bool_left: left.map(Box::new),
+            value_bool_right: right.map(Box::new),
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: Some(match bool_op.op {
+                ruff_python_ast::BoolOp::And => String::from("and"),
+                ruff_python_ast::BoolOp::Or => String::from("or"),
+            }),
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::BinOp(bin_op) = expr {
-        return DirectExprMetadata { value_type: Some(String::new()), value_type_expr: None, is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: None,
-        value_subscript_string_key: None,
-        value_subscript_index: None,
-        value_if_true: None,
-        value_if_false: None,
-        value_if_guard: None,
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
-        value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
-        value_binop_operator: Some(direct_operator_text(bin_op.op)),
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
+        return DirectExprMetadata {
+            value_type: Some(String::new()),
+            value_type_expr: None,
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.left))),
+            value_binop_right: Some(Box::new(extract_direct_expr_metadata(source, &bin_op.right))),
+            value_binop_operator: Some(direct_operator_text(bin_op.op)),
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
     }
 
     if let Expr::If(if_expr) = expr {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
+            value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
+            value_if_guard: extract_guard_condition(source, &if_expr.test),
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
+    }
+
+    if let Expr::Subscript(subscript) = expr {
+        return DirectExprMetadata {
+            value_type: Some(infer_literal_arg_type(expr)),
+            value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: Some(Box::new(extract_direct_expr_metadata(
+                source,
+                &subscript.value,
+            ))),
+            value_subscript_string_key: extract_string_literal_value(source, &subscript.slice),
+            value_subscript_index: match infer_literal_arg_type(&subscript.slice).as_str() {
+                "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
+                _ => None,
+            },
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        };
+    }
+
+    let member = extract_direct_member_access(expr);
+    DirectExprMetadata {
+        value_type: Some(infer_literal_arg_type(expr)),
+        value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
+        is_awaited: false,
+        value_callee: extract_direct_callee(expr),
+        value_name: extract_direct_name(expr),
+        value_member_owner_name: member.as_ref().map(|(owner_name, _, _)| owner_name.clone()),
+        value_member_name: member.as_ref().map(|(_, member, _)| member.clone()),
+        value_member_through_instance: member
+            .as_ref()
+            .map(|(_, _, through_instance)| *through_instance)
+            .unwrap_or(false),
         value_method_owner_name: None,
         value_method_name: None,
         value_method_through_instance: false,
         value_subscript_target: None,
         value_subscript_string_key: None,
         value_subscript_index: None,
-        value_if_true: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.body))),
-        value_if_false: Some(Box::new(extract_direct_expr_metadata(source, &if_expr.orelse))),
-        value_if_guard: extract_guard_condition(source, &if_expr.test),
-        value_bool_left: None,
-        value_bool_right: None,
-        value_binop_left: None,
-        value_binop_right: None,
-        value_binop_operator: None,
-        value_lambda: None,
-        value_list_comprehension: None,
-        value_generator_comprehension: None,
-        value_list_elements: None,
-        value_set_elements: None,
-        value_dict_entries: None, };
-    }
-
-    if let Expr::Subscript(subscript) = expr {
-        return DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-        value_callee: None,
-        value_name: None,
-        value_member_owner_name: None,
-        value_member_name: None,
-        value_member_through_instance: false,
-        value_method_owner_name: None,
-        value_method_name: None,
-        value_method_through_instance: false,
-        value_subscript_target: Some(Box::new(extract_direct_expr_metadata(
-            source,
-            &subscript.value,
-        ))),
-        value_subscript_string_key: extract_string_literal_value(source, &subscript.slice),
-        value_subscript_index: match infer_literal_arg_type(&subscript.slice).as_str() {
-            "int" => slice_range(source, subscript.slice.range()).map(str::to_owned),
-            _ => None,
-        },
         value_if_true: None,
         value_if_false: None,
         value_if_guard: None,
@@ -3485,42 +3599,11 @@ fn extract_direct_expr_metadata(source: &str, expr: &Expr) -> DirectExprMetadata
         value_generator_comprehension: None,
         value_list_elements: None,
         value_set_elements: None,
-        value_dict_entries: None, };
+        value_dict_entries: None,
     }
-
-    let member = extract_direct_member_access(expr);
-    DirectExprMetadata { value_type: Some(infer_literal_arg_type(expr)), value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)), is_awaited: false,
-    value_callee: extract_direct_callee(expr),
-    value_name: extract_direct_name(expr),
-    value_member_owner_name: member.as_ref().map(|(owner_name, _, _)| owner_name.clone()),
-    value_member_name: member.as_ref().map(|(_, member, _)| member.clone()),
-    value_member_through_instance: member
-        .as_ref()
-        .map(|(_, _, through_instance)| *through_instance)
-        .unwrap_or(false),
-    value_method_owner_name: None,
-    value_method_name: None,
-    value_method_through_instance: false,
-    value_subscript_target: None,
-    value_subscript_string_key: None,
-    value_subscript_index: None,
-    value_if_true: None,
-    value_if_false: None,
-    value_if_guard: None,
-    value_bool_left: None,
-    value_bool_right: None,
-    value_binop_left: None,
-    value_binop_right: None,
-    value_binop_operator: None,
-    value_lambda: None,
-    value_list_comprehension: None,
-    value_generator_comprehension: None,
-    value_list_elements: None,
-    value_set_elements: None,
-    value_dict_entries: None, }
 }
 
-fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
+pub(super) fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
     let Expr::Call(call) = expr else {
         return None;
     };
@@ -3542,7 +3625,7 @@ fn extract_direct_method_call(expr: &Expr) -> Option<(String, String, bool)> {
     }
 }
 
-fn extract_direct_callee(expr: &Expr) -> Option<String> {
+pub(super) fn extract_direct_callee(expr: &Expr) -> Option<String> {
     let Expr::Call(call) = expr else {
         return None;
     };
@@ -3552,14 +3635,14 @@ fn extract_direct_callee(expr: &Expr) -> Option<String> {
     Some(name.id.as_str().to_owned())
 }
 
-fn extract_direct_name(expr: &Expr) -> Option<String> {
+pub(super) fn extract_direct_name(expr: &Expr) -> Option<String> {
     let Expr::Name(name) = expr else {
         return None;
     };
     Some(name.id.as_str().to_owned())
 }
 
-fn extract_direct_member_access(expr: &Expr) -> Option<(String, String, bool)> {
+pub(super) fn extract_direct_member_access(expr: &Expr) -> Option<(String, String, bool)> {
     let Expr::Attribute(attribute) = expr else {
         return None;
     };
@@ -3578,7 +3661,7 @@ fn extract_direct_member_access(expr: &Expr) -> Option<(String, String, bool)> {
     }
 }
 
-fn extract_ast_type_params(
+pub(super) fn extract_ast_type_params(
     path: &Path,
     source: &str,
     type_params: Option<&ruff_python_ast::TypeParams>,
@@ -3600,7 +3683,10 @@ fn extract_ast_type_params(
                     name: type_var.name.as_str().to_owned(),
                     bound_expr: bound.as_deref().and_then(TypeExpr::parse),
                     bound,
-                    constraint_exprs: constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect(),
+                    constraint_exprs: constraints
+                        .iter()
+                        .filter_map(|constraint| TypeExpr::parse(constraint))
+                        .collect(),
                     constraints,
                     default_expr: type_var
                         .default
@@ -3666,7 +3752,7 @@ fn extract_ast_type_params(
     Some(parsed)
 }
 
-fn extract_ast_type_param_bound_and_constraints(
+pub(super) fn extract_ast_type_param_bound_and_constraints(
     source: &str,
     bound: Option<&Expr>,
 ) -> Option<(Option<String>, Vec<String>)> {
@@ -3684,7 +3770,7 @@ fn extract_ast_type_param_bound_and_constraints(
     Some((slice_range(source, bound.range()).map(str::to_owned), Vec::new()))
 }
 
-fn extract_function_params(
+pub(super) fn extract_function_params(
     source: &str,
     parameters: &ruff_python_ast::Parameters,
 ) -> Vec<FunctionParam> {
@@ -3777,7 +3863,7 @@ fn extract_function_params(
         .collect()
 }
 
-fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> Vec<String> {
+pub(super) fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> Vec<String> {
     arguments
         .args
         .iter()
@@ -3785,7 +3871,7 @@ fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> 
         .collect()
 }
 
-fn extract_assignment_names(expr: &Expr) -> Vec<String> {
+pub(super) fn extract_assignment_names(expr: &Expr) -> Vec<String> {
     match expr {
         Expr::Name(name) => vec![name.id.as_str().to_owned()],
         Expr::Tuple(tuple) => tuple.elts.iter().flat_map(extract_assignment_names).collect(),
@@ -3795,7 +3881,7 @@ fn extract_assignment_names(expr: &Expr) -> Vec<String> {
     }
 }
 
-fn extract_simple_destructuring_target_names(expr: &Expr) -> Option<Vec<String>> {
+pub(super) fn extract_simple_destructuring_target_names(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::Tuple(tuple) => tuple
             .elts
@@ -3817,7 +3903,7 @@ fn extract_simple_destructuring_target_names(expr: &Expr) -> Option<Vec<String>>
     }
 }
 
-fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+pub(super) fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     match &decorator.expression {
         Expr::Name(name) => name.id.as_str() == "overload",
         Expr::Attribute(attribute) => {
@@ -3828,7 +3914,7 @@ fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
-fn is_override_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+pub(super) fn is_override_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     match &decorator.expression {
         Expr::Name(name) => name.id.as_str() == "override",
         Expr::Attribute(attribute) => {
@@ -3839,7 +3925,7 @@ fn is_override_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
-fn is_abstractmethod_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+pub(super) fn is_abstractmethod_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     match &decorator.expression {
         Expr::Name(name) => name.id.as_str() == "abstractmethod",
         Expr::Attribute(attribute) => {
@@ -3850,7 +3936,7 @@ fn is_abstractmethod_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
-fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
+pub(super) fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     match &decorator.expression {
         Expr::Name(name) => name.id.as_str() == "final",
         Expr::Attribute(attribute) => {
@@ -3861,11 +3947,11 @@ fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
     }
 }
 
-fn deprecated_decorator_message(decorators: &[ruff_python_ast::Decorator]) -> Option<String> {
+pub(super) fn deprecated_decorator_message(decorators: &[ruff_python_ast::Decorator]) -> Option<String> {
     decorators.iter().find_map(deprecated_decorator_arg)
 }
 
-fn deprecated_decorator_arg(decorator: &ruff_python_ast::Decorator) -> Option<String> {
+pub(super) fn deprecated_decorator_arg(decorator: &ruff_python_ast::Decorator) -> Option<String> {
     match &decorator.expression {
         Expr::Name(name) if name.id.as_str() == "deprecated" => Some(String::new()),
         Expr::Attribute(attribute)
@@ -3899,7 +3985,7 @@ fn deprecated_decorator_arg(decorator: &ruff_python_ast::Decorator) -> Option<St
     }
 }
 
-fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> MethodKind {
+pub(super) fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> MethodKind {
     for decorator in decorators {
         match &decorator.expression {
             Expr::Name(name) if name.id.as_str() == "classmethod" => return MethodKind::Class,
@@ -3915,12 +4001,12 @@ fn method_kind_from_decorators(decorators: &[ruff_python_ast::Decorator]) -> Met
     MethodKind::Instance
 }
 
-fn is_abstract_class(statement: &NamedBlockStatement) -> bool {
+pub(super) fn is_abstract_class(statement: &NamedBlockStatement) -> bool {
     statement.bases.iter().any(|base| matches!(base.as_str(), "ABC" | "abc.ABC"))
         || statement.members.iter().any(|member| member.is_abstract_method)
 }
 
-fn is_final_annotation(expr: &Expr) -> bool {
+pub(super) fn is_final_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "Final",
         Expr::Attribute(attribute) => {
@@ -3932,7 +4018,7 @@ fn is_final_annotation(expr: &Expr) -> bool {
     }
 }
 
-fn is_classvar_annotation(expr: &Expr) -> bool {
+pub(super) fn is_classvar_annotation(expr: &Expr) -> bool {
     match expr {
         Expr::Name(name) => name.id.as_str() == "ClassVar",
         Expr::Attribute(attribute) => {
@@ -3944,7 +4030,7 @@ fn is_classvar_annotation(expr: &Expr) -> bool {
     }
 }
 
-fn normalize_import_module(
+pub(super) fn normalize_import_module(
     path: &Path,
     current_module_key: &str,
     level: u32,
@@ -3967,11 +4053,11 @@ fn normalize_import_module(
     parts.join(".")
 }
 
-fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
+pub(super) fn slice_range(source: &str, range: ruff_text_size::TextRange) -> Option<&str> {
     source.get(range.start().to_usize()..range.end().to_usize())
 }
 
-fn parse_extension_statement(
+pub(super) fn parse_extension_statement(
     path: &Path,
     trimmed_line: &str,
     line_number: usize,
@@ -4023,7 +4109,7 @@ fn parse_extension_statement(
     None
 }
 
-fn strip_soft_keyword<'source>(line: &'source str, keyword: &str) -> Option<&'source str> {
+pub(super) fn strip_soft_keyword<'source>(line: &'source str, keyword: &str) -> Option<&'source str> {
     let rest = line.strip_prefix(keyword)?;
     match rest.chars().next() {
         Some(character) if character == '_' || character.is_ascii_alphanumeric() => None,
@@ -4031,7 +4117,7 @@ fn strip_soft_keyword<'source>(line: &'source str, keyword: &str) -> Option<&'so
     }
 }
 
-fn parse_typealias(
+pub(super) fn parse_typealias(
     path: &Path,
     line: &str,
     rest: &str,
@@ -4082,7 +4168,7 @@ fn parse_typealias(
     }))
 }
 
-fn parse_named_block(
+pub(super) fn parse_named_block(
     path: &Path,
     line: &str,
     rest: &str,
@@ -4128,7 +4214,7 @@ fn parse_named_block(
     }))
 }
 
-fn parse_overload(
+pub(super) fn parse_overload(
     path: &Path,
     line: &str,
     rest: &str,
@@ -4146,7 +4232,7 @@ fn parse_overload(
     )
 }
 
-fn parse_function(
+pub(super) fn parse_function(
     path: &Path,
     line: &str,
     rest: &str,
@@ -4200,7 +4286,7 @@ fn parse_function(
     }))
 }
 
-fn parse_unsafe(
+pub(super) fn parse_unsafe(
     path: &Path,
     line: &str,
     line_number: usize,
@@ -4223,7 +4309,7 @@ fn parse_unsafe(
     None
 }
 
-fn extract_decl_head(header: &str) -> Option<(String, &str)> {
+pub(super) fn extract_decl_head(header: &str) -> Option<(String, &str)> {
     let header = header.trim();
     if header.is_empty() {
         return None;
@@ -4236,7 +4322,7 @@ fn extract_decl_head(header: &str) -> Option<(String, &str)> {
     is_valid_identifier(candidate).then(|| (candidate.to_owned(), &header[end..]))
 }
 
-fn parse_type_params<'source>(
+pub(super) fn parse_type_params<'source>(
     path: &Path,
     line_number: usize,
     line: &str,
@@ -4288,7 +4374,7 @@ fn parse_type_params<'source>(
     Some(ParsedTypeParams { type_params, remainder })
 }
 
-fn validate_type_param_names(
+pub(super) fn validate_type_param_names(
     path: &Path,
     line_number: usize,
     label: &str,
@@ -4317,7 +4403,7 @@ fn validate_type_param_names(
     true
 }
 
-fn validate_type_param_default_order(
+pub(super) fn validate_type_param_default_order(
     path: &Path,
     line_number: usize,
     label: &str,
@@ -4347,7 +4433,7 @@ fn validate_type_param_default_order(
     true
 }
 
-fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
+pub(super) fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
     let mut bracket_depth = 0usize;
     let mut paren_depth = 0usize;
 
@@ -4369,7 +4455,7 @@ fn split_top_level_once(input: &str, separator: char) -> Option<(&str, &str)> {
     None
 }
 
-fn split_top_level_commas(input: &str) -> Vec<&str> {
+pub(super) fn split_top_level_commas(input: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut bracket_depth = 0usize;
     let mut paren_depth = 0usize;
@@ -4398,7 +4484,7 @@ fn split_top_level_commas(input: &str) -> Vec<&str> {
     parts
 }
 
-fn parse_type_param(
+pub(super) fn parse_type_param(
     path: &Path,
     line_number: usize,
     line: &str,
@@ -4489,14 +4575,17 @@ fn parse_type_param(
         name: name_part.to_owned(),
         bound_expr: bound.as_deref().and_then(TypeExpr::parse),
         bound,
-        constraint_exprs: constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect(),
+        constraint_exprs: constraints
+            .iter()
+            .filter_map(|constraint| TypeExpr::parse(constraint))
+            .collect(),
         constraints,
         default_expr: default.as_deref().and_then(TypeExpr::parse),
         default,
     })
 }
 
-fn parse_type_param_constraints(
+pub(super) fn parse_type_param_constraints(
     path: &Path,
     line_number: usize,
     line: &str,
@@ -4532,7 +4621,7 @@ fn parse_type_param_constraints(
     Ok(parsed.into_iter().map(str::to_owned).collect())
 }
 
-fn split_bracketed(input: &str) -> Option<(&str, &str)> {
+pub(super) fn split_bracketed(input: &str) -> Option<(&str, &str)> {
     let mut depth = 0usize;
 
     for (index, character) in input.char_indices() {
@@ -4551,7 +4640,7 @@ fn split_bracketed(input: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn split_top_level(input: &str, separator: char) -> Vec<&str> {
+pub(super) fn split_top_level(input: &str, separator: char) -> Vec<&str> {
     let mut items = Vec::new();
     let mut start = 0usize;
     let mut bracket_depth = 0usize;
@@ -4575,7 +4664,7 @@ fn split_top_level(input: &str, separator: char) -> Vec<&str> {
     items
 }
 
-fn is_valid_identifier(candidate: &str) -> bool {
+pub(super) fn is_valid_identifier(candidate: &str) -> bool {
     let mut characters = candidate.chars();
     match characters.next() {
         Some(first) if first == '_' || first.is_ascii_alphabetic() => {}
@@ -4585,7 +4674,7 @@ fn is_valid_identifier(candidate: &str) -> bool {
     characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
 
-fn parse_error(
+pub(super) fn parse_error(
     path: &Path,
     line_number: usize,
     line: &str,
@@ -4600,7 +4689,7 @@ fn parse_error(
     ))
 }
 
-fn parse_error_span(path: &Path, source: &str, start: usize, end: usize) -> Span {
+pub(super) fn parse_error_span(path: &Path, source: &str, start: usize, end: usize) -> Span {
     let start = start.min(source.len());
     let end = end.max(start).min(source.len());
     let (line, column) = offset_to_line_column(source, start);
@@ -4609,7 +4698,7 @@ fn parse_error_span(path: &Path, source: &str, start: usize, end: usize) -> Span
     Span::new(path.display().to_string(), line, column, end_line, end_column)
 }
 
-fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
+pub(super) fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
     let active_lookup = ACTIVE_SOURCE_LINE_INDICES.with(|active| {
         active
             .borrow()
@@ -4640,7 +4729,7 @@ fn offset_to_line_column(source: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
-fn with_active_annotated_lambda_sites<T>(
+pub(super) fn with_active_annotated_lambda_sites<T>(
     sites: Vec<AnnotatedLambdaSite>,
     action: impl FnOnce() -> T,
 ) -> T {
@@ -4661,13 +4750,13 @@ fn with_active_annotated_lambda_sites<T>(
     action()
 }
 
-fn annotated_lambda_site_at(line: usize, column: usize) -> Option<AnnotatedLambdaSite> {
+pub(super) fn annotated_lambda_site_at(line: usize, column: usize) -> Option<AnnotatedLambdaSite> {
     ACTIVE_ANNOTATED_LAMBDA_SITES.with(|active| {
         active.borrow().iter().find(|site| site.line == line && site.column == column).cloned()
     })
 }
 
-fn normalize_annotated_lambda_source(source: &str) -> (String, Vec<AnnotatedLambdaSite>) {
+pub(super) fn normalize_annotated_lambda_source(source: &str) -> (String, Vec<AnnotatedLambdaSite>) {
     let mut normalized = source.as_bytes().to_vec();
     let mut sites = Vec::new();
     let mut search_from = 0usize;
@@ -4696,11 +4785,11 @@ fn normalize_annotated_lambda_source(source: &str) -> (String, Vec<AnnotatedLamb
     (String::from_utf8(normalized).expect("lambda normalization must preserve utf-8"), sites)
 }
 
-fn normalize_annotated_lambda_source_lossy(source: &str) -> String {
+pub(super) fn normalize_annotated_lambda_source_lossy(source: &str) -> String {
     normalize_annotated_lambda_source(source).0
 }
 
-struct AnnotatedLambdaCandidate {
+pub(super) struct AnnotatedLambdaCandidate {
     open_paren: usize,
     close_paren: usize,
     line: usize,
@@ -4710,7 +4799,7 @@ struct AnnotatedLambdaCandidate {
     annotation_spans: Vec<(usize, usize)>,
 }
 
-fn find_next_lambda_keyword(source: &str, start: usize) -> Option<usize> {
+pub(super) fn find_next_lambda_keyword(source: &str, start: usize) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut index = start;
     let mut in_comment = false;
@@ -4783,17 +4872,17 @@ fn find_next_lambda_keyword(source: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn is_lambda_keyword_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
+pub(super) fn is_lambda_keyword_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
     let before_ok = start == 0 || !is_identifier_byte(bytes[start - 1]);
     let after_ok = end >= bytes.len() || !is_identifier_byte(bytes[end]);
     before_ok && after_ok
 }
 
-fn is_identifier_byte(byte: u8) -> bool {
+pub(super) fn is_identifier_byte(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphanumeric()
 }
 
-fn parse_annotated_lambda_at(
+pub(super) fn parse_annotated_lambda_at(
     source: &str,
     lambda_start: usize,
 ) -> Option<AnnotatedLambdaCandidate> {
@@ -4837,7 +4926,7 @@ fn parse_annotated_lambda_at(
     })
 }
 
-fn find_matching_delimiter(source: &str, open_index: usize, open: u8, close: u8) -> Option<usize> {
+pub(super) fn find_matching_delimiter(source: &str, open_index: usize, open: u8, close: u8) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut depth = 0usize;
     let mut index = open_index;
@@ -4915,13 +5004,13 @@ fn find_matching_delimiter(source: &str, open_index: usize, open: u8, close: u8)
     None
 }
 
-struct ParsedAnnotatedLambdaParams {
+pub(super) struct ParsedAnnotatedLambdaParams {
     param_names: Vec<String>,
     annotations: Vec<Option<String>>,
     annotation_spans: Vec<(usize, usize)>,
 }
 
-fn parse_annotated_lambda_params(
+pub(super) fn parse_annotated_lambda_params(
     params_source: &str,
     absolute_start: usize,
 ) -> ParsedAnnotatedLambdaParams {
@@ -4967,7 +5056,7 @@ fn parse_annotated_lambda_params(
     ParsedAnnotatedLambdaParams { param_names, annotations, annotation_spans }
 }
 
-fn top_level_comma_ranges(input: &str) -> Vec<(usize, usize)> {
+pub(super) fn top_level_comma_ranges(input: &str) -> Vec<(usize, usize)> {
     let mut parts = Vec::new();
     let mut start = 0usize;
     let mut paren_depth = 0usize;
@@ -5067,7 +5156,7 @@ fn top_level_comma_ranges(input: &str) -> Vec<(usize, usize)> {
     parts
 }
 
-fn find_top_level_char(input: &str, target: u8) -> Option<usize> {
+pub(super) fn find_top_level_char(input: &str, target: u8) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
@@ -5173,9 +5262,9 @@ mod tests {
         MatchCaseStatement, MatchPattern, MatchStatement, MemberAccessStatement,
         MethodCallStatement, MethodKind, NamedBlockStatement, ParseOptions, ParsePythonVersion,
         ParseTargetPlatform, ReturnStatement, SourceFile, SourceKind, SyntaxStatement,
-        TypeAliasStatement, TypeExpr,
-        TypeIgnoreDirective, TypeParam, TypeParamKind, TypedDictLiteralEntry, UnsafeStatement,
-        ValueStatement, WithStatement, YieldStatement, parse, parse_with_options,
+        TypeAliasStatement, TypeExpr, TypeIgnoreDirective, TypeParam, TypeParamKind,
+        TypedDictLiteralEntry, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
+        parse, parse_with_options,
     };
     use std::path::PathBuf;
 
@@ -5223,7 +5312,9 @@ mod tests {
                 SyntaxStatement::FunctionDef(normalize_function_statement(statement))
             }
             SyntaxStatement::Import(statement) => SyntaxStatement::Import(statement),
-            SyntaxStatement::Value(statement) => SyntaxStatement::Value(normalize_value_statement(statement)),
+            SyntaxStatement::Value(statement) => {
+                SyntaxStatement::Value(normalize_value_statement(statement))
+            }
             SyntaxStatement::Call(statement) => {
                 SyntaxStatement::Call(normalize_call_statement(statement))
             }
@@ -5277,8 +5368,11 @@ mod tests {
             param.bound_expr = param.bound.as_deref().and_then(TypeExpr::parse);
         }
         if param.constraint_exprs.is_empty() {
-            param.constraint_exprs =
-                param.constraints.iter().filter_map(|constraint| TypeExpr::parse(constraint)).collect();
+            param.constraint_exprs = param
+                .constraints
+                .iter()
+                .filter_map(|constraint| TypeExpr::parse(constraint))
+                .collect();
         }
         if param.default_expr.is_none() {
             param.default_expr = param.default.as_deref().and_then(TypeExpr::parse);
@@ -5319,35 +5413,32 @@ mod tests {
             normalize_comprehension_option(statement.value_generator_comprehension);
         statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
         statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
-        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement.value_dict_entries =
+            normalize_typed_dict_literal_entries(statement.value_dict_entries);
         statement
     }
 
     fn normalize_call_statement(mut statement: CallStatement) -> CallStatement {
-        statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.arg_values =
+            statement.arg_values.into_iter().map(normalize_direct_expr).collect();
         statement.starred_arg_values =
             statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
         statement.keyword_arg_values =
             statement.keyword_arg_values.into_iter().map(normalize_direct_expr).collect();
-        statement.keyword_expansion_values = statement
-            .keyword_expansion_values
-            .into_iter()
-            .map(normalize_direct_expr)
-            .collect();
+        statement.keyword_expansion_values =
+            statement.keyword_expansion_values.into_iter().map(normalize_direct_expr).collect();
         statement
     }
 
     fn normalize_method_call_statement(mut statement: MethodCallStatement) -> MethodCallStatement {
-        statement.arg_values = statement.arg_values.into_iter().map(normalize_direct_expr).collect();
+        statement.arg_values =
+            statement.arg_values.into_iter().map(normalize_direct_expr).collect();
         statement.starred_arg_values =
             statement.starred_arg_values.into_iter().map(normalize_direct_expr).collect();
         statement.keyword_arg_values =
             statement.keyword_arg_values.into_iter().map(normalize_direct_expr).collect();
-        statement.keyword_expansion_values = statement
-            .keyword_expansion_values
-            .into_iter()
-            .map(normalize_direct_expr)
-            .collect();
+        statement.keyword_expansion_values =
+            statement.keyword_expansion_values.into_iter().map(normalize_direct_expr).collect();
         statement
     }
 
@@ -5363,7 +5454,8 @@ mod tests {
         statement.value_lambda = normalize_lambda_option(statement.value_lambda);
         statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
         statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
-        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement.value_dict_entries =
+            normalize_typed_dict_literal_entries(statement.value_dict_entries);
         statement
     }
 
@@ -5379,7 +5471,8 @@ mod tests {
         statement.value_lambda = normalize_lambda_option(statement.value_lambda);
         statement.value_list_elements = normalize_direct_expr_vec(statement.value_list_elements);
         statement.value_set_elements = normalize_direct_expr_vec(statement.value_set_elements);
-        statement.value_dict_entries = normalize_typed_dict_literal_entries(statement.value_dict_entries);
+        statement.value_dict_entries =
+            normalize_typed_dict_literal_entries(statement.value_dict_entries);
         statement
     }
 
@@ -5401,7 +5494,9 @@ mod tests {
         metadata.map(|metadata| Box::new(normalize_comprehension_metadata(*metadata)))
     }
 
-    fn normalize_comprehension_metadata(mut metadata: ComprehensionMetadata) -> ComprehensionMetadata {
+    fn normalize_comprehension_metadata(
+        mut metadata: ComprehensionMetadata,
+    ) -> ComprehensionMetadata {
         metadata.clauses = metadata
             .clauses
             .into_iter()
@@ -5434,9 +5529,8 @@ mod tests {
             entries
                 .into_iter()
                 .map(|mut entry| {
-                    entry.key_value = entry
-                        .key_value
-                        .map(|value| Box::new(normalize_direct_expr(*value)));
+                    entry.key_value =
+                        entry.key_value.map(|value| Box::new(normalize_direct_expr(*value)));
                     entry.value = normalize_direct_expr(entry.value);
                     entry
                 })
@@ -5463,7 +5557,8 @@ mod tests {
             normalize_comprehension_option(metadata.value_generator_comprehension);
         metadata.value_list_elements = normalize_direct_expr_vec(metadata.value_list_elements);
         metadata.value_set_elements = normalize_direct_expr_vec(metadata.value_set_elements);
-        metadata.value_dict_entries = normalize_typed_dict_literal_entries(metadata.value_dict_entries);
+        metadata.value_dict_entries =
+            normalize_typed_dict_literal_entries(metadata.value_dict_entries);
         metadata
     }
 
@@ -8313,7 +8408,7 @@ mod tests {
                         kind: ClassMemberKind::Field,
                         method_kind: None,
                         annotation: None,
-                    annotation_expr: None,
+                        annotation_expr: None,
                         value_type: None,
                         params: Vec::new(),
                         returns: None,
@@ -8395,14 +8490,14 @@ mod tests {
                     deprecation_message: None,
                     is_abstract_class: false,
                     members: vec![
-                    ClassMember {
-                        name: String::from("parse"),
-                        kind: ClassMemberKind::Overload,
-                        method_kind: Some(MethodKind::Instance),
-                        annotation: None,
-                        annotation_expr: None,
-                        value_type: None,
-                        params: vec![
+                        ClassMember {
+                            name: String::from("parse"),
+                            kind: ClassMemberKind::Overload,
+                            method_kind: Some(MethodKind::Instance),
+                            annotation: None,
+                            annotation_expr: None,
+                            value_type: None,
+                            params: vec![
                                 FunctionParam {
                                     name: String::from("self"),
                                     annotation: None,
@@ -8622,15 +8717,19 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Import(ImportStatement { bindings, line })
-                if *line == 3
-                    && bindings == &vec![ImportBinding {
-                        local_name: String::from("User"),
-                        source_path: String::from("app.models.User"),
-                    }]
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Import(ImportStatement { bindings, line })
+                    if *line == 3
+                        && bindings == &vec![ImportBinding {
+                            local_name: String::from("User"),
+                            source_path: String::from("app.models.User"),
+                        }]
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8645,15 +8744,19 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Import(ImportStatement { bindings, line })
-                if *line == 3
-                    && bindings == &vec![ImportBinding {
-                        local_name: String::from("User"),
-                        source_path: String::from("app.models.User"),
-                    }]
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Import(ImportStatement { bindings, line })
+                    if *line == 3
+                        && bindings == &vec![ImportBinding {
+                            local_name: String::from("User"),
+                            source_path: String::from("app.models.User"),
+                        }]
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8674,24 +8777,32 @@ mod tests {
         );
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Import(ImportStatement { bindings, line })
-                if *line == 3
-                    && bindings == &vec![ImportBinding {
-                        local_name: String::from("NewUser"),
-                        source_path: String::from("app.models.NewUser"),
-                    }]
-        )), "{:?}", tree.statements);
-        assert!(!tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Import(ImportStatement { bindings, line })
-                if *line == 5
-                    && bindings == &vec![ImportBinding {
-                        local_name: String::from("OldUser"),
-                        source_path: String::from("app.models.OldUser"),
-                    }]
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Import(ImportStatement { bindings, line })
+                    if *line == 3
+                        && bindings == &vec![ImportBinding {
+                            local_name: String::from("NewUser"),
+                            source_path: String::from("app.models.NewUser"),
+                        }]
+            )),
+            "{:?}",
+            tree.statements
+        );
+        assert!(
+            !tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Import(ImportStatement { bindings, line })
+                    if *line == 5
+                        && bindings == &vec![ImportBinding {
+                            local_name: String::from("OldUser"),
+                            source_path: String::from("app.models.OldUser"),
+                        }]
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8712,15 +8823,19 @@ mod tests {
         );
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Import(ImportStatement { bindings, line })
-                if *line == 3
-                    && bindings == &vec![ImportBinding {
-                        local_name: String::from("MacOnly"),
-                        source_path: String::from("app.models.MacOnly"),
-                    }]
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Import(ImportStatement { bindings, line })
+                    if *line == 3
+                        && bindings == &vec![ImportBinding {
+                            local_name: String::from("MacOnly"),
+                            source_path: String::from("app.models.MacOnly"),
+                        }]
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8738,11 +8853,15 @@ mod tests {
         );
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::ClassDef(NamedBlockStatement { name, line, .. })
-                if name == "User" && *line == 3
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::ClassDef(NamedBlockStatement { name, line, .. })
+                    if name == "User" && *line == 3
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8760,16 +8879,24 @@ mod tests {
         );
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
-                if name == "UserId" && value == "int" && *line == 3
-        )), "{:?}", tree.statements);
-        assert!(!tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
-                if name == "UserId" && value == "str" && *line == 5
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
+                    if name == "UserId" && value == "int" && *line == 3
+            )),
+            "{:?}",
+            tree.statements
+        );
+        assert!(
+            !tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, line, .. })
+                    if name == "UserId" && value == "str" && *line == 5
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -8820,8 +8947,8 @@ mod tests {
                             variadic: false,
                             keyword_variadic: false
                         }],
-                    returns: Some(String::from("None")),
-                    returns_expr: None,
+                        returns: Some(String::from("None")),
+                        returns_expr: None,
                         is_async: false,
                         is_override: false,
                         is_abstract_method: false,
@@ -9309,19 +9436,18 @@ mod tests {
                 && *line == 3
         )));
         assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::MethodCall(MethodCallStatement {
+                    owner_name,
+                    method,
+                    through_instance: false,
+                    line,
+                    ..
+                }) if owner_name == "box" && method == "get" && *line == 3
+            )),
+            "{:?}",
             tree.statements
-                .iter()
-                .any(|statement| matches!(
-                    statement,
-                    SyntaxStatement::MethodCall(MethodCallStatement {
-                        owner_name,
-                        method,
-                        through_instance: false,
-                        line,
-                        ..
-                    }) if owner_name == "box" && method == "get" && *line == 3
-                ))
-            , "{:?}", tree.statements
         );
     }
 
@@ -9335,30 +9461,38 @@ mod tests {
         });
 
         assert!(tree.diagnostics.is_empty());
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::Return(ReturnStatement {
-                owner_name,
-                value_method_owner_name,
-                value_method_name,
-                value_method_through_instance: true,
-                line,
-                ..
-            }) if owner_name == "build"
-                && value_method_owner_name.as_deref() == Some("make_box")
-                && value_method_name.as_deref() == Some("get")
-                && *line == 2
-        )), "{:?}", tree.statements);
-        assert!(tree.statements.iter().any(|statement| matches!(
-            statement,
-            SyntaxStatement::MethodCall(MethodCallStatement {
-                owner_name,
-                method,
-                through_instance: true,
-                line,
-                ..
-            }) if owner_name == "make_box" && method == "get" && *line == 2
-        )), "{:?}", tree.statements);
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::Return(ReturnStatement {
+                    owner_name,
+                    value_method_owner_name,
+                    value_method_name,
+                    value_method_through_instance: true,
+                    line,
+                    ..
+                }) if owner_name == "build"
+                    && value_method_owner_name.as_deref() == Some("make_box")
+                    && value_method_name.as_deref() == Some("get")
+                    && *line == 2
+            )),
+            "{:?}",
+            tree.statements
+        );
+        assert!(
+            tree.statements.iter().any(|statement| matches!(
+                statement,
+                SyntaxStatement::MethodCall(MethodCallStatement {
+                    owner_name,
+                    method,
+                    through_instance: true,
+                    line,
+                    ..
+                }) if owner_name == "make_box" && method == "get" && *line == 2
+            )),
+            "{:?}",
+            tree.statements
+        );
     }
 
     #[test]
@@ -10146,14 +10280,14 @@ mod tests {
                             name: String::from("make"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Class),
-                        annotation: None,
-                        annotation_expr: None,
-                        value_type: None,
-                            params: vec![FunctionParam {
-                                name: String::from("cls"),
                             annotation: None,
                             annotation_expr: None,
-                            has_default: false,
+                            value_type: None,
+                            params: vec![FunctionParam {
+                                name: String::from("cls"),
+                                annotation: None,
+                                annotation_expr: None,
+                                has_default: false,
                                 positional_only: false,
                                 keyword_only: false,
                                 variadic: false,
@@ -10175,9 +10309,9 @@ mod tests {
                             name: String::from("build"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Static),
-                        annotation: None,
-                        annotation_expr: None,
-                        value_type: None,
+                            annotation: None,
+                            annotation_expr: None,
+                            value_type: None,
                             params: Vec::new(),
                             returns: Some(String::from("None")),
                             returns_expr: None,
@@ -10195,9 +10329,9 @@ mod tests {
                             name: String::from("name"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::Property),
-                        annotation: None,
-                        annotation_expr: None,
-                        value_type: None,
+                            annotation: None,
+                            annotation_expr: None,
+                            value_type: None,
                             params: vec![FunctionParam {
                                 name: String::from("self"),
                                 annotation: None,
@@ -10208,8 +10342,8 @@ mod tests {
                                 variadic: false,
                                 keyword_variadic: false
                             }],
-                        returns: Some(String::from("str")),
-                        returns_expr: None,
+                            returns: Some(String::from("str")),
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,
@@ -10224,8 +10358,8 @@ mod tests {
                             name: String::from("name"),
                             kind: ClassMemberKind::Method,
                             method_kind: Some(MethodKind::PropertySetter),
-                                annotation: None,
-                                annotation_expr: None,
+                            annotation: None,
+                            annotation_expr: None,
                             value_type: None,
                             params: vec![
                                 FunctionParam {
@@ -10249,8 +10383,8 @@ mod tests {
                                     keyword_variadic: false
                                 },
                             ],
-                    returns: Some(String::from("None")),
-                    returns_expr: None,
+                            returns: Some(String::from("None")),
+                            returns_expr: None,
                             is_async: false,
                             is_override: false,
                             is_abstract_method: false,

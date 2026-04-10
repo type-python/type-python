@@ -1,4 +1,6 @@
-fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree {
+use super::*;
+
+pub(super) fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
     let type_ignore_directives = parse_type_ignore_directives(&source.text);
@@ -52,7 +54,13 @@ fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree 
                 &mut statements,
             );
             collect_nested_call_statements(&source.text, parsed.suite(), &mut statements);
-            collect_nested_method_call_statements(&source.text, parsed.suite(), None, None, &mut statements);
+            collect_nested_method_call_statements(
+                &source.text,
+                parsed.suite(),
+                None,
+                None,
+                &mut statements,
+            );
             collect_nested_member_access_statements(
                 &source.text,
                 parsed.suite(),
@@ -101,7 +109,7 @@ fn parse_python_source(source: SourceFile, options: ParseOptions) -> SyntaxTree 
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
 }
 
-fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxTree {
+pub(super) fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxTree {
     let mut statements = Vec::new();
     let mut diagnostics = DiagnosticReport::default();
     let type_ignore_directives = parse_type_ignore_directives(&source.text);
@@ -281,7 +289,7 @@ fn parse_typepython_source(source: SourceFile, options: ParseOptions) -> SyntaxT
     SyntaxTree { source, statements, type_ignore_directives, diagnostics }
 }
 
-fn parse_error_code(message: &str) -> &'static str {
+pub(super) fn parse_error_code(message: &str) -> &'static str {
     if matches!(
         message,
         "Invalid assignment target"
@@ -322,14 +330,14 @@ pub fn apply_type_ignore_directives(
     });
 }
 
-fn parse_type_ignore_directives(text: &str) -> Vec<TypeIgnoreDirective> {
+pub(super) fn parse_type_ignore_directives(text: &str) -> Vec<TypeIgnoreDirective> {
     text.lines()
         .enumerate()
         .filter_map(|(index, line)| parse_type_ignore_directive_line(index + 1, line))
         .collect()
 }
 
-fn parse_type_ignore_directive_line(line_number: usize, line: &str) -> Option<TypeIgnoreDirective> {
+pub(super) fn parse_type_ignore_directive_line(line_number: usize, line: &str) -> Option<TypeIgnoreDirective> {
     let (_, comment) = line.split_once('#')?;
     let comment = comment.trim();
     let remainder = comment.strip_prefix("type: ignore")?.trim();
@@ -349,7 +357,7 @@ fn parse_type_ignore_directive_line(line_number: usize, line: &str) -> Option<Ty
     Some(TypeIgnoreDirective { line: line_number, codes })
 }
 
-fn collect_invalid_annotation_placement_diagnostics(
+pub(super) fn collect_invalid_annotation_placement_diagnostics(
     path: &Path,
     source: &str,
     suite: &[Stmt],
@@ -403,7 +411,7 @@ fn collect_invalid_annotation_placement_diagnostics(
     }
 }
 
-fn collect_invalid_parameter_annotation_diagnostics(
+pub(super) fn collect_invalid_parameter_annotation_diagnostics(
     path: &Path,
     source: &str,
     parameters: &ruff_python_ast::Parameters,
@@ -436,7 +444,7 @@ fn collect_invalid_parameter_annotation_diagnostics(
     }
 }
 
-fn refresh_custom_statements_from_ast(
+pub(super) fn refresh_custom_statements_from_ast(
     path: &Path,
     normalized: &str,
     suite: &[Stmt],
@@ -640,7 +648,7 @@ fn refresh_custom_statements_from_ast(
     }
 }
 
-fn is_valid_interface_body_statement(statement: &Stmt) -> bool {
+pub(super) fn is_valid_interface_body_statement(statement: &Stmt) -> bool {
     match statement {
         Stmt::AnnAssign(_) | Stmt::Pass(_) => true,
         Stmt::Expr(expr) => {
@@ -651,14 +659,14 @@ fn is_valid_interface_body_statement(statement: &Stmt) -> bool {
     }
 }
 
-fn is_stub_like_function_body(body: &[Stmt]) -> bool {
+pub(super) fn is_stub_like_function_body(body: &[Stmt]) -> bool {
     body.iter().all(|statement| {
         matches!(statement, Stmt::Pass(_))
             || matches!(statement, Stmt::Expr(expr) if matches!(expr.value.as_ref(), Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)))
     })
 }
 
-fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
+pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
     let mut members = Vec::new();
 
     for statement in body {
@@ -755,7 +763,7 @@ fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<ClassMember> {
     members
 }
 
-fn ast_class_def_for_line<'a>(
+pub(super) fn ast_class_def_for_line<'a>(
     normalized: &str,
     suite: &'a [Stmt],
     line: usize,
@@ -770,7 +778,7 @@ fn ast_class_def_for_line<'a>(
     })
 }
 
-fn ast_function_def_for_line<'a>(
+pub(super) fn ast_function_def_for_line<'a>(
     normalized: &str,
     suite: &'a [Stmt],
     line: usize,
