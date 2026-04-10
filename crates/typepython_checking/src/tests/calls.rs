@@ -612,4 +612,3 @@ fn check_accepts_unique_module_symbols() {
 
     assert!(result.diagnostics.is_empty(), "{}", result.diagnostics.as_text());
 }
-

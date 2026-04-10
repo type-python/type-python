@@ -1,4 +1,3 @@
-
 use super::{
     EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary, StubCallableOverride,
     StubSealedClass, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,

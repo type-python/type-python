@@ -544,4 +544,3 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         &string_overload
     ));
 }
-

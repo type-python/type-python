@@ -621,10 +621,9 @@ fn collect_source_paths_reports_cross_root_collisions() {
     assert!(discovery.diagnostics.as_text().contains("TPY3002"));
 }
 
-
-mod verification;
-mod pipeline;
 mod migration;
+mod pipeline;
+mod verification;
 
 pub(super) fn temp_project_dir(test_name: &str) -> PathBuf {
     let unique = SystemTime::now()

@@ -9,6 +9,6 @@ mod binding_impl;
 mod tests;
 mod types;
 
-use binding_impl::*;
 pub use binding_impl::bind;
+use binding_impl::*;
 pub use types::*;

@@ -49,7 +49,10 @@ pub(super) fn statement_line(statement: &SyntaxStatement) -> usize {
     }
 }
 
-pub(super) fn normalize_typepython_statement_line(line: &str, statement: &SyntaxStatement) -> String {
+pub(super) fn normalize_typepython_statement_line(
+    line: &str,
+    statement: &SyntaxStatement,
+) -> String {
     match statement {
         SyntaxStatement::TypeAlias(statement) => {
             let indentation = leading_indent(line);
@@ -341,7 +344,10 @@ pub(super) fn formatting_syntax_kind(statement: &SyntaxStatement) -> Option<Form
     })
 }
 
-pub(super) fn normalize_typepython_formatting_line(line: &str, kind: FormattingSyntaxKind) -> String {
+pub(super) fn normalize_typepython_formatting_line(
+    line: &str,
+    kind: FormattingSyntaxKind,
+) -> String {
     let indentation = leading_indent(line);
     let trimmed = line.trim_start();
     match kind {

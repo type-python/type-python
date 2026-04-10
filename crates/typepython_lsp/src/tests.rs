@@ -1576,18 +1576,10 @@ fn did_open_background_mode_prewarms_support_index_cache() {
             "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
         }))
         .expect("didOpen should succeed in background mode");
-
-    let mut cache_warmed = false;
-    for _ in 0..200 {
-        if cache_path.is_file() {
-            cache_warmed = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
+    server.analysis.wait_for_support_index_prewarm();
 
     assert!(server.analysis.support_index_prewarm_started);
-    assert!(cache_warmed);
+    assert!(cache_path.is_file());
 }
 
 #[test]

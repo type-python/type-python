@@ -1450,9 +1450,7 @@ fn has_overload_import(source: &str) -> bool {
     })
 }
 
-pub(super) fn is_lowerable_named_block(
-    statement: &typepython_syntax::NamedBlockStatement,
-) -> bool {
+pub(super) fn is_lowerable_named_block(statement: &typepython_syntax::NamedBlockStatement) -> bool {
     statement.header_suffix.is_empty()
         || (statement.header_suffix.starts_with('(') && statement.header_suffix.ends_with(')'))
 }

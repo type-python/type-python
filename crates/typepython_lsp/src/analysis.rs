@@ -5,6 +5,7 @@ pub(super) struct AnalysisHost {
     pub(super) overlays: BTreeMap<PathBuf, OverlayDocument>,
     pub(super) cached_workspace: Option<IncrementalWorkspace>,
     pub(super) support_index_prewarm_started: bool,
+    support_index_prewarm_task: Option<std::thread::JoinHandle<()>>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -22,6 +23,7 @@ impl AnalysisHost {
             overlays: BTreeMap::new(),
             cached_workspace: None,
             support_index_prewarm_started: false,
+            support_index_prewarm_task: None,
         }
     }
 
@@ -106,12 +108,19 @@ impl AnalysisHost {
 
         self.support_index_prewarm_started = true;
         let config = self.config.clone();
-        std::thread::spawn(move || {
+        self.support_index_prewarm_task = Some(std::thread::spawn(move || {
             let _ = typepython_project::support_source_index(
                 &config,
                 &config.config.project.target_python,
             );
-        });
+        }));
+    }
+
+    #[cfg(test)]
+    pub(super) fn wait_for_support_index_prewarm(&mut self) {
+        if let Some(task) = self.support_index_prewarm_task.take() {
+            task.join().expect("support source index prewarm task should not panic");
+        }
     }
 
     pub(super) fn publish_diagnostics(

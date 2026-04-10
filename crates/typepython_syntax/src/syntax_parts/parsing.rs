@@ -337,7 +337,10 @@ pub(super) fn parse_type_ignore_directives(text: &str) -> Vec<TypeIgnoreDirectiv
         .collect()
 }
 
-pub(super) fn parse_type_ignore_directive_line(line_number: usize, line: &str) -> Option<TypeIgnoreDirective> {
+pub(super) fn parse_type_ignore_directive_line(
+    line_number: usize,
+    line: &str,
+) -> Option<TypeIgnoreDirective> {
     let (_, comment) = line.split_once('#')?;
     let comment = comment.trim();
     let remainder = comment.strip_prefix("type: ignore")?.trim();

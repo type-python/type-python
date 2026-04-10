@@ -909,4 +909,3 @@ fn check_allows_non_callable_decorator_transform_in_non_strict_mode() {
 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
-

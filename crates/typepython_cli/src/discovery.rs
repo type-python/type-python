@@ -7,16 +7,18 @@ use std::{
 use anyhow::Result;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::DiagnosticReport;
-pub(crate) use typepython_project::{DiscoveredSource, ExternalSupportRoot, normalize_glob_path};
+#[cfg(test)]
+pub(crate) use typepython_project::ExternalSupportRoot;
+pub(crate) use typepython_project::{DiscoveredSource, normalize_glob_path};
 use typepython_project::{
     bundled_stdlib_file_matches_target, bundled_stdlib_root,
     bundled_stdlib_sources_for_root as shared_bundled_stdlib_sources_for_root,
-    collect_project_sources, compile_patterns, configured_external_type_roots,
-    detect_module_collisions, module_collision_diagnostics,
-    python_type_roots_from_interpreter as shared_python_type_roots_from_interpreter,
-    sort_sources_by_type_authority, source_roots,
-    support_source_index as shared_support_source_index, walk_external_type_root,
+    collect_project_sources, compile_patterns, detect_module_collisions,
+    module_collision_diagnostics, sort_sources_by_type_authority, source_roots,
+    support_source_index as shared_support_source_index,
 };
+#[cfg(test)]
+use typepython_project::{configured_external_type_roots, walk_external_type_root};
 
 #[derive(Debug)]
 pub(crate) struct SourceDiscovery {
@@ -48,6 +50,7 @@ pub(crate) fn bundled_stdlib_sources(target_python: &str) -> Result<Vec<Discover
     shared_bundled_stdlib_sources_for_root(&cli_bundled_stdlib_root(), target_python)
 }
 
+#[cfg(test)]
 pub(crate) fn bundled_stdlib_sources_for_root(
     root: &Path,
     target_python: &str,
@@ -109,6 +112,7 @@ fn collect_stdlib_files(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
     let mut sources = Vec::new();
     for root in configured_external_type_roots(config)? {
@@ -119,8 +123,9 @@ pub(crate) fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<D
     Ok(sources)
 }
 
+#[cfg(test)]
 pub(crate) fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<ExternalSupportRoot> {
-    shared_python_type_roots_from_interpreter(interpreter)
+    typepython_project::python_type_roots_from_interpreter(interpreter)
 }
 
 pub(crate) fn support_source_index(

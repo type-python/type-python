@@ -1,4 +1,3 @@
-
 use super::{
     AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget, BoundTypeExpr,
     Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,

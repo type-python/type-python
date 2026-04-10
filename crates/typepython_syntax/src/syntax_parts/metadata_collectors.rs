@@ -976,7 +976,10 @@ pub(super) fn dataclass_transform_metadata_from_call(
     metadata
 }
 
-pub(super) fn is_dataclass_transform_expr(expr: &Expr, import_bindings: &BTreeMap<String, String>) -> bool {
+pub(super) fn is_dataclass_transform_expr(
+    expr: &Expr,
+    import_bindings: &BTreeMap<String, String>,
+) -> bool {
     decorator_target_name(expr)
         .map(|name| normalize_imported_name(&name, import_bindings))
         .is_some_and(|name| {
@@ -1099,7 +1102,10 @@ pub(super) fn collect_import_bindings(suite: &[Stmt]) -> BTreeMap<String, String
     bindings
 }
 
-pub(super) fn normalize_imported_name(name: &str, import_bindings: &BTreeMap<String, String>) -> String {
+pub(super) fn normalize_imported_name(
+    name: &str,
+    import_bindings: &BTreeMap<String, String>,
+) -> String {
     let mut parts = name.split('.');
     let head = parts.next().unwrap_or(name);
     let tail = parts.collect::<Vec<_>>();

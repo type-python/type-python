@@ -304,7 +304,11 @@ pub(super) fn is_custom_guard_filtered_statement(statement: &SyntaxStatement) ->
     )
 }
 
-pub(super) fn evaluate_guarded_import_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+pub(super) fn evaluate_guarded_import_expr(
+    source: &str,
+    expr: &Expr,
+    options: ParseOptions,
+) -> Option<bool> {
     if is_type_checking_guard_expr(expr) {
         return Some(true);
     }
@@ -388,7 +392,11 @@ pub(super) fn parse_small_python_version_component(number: &ruff_python_ast::Num
     }
 }
 
-pub(super) fn evaluate_platform_guard_expr(source: &str, expr: &Expr, options: ParseOptions) -> Option<bool> {
+pub(super) fn evaluate_platform_guard_expr(
+    source: &str,
+    expr: &Expr,
+    options: ParseOptions,
+) -> Option<bool> {
     let platform = options.target_platform?;
     let Expr::Compare(compare) = expr else {
         return None;
@@ -848,7 +856,10 @@ pub(super) fn if_false_end_line(source: &str, stmt: &ruff_python_ast::StmtIf) ->
     stmt.elif_else_clauses.last().and_then(|clause| suite_end_line_optional(source, &clause.body))
 }
 
-pub(super) fn for_each_if_false_suite(stmt: &ruff_python_ast::StmtIf, mut callback: impl FnMut(&[Stmt])) {
+pub(super) fn for_each_if_false_suite(
+    stmt: &ruff_python_ast::StmtIf,
+    mut callback: impl FnMut(&[Stmt]),
+) {
     for clause in &stmt.elif_else_clauses {
         callback(&clause.body);
     }
@@ -887,7 +898,11 @@ pub(super) fn for_each_nested_suite(stmt: &Stmt, mut callback: impl FnMut(&[Stmt
     }
 }
 
-pub(super) fn extract_call_statement(source: &str, expr: &Expr, line: usize) -> Option<SyntaxStatement> {
+pub(super) fn extract_call_statement(
+    source: &str,
+    expr: &Expr,
+    line: usize,
+) -> Option<SyntaxStatement> {
     let Expr::Call(call) = expr else {
         return None;
     };
@@ -2838,7 +2853,10 @@ pub(super) fn extract_match_statement(
     }))
 }
 
-pub(super) fn extract_match_patterns(source: &str, pattern: &ruff_python_ast::Pattern) -> Vec<MatchPattern> {
+pub(super) fn extract_match_patterns(
+    source: &str,
+    pattern: &ruff_python_ast::Pattern,
+) -> Vec<MatchPattern> {
     use ruff_python_ast::Pattern;
 
     if pattern.is_wildcard() {
@@ -2980,7 +2998,11 @@ pub(super) fn extract_except_handler_statement(
     }))
 }
 
-pub(super) fn collect_calls_from_suite(source: &str, suite: &[Stmt], statements: &mut Vec<SyntaxStatement>) {
+pub(super) fn collect_calls_from_suite(
+    source: &str,
+    suite: &[Stmt],
+    statements: &mut Vec<SyntaxStatement>,
+) {
     for stmt in suite {
         let line = offset_to_line_column(source, stmt.range().start().to_usize()).0;
         if let Some(call) =
@@ -3863,7 +3885,10 @@ pub(super) fn extract_function_params(
         .collect()
 }
 
-pub(super) fn extract_class_bases(source: &str, arguments: &ruff_python_ast::Arguments) -> Vec<String> {
+pub(super) fn extract_class_bases(
+    source: &str,
+    arguments: &ruff_python_ast::Arguments,
+) -> Vec<String> {
     arguments
         .args
         .iter()
@@ -3947,7 +3972,9 @@ pub(super) fn is_final_decorator(decorator: &ruff_python_ast::Decorator) -> bool
     }
 }
 
-pub(super) fn deprecated_decorator_message(decorators: &[ruff_python_ast::Decorator]) -> Option<String> {
+pub(super) fn deprecated_decorator_message(
+    decorators: &[ruff_python_ast::Decorator],
+) -> Option<String> {
     decorators.iter().find_map(deprecated_decorator_arg)
 }
 
@@ -4109,7 +4136,10 @@ pub(super) fn parse_extension_statement(
     None
 }
 
-pub(super) fn strip_soft_keyword<'source>(line: &'source str, keyword: &str) -> Option<&'source str> {
+pub(super) fn strip_soft_keyword<'source>(
+    line: &'source str,
+    keyword: &str,
+) -> Option<&'source str> {
     let rest = line.strip_prefix(keyword)?;
     match rest.chars().next() {
         Some(character) if character == '_' || character.is_ascii_alphanumeric() => None,
@@ -4756,7 +4786,9 @@ pub(super) fn annotated_lambda_site_at(line: usize, column: usize) -> Option<Ann
     })
 }
 
-pub(super) fn normalize_annotated_lambda_source(source: &str) -> (String, Vec<AnnotatedLambdaSite>) {
+pub(super) fn normalize_annotated_lambda_source(
+    source: &str,
+) -> (String, Vec<AnnotatedLambdaSite>) {
     let mut normalized = source.as_bytes().to_vec();
     let mut sites = Vec::new();
     let mut search_from = 0usize;
@@ -4926,7 +4958,12 @@ pub(super) fn parse_annotated_lambda_at(
     })
 }
 
-pub(super) fn find_matching_delimiter(source: &str, open_index: usize, open: u8, close: u8) -> Option<usize> {
+pub(super) fn find_matching_delimiter(
+    source: &str,
+    open_index: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut depth = 0usize;
     let mut index = open_index;

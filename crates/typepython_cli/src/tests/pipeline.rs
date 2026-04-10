@@ -516,4 +516,3 @@ fn compile_runtime_bytecode_uses_configured_python_executable() {
     assert!(log.contains("__init__.py"));
     assert!(log.contains("__pycache__"));
 }
-

@@ -665,8 +665,7 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
     }
 }
 
-
-mod typed_dict;
-mod semantic;
-mod calls;
 mod advanced;
+mod calls;
+mod semantic;
+mod typed_dict;
