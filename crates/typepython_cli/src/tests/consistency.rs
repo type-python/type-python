@@ -58,16 +58,15 @@ fn lsp_session_messages(config: &typepython_config::ConfigHandle, open_path: &Pa
     parse_lsp_output(&output)
 }
 
-fn lsp_diagnostic_codes(config: &typepython_config::ConfigHandle, open_path: &Path) -> BTreeSet<String> {
+fn lsp_diagnostic_codes(
+    config: &typepython_config::ConfigHandle,
+    open_path: &Path,
+) -> BTreeSet<String> {
     lsp_session_messages(config, open_path)
         .into_iter()
         .filter(|message| message.get("method") == Some(&json!("textDocument/publishDiagnostics")))
         .flat_map(|message| {
-            message["params"]["diagnostics"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
+            message["params"]["diagnostics"].as_array().cloned().unwrap_or_default().into_iter()
         })
         .filter_map(|diagnostic| diagnostic.get("code").and_then(Value::as_str).map(str::to_owned))
         .collect()
@@ -114,7 +113,8 @@ fn cli_and_lsp_report_same_codes_for_module_collisions() {
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
         let open_path = project_dir.join("src/app.tpy");
-        fs::write(&open_path, "def build() -> int:\n    return 1\n").expect("test setup should succeed");
+        fs::write(&open_path, "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
         fs::write(project_dir.join("src/app.py"), "def build() -> int:\n    return 1\n")
             .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");

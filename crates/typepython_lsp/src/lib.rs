@@ -23,13 +23,13 @@ use typepython_incremental::{
     snapshot_diff_modules,
 };
 use typepython_project::{DiscoveredSource, SupportSourceIndex};
+#[cfg(test)]
+use typepython_syntax::SourceKind;
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
     SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
     prepare_syntax_tree_for_external_formatter,
 };
-#[cfg(test)]
-use typepython_syntax::SourceKind;
 use url::Url;
 
 #[derive(Debug, Error)]

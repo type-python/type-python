@@ -1354,7 +1354,8 @@ mod tests {
 
     #[test]
     fn loads_all_supported_typepython_toml_configuration_fields() {
-        let project_dir = temp_project_dir("loads_all_supported_typepython_toml_configuration_fields");
+        let project_dir =
+            temp_project_dir("loads_all_supported_typepython_toml_configuration_fields");
         let executable = write_fake_python(&project_dir, "3.11");
         fs::write(
             project_dir.join("typepython.toml"),

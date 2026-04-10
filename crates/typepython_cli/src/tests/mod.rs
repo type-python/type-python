@@ -621,9 +621,9 @@ fn collect_source_paths_reports_cross_root_collisions() {
     assert!(discovery.diagnostics.as_text().contains("TPY3002"));
 }
 
+mod consistency;
 mod migration;
 mod pipeline;
-mod consistency;
 mod verification;
 
 pub(super) fn temp_project_dir(test_name: &str) -> PathBuf {
