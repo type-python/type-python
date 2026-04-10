@@ -6,8 +6,8 @@ use super::discovery::{
 use super::migration::{build_migration_report, emit_migration_stubs};
 use super::pipeline::{
     build_diagnostics, clean_project, compile_runtime_bytecode, format_watch_rebuild_note,
-    load_syntax_trees, run_pipeline, should_emit_build_outputs, watch_targets,
-    write_incremental_snapshot,
+    load_syntax_trees, run_build_like_command, run_pipeline, should_emit_build_outputs,
+    watch_targets, write_incremental_snapshot,
 };
 use super::verification::{
     SuppliedArtifactKind, SuppliedVerifyArtifact, run_verify, supplied_verify_artifacts,
@@ -31,7 +31,6 @@ use std::{
 use typepython_binding::bind;
 use typepython_checking::check as check_graph;
 use typepython_config::load;
-use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, write_runtime_outputs};
 use typepython_graph::build as build_graph;
 use typepython_incremental::IncrementalState;
@@ -3155,8 +3154,8 @@ fn run_pipeline_ignores_private_incomplete_surface_when_required() {
 }
 
 #[test]
-fn run_pipeline_stops_before_lowering_when_checker_fails() {
-    let project_dir = temp_project_dir("run_pipeline_stops_before_lowering_when_checker_fails");
+fn run_pipeline_keeps_lowering_when_checker_fails() {
+    let project_dir = temp_project_dir("run_pipeline_keeps_lowering_when_checker_fails");
     let snapshot = {
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
@@ -3169,9 +3168,108 @@ fn run_pipeline_stops_before_lowering_when_checker_fails() {
     remove_temp_project_dir(&project_dir);
 
     assert!(snapshot.diagnostics.has_errors());
+    assert!(!snapshot.emit_blocked_by_pipeline);
+    assert_eq!(snapshot.lowered_modules.len(), 1);
+    assert_eq!(snapshot.emit_plan.len(), 1);
+    assert!(snapshot.tracked_modules > 0);
+}
+
+#[test]
+fn run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed() {
+    let project_dir =
+        temp_project_dir("run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed");
+    let snapshot = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            "class User(TypedDict):\n    id: int\n\ntypealias UserPublic = Pick[User, \"name\"]\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        run_pipeline(&config).expect("test setup should succeed")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(snapshot.diagnostics.has_errors());
+    assert!(snapshot.emit_blocked_by_pipeline);
     assert!(snapshot.lowered_modules.is_empty());
     assert!(snapshot.emit_plan.is_empty());
-    assert_eq!(snapshot.tracked_modules, 0);
+}
+
+#[test]
+fn run_build_like_command_emits_outputs_when_checker_fails_and_emit_is_allowed() {
+    let project_dir = temp_project_dir(
+        "run_build_like_command_emits_outputs_when_checker_fails_and_emit_is_allowed",
+    );
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app.py");
+        let stub_path = project_dir.join(".typepython/build/app.pyi");
+
+        let exit_code =
+            run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+                .expect("build should run to completion");
+
+        (exit_code, runtime_path.exists(), stub_path.exists())
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (exit_code, runtime_exists, stub_exists) = result;
+    assert_eq!(exit_code, ExitCode::FAILURE);
+    assert!(runtime_exists);
+    assert!(stub_exists);
+}
+
+#[test]
+fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
+    let project_dir =
+        temp_project_dir("run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed");
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
+
+        let verify_result = run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: Vec::new(),
+        })
+        .expect("verify should run to completion");
+
+        (
+            verify_result,
+            project_dir.join(".typepython/build/app.py").exists(),
+            project_dir.join(".typepython/build/app.pyi").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (verify_result, runtime_exists, stub_exists) = result;
+    assert_eq!(verify_result, ExitCode::FAILURE);
+    assert!(runtime_exists);
+    assert!(stub_exists);
 }
 
 #[test]
@@ -3335,17 +3433,19 @@ fn run_pipeline_invalidates_cache_when_public_summary_changes() {
 fn build_diagnostics_adds_emit_blocked_error_when_configured() {
     let project_dir = temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
     let rendered = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
             .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+        let snapshot = run_pipeline(&config).expect("test setup should succeed");
 
-        build_diagnostics(&config, &diagnostics).as_text()
+        build_diagnostics(&config, &snapshot).as_text()
     };
     remove_temp_project_dir(&project_dir);
 
-    assert!(rendered.contains("TPY4004"));
+    assert!(rendered.contains("build"));
     assert!(rendered.contains("TPY5002"));
 }
 
@@ -3353,16 +3453,18 @@ fn build_diagnostics_adds_emit_blocked_error_when_configured() {
 fn should_emit_build_outputs_respects_no_emit_on_error() {
     let project_dir = temp_project_dir("should_emit_build_outputs_respects_no_emit_on_error");
     let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(
             project_dir.join("typepython.toml"),
             "[project]\nsrc = [\"src\"]\n\n[emit]\nno_emit_on_error = false\n",
         )
         .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return \"oops\"\n")
+            .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");
-        let mut diagnostics = DiagnosticReport::default();
-        diagnostics.push(Diagnostic::error("TPY4004", "duplicate declaration"));
+        let snapshot = run_pipeline(&config).expect("test setup should succeed");
 
-        should_emit_build_outputs(&config, &diagnostics)
+        should_emit_build_outputs(&config, &snapshot)
     };
     remove_temp_project_dir(&project_dir);
 

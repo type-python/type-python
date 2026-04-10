@@ -43,23 +43,28 @@ pub(crate) struct PipelineSnapshot {
     pub(crate) incremental: IncrementalState,
     pub(crate) tracked_modules: usize,
     pub(crate) discovered_sources: usize,
+    pub(crate) emit_blocked_by_pipeline: bool,
     pub(crate) diagnostics: DiagnosticReport,
 }
 
 pub(crate) fn should_emit_build_outputs(
     config: &ConfigHandle,
-    diagnostics: &DiagnosticReport,
+    snapshot: &PipelineSnapshot,
 ) -> bool {
-    !diagnostics.has_errors() || !config.config.emit.no_emit_on_error
+    !snapshot.emit_blocked_by_pipeline
+        && (!snapshot.diagnostics.has_errors() || !config.config.emit.no_emit_on_error)
 }
 
 pub(crate) fn build_diagnostics(
     config: &ConfigHandle,
-    diagnostics: &DiagnosticReport,
+    snapshot: &PipelineSnapshot,
 ) -> DiagnosticReport {
-    let mut build_diagnostics = diagnostics.clone();
+    let mut build_diagnostics = snapshot.diagnostics.clone();
 
-    if diagnostics.has_errors() && config.config.emit.no_emit_on_error {
+    if snapshot.diagnostics.has_errors()
+        && !snapshot.emit_blocked_by_pipeline
+        && config.config.emit.no_emit_on_error
+    {
         build_diagnostics.push(Diagnostic::error(
             "TPY5002",
             format!("emit blocked by `emit.no_emit_on_error` for {}", config.config_dir.display()),
@@ -104,8 +109,8 @@ pub(crate) fn run_build_like_command(
     ensure_output_dirs(config)?;
 
     let snapshot = run_pipeline(config)?;
-    let mut diagnostics = build_diagnostics(config, &snapshot.diagnostics);
-    if should_emit_build_outputs(config, &snapshot.diagnostics) {
+    let mut diagnostics = build_diagnostics(config, &snapshot);
+    if should_emit_build_outputs(config, &snapshot) {
         let materialize_notes = match materialize_build_outputs(config, &snapshot) {
             Ok(runtime_summary) => runtime_summary,
             Err(error) if error.to_string().contains("TPY5001") => {
@@ -607,6 +612,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: discovery.sources.len(),
+            emit_blocked_by_pipeline: true,
             diagnostics: discovery.diagnostics,
         });
     }
@@ -645,6 +651,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
             incremental: IncrementalState::default(),
             tracked_modules: 0,
             discovered_sources: source_paths.len(),
+            emit_blocked_by_pipeline: true,
             diagnostics: parse_diagnostics,
         });
     }
@@ -665,18 +672,6 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     .diagnostics;
     diagnostics = filter_project_diagnostics(&diagnostics, &source_paths);
     apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-
-    if diagnostics.has_errors() {
-        return Ok(PipelineSnapshot {
-            lowered_modules: Vec::new(),
-            emit_plan: Vec::new(),
-            stub_contexts: BTreeMap::new(),
-            incremental: IncrementalState::default(),
-            tracked_modules: 0,
-            discovered_sources: source_paths.len(),
-            diagnostics,
-        });
-    }
 
     let stdlib_snapshot =
         Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
@@ -712,6 +707,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
                 incremental,
                 tracked_modules,
                 discovered_sources: source_paths.len(),
+                emit_blocked_by_pipeline: false,
                 diagnostics,
             });
         }
@@ -723,14 +719,16 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         syntax_trees.iter().map(|tree| lower_with_options(tree, &lowering_options)).collect();
     let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
     if lowering_diagnostics.has_errors() {
+        diagnostics.diagnostics.extend(lowering_diagnostics.diagnostics);
         return Ok(PipelineSnapshot {
             lowered_modules: Vec::new(),
             emit_plan: Vec::new(),
             stub_contexts: BTreeMap::new(),
-            incremental: IncrementalState::default(),
-            tracked_modules: 0,
+            incremental,
+            tracked_modules,
             discovered_sources: source_paths.len(),
-            diagnostics: lowering_diagnostics,
+            emit_blocked_by_pipeline: true,
+            diagnostics,
         });
     }
 
@@ -746,17 +744,6 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         )
         .diagnostics,
     );
-    if diagnostics.has_errors() {
-        return Ok(PipelineSnapshot {
-            lowered_modules: Vec::new(),
-            emit_plan: Vec::new(),
-            stub_contexts: BTreeMap::new(),
-            incremental: IncrementalState::default(),
-            tracked_modules: 0,
-            discovered_sources: source_paths.len(),
-            diagnostics,
-        });
-    }
     let emit_plan = plan_emits(config, &lowered_modules);
 
     Ok(PipelineSnapshot {
@@ -766,6 +753,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         incremental,
         tracked_modules,
         discovered_sources: source_paths.len(),
+        emit_blocked_by_pipeline: false,
         diagnostics,
     })
 }

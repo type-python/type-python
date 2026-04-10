@@ -21,7 +21,8 @@ use zip::ZipArchive;
 use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
-    ensure_output_dirs, materialize_build_outputs, py_typed_package_roots, run_pipeline,
+    build_diagnostics, ensure_output_dirs, materialize_build_outputs, py_typed_package_roots,
+    run_pipeline, should_emit_build_outputs,
 };
 use crate::{
     CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
@@ -78,10 +79,8 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     let mut notes = vec![String::from(
         "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
     )];
-    let diagnostics = if snapshot.diagnostics.has_errors() {
-        snapshot.diagnostics.clone()
-    } else {
-        let mut diagnostics = DiagnosticReport::default();
+    let mut diagnostics = build_diagnostics(&config, &snapshot);
+    if should_emit_build_outputs(&config, &snapshot) {
         match materialize_build_outputs(&config, &snapshot) {
             Ok(materialize_notes) => notes.extend(materialize_notes),
             Err(error) if error.to_string().contains("TPY5001") => {
@@ -96,31 +95,30 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
                 });
             }
         }
-        if !diagnostics.has_errors() {
-            diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
-        }
-        if !diagnostics.has_errors() {
-            diagnostics.diagnostics.extend(
-                verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
-            );
-        }
-        if !diagnostics.has_errors() {
-            diagnostics.diagnostics.extend(
-                verify_packaged_artifacts(
-                    &config,
-                    &snapshot.emit_plan,
-                    &supplied_verify_artifacts(&args),
-                )
-                .diagnostics,
-            );
-        }
-        if !diagnostics.has_errors() {
-            diagnostics
-                .diagnostics
-                .extend(verify_external_checkers(&config, &args.checkers).diagnostics);
-        }
+    }
+    if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
+        diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
+    }
+    if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
         diagnostics
-    };
+            .diagnostics
+            .extend(verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics);
+    }
+    if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
+        diagnostics.diagnostics.extend(
+            verify_packaged_artifacts(
+                &config,
+                &snapshot.emit_plan,
+                &supplied_verify_artifacts(&args),
+            )
+            .diagnostics,
+        );
+    }
+    if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
+        diagnostics
+            .diagnostics
+            .extend(verify_external_checkers(&config, &args.checkers).diagnostics);
+    }
 
     let supplied_artifact_count = args.wheels.len() + args.sdists.len();
     if supplied_artifact_count > 0 {
