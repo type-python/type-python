@@ -161,6 +161,7 @@ pub fn plan_emits_for_sources(
 pub fn write_runtime_outputs(
     artifacts: &[EmitArtifact],
     modules: &[LoweredModule],
+    write_py_typed: bool,
     runtime_validators: bool,
     stub_contexts: Option<&BTreeMap<PathBuf, TypePythonStubContext>>,
 ) -> Result<RuntimeWriteSummary, io::Error> {
@@ -234,9 +235,11 @@ pub fn write_runtime_outputs(
     }
 
     let mut py_typed_written = 0usize;
-    for package_root in package_roots {
-        fs::write(package_root.join("py.typed"), "")?;
-        py_typed_written += 1;
+    if write_py_typed {
+        for package_root in package_roots {
+            fs::write(package_root.join("py.typed"), "")?;
+            py_typed_written += 1;
+        }
     }
 
     Ok(RuntimeWriteSummary { runtime_files_written, stub_files_written, py_typed_written })
@@ -3110,7 +3113,7 @@ mod tests {
             },
         ];
 
-        let summary = write_runtime_outputs(&artifacts, &modules, false, None)
+        let summary = write_runtime_outputs(&artifacts, &modules, true, false, None)
             .expect("runtime outputs should be written");
         let runtime_init = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime __init__.py should be readable");
@@ -3215,7 +3218,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        write_runtime_outputs(&artifacts, &modules, true, None)
+        write_runtime_outputs(&artifacts, &modules, true, true, None)
             .expect("runtime validator outputs should be written");
         let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime validator file should be readable");
@@ -3249,7 +3252,7 @@ mod tests {
             runtime_path: Some(temp_dir.join("build/app/__init__.py")),
             stub_path: None,
         }];
-        write_runtime_outputs(&artifacts, &modules, false, None)
+        write_runtime_outputs(&artifacts, &modules, true, false, None)
             .expect("runtime outputs should be written without validators");
         let runtime = fs::read_to_string(temp_dir.join("build/app/__init__.py"))
             .expect("runtime file should be readable");
@@ -3276,7 +3279,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        let result = write_runtime_outputs(&artifacts, &modules, false, None);
+        let result = write_runtime_outputs(&artifacts, &modules, true, false, None);
         remove_temp_dir(&temp_dir);
 
         let error = result.expect_err("invalid lowered python should fail stub generation");
@@ -3302,7 +3305,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        let summary = write_runtime_outputs(&artifacts, &modules, false, None)
+        let summary = write_runtime_outputs(&artifacts, &modules, true, false, None)
             .expect("stub-only package outputs should be written");
         let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
             .expect("stub-only __init__.pyi should be readable");
@@ -3314,6 +3317,34 @@ mod tests {
         assert_eq!(summary.py_typed_written, 1);
         assert_eq!(stub, "def helper() -> int: ...\n");
         assert_eq!(py_typed, "");
+    }
+
+    #[test]
+    fn write_runtime_outputs_skips_py_typed_when_disabled() {
+        let temp_dir = temp_dir("write_runtime_outputs_skips_py_typed_when_disabled");
+        let modules = vec![LoweredModule {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            source_kind: SourceKind::TypePython,
+            python_source: String::from("def build() -> int:\n    return 1\n"),
+            source_map: vec![SourceMapEntry { original_line: 1, lowered_line: 1 }],
+            span_map: Vec::new(),
+            required_imports: Vec::new(),
+            metadata: typepython_lowering::LoweringMetadata::default(),
+        }];
+        let artifacts = vec![EmitArtifact {
+            source_path: PathBuf::from("src/app/__init__.tpy"),
+            runtime_path: Some(temp_dir.join("build/app/__init__.py")),
+            stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
+        }];
+
+        let summary = write_runtime_outputs(&artifacts, &modules, false, false, None)
+            .expect("runtime outputs should be written without py.typed");
+        let py_typed_path = temp_dir.join("build/app/py.typed");
+        let py_typed_exists = py_typed_path.exists();
+        remove_temp_dir(&temp_dir);
+
+        assert_eq!(summary.py_typed_written, 0);
+        assert!(!py_typed_exists);
     }
 
     #[test]
@@ -3336,7 +3367,7 @@ mod tests {
             stub_path: Some(temp_dir.join("build/app/__init__.pyi")),
         }];
 
-        write_runtime_outputs(&artifacts, &modules, false, None)
+        write_runtime_outputs(&artifacts, &modules, true, false, None)
             .expect("multiline runtime outputs should be written");
         let stub = fs::read_to_string(temp_dir.join("build/app/__init__.pyi"))
             .expect("multiline stub should be readable");

@@ -3234,6 +3234,40 @@ fn run_build_like_command_emits_outputs_when_checker_fails_and_emit_is_allowed()
 }
 
 #[test]
+fn run_build_like_command_skips_py_typed_when_disabled() {
+    let project_dir = temp_project_dir("run_build_like_command_skips_py_typed_when_disabled");
+    let result = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nwrite_py_typed = false\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/__init__.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let exit_code =
+            run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+                .expect("build should run to completion");
+
+        (
+            exit_code,
+            project_dir.join(".typepython/build/app/__init__.py").exists(),
+            project_dir.join(".typepython/build/app/__init__.pyi").exists(),
+            project_dir.join(".typepython/build/app/py.typed").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (exit_code, runtime_exists, stub_exists, py_typed_exists) = result;
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(runtime_exists);
+    assert!(stub_exists);
+    assert!(!py_typed_exists);
+}
+
+#[test]
 fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed");
@@ -3373,6 +3407,7 @@ fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
         write_runtime_outputs(
             &first.emit_plan,
             &first.lowered_modules,
+            config.config.emit.write_py_typed,
             false,
             Some(&first.stub_contexts),
         )
@@ -3408,6 +3443,7 @@ fn run_pipeline_invalidates_cache_when_public_summary_changes() {
         write_runtime_outputs(
             &first.emit_plan,
             &first.lowered_modules,
+            config.config.emit.write_py_typed,
             false,
             Some(&first.stub_contexts),
         )

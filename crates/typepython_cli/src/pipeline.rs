@@ -163,6 +163,7 @@ pub(crate) fn materialize_build_outputs(
     let runtime_summary = write_runtime_outputs(
         &snapshot.emit_plan,
         &snapshot.lowered_modules,
+        config.config.emit.write_py_typed,
         config.config.emit.runtime_validators,
         Some(&snapshot.stub_contexts),
     )?;
