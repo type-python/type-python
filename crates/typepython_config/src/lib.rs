@@ -1353,6 +1353,200 @@ mod tests {
     }
 
     #[test]
+    fn loads_all_supported_typepython_toml_configuration_fields() {
+        let project_dir = temp_project_dir("loads_all_supported_typepython_toml_configuration_fields");
+        let executable = write_fake_python(&project_dir, "3.11");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                concat!(
+                    "[project]\n",
+                    "src = [\"pkg\", \"vendor\"]\n",
+                    "include = [\"pkg/**/*.tpy\", \"vendor/**/*.py\"]\n",
+                    "exclude = [\"pkg/generated/**\"]\n",
+                    "root_dir = \"pkg\"\n",
+                    "out_dir = \".cache/build-out\"\n",
+                    "cache_dir = \".cache/state\"\n",
+                    "target_python = \"3.11\"\n\n",
+                    "[resolution]\n",
+                    "type_roots = [\"stubs\", \"more-stubs\"]\n",
+                    "python_executable = \"{}\"\n\n",
+                    "[format]\n",
+                    "command = [\"python3\", \"{{workspace_root}}/tools/format.py\", \"{{file}}\"]\n",
+                    "line_length = 88\n\n",
+                    "[emit]\n",
+                    "emit_pyi = false\n",
+                    "emit_pyc = true\n",
+                    "write_py_typed = false\n",
+                    "no_emit_on_error = false\n",
+                    "runtime_validators = true\n\n",
+                    "[typing]\n",
+                    "profile = \"migration\"\n",
+                    "strict = true\n",
+                    "strict_nulls = false\n",
+                    "imports = \"dynamic\"\n",
+                    "no_implicit_dynamic = false\n",
+                    "warn_unsafe = false\n",
+                    "enable_sealed_exhaustiveness = false\n",
+                    "report_deprecated = \"error\"\n",
+                    "require_explicit_overrides = true\n",
+                    "require_known_public_types = true\n",
+                    "infer_passthrough = true\n",
+                    "conditional_returns = true\n\n",
+                    "[watch]\n",
+                    "debounce_ms = 125\n"
+                ),
+                executable.display()
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected full typepython.toml config to load");
+        assert_eq!(handle.config.project.src, vec![String::from("pkg"), String::from("vendor")]);
+        assert_eq!(
+            handle.config.project.include,
+            vec![String::from("pkg/**/*.tpy"), String::from("vendor/**/*.py")]
+        );
+        assert_eq!(handle.config.project.exclude, vec![String::from("pkg/generated/**")]);
+        assert_eq!(handle.config.project.root_dir, "pkg");
+        assert_eq!(handle.config.project.out_dir, ".cache/build-out");
+        assert_eq!(handle.config.project.cache_dir, ".cache/state");
+        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(
+            handle.config.resolution.type_roots,
+            vec![String::from("stubs"), String::from("more-stubs")]
+        );
+        assert_eq!(
+            handle.config.resolution.python_executable.as_deref(),
+            Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            handle.config.format.command,
+            Some(vec![
+                String::from("python3"),
+                String::from("{workspace_root}/tools/format.py"),
+                String::from("{file}"),
+            ])
+        );
+        assert_eq!(handle.config.format.line_length, 88);
+        assert!(!handle.config.emit.emit_pyi);
+        assert!(handle.config.emit.emit_pyc);
+        assert!(!handle.config.emit.write_py_typed);
+        assert!(!handle.config.emit.no_emit_on_error);
+        assert!(handle.config.emit.runtime_validators);
+        assert_eq!(handle.config.typing.profile, Some(super::TypingProfile::Migration));
+        assert!(handle.config.typing.strict);
+        assert!(!handle.config.typing.strict_nulls);
+        assert_eq!(handle.config.typing.imports, super::ImportFallback::Dynamic);
+        assert!(!handle.config.typing.no_implicit_dynamic);
+        assert!(!handle.config.typing.warn_unsafe);
+        assert!(!handle.config.typing.enable_sealed_exhaustiveness);
+        assert_eq!(handle.config.typing.report_deprecated, super::DiagnosticLevel::Error);
+        assert!(handle.config.typing.require_explicit_overrides);
+        assert!(handle.config.typing.require_known_public_types);
+        assert!(handle.config.typing.infer_passthrough);
+        assert!(handle.config.typing.conditional_returns);
+        assert_eq!(handle.config.watch.debounce_ms, 125);
+    }
+
+    #[test]
+    fn loads_all_supported_embedded_pyproject_configuration_fields() {
+        let project_dir =
+            temp_project_dir("loads_all_supported_embedded_pyproject_configuration_fields");
+        let executable = write_fake_python(&project_dir, "3.12");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            format!(
+                concat!(
+                    "[tool.typepython.project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n",
+                    "exclude = [\"dist/**\"]\n",
+                    "root_dir = \"src\"\n",
+                    "out_dir = \".typepython/out\"\n",
+                    "cache_dir = \".typepython/cache-data\"\n",
+                    "target_python = \"3.12\"\n\n",
+                    "[tool.typepython.resolution]\n",
+                    "type_roots = [\"stubs\"]\n",
+                    "python_executable = \"{}\"\n\n",
+                    "[tool.typepython.format]\n",
+                    "command = [\"ruff\", \"format\", \"{{file}}\"]\n",
+                    "line_length = 120\n\n",
+                    "[tool.typepython.emit]\n",
+                    "emit_pyi = true\n",
+                    "emit_pyc = false\n",
+                    "write_py_typed = true\n",
+                    "no_emit_on_error = true\n",
+                    "runtime_validators = false\n\n",
+                    "[tool.typepython.typing]\n",
+                    "profile = \"library\"\n",
+                    "strict = false\n",
+                    "strict_nulls = true\n",
+                    "imports = \"unknown\"\n",
+                    "no_implicit_dynamic = true\n",
+                    "warn_unsafe = true\n",
+                    "enable_sealed_exhaustiveness = true\n",
+                    "report_deprecated = \"warning\"\n",
+                    "require_explicit_overrides = false\n",
+                    "require_known_public_types = false\n",
+                    "infer_passthrough = false\n",
+                    "conditional_returns = false\n\n",
+                    "[tool.typepython.watch]\n",
+                    "debounce_ms = 40\n"
+                ),
+                executable.display()
+            ),
+        )
+        .expect("pyproject.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected embedded pyproject config to load");
+        assert_eq!(handle.source, ConfigSource::PyProject);
+        assert_eq!(handle.config.project.src, vec![String::from("src")]);
+        assert_eq!(handle.config.project.include, vec![String::from("src/**/*.tpy")]);
+        assert_eq!(handle.config.project.exclude, vec![String::from("dist/**")]);
+        assert_eq!(handle.config.project.root_dir, "src");
+        assert_eq!(handle.config.project.out_dir, ".typepython/out");
+        assert_eq!(handle.config.project.cache_dir, ".typepython/cache-data");
+        assert_eq!(handle.config.project.target_python, "3.12");
+        assert_eq!(handle.config.resolution.type_roots, vec![String::from("stubs")]);
+        assert_eq!(
+            handle.config.resolution.python_executable.as_deref(),
+            Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            handle.config.format.command,
+            Some(vec![String::from("ruff"), String::from("format"), String::from("{file}")])
+        );
+        assert_eq!(handle.config.format.line_length, 120);
+        assert!(handle.config.emit.emit_pyi);
+        assert!(!handle.config.emit.emit_pyc);
+        assert!(handle.config.emit.write_py_typed);
+        assert!(handle.config.emit.no_emit_on_error);
+        assert!(!handle.config.emit.runtime_validators);
+        assert_eq!(handle.config.typing.profile, Some(super::TypingProfile::Library));
+        assert!(!handle.config.typing.strict);
+        assert!(handle.config.typing.strict_nulls);
+        assert_eq!(handle.config.typing.imports, super::ImportFallback::Unknown);
+        assert!(handle.config.typing.no_implicit_dynamic);
+        assert!(handle.config.typing.warn_unsafe);
+        assert!(handle.config.typing.enable_sealed_exhaustiveness);
+        assert_eq!(handle.config.typing.report_deprecated, super::DiagnosticLevel::Warning);
+        assert!(!handle.config.typing.require_explicit_overrides);
+        assert!(!handle.config.typing.require_known_public_types);
+        assert!(!handle.config.typing.infer_passthrough);
+        assert!(!handle.config.typing.conditional_returns);
+        assert_eq!(handle.config.watch.debounce_ms, 40);
+    }
+
+    #[test]
     fn rejects_unknown_typepython_toml_keys_during_load() {
         let project_dir = temp_project_dir("rejects_unknown_typepython_toml_keys_during_load");
         fs::write(
