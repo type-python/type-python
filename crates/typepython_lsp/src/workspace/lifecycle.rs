@@ -46,67 +46,6 @@ fn project_collision_diagnostics(
     diagnostics
 }
 
-fn inferred_shadow_stub_syntax_trees(
-    syntax_trees: &[SyntaxTree],
-    enable_conditional_returns: bool,
-    target_python: &str,
-) -> Result<Vec<SyntaxTree>, LspError> {
-    let local_stub_modules = syntax_trees
-        .iter()
-        .filter(|tree| tree.source.kind == SourceKind::Stub)
-        .map(|tree| tree.source.logical_module.clone())
-        .collect::<BTreeSet<_>>();
-
-    syntax_trees
-        .iter()
-        .filter(|tree| {
-            tree.source.kind == SourceKind::Python
-                && !local_stub_modules.contains(&tree.source.logical_module)
-        })
-        .map(|tree| {
-            let stub_source =
-                generate_inferred_stub_source(&tree.source.text, InferredStubMode::Shadow)
-                    .map_err(|error| {
-                        LspError::Other(format!(
-                            "unable to generate inferred shadow stub for {}: {error}",
-                            tree.source.path.display()
-                        ))
-                    })?;
-            Ok(parse_with_options(
-                SourceFile {
-                    path: tree.source.path.clone(),
-                    kind: SourceKind::Stub,
-                    logical_module: tree.source.logical_module.clone(),
-                    text: stub_source,
-                },
-                ParseOptions {
-                    enable_conditional_returns,
-                    target_python: ParsePythonVersion::parse(target_python),
-                    target_platform: Some(ParseTargetPlatform::current()),
-                },
-            ))
-        })
-        .collect()
-}
-
-fn replace_local_python_surfaces_with_shadow_stubs(
-    syntax_trees: &[SyntaxTree],
-    shadow_stub_syntax: Vec<SyntaxTree>,
-) -> Vec<SyntaxTree> {
-    let shadow_modules =
-        shadow_stub_syntax.iter().map(|tree| tree.source.logical_module.clone()).collect::<BTreeSet<_>>();
-    let mut surfaces = syntax_trees
-        .iter()
-        .filter(|tree| {
-            !(tree.source.kind == SourceKind::Python
-                && shadow_modules.contains(&tree.source.logical_module))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    surfaces.extend(shadow_stub_syntax);
-    surfaces
-}
-
 impl IncrementalWorkspace {
     pub(super) fn new(
         config: ConfigHandle,
@@ -320,7 +259,7 @@ impl IncrementalWorkspace {
             return Ok(project_syntax_trees);
         }
 
-        let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
+        let shadow_stub_syntax = typepython_project::inferred_shadow_stub_syntax_trees(
             &project_syntax_trees,
             self.config.config.typing.conditional_returns,
             &self.config.config.project.target_python,
@@ -328,7 +267,7 @@ impl IncrementalWorkspace {
         if shadow_stub_syntax.is_empty() {
             Ok(project_syntax_trees)
         } else {
-            Ok(replace_local_python_surfaces_with_shadow_stubs(
+            Ok(typepython_project::replace_local_python_surfaces_with_shadow_stubs(
                 &project_syntax_trees,
                 shadow_stub_syntax,
             ))

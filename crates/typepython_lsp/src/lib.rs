@@ -17,7 +17,6 @@ use typepython_checking::{
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
-use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_graph::{ModuleGraph, ModuleNode, build};
 use typepython_incremental::{
     IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
@@ -26,9 +25,11 @@ use typepython_incremental::{
 use typepython_project::{DiscoveredSource, SupportSourceIndex};
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
-    SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
+    SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
     prepare_syntax_tree_for_external_formatter,
 };
+#[cfg(test)]
+use typepython_syntax::SourceKind;
 use url::Url;
 
 #[derive(Debug, Error)]

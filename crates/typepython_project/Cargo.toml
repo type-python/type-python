@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 typepython-config = { path = "../typepython_config" }
 typepython-diagnostics = { path = "../typepython_diagnostics" }
+typepython-emit = { path = "../typepython_emit" }
 typepython-syntax = { path = "../typepython_syntax" }
 
 [lints]

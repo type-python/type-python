@@ -11,7 +11,12 @@ use glob::Pattern;
 use serde::{Deserialize, Serialize};
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_syntax::SourceKind;
+use typepython_syntax::{
+    ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile, SyntaxTree,
+    parse_with_options,
+};
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredSource {
@@ -37,6 +42,105 @@ pub struct ModuleCollision {
 #[derive(Debug, Clone, Default)]
 pub struct SupportSourceIndex {
     sources_by_module: BTreeMap<String, Vec<DiscoveredSource>>,
+}
+
+pub fn inferred_shadow_stub_syntax_trees(
+    syntax_trees: &[SyntaxTree],
+    enable_conditional_returns: bool,
+    target_python: &str,
+) -> Result<Vec<SyntaxTree>> {
+    let local_stub_modules = syntax_trees
+        .iter()
+        .filter(|tree| tree.source.kind == SourceKind::Stub)
+        .map(|tree| tree.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
+
+    syntax_trees
+        .iter()
+        .filter(|tree| {
+            tree.source.kind == SourceKind::Python
+                && !local_stub_modules.contains(&tree.source.logical_module)
+        })
+        .map(|tree| {
+            let stub_source =
+                generate_inferred_stub_source(&tree.source.text, InferredStubMode::Shadow)
+                    .with_context(|| {
+                        format!(
+                            "unable to generate inferred shadow stub for {}",
+                            tree.source.path.display()
+                        )
+                    })?;
+            Ok(parse_with_options(
+                SourceFile {
+                    path: tree.source.path.clone(),
+                    kind: SourceKind::Stub,
+                    logical_module: tree.source.logical_module.clone(),
+                    text: stub_source,
+                },
+                ParseOptions {
+                    enable_conditional_returns,
+                    target_python: ParsePythonVersion::parse(target_python),
+                    target_platform: Some(ParseTargetPlatform::current()),
+                },
+            ))
+        })
+        .collect()
+}
+
+pub fn replace_local_python_surfaces_with_shadow_stubs(
+    syntax_trees: &[SyntaxTree],
+    shadow_stub_syntax: Vec<SyntaxTree>,
+) -> Vec<SyntaxTree> {
+    let shadow_modules = shadow_stub_syntax
+        .iter()
+        .map(|tree| tree.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
+    let mut surfaces = syntax_trees
+        .iter()
+        .filter(|tree| {
+            !(tree.source.kind == SourceKind::Python
+                && shadow_modules.contains(&tree.source.logical_module))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    surfaces.extend(shadow_stub_syntax);
+    surfaces
+}
+
+pub fn write_shadow_stub_cache(cache_root: &Path, shadow_stub_syntax: &[SyntaxTree]) -> Result<()> {
+    fs::create_dir_all(cache_root)
+        .with_context(|| format!("unable to create {}", cache_root.display()))?;
+
+    for tree in shadow_stub_syntax {
+        let relative_path = shadow_stub_relative_path(&tree.source);
+        let stub_path = cache_root.join(relative_path);
+        if let Some(parent) = stub_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("unable to create {}", parent.display()))?;
+        }
+        fs::write(&stub_path, &tree.source.text)
+            .with_context(|| format!("unable to write {}", stub_path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn shadow_stub_relative_path(source: &SourceFile) -> PathBuf {
+    let mut path = PathBuf::new();
+    let mut parts = source.logical_module.split('.').collect::<Vec<_>>();
+    if source.path.file_name().is_some_and(|name| name == "__init__.py") {
+        for part in parts {
+            path.push(part);
+        }
+        path.push("__init__.pyi");
+    } else {
+        let module_name = parts.pop().unwrap_or("module");
+        for part in parts {
+            path.push(part);
+        }
+        path.push(format!("{module_name}.pyi"));
+    }
+    path
 }
 
 impl SupportSourceIndex {

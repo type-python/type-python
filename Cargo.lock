@@ -1921,6 +1921,7 @@ dependencies = [
  "serde_json",
  "typepython-config",
  "typepython-diagnostics",
+ "typepython-emit",
  "typepython-syntax",
 ]
 
