@@ -89,7 +89,7 @@ type_roots = []                                   # Extra stub directories
 python_executable = null                          # Interpreter used for installed-package resolution
 
 [resolution.paths]
-# "@app/*" = ["src/app/*"]                       # Path aliases
+# "@app/*" = ["src/app/*"]                       # Reserved; non-empty tables are rejected today
 
 [emit]
 emit_pyi = true                                  # Emit .pyi stub files
@@ -139,9 +139,9 @@ When this schema is embedded in `pyproject.toml`, the same tables appear under `
 | `base_url`          | string         | Reserved for non-relative path resolution; current implementations only support the default project root (`.`) |
 | `type_roots`        | list[string]   | Directories searched for stub packages before installed packages                             |
 | `python_executable` | string \| null | Interpreter used to locate installed packages and, when supported, verification subprocesses |
-| `paths`             | table          | Alias mapping from module patterns to filesystem patterns                                    |
+| `paths`             | table          | Reserved for alias mapping from module patterns to filesystem patterns; current implementations reject non-empty tables |
 
-Path mappings apply only during static resolution. They MUST NOT rewrite import text emitted into `.py`.
+Path mappings are reserved for future static resolution support. Current implementations MUST reject non-empty tables rather than silently ignoring them.
 
 If `python_executable` is configured and its resolved Python major/minor version is incompatible with `project.target_python`, configuration loading MUST diagnose `TPY1002`.
 

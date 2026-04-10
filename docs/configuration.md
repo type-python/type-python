@@ -70,8 +70,8 @@ type_roots = []
 # Default: null (auto-detect)
 python_executable = null
 
-# Path aliases for import rewriting (similar to tsconfig paths).
-# Keys are import patterns; values are lists of directory patterns.
+# Reserved for future static path mapping support.
+# Current implementation rejects non-empty alias tables.
 # Default: {}
 [resolution.paths]
 # Example:

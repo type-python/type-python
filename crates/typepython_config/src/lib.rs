@@ -401,6 +401,7 @@ impl Config {
             &self.project.cache_dir,
         )?;
         validate_resolution_base_url(config_path, config_dir, &self.resolution.base_url)?;
+        validate_resolution_paths(config_path, &self.resolution.paths)?;
 
         if let Some(python_executable) = &self.resolution.python_executable {
             validate_python_executable(
@@ -745,6 +746,22 @@ fn validate_resolution_base_url(
     Ok(())
 }
 
+fn validate_resolution_paths(
+    config_path: &Path,
+    paths: &BTreeMap<String, Vec<String>>,
+) -> Result<(), ConfigError> {
+    if !paths.is_empty() {
+        return Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: String::from(
+                "resolution.paths is not implemented yet; remove path aliases until static path mapping support lands",
+            ),
+        });
+    }
+
+    Ok(())
+}
+
 fn normalize_project_path(config_dir: &Path, configured_path: &str) -> PathBuf {
     let configured_path = Path::new(configured_path);
     let resolved = if configured_path.is_absolute() {
@@ -962,6 +979,30 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("TPY1002"));
         assert!(message.contains("resolution.base_url = `src`"));
+        assert!(message.contains("not implemented yet"));
+    }
+
+    #[test]
+    fn rejects_unsupported_resolution_paths() {
+        let project_dir = temp_project_dir("rejects_unsupported_resolution_paths");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\nsrc = [\"src\"]\n\n",
+                "[resolution.paths]\n",
+                "\"@app/*\" = [\"src/app/*\"]\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected unsupported resolution.paths to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("resolution.paths"));
         assert!(message.contains("not implemented yet"));
     }
 
