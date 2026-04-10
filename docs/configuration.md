@@ -117,7 +117,8 @@ write_py_typed = true
 # Default: true
 preserve_comments = true
 
-# Block all output if any diagnostic errors exist.
+# Block best-effort output when semantic diagnostics have errors.
+# Discovery, parse, and lowering failures still stop emission even when false.
 # Default: true
 no_emit_on_error = true
 
@@ -341,3 +342,6 @@ profile = "migration"
 [emit]
 no_emit_on_error = false
 ```
+
+This enables best-effort output for type-checking and public-surface errors during migration.
+Discovery, parse, and lowering failures still stop emission.

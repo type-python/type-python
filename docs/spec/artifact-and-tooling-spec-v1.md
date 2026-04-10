@@ -96,7 +96,7 @@ emit_pyi = true                                  # Emit .pyi stub files
 emit_pyc = false                                 # Emit .pyc files
 write_py_typed = true                            # Emit py.typed marker
 preserve_comments = true                         # Preserve comments
-no_emit_on_error = true                          # Block emit on errors
+no_emit_on_error = true                          # Block best-effort emit on semantic errors
 runtime_validators = false                       # Experimental: emit runtime validators for data class
 
 [typing]
@@ -153,7 +153,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `emit_pyc`           | bool | Compile `.py` to `.pyc` using target interpreter                |
 | `write_py_typed`     | bool | Emit `py.typed` marker for typed packages                       |
 | `preserve_comments`  | bool | Retain user comments where lowering permits                     |
-| `no_emit_on_error`   | bool | Block output on fatal diagnostics                               |
+| `no_emit_on_error`   | bool | Block best-effort output after semantic/public-surface errors; discovery/parse/lowering remain hard blockers |
 | `runtime_validators` | bool | Experimental: emit `validate` classmethod on `data class` types |
 
 **`[typing]` fields:**
@@ -629,7 +629,8 @@ The map MAY remain an internal cache artifact in v1; no user-facing sourcemap fo
 - SHOULD preserve comments where feasible
 - MUST preserve import semantics
 - MAY use `# tpy:*` markers for internal metadata (no runtime effect)
-- If `no_emit_on_error = true`, fatal diagnostics MUST block `.py` emission
+- Discovery, parse, and lowering failures MUST block `.py` emission
+- If `no_emit_on_error = true`, semantic and public-surface diagnostics MUST block `.py` emission
 
 #### 13.6.2 `.pyi` Emission
 
@@ -778,7 +779,7 @@ At minimum, a Core v1 implementation MUST reserve the following concrete codes w
 | `TPY4018` | Incomplete conditional return type coverage                             |
 | `TPY4101` | Use of deprecated declaration                                           |
 | `TPY5001` | `.pyi` generation failure                                               |
-| `TPY5002` | Emit blocked by `no_emit_on_error`                                      |
+| `TPY5002` | Best-effort emit blocked by `no_emit_on_error` after semantic errors     |
 | `TPY5003` | Public API verification failure                                         |
 | `TPY6001` | Incremental cache incompatibility or corruption                         |
 | `TPY6002` | LSP overlay/state synchronization failure                               |

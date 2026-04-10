@@ -115,7 +115,7 @@ target_python = "3.10"
 profile = "migration"
 
 [emit]
-no_emit_on_error = false    # Allow output even with type errors
+no_emit_on_error = false    # Keep emitting on type/public-surface errors during migration
 ```
 
 ### Step 2: Run baseline check

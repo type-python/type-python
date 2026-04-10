@@ -188,7 +188,8 @@ The Python bridge can't find the binary. Either:
 
 ### Build produces no output files
 
-Check if `emit.no_emit_on_error = true` (default) and there are diagnostic errors. Fix the errors or set `emit.no_emit_on_error = false`.
+If the diagnostics are type-checking or public-surface errors, `emit.no_emit_on_error = false` allows best-effort output while the command still exits non-zero.
+Discovery, parse, and lowering errors still stop emission even when `emit.no_emit_on_error = false`.
 
 ### "Conflicting module path" error
 

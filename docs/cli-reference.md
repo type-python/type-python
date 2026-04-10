@@ -144,7 +144,7 @@ build:
   note: cached 12 module fingerprint(s) at /path/to/project/.typepython/cache/snapshot.json
 ```
 
-**Blocked by errors:** When `emit.no_emit_on_error = true` (default), no output is written if any diagnostics have error severity. This is reported as `TPY5002`.
+**Blocked by errors:** When `emit.no_emit_on_error = true` (default), type-checking and public-surface errors suppress writing and add `TPY5002`. Discovery, parse, and lowering errors block emission regardless of this setting.
 
 **Example:**
 
