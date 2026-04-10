@@ -1484,6 +1484,35 @@ fn active_support_set_changes_stay_incremental() {
 }
 
 #[test]
+fn incremental_workspace_reports_module_collision_diagnostics() {
+    let config = temp_workspace(
+        "incremental_workspace_reports_module_collision_diagnostics",
+        &[
+            ("src/app.tpy", "def build() -> int:\n    return 1\n"),
+            ("src/app.py", "def build() -> int:\n    return 1\n"),
+        ],
+    );
+    let overlays = BTreeMap::new();
+    let workspace =
+        IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+    let tpy_uri = path_to_uri(&config.config_dir.join("src/app.tpy"));
+    let py_uri = path_to_uri(&config.config_dir.join("src/app.py"));
+
+    for uri in [tpy_uri, py_uri] {
+        let diagnostics = workspace
+            .state
+            .diagnostics_by_uri
+            .get(&uri)
+            .expect("workspace diagnostics should include every project document");
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "TPY3002"));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("logical module `app` has conflicting source files")
+        }));
+    }
+    assert!(workspace.check_diagnostics_by_module.is_empty());
+}
+
+#[test]
 fn incremental_workspace_refreshes_query_indexes() {
     let config = temp_config(
         "incremental_workspace_refreshes_query_indexes",

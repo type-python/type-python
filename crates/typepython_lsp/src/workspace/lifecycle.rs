@@ -10,6 +10,35 @@ impl SupportSourceCatalog {
     }
 }
 
+fn project_collision_diagnostics(
+    sources: &[DiscoveredSource],
+    source_roots: &[PathBuf],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+
+    for collision in typepython_project::detect_module_collisions(sources, source_roots) {
+        for source in &collision.sources {
+            let mut diagnostic = Diagnostic::error(
+                "TPY3002",
+                format!("logical module `{}` has conflicting source files", collision.logical_module),
+            )
+            .with_span(Span::new(source.path.display().to_string(), 1, 1, 1, 1));
+
+            for conflicting in &collision.sources {
+                diagnostic = diagnostic.with_note(format!(
+                    "{} ({})",
+                    conflicting.path.display(),
+                    typepython_project::source_kind_name(conflicting.kind)
+                ));
+            }
+
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    diagnostics
+}
+
 impl IncrementalWorkspace {
     pub(super) fn new(
         config: ConfigHandle,
@@ -293,13 +322,18 @@ impl IncrementalWorkspace {
         let current_dependency_index = dependency_index(&graph);
         let snapshot_diff = diff(&self.incremental, &current_incremental);
         let summary_changed_modules = snapshot_diff_modules(&snapshot_diff);
+        let project_sources =
+            self.project_documents.values().map(|document| document.source.clone()).collect::<Vec<_>>();
+        let collision_diagnostics = project_collision_diagnostics(&project_sources, &self.source_roots);
+        let has_collision_errors = collision_diagnostics.has_errors();
         let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
         apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
         let has_parse_errors = parse_diagnostics.has_errors();
+        let has_precheck_errors = has_collision_errors || has_parse_errors;
         self.check_diagnostics_by_module
             .retain(|module_key, _| current_module_keys.contains(module_key));
 
-        if !has_parse_errors {
+        if !has_precheck_errors {
             if force_full_check || self.parse_blocked {
                 self.check_diagnostics_by_module = check_modules_with_binding_metadata(
                     &graph,
@@ -348,8 +382,9 @@ impl IncrementalWorkspace {
             }
         }
 
-        let mut diagnostics = parse_diagnostics.clone();
-        if !has_parse_errors {
+        let mut diagnostics = collision_diagnostics;
+        diagnostics.diagnostics.extend(parse_diagnostics.clone().diagnostics);
+        if !has_precheck_errors {
             diagnostics.diagnostics.extend(
                 self.check_diagnostics_by_module
                     .values()
@@ -360,7 +395,7 @@ impl IncrementalWorkspace {
 
         let index_trigger_modules =
             direct_changes.union(&summary_changed_modules).cloned().collect::<BTreeSet<_>>();
-        let reindexed_modules = if force_full_check || self.parse_blocked {
+        let reindexed_modules = if force_full_check || self.parse_blocked || has_precheck_errors {
             current_module_keys.clone()
         } else {
             affected_modules(
@@ -373,8 +408,11 @@ impl IncrementalWorkspace {
             .filter(|module_key| current_module_keys.contains(module_key))
             .collect()
         };
-        let force_full_state_refresh = force_full_check || self.parse_blocked;
-        self.rebuild_document_indexes(&reindexed_modules, force_full_check || self.parse_blocked);
+        let force_full_state_refresh = force_full_check || self.parse_blocked || has_precheck_errors;
+        self.rebuild_document_indexes(
+            &reindexed_modules,
+            force_full_check || self.parse_blocked || has_precheck_errors,
+        );
         self.update_workspace_state(
             diagnostics,
             graph,
@@ -383,7 +421,7 @@ impl IncrementalWorkspace {
         );
         self.incremental = current_incremental;
         self.dependency_index = current_dependency_index;
-        self.parse_blocked = has_parse_errors;
+        self.parse_blocked = has_precheck_errors;
         Ok(())
     }
 
