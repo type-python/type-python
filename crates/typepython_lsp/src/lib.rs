@@ -10,24 +10,23 @@ use glob::Pattern;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
-use typepython_binding::{BindingTable, bind};
+use typepython_binding::bind;
 use typepython_checking::{
     check_modules_with_binding_metadata, semantic_incremental_state_with_binding_metadata,
     semantic_incremental_state_with_reused_summaries,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity, Span};
+use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_graph::{ModuleGraph, ModuleNode, build};
 use typepython_incremental::{
     IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
     snapshot_diff_modules,
 };
 use typepython_project::DiscoveredSource;
-#[cfg(test)]
-use typepython_syntax::SourceKind;
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
-    SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
+    SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
     prepare_syntax_tree_for_external_formatter,
 };
 use url::Url;
@@ -115,7 +114,6 @@ type QueryDocumentState = (String, DocumentState, Vec<SymbolOccurrence>, Vec<Sym
 #[derive(Debug, Clone)]
 struct CachedDocument {
     source: DiscoveredSource,
-    binding: BindingTable,
     document: DocumentState,
     declarations: Vec<SymbolOccurrence>,
     references: Vec<SymbolOccurrence>,

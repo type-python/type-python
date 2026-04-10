@@ -39,6 +39,67 @@ fn project_collision_diagnostics(
     diagnostics
 }
 
+fn inferred_shadow_stub_syntax_trees(
+    syntax_trees: &[SyntaxTree],
+    enable_conditional_returns: bool,
+    target_python: &str,
+) -> Result<Vec<SyntaxTree>, LspError> {
+    let local_stub_modules = syntax_trees
+        .iter()
+        .filter(|tree| tree.source.kind == SourceKind::Stub)
+        .map(|tree| tree.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
+
+    syntax_trees
+        .iter()
+        .filter(|tree| {
+            tree.source.kind == SourceKind::Python
+                && !local_stub_modules.contains(&tree.source.logical_module)
+        })
+        .map(|tree| {
+            let stub_source =
+                generate_inferred_stub_source(&tree.source.text, InferredStubMode::Shadow)
+                    .map_err(|error| {
+                        LspError::Other(format!(
+                            "unable to generate inferred shadow stub for {}: {error}",
+                            tree.source.path.display()
+                        ))
+                    })?;
+            Ok(parse_with_options(
+                SourceFile {
+                    path: tree.source.path.clone(),
+                    kind: SourceKind::Stub,
+                    logical_module: tree.source.logical_module.clone(),
+                    text: stub_source,
+                },
+                ParseOptions {
+                    enable_conditional_returns,
+                    target_python: ParsePythonVersion::parse(target_python),
+                    target_platform: Some(ParseTargetPlatform::current()),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn replace_local_python_surfaces_with_shadow_stubs(
+    syntax_trees: &[SyntaxTree],
+    shadow_stub_syntax: Vec<SyntaxTree>,
+) -> Vec<SyntaxTree> {
+    let shadow_modules =
+        shadow_stub_syntax.iter().map(|tree| tree.source.logical_module.clone()).collect::<BTreeSet<_>>();
+    let mut surfaces = syntax_trees
+        .iter()
+        .filter(|tree| {
+            !(tree.source.kind == SourceKind::Python
+                && shadow_modules.contains(&tree.source.logical_module))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    surfaces.extend(shadow_stub_syntax);
+    surfaces
+}
+
 impl IncrementalWorkspace {
     pub(super) fn new(
         config: ConfigHandle,
@@ -59,11 +120,10 @@ impl IncrementalWorkspace {
                     config.config.typing.conditional_returns,
                     &config.config.project.target_python,
                 )?;
-            let binding = bind(&syntax);
             let (document, declarations) = index_document_state(syntax);
             project_documents.insert(
                 source.path.clone(),
-                CachedDocument { source, binding, document, declarations, references: Vec::new() },
+                CachedDocument { source, document, declarations, references: Vec::new() },
             );
         }
 
@@ -126,18 +186,11 @@ impl IncrementalWorkspace {
                     self.config.config.typing.conditional_returns,
                     &self.config.config.project.target_python,
                 )?;
-                let binding = bind(&syntax);
                 let (document, declarations) = index_document_state(syntax);
                 direct_changes.insert(source.logical_module.clone());
                 self.project_documents.insert(
                     source.path.clone(),
-                    CachedDocument {
-                        source,
-                        binding,
-                        document,
-                        declarations,
-                        references: Vec::new(),
-                    },
+                    CachedDocument { source, document, declarations, references: Vec::new() },
                 );
             }
             None => {
@@ -162,11 +215,7 @@ impl IncrementalWorkspace {
     }
 
     pub(super) fn sync_support_documents(&mut self) -> Result<(), LspError> {
-        let project_syntax_trees = self
-            .project_documents
-            .values()
-            .map(|document| document.document.syntax.clone())
-            .collect::<Vec<_>>();
+        let project_syntax_trees = self.checking_project_syntax_trees()?;
         let project_modules = project_syntax_trees
             .iter()
             .map(|tree| tree.source.logical_module.clone())
@@ -236,17 +285,10 @@ impl IncrementalWorkspace {
                 self.config.config.typing.conditional_returns,
                 &self.config.config.project.target_python,
             )?;
-        let binding = bind(&syntax);
         let (document, declarations) = index_document_state(syntax);
         self.support_documents.insert(
             source.path.clone(),
-            CachedDocument {
-                source: source.clone(),
-                binding,
-                document,
-                declarations,
-                references: Vec::new(),
-            },
+            CachedDocument { source: source.clone(), document, declarations, references: Vec::new() },
         );
         Ok(())
     }
@@ -263,27 +305,52 @@ impl IncrementalWorkspace {
         documents
     }
 
-    pub(super) fn active_syntax_trees(&self) -> Vec<SyntaxTree> {
-        self.active_cached_documents()
-            .into_iter()
+    pub(super) fn checking_project_syntax_trees(&self) -> Result<Vec<SyntaxTree>, LspError> {
+        let project_syntax_trees = self
+            .project_documents
+            .values()
             .map(|document| document.document.syntax.clone())
-            .collect()
+            .collect::<Vec<_>>();
+        if !self.config.config.typing.infer_passthrough {
+            return Ok(project_syntax_trees);
+        }
+
+        let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
+            &project_syntax_trees,
+            self.config.config.typing.conditional_returns,
+            &self.config.config.project.target_python,
+        )?;
+        if shadow_stub_syntax.is_empty() {
+            Ok(project_syntax_trees)
+        } else {
+            Ok(replace_local_python_surfaces_with_shadow_stubs(
+                &project_syntax_trees,
+                shadow_stub_syntax,
+            ))
+        }
     }
 
-    pub(super) fn active_bindings(&self) -> Vec<BindingTable> {
-        self.active_cached_documents()
-            .into_iter()
-            .map(|document| document.binding.clone())
-            .collect()
+    pub(super) fn checking_syntax_trees(&self) -> Result<Vec<SyntaxTree>, LspError> {
+        let mut syntax_trees = self.checking_project_syntax_trees()?;
+        syntax_trees.extend(
+            self.support_documents
+                .iter()
+                .filter(|(path, _)| self.active_support_paths.contains(*path))
+                .map(|(_, document)| document.document.syntax.clone()),
+        );
+        syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
+        Ok(syntax_trees)
     }
 
-    pub(super) fn active_source_overrides(&self) -> BTreeMap<String, String> {
-        self.active_cached_documents()
-            .into_iter()
-            .map(|document| {
+    pub(super) fn source_overrides_for_syntax_trees(
+        syntax_trees: &[SyntaxTree],
+    ) -> BTreeMap<String, String> {
+        syntax_trees
+            .iter()
+            .map(|tree| {
                 (
-                    document.source.path.display().to_string(),
-                    document.document.syntax.source.text.clone(),
+                    tree.source.path.display().to_string(),
+                    tree.source.text.clone(),
                 )
             })
             .collect()
@@ -294,12 +361,17 @@ impl IncrementalWorkspace {
         direct_changes: BTreeSet<String>,
         force_full_check: bool,
     ) -> Result<(), LspError> {
-        let syntax_trees = self.active_syntax_trees();
-        let bindings = self.active_bindings();
+        let project_document_syntax_trees = self
+            .project_documents
+            .values()
+            .map(|document| document.document.syntax.clone())
+            .collect::<Vec<_>>();
+        let syntax_trees = self.checking_syntax_trees()?;
+        let bindings = syntax_trees.iter().map(bind).collect::<Vec<_>>();
         let graph = build(&bindings);
         let current_module_keys =
             graph.nodes.iter().map(|node| node.module_key.clone()).collect::<BTreeSet<_>>();
-        let source_overrides = self.active_source_overrides();
+        let source_overrides = Self::source_overrides_for_syntax_trees(&syntax_trees);
         let current_incremental = if force_full_check || self.incremental.summaries.is_empty() {
             semantic_incremental_state_with_binding_metadata(
                 &graph,
@@ -327,7 +399,7 @@ impl IncrementalWorkspace {
         let collision_diagnostics = project_collision_diagnostics(&project_sources, &self.source_roots);
         let has_collision_errors = collision_diagnostics.has_errors();
         let mut parse_diagnostics = collect_parse_diagnostics(&syntax_trees);
-        apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
+        apply_type_ignore_directives(&project_document_syntax_trees, &mut parse_diagnostics);
         let has_parse_errors = parse_diagnostics.has_errors();
         let has_precheck_errors = has_collision_errors || has_parse_errors;
         self.check_diagnostics_by_module
@@ -390,7 +462,7 @@ impl IncrementalWorkspace {
                     .values()
                     .flat_map(|module_diagnostics| module_diagnostics.iter().cloned()),
             );
-            apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
+            apply_type_ignore_directives(&project_document_syntax_trees, &mut diagnostics);
         }
 
         let index_trigger_modules =

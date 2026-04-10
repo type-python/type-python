@@ -18,6 +18,7 @@ typepython-binding = { path = "../typepython_binding" }
 typepython-checking = { path = "../typepython_checking" }
 typepython-config = { path = "../typepython_config" }
 typepython-diagnostics = { path = "../typepython_diagnostics" }
+typepython-emit = { path = "../typepython_emit" }
 typepython-graph = { path = "../typepython_graph" }
 typepython-incremental = { path = "../typepython_incremental" }
 typepython-project = { path = "../typepython_project" }

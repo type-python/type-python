@@ -1513,6 +1513,45 @@ fn incremental_workspace_reports_module_collision_diagnostics() {
 }
 
 #[test]
+fn incremental_workspace_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled() {
+    let config = temp_workspace_with_config(
+        "incremental_workspace_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_enabled",
+        "[project]\nsrc = [\"src\"]\n\n[typing]\ninfer_passthrough = true\n",
+        &[
+            (
+                "src/app/helpers.py",
+                "class User:\n    def __init__(self):\n        self.age = 3\n\ndef build():\n    return User()\n",
+            ),
+            (
+                "src/app/__init__.tpy",
+                "from app.helpers import build\n\nuser = build()\nage: int = user.age\n",
+            ),
+        ],
+    );
+    let overlays = BTreeMap::new();
+    let workspace =
+        IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+    let package_uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let helpers_uri = path_to_uri(&config.config_dir.join("src/app/helpers.py"));
+
+    let package_diagnostics = workspace
+        .state
+        .diagnostics_by_uri
+        .get(&package_uri)
+        .expect("workspace diagnostics should include the package module");
+    assert!(package_diagnostics.is_empty(), "{package_diagnostics:?}");
+    assert!(
+        workspace
+            .check_diagnostics_by_module
+            .get("app")
+            .is_some_and(|diagnostics| diagnostics.is_empty())
+    );
+    assert!(workspace.state.documents.iter().any(|document| {
+        document.uri == helpers_uri && document.syntax.source.kind == SourceKind::Python
+    }));
+}
+
+#[test]
 fn incremental_workspace_refreshes_query_indexes() {
     let config = temp_config(
         "incremental_workspace_refreshes_query_indexes",
