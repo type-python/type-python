@@ -1484,6 +1484,113 @@ fn active_support_set_changes_stay_incremental() {
 }
 
 #[test]
+fn incremental_workspace_loads_support_index_lazily() {
+    let root = env::temp_dir().join(format!(
+        "typepython-lsp-lazy-support-index-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let probe = root.join("python-probe");
+    write_executable_script(
+        &probe,
+        "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+    );
+    let config = temp_workspace_with_config(
+        "incremental_workspace_loads_support_index_lazily",
+        &format!(
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site-packages\"]\npython_executable = \"{}\"\n",
+            probe.display()
+        ),
+        &[("src/app/__init__.tpy", "def run() -> None:\n    pass\n")],
+    );
+    fs::create_dir_all(config.config_dir.join("site-packages/demo"))
+        .expect("support package directory should be created");
+    fs::write(config.config_dir.join("site-packages/demo/__init__.pyi"), "pass\n")
+        .expect("support package stub should be written");
+    let overlays = BTreeMap::new();
+    let mut workspace =
+        IncrementalWorkspace::new(config.clone(), &overlays).expect("workspace should build");
+    assert!(workspace.support_catalog.index.is_none());
+
+    let path = config.config_dir.join("src/app/__init__.tpy");
+    let uri = path_to_uri(&path);
+    let overlay = OverlayDocument {
+        uri,
+        text: String::from("from demo import value\n\ndef run() -> None:\n    pass\n"),
+        version: 1,
+    };
+    workspace
+        .apply_project_path_update(&path, Some(&overlay))
+        .expect("overlay update should load support sources on demand");
+
+    assert!(workspace.support_catalog.index.is_some());
+    assert!(!workspace.active_support_paths.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn did_open_background_mode_prewarms_support_index_cache() {
+    let root = env::temp_dir().join(format!(
+        "typepython-lsp-prewarm-support-index-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("workspace root should be created");
+    let probe = root.join("python-probe");
+    write_executable_script(
+        &probe,
+        "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+    );
+    let config = temp_workspace_with_config(
+        "did_open_background_mode_prewarms_support_index_cache",
+        &format!(
+            "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"site-packages\"]\npython_executable = \"{}\"\n",
+            probe.display()
+        ),
+        &[("src/app/__init__.tpy", "def run() -> None:\n    pass\n")],
+    );
+    fs::create_dir_all(config.config_dir.join("site-packages/demo"))
+        .expect("support package directory should be created");
+    fs::write(config.config_dir.join("site-packages/demo/__init__.pyi"), "pass\n")
+        .expect("support package stub should be written");
+
+    let cache_path = typepython_project::support_source_index_cache_path(
+        &config,
+        &config.config.project.target_python,
+    );
+    let mut server = Server::new(config.clone());
+    server.scheduler.enable_background_mode();
+    let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
+    let text = fs::read_to_string(config.config_dir.join("src/app/__init__.tpy"))
+        .expect("source file should be readable");
+
+    server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": text, "languageId": "typepython", "version": 1}}
+        }))
+        .expect("didOpen should succeed in background mode");
+
+    let mut cache_warmed = false;
+    for _ in 0..200 {
+        if cache_path.is_file() {
+            cache_warmed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    assert!(server.analysis.support_index_prewarm_started);
+    assert!(cache_warmed);
+}
+
+#[test]
 fn incremental_workspace_reports_module_collision_diagnostics() {
     let config = temp_workspace(
         "incremental_workspace_reports_module_collision_diagnostics",
@@ -1974,6 +2081,11 @@ fn temp_chain_workspace(test_name: &str, module_count: usize) -> ConfigHandle {
 
 #[cfg(unix)]
 fn write_fake_formatter(path: &Path, script: &str) {
+    write_executable_script(path, script);
+}
+
+#[cfg(unix)]
+fn write_executable_script(path: &Path, script: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("formatter parent directory should be created");
     }

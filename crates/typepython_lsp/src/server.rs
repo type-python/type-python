@@ -235,7 +235,11 @@ impl Server {
         let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
             LspError::Other(String::from("TPY6002: didOpen missing document version"))
         })?;
-        self.analysis.open_document(uri, text, version)
+        self.analysis.open_document(uri, text, version)?;
+        if self.scheduler.is_background_mode() {
+            self.analysis.spawn_support_index_prewarm();
+        }
+        Ok(())
     }
 
     pub(super) fn apply_did_change(&mut self, params: Value) -> Result<(), LspError> {
@@ -253,7 +257,11 @@ impl Server {
             serde_json::from_value(params.get("contentChanges").cloned().ok_or_else(|| {
                 LspError::Other(String::from("didChange missing contentChanges"))
             })?)?;
-        self.analysis.change_document(uri, version, &content_changes)
+        self.analysis.change_document(uri, version, &content_changes)?;
+        if self.scheduler.is_background_mode() {
+            self.analysis.spawn_support_index_prewarm();
+        }
+        Ok(())
     }
 
     pub(super) fn apply_did_close(&mut self, params: Value) -> Result<Vec<Value>, LspError> {

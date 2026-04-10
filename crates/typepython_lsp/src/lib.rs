@@ -121,7 +121,7 @@ struct CachedDocument {
 
 #[derive(Debug, Clone, Default)]
 struct SupportSourceCatalog {
-    index: SupportSourceIndex,
+    index: Option<SupportSourceIndex>,
 }
 
 #[derive(Debug)]

@@ -35,6 +35,10 @@ impl LspScheduler {
         self.background_mode = true;
     }
 
+    pub(super) fn is_background_mode(&self) -> bool {
+        self.background_mode
+    }
+
     pub(super) fn disable_background_mode(&mut self) {
         self.background_mode = false;
         self.pending_diagnostics = None;

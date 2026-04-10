@@ -670,7 +670,7 @@ struct CachedSupportSource {
     load_as_inferred_stub: bool,
 }
 
-fn support_source_index_cache_path(config: &ConfigHandle, target_python: &str) -> PathBuf {
+pub fn support_source_index_cache_path(config: &ConfigHandle, target_python: &str) -> PathBuf {
     let sanitized_target = target_python.replace('.', "_");
     config
         .resolve_relative_path(&config.config.project.cache_dir)

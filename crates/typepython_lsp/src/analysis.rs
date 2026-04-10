@@ -4,6 +4,7 @@ pub(super) struct AnalysisHost {
     pub(super) config: ConfigHandle,
     pub(super) overlays: BTreeMap<PathBuf, OverlayDocument>,
     pub(super) cached_workspace: Option<IncrementalWorkspace>,
+    pub(super) support_index_prewarm_started: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -16,7 +17,12 @@ struct WorkspaceSymbolMatch {
 
 impl AnalysisHost {
     pub(super) fn new(config: ConfigHandle) -> Self {
-        Self { config, overlays: BTreeMap::new(), cached_workspace: None }
+        Self {
+            config,
+            overlays: BTreeMap::new(),
+            cached_workspace: None,
+            support_index_prewarm_started: false,
+        }
     }
 
     pub(super) fn open_document(
@@ -83,6 +89,29 @@ impl AnalysisHost {
             workspace.apply_project_path_update(&path, None)?;
         }
         Ok(uri.to_owned())
+    }
+
+    pub(super) fn spawn_support_index_prewarm(&mut self) {
+        if self.support_index_prewarm_started {
+            return;
+        }
+        if self
+            .cached_workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.support_catalog.index.is_some())
+        {
+            self.support_index_prewarm_started = true;
+            return;
+        }
+
+        self.support_index_prewarm_started = true;
+        let config = self.config.clone();
+        std::thread::spawn(move || {
+            let _ = typepython_project::support_source_index(
+                &config,
+                &config.config.project.target_python,
+            );
+        });
     }
 
     pub(super) fn publish_diagnostics(

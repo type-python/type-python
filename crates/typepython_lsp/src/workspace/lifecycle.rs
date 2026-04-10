@@ -1,11 +1,19 @@
 impl SupportSourceCatalog {
-    pub(super) fn new(config: &ConfigHandle) -> Result<Self, LspError> {
-        Ok(Self {
-            index: typepython_project::support_source_index(
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(super) fn ensure_loaded(
+        &mut self,
+        config: &ConfigHandle,
+    ) -> Result<&SupportSourceIndex, LspError> {
+        if self.index.is_none() {
+            self.index = Some(typepython_project::support_source_index(
                 config,
                 &config.config.project.target_python,
-            )?,
-        })
+            )?);
+        }
+        Ok(self.index.as_ref().expect("support source index should be loaded"))
     }
 }
 
@@ -109,7 +117,7 @@ impl IncrementalWorkspace {
         let exclude_patterns =
             compile_patterns(&config, &config.config.project.exclude, "project.exclude")?;
         let source_roots = typepython_project::source_roots(&config);
-        let support_catalog = SupportSourceCatalog::new(&config)?;
+        let support_catalog = SupportSourceCatalog::new();
 
         let mut project_documents = BTreeMap::new();
         for source in collect_project_source_paths(&config, overlays)? {
@@ -223,11 +231,16 @@ impl IncrementalWorkspace {
             .into_iter()
             .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
             .collect::<Vec<_>>();
+        if external_import_paths.is_empty() {
+            self.active_support_paths.clear();
+            return Ok(());
+        }
+        let support_index = self.support_catalog.ensure_loaded(&self.config)?.clone();
 
         let mut queued_modules = BTreeSet::new();
         let mut queue = VecDeque::new();
         for import_path in external_import_paths {
-            for module_key in self.support_catalog.index.matching_module_keys(&import_path) {
+            for module_key in support_index.matching_module_keys(&import_path) {
                 if queued_modules.insert(module_key.clone()) {
                     queue.push_back(module_key);
                 }
@@ -236,12 +249,7 @@ impl IncrementalWorkspace {
 
         let mut active_support_paths = BTreeSet::new();
         while let Some(module_key) = queue.pop_front() {
-            let Some(module_sources) = self
-                .support_catalog
-                .index
-                .module_sources(&module_key)
-                .map(|sources| sources.to_vec())
-            else {
+            let Some(module_sources) = support_index.module_sources(&module_key).map(|sources| sources.to_vec()) else {
                 continue;
             };
             for source in module_sources {
@@ -254,9 +262,7 @@ impl IncrementalWorkspace {
                 for import_path in
                     collect_import_source_paths(std::slice::from_ref(&document.document.syntax))
                 {
-                    for nested_module_key in
-                        self.support_catalog.index.matching_module_keys(&import_path)
-                    {
+                    for nested_module_key in support_index.matching_module_keys(&import_path) {
                         if queued_modules.insert(nested_module_key.clone()) {
                             queue.push_back(nested_module_key);
                         }
