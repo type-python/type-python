@@ -1,0 +1,672 @@
+pub(super) use super::{
+    check, check_with_binding_metadata, check_with_options,
+    semantic_incremental_state_with_binding_metadata,
+    semantic_incremental_state_with_reused_summaries,
+};
+pub(super) use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::ErrorKind,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
+pub(super) use typepython_binding::{
+    Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
+};
+pub(super) use typepython_config::{DiagnosticLevel, ImportFallback};
+pub(super) use typepython_graph::{ModuleGraph, ModuleNode, build};
+pub(super) use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
+
+pub(super) static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn create_temp_typepython_root() -> PathBuf {
+    let temp_dir = std::env::temp_dir();
+    loop {
+        let unique = TEMP_SOURCE_ROOT_ID.fetch_add(1, Ordering::Relaxed);
+        let root = temp_dir.join(format!("typepython-checking-{}-{unique}", std::process::id()));
+        match fs::create_dir(&root) {
+            Ok(()) => return root,
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("temp directory should be created: {error}"),
+        }
+    }
+}
+
+pub(super) fn check_temp_typepython_source(source_text: &str) -> crate::CheckResult {
+    check_temp_typepython_source_with_options(source_text, ParseOptions::default())
+}
+
+pub(super) fn check_temp_typepython_source_with_options(
+    source_text: &str,
+    options: ParseOptions,
+) -> crate::CheckResult {
+    check_temp_typepython_source_with_check_options(
+        source_text,
+        options,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+    )
+}
+
+pub(super) fn check_temp_typepython_source_with_check_options(
+    source_text: &str,
+    options: ParseOptions,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+) -> crate::CheckResult {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let source = SourceFile {
+        path: path.clone(),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, options);
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let result = check_with_options(
+        &graph,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        ImportFallback::Unknown,
+    );
+
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
+#[test]
+fn semantic_incremental_state_reuses_unchanged_public_summaries() {
+    let root = create_temp_typepython_root();
+    let a_path = root.join("a.tpy");
+    let b_path = root.join("b.tpy");
+    fs::write(&a_path, "def produce() -> int:\n    return 1\n")
+        .expect("temp source should be written");
+    fs::write(&b_path, "def helper() -> int:\n    return 2\n")
+        .expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: a_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.a"),
+                text: String::from("def produce() -> int:\n    return 1\n"),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: b_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.b"),
+                text: String::from("def helper() -> int:\n    return 2\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let baseline = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        None,
+    );
+    let mut previous_summaries = baseline.summaries.clone();
+    let sentinel_summary = {
+        let summary = previous_summaries
+            .iter_mut()
+            .find(|summary| summary.module == "app.b")
+            .expect("baseline should contain app.b summary");
+        summary.exports[0].type_repr = String::from("sentinel");
+        summary.clone()
+    };
+    let changed_sentinel = {
+        let summary = previous_summaries
+            .iter_mut()
+            .find(|summary| summary.module == "app.a")
+            .expect("baseline should contain app.a summary");
+        summary.exports[0].type_repr = String::from("stale");
+        summary.clone()
+    };
+
+    let rebuilt = semantic_incremental_state_with_reused_summaries(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        &previous_summaries,
+        &BTreeSet::from([String::from("app.a")]),
+        None,
+    );
+
+    let reused_b = rebuilt
+        .summaries
+        .iter()
+        .find(|summary| summary.module == "app.b")
+        .cloned()
+        .expect("rebuilt summaries should contain app.b");
+    let refreshed_a = rebuilt
+        .summaries
+        .iter()
+        .find(|summary| summary.module == "app.a")
+        .cloned()
+        .expect("rebuilt summaries should contain app.a");
+
+    assert_eq!(reused_b, sentinel_summary);
+    assert_ne!(refreshed_a, changed_sentinel);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_propagates_generic_owner_arguments_into_member_reads() {
+    let diagnostics = check_temp_typepython_source(
+        "class Box[T]:\n    value: T\n\ndef read(box: Box[int]) -> int:\n    return box.value\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_propagates_generic_owner_arguments_into_method_returns() {
+    let diagnostics = check_temp_typepython_source(
+        "class Box[T]:\n    value: T\n    def get(self) -> T:\n        return self.value\n\ndef read(box: Box[int]) -> int:\n    return box.get()\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    let source_text = "class Box[T]:\n    value: T\n    def get(self) -> T:\n        return self.value\n\ndef read(box: Box[int]) -> int:\n    return box.get()\n";
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    assert_eq!(node.method_calls.len(), 1, "expected a single nested method call site");
+    assert_eq!(node.method_calls[0].current_owner_name.as_deref(), Some("read"));
+    assert_eq!(node.method_calls[0].current_owner_type_name.as_deref(), None);
+    let context = super::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+    let resolved_receiver = super::resolve_direct_name_reference_semantic_type_with_context(
+        &context,
+        node,
+        &graph.nodes,
+        None,
+        None,
+        node.method_calls[0].current_owner_name.as_deref(),
+        node.method_calls[0].current_owner_type_name.as_deref(),
+        node.method_calls[0].line,
+        &node.method_calls[0].owner_name,
+    );
+    assert_eq!(
+        resolved_receiver.as_ref().map(crate::render_semantic_type),
+        Some(String::from("Box[int]")),
+    );
+    assert!(
+        !super::name_is_unknown_boundary_with_context(
+            &context,
+            node,
+            &graph.nodes,
+            node.method_calls[0].current_owner_name.as_deref(),
+            node.method_calls[0].current_owner_type_name.as_deref(),
+            node.method_calls[0].line,
+            &node.method_calls[0].owner_name,
+        ),
+        "method receiver should not be treated as an unknown boundary",
+    );
+    let class_decl = node
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Box" && declaration.kind == DeclarationKind::Class)
+        .expect("Box class should be present");
+    let method = node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == "get"
+                && declaration.owner.as_ref().is_some_and(|owner| owner.name == class_decl.name)
+        })
+        .expect("get method should be present");
+    let direct_call = typepython_binding::CallSite {
+        callee: String::from("Box.get"),
+        arg_count: 0,
+        arg_types: Vec::new(),
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let resolved = super::resolve_method_call_candidate_detailed(
+        node,
+        &graph.nodes,
+        method,
+        &direct_call,
+        &crate::lower_type_text_or_name("Box[int]"),
+        super::declaration_callable_semantics(method).as_ref(),
+    )
+    .expect("generic method call should resolve");
+
+    assert_eq!(
+        resolved.return_type.map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("int"))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    let source_text = concat!(
+        "class Animal:\n    pass\n\n",
+        "class Cat(Animal):\n    pass\n\n",
+        "def choose[T](first: T, second: T) -> T:\n    return first\n",
+    );
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let function = node
+        .declarations
+        .iter()
+        .find(|declaration| {
+            declaration.name == "choose" && declaration.kind == DeclarationKind::Function
+        })
+        .expect("choose function should be present");
+    let call = typepython_binding::CallSite {
+        callee: String::from("choose"),
+        arg_count: 2,
+        arg_types: vec![String::from("Animal"), String::from("Cat")],
+        arg_values: Vec::new(),
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let instantiated_return = super::resolve_instantiated_callable_return_type_from_declaration(
+        node,
+        &graph.nodes,
+        function,
+        &call,
+    )
+    .expect("instantiated return type");
+
+    assert_eq!(instantiated_return, "Animal");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_resolves_imports_inside_type_checking_guards() {
+    let root = create_temp_typepython_root();
+    let main_path = root.join("main.tpy");
+    let models_path = root.join("models.tpy");
+    fs::write(
+        &main_path,
+        "import typing\nif typing.TYPE_CHECKING:\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .expect("temp source should be written");
+    fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: main_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.main"),
+                text: String::from(
+                    "import typing\nif typing.TYPE_CHECKING:\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+                ),
+            },
+            ParseOptions::default(),
+        ),
+        parse_with_options(
+            SourceFile {
+                path: models_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.models"),
+                text: String::from("class User:\n    pass\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let diagnostics = check_with_options(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_accepts_direct_type_checking_import_from_typing() {
+    let diagnostics = check_temp_typepython_source(
+        "from typing import TYPE_CHECKING\nflag: bool = TYPE_CHECKING\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_resolves_imports_inside_version_guards() {
+    let root = create_temp_typepython_root();
+    let main_path = root.join("main.tpy");
+    let models_path = root.join("models.tpy");
+    fs::write(
+        &main_path,
+        "import sys\nif sys.version_info >= (3, 11):\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .expect("temp source should be written");
+    fs::write(&models_path, "class User:\n    pass\n").expect("temp source should be written");
+
+    let trees = [
+        parse_with_options(
+            SourceFile {
+                path: main_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.main"),
+                text: String::from(
+                    "import sys\nif sys.version_info >= (3, 11):\n    from app.models import User\n\ndef take(user: User) -> User:\n    return user\n",
+                ),
+            },
+            ParseOptions {
+                target_python: Some(typepython_syntax::ParsePythonVersion { major: 3, minor: 11 }),
+                ..ParseOptions::default()
+            },
+        ),
+        parse_with_options(
+            SourceFile {
+                path: models_path,
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app.models"),
+                text: String::from("class User:\n    pass\n"),
+            },
+            ParseOptions::default(),
+        ),
+    ];
+    let bindings = trees.iter().map(bind).collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let diagnostics = check_with_options(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_resolves_class_declarations_inside_type_checking_guards() {
+    let diagnostics = check_temp_typepython_source(
+        "import typing\nif typing.TYPE_CHECKING:\n    class User:\n        pass\n\ndef take(user: User) -> User:\n    return user\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn check_resolves_typealiases_inside_type_checking_guards() {
+    let diagnostics = check_temp_typepython_source(
+        "import typing\nif typing.TYPE_CHECKING:\n    typealias UserId = int\n\ndef take(user: UserId) -> UserId:\n    return user\nvalue: int = take(1)\n",
+    )
+    .diagnostics;
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+pub(super) fn check_temp_project_sources(
+    sources: &[(&str, &str, SourceKind, &str)],
+) -> crate::CheckResult {
+    let root = create_temp_typepython_root();
+    let bindings = sources
+        .iter()
+        .map(|(relative_path, logical_module, kind, source_text)| {
+            let path = root.join(relative_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("temp source parent should be created");
+            }
+            fs::write(&path, source_text).expect("temp source should be written");
+
+            let source = SourceFile {
+                path,
+                kind: *kind,
+                logical_module: (*logical_module).to_owned(),
+                text: (*source_text).to_owned(),
+            };
+            bind(&parse_with_options(source, ParseOptions::default()))
+        })
+        .collect::<Vec<_>>();
+    let graph = build(&bindings);
+    let result = check(&graph);
+
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
+pub(super) fn check_virtual_binding_metadata_source(source_text: &str) -> crate::CheckResult {
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    let graph = build(std::slice::from_ref(&binding));
+
+    check_with_binding_metadata(
+        &graph,
+        &[binding],
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        None,
+    )
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_typed_dict_facts_without_reading_source_file() {
+    let source_text = "from typing import TypedDict\nclass Config(TypedDict, total=False):\n    name: str\nconfig: Config = {}\n";
+    let source = SourceFile {
+        path: PathBuf::from("virtual/app.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, ParseOptions::default());
+    let binding = bind(&tree);
+    assert_eq!(
+        binding
+            .surface_facts
+            .typed_dict_class_metadata
+            .get("Config")
+            .and_then(|metadata| metadata.total),
+        Some(false),
+        "binding should preserve TypedDict(total=False) metadata"
+    );
+    let graph = build(std::slice::from_ref(&binding));
+
+    let result = check_with_binding_metadata(
+        &graph,
+        &[binding],
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        false,
+        false,
+        ImportFallback::Unknown,
+        None,
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve TypedDict(total=False) behavior without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_typed_dict_facts_in_contextual_collections() {
+    let result = check_virtual_binding_metadata_source(
+        "from typing import TypedDict\nclass Config(TypedDict, total=False):\n    name: str\nitems: list[Config] = [{}]\n",
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve nested TypedDict(total=False) behavior without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
+}
+
+#[test]
+fn check_with_binding_metadata_uses_bound_dataclass_transform_facts_without_reading_source_file() {
+    let result = check_virtual_binding_metadata_source(
+        "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform()\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    name: str\n\nuser: User = User(\"Ada\")\n",
+    );
+
+    assert!(
+        !result.diagnostics.has_errors(),
+        "bound surface metadata should preserve dataclass-transform constructor facts without a backing file: {:?}",
+        result.diagnostics.diagnostics
+    );
+}
+
+pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
+    ModuleNode {
+        module_path: PathBuf::from("<type-relations>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: vec![
+            Declaration {
+                name: String::from("Base"),
+                kind: DeclarationKind::Class,
+                metadata: Default::default(),
+                detail: String::new(),
+                value_type: None,
+                method_kind: None,
+                class_kind: Some(DeclarationOwnerKind::Class),
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: Vec::new(),
+                type_params: Vec::new(),
+            },
+            Declaration {
+                name: String::from("Child"),
+                kind: DeclarationKind::Class,
+                metadata: Default::default(),
+                detail: String::from("Base"),
+                value_type: None,
+                method_kind: None,
+                class_kind: Some(DeclarationOwnerKind::Class),
+                owner: None,
+                is_async: false,
+                is_override: false,
+                is_abstract_method: false,
+                is_final_decorator: false,
+                is_deprecated: false,
+                deprecation_message: None,
+                is_final: false,
+                is_class_var: false,
+                bases: vec![String::from("Base")],
+                type_params: Vec::new(),
+            },
+        ],
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    }
+}
+
+
+mod typed_dict;
+mod semantic;
+mod calls;
+mod advanced;
