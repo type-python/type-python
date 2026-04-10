@@ -267,17 +267,7 @@ fn bytecode_path_for(runtime_path: &Path) -> Result<PathBuf> {
 }
 
 fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
-    match config.config.resolution.python_executable.as_deref() {
-        Some(executable) => {
-            let path = Path::new(executable);
-            if path.is_absolute() || !executable.contains(std::path::MAIN_SEPARATOR) {
-                path.to_path_buf()
-            } else {
-                config.config_dir.join(path)
-            }
-        }
-        None => PathBuf::from("python3"),
-    }
+    typepython_project::resolve_python_executable(config)
 }
 
 fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {

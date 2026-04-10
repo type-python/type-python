@@ -10,6 +10,7 @@ members = [
     "crates/typepython_incremental",
     "crates/typepython_lowering",
     "crates/typepython_lsp",
+    "crates/typepython_project",
     "crates/typepython_syntax",
 ]
 resolver = "3"

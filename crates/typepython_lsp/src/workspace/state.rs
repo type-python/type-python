@@ -39,13 +39,6 @@ pub(super) fn parse_discovered_source(
     ))
 }
 
-pub(super) fn source_root_for_path_from_roots(
-    source_roots: &[PathBuf],
-    path: &Path,
-) -> Option<PathBuf> {
-    source_roots.iter().find(|root| path.starts_with(root)).cloned()
-}
-
 pub(super) fn index_document_state(syntax: SyntaxTree) -> (DocumentState, Vec<SymbolOccurrence>) {
     let text = syntax.source.text.clone();
     let uri = path_to_uri(&syntax.source.path);

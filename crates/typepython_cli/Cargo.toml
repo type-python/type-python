@@ -32,6 +32,7 @@ typepython-graph = { path = "../typepython_graph" }
 typepython-incremental = { path = "../typepython_incremental" }
 typepython-lowering = { path = "../typepython_lowering" }
 typepython-lsp = { path = "../typepython_lsp" }
+typepython-project = { path = "../typepython_project" }
 typepython-syntax = { path = "../typepython_syntax" }
 zip.workspace = true
 

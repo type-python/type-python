@@ -1821,6 +1821,7 @@ dependencies = [
  "typepython-incremental",
  "typepython-lowering",
  "typepython-lsp",
+ "typepython-project",
  "typepython-syntax",
  "zip",
 ]
@@ -1904,8 +1905,22 @@ dependencies = [
  "typepython-diagnostics",
  "typepython-graph",
  "typepython-incremental",
+ "typepython-project",
  "typepython-syntax",
  "url",
+]
+
+[[package]]
+name = "typepython-project"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glob",
+ "serde",
+ "serde_json",
+ "typepython-config",
+ "typepython-diagnostics",
+ "typepython-syntax",
 ]
 
 [[package]]

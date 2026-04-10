@@ -22,11 +22,14 @@ use typepython_incremental::{
     IncrementalState, ModuleDependencyIndex, affected_modules, dependency_index, diff,
     snapshot_diff_modules,
 };
+use typepython_project::DiscoveredSource;
 use typepython_syntax::{
     NamedBlockStatement, ParseOptions, ParsePythonVersion, ParseTargetPlatform, SourceFile,
-    SourceKind, SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
+    SyntaxStatement, SyntaxTree, apply_type_ignore_directives, parse_with_options,
     prepare_syntax_tree_for_external_formatter,
 };
+#[cfg(test)]
+use typepython_syntax::SourceKind;
 use url::Url;
 
 #[derive(Debug, Error)]
@@ -66,13 +69,6 @@ struct OverlayDocument {
     uri: String,
     text: String,
     version: i64,
-}
-
-#[derive(Debug, Clone)]
-struct DiscoveredSource {
-    path: PathBuf,
-    kind: SourceKind,
-    logical_module: String,
 }
 
 #[derive(Debug, Clone)]

@@ -15,15 +15,11 @@ impl IncrementalWorkspace {
         config: ConfigHandle,
         overlays: &BTreeMap<PathBuf, OverlayDocument>,
     ) -> Result<Self, LspError> {
-        let include_patterns = compile_patterns(&config, &config.config.project.include)?;
-        let exclude_patterns = compile_patterns(&config, &config.config.project.exclude)?;
-        let source_roots = config
-            .config
-            .project
-            .src
-            .iter()
-            .map(|root| config.resolve_relative_path(root))
-            .collect();
+        let include_patterns =
+            compile_patterns(&config, &config.config.project.include, "project.include")?;
+        let exclude_patterns =
+            compile_patterns(&config, &config.config.project.exclude, "project.exclude")?;
+        let source_roots = typepython_project::source_roots(&config);
         let support_catalog = SupportSourceCatalog::new(&config)?;
 
         let mut project_documents = BTreeMap::new();
@@ -127,24 +123,13 @@ impl IncrementalWorkspace {
         &self,
         path: &Path,
     ) -> Result<Option<DiscoveredSource>, LspError> {
-        let Some(kind) = SourceKind::from_path(path) else {
-            return Ok(None);
-        };
-        if !is_selected_source_path(
+        Ok(typepython_project::discover_project_source_for_path(
             &self.config,
-            path,
+            &self.source_roots,
             &self.include_patterns,
             &self.exclude_patterns,
-        )? {
-            return Ok(None);
-        }
-        let Some(root) = source_root_for_path_from_roots(&self.source_roots, path) else {
-            return Ok(None);
-        };
-        let Some(logical_module) = logical_module_path(&root, path) else {
-            return Ok(None);
-        };
-        Ok(Some(DiscoveredSource { path: path.to_path_buf(), kind, logical_module }))
+            path,
+        )?)
     }
 
     pub(super) fn sync_support_documents(&mut self) -> Result<(), LspError> {

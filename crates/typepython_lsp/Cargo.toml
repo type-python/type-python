@@ -20,6 +20,7 @@ typepython-config = { path = "../typepython_config" }
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-graph = { path = "../typepython_graph" }
 typepython-incremental = { path = "../typepython_incremental" }
+typepython-project = { path = "../typepython_project" }
 typepython-syntax = { path = "../typepython_syntax" }
 url.workspace = true
 
