@@ -1,9 +1,5 @@
 use super::*;
-use typepython_project::{
-    bundled_stdlib_root as shared_bundled_stdlib_root,
-    bundled_stdlib_sources_for_root as shared_bundled_stdlib_sources_for_root,
-    collect_project_sources, discover_project_source_for_path, source_roots,
-};
+use typepython_project::{collect_project_sources, discover_project_source_for_path, source_roots};
 
 pub(crate) fn collect_project_source_paths(
     config: &ConfigHandle,
@@ -86,16 +82,4 @@ pub(crate) fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &s
         current = parent;
     }
     candidates.into_iter()
-}
-
-pub(crate) fn bundled_stdlib_root() -> PathBuf {
-    shared_bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"))
-}
-
-pub(crate) fn bundled_stdlib_sources(target_python: &str) -> Result<Vec<DiscoveredSource>> {
-    shared_bundled_stdlib_sources_for_root(&bundled_stdlib_root(), target_python)
-}
-
-pub(crate) fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
-    typepython_project::external_resolution_sources(config)
 }

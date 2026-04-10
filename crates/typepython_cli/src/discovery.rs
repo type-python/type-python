@@ -14,7 +14,8 @@ use typepython_project::{
     collect_project_sources, compile_patterns, configured_external_type_roots,
     detect_module_collisions, module_collision_diagnostics,
     python_type_roots_from_interpreter as shared_python_type_roots_from_interpreter,
-    sort_sources_by_type_authority, source_roots, walk_external_type_root,
+    sort_sources_by_type_authority, source_roots,
+    support_source_index as shared_support_source_index, walk_external_type_root,
 };
 
 #[derive(Debug)]
@@ -120,4 +121,11 @@ pub(crate) fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<D
 
 pub(crate) fn python_type_roots_from_interpreter(interpreter: &Path) -> Vec<ExternalSupportRoot> {
     shared_python_type_roots_from_interpreter(interpreter)
+}
+
+pub(crate) fn support_source_index(
+    config: &ConfigHandle,
+    target_python: &str,
+) -> Result<typepython_project::SupportSourceIndex> {
+    shared_support_source_index(config, target_python)
 }

@@ -26,8 +26,7 @@ use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
 use crate::cli::{CleanArgs, OutputFormat, RunArgs};
 use crate::discovery::{
-    DiscoveredSource, bundled_stdlib_snapshot_identity, bundled_stdlib_sources,
-    collect_source_paths, external_resolution_sources,
+    DiscoveredSource, bundled_stdlib_snapshot_identity, collect_source_paths, support_source_index,
 };
 use crate::verification::{public_surface_completeness_diagnostics, verify_build_artifacts};
 use crate::{
@@ -327,12 +326,8 @@ fn load_support_syntax_trees(
         return Ok(Vec::new());
     }
 
-    let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
-    support_sources.extend(external_resolution_sources(config)?);
-    let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
-    for source in support_sources {
-        sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
-    }
+    let sources_by_module = support_source_index(config, &config.config.project.target_python)?
+        .into_sources_by_module();
 
     let mut queued_modules = BTreeSet::new();
     let mut queue = VecDeque::new();

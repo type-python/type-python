@@ -1,12 +1,12 @@
 impl SupportSourceCatalog {
     pub(super) fn new(config: &ConfigHandle) -> Result<Self, LspError> {
-        let mut support_sources = bundled_stdlib_sources(&config.config.project.target_python)?;
-        support_sources.extend(external_resolution_sources(config)?);
-        let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
-        for source in support_sources {
-            sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
-        }
-        Ok(Self { sources_by_module })
+        Ok(Self {
+            sources_by_module: typepython_project::support_source_index(
+                config,
+                &config.config.project.target_python,
+            )?
+            .into_sources_by_module(),
+        })
     }
 }
 

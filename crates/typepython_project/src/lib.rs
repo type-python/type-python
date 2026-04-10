@@ -3,11 +3,12 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result};
 use glob::Pattern;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_syntax::SourceKind;
@@ -31,6 +32,35 @@ pub struct ExternalSupportRoot {
 pub struct ModuleCollision {
     pub logical_module: String,
     pub sources: Vec<DiscoveredSource>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SupportSourceIndex {
+    sources_by_module: BTreeMap<String, Vec<DiscoveredSource>>,
+}
+
+impl SupportSourceIndex {
+    pub fn from_sources(mut sources: Vec<DiscoveredSource>) -> Self {
+        sort_sources_by_type_authority(&mut sources);
+        sources.dedup_by(|left, right| left.path == right.path);
+        let mut sources_by_module = BTreeMap::<String, Vec<DiscoveredSource>>::new();
+        for source in sources {
+            sources_by_module.entry(source.logical_module.clone()).or_default().push(source);
+        }
+        Self { sources_by_module }
+    }
+
+    pub fn all_sources(&self) -> Vec<DiscoveredSource> {
+        self.sources_by_module.values().flatten().cloned().collect()
+    }
+
+    pub fn sources_by_module(&self) -> &BTreeMap<String, Vec<DiscoveredSource>> {
+        &self.sources_by_module
+    }
+
+    pub fn into_sources_by_module(self) -> BTreeMap<String, Vec<DiscoveredSource>> {
+        self.sources_by_module
+    }
 }
 
 pub fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
@@ -359,6 +389,35 @@ pub fn bundled_stdlib_file_matches_target(path: &Path, target_python: &str) -> R
     Ok(parse_bundled_stdlib_version_filter(&contents).allows(target_python))
 }
 
+pub fn support_source_index(
+    config: &ConfigHandle,
+    target_python: &str,
+) -> Result<SupportSourceIndex> {
+    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    let external_roots = configured_external_type_roots(config)?;
+    let cache_path = support_source_index_cache_path(config, target_python);
+
+    if let Some(index) =
+        load_cached_support_source_index(&cache_path, target_python, &stdlib_root, &external_roots)?
+    {
+        return Ok(index);
+    }
+
+    let mut sources = bundled_stdlib_sources_for_root(&stdlib_root, target_python)?;
+    for root in &external_roots {
+        walk_external_type_root(root, &mut sources)?;
+    }
+    let index = SupportSourceIndex::from_sources(sources);
+    let _ = write_cached_support_source_index(
+        &cache_path,
+        target_python,
+        &stdlib_root,
+        &external_roots,
+        &index,
+    );
+    Ok(index)
+}
+
 pub fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {
     let mut sources = Vec::new();
     for root in configured_external_type_roots(config)? {
@@ -559,6 +618,148 @@ pub fn partial_stub_package_marker(stub_root: &Path) -> bool {
         .is_some_and(|contents| contents.lines().any(|line| line.trim() == "partial"))
 }
 
+const SUPPORT_SOURCE_INDEX_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+struct CachedSupportSourceIndex {
+    version: u32,
+    target_python: String,
+    roots: Vec<CachedSupportRoot>,
+    sources: Vec<CachedSupportSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+struct CachedSupportRoot {
+    kind: String,
+    path: String,
+    allow_untyped_runtime: bool,
+    modified_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+struct CachedSupportSource {
+    path: String,
+    root: String,
+    logical_module: String,
+    load_as_inferred_stub: bool,
+}
+
+fn support_source_index_cache_path(config: &ConfigHandle, target_python: &str) -> PathBuf {
+    let sanitized_target = target_python.replace('.', "_");
+    config
+        .resolve_relative_path(&config.config.project.cache_dir)
+        .join(format!("support-index-v{SUPPORT_SOURCE_INDEX_VERSION}-{sanitized_target}.json"))
+}
+
+fn load_cached_support_source_index(
+    cache_path: &Path,
+    target_python: &str,
+    stdlib_root: &Path,
+    external_roots: &[ExternalSupportRoot],
+) -> Result<Option<SupportSourceIndex>> {
+    if !cache_path.is_file() {
+        return Ok(None);
+    }
+
+    let rendered = match fs::read_to_string(cache_path) {
+        Ok(rendered) => rendered,
+        Err(_) => return Ok(None),
+    };
+    let cached = match serde_json::from_str::<CachedSupportSourceIndex>(&rendered) {
+        Ok(cached) => cached,
+        Err(_) => return Ok(None),
+    };
+    let current_roots = support_root_signatures(stdlib_root, external_roots)?;
+    if cached.version != SUPPORT_SOURCE_INDEX_VERSION
+        || cached.target_python != target_python
+        || cached.roots != current_roots
+    {
+        return Ok(None);
+    }
+
+    Ok(Some(SupportSourceIndex::from_sources(
+        cached
+            .sources
+            .into_iter()
+            .filter_map(|source| {
+                let path = PathBuf::from(&source.path);
+                Some(DiscoveredSource {
+                    kind: SourceKind::from_path(&path)?,
+                    path,
+                    root: PathBuf::from(source.root),
+                    logical_module: source.logical_module,
+                    load_as_inferred_stub: source.load_as_inferred_stub,
+                })
+            })
+            .collect(),
+    )))
+}
+
+fn write_cached_support_source_index(
+    cache_path: &Path,
+    target_python: &str,
+    stdlib_root: &Path,
+    external_roots: &[ExternalSupportRoot],
+    index: &SupportSourceIndex,
+) -> Result<()> {
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("unable to create support cache directory {}", parent.display())
+        })?;
+    }
+
+    let cached = CachedSupportSourceIndex {
+        version: SUPPORT_SOURCE_INDEX_VERSION,
+        target_python: target_python.to_owned(),
+        roots: support_root_signatures(stdlib_root, external_roots)?,
+        sources: index
+            .all_sources()
+            .into_iter()
+            .map(|source| CachedSupportSource {
+                path: source.path.display().to_string(),
+                root: source.root.display().to_string(),
+                logical_module: source.logical_module,
+                load_as_inferred_stub: source.load_as_inferred_stub,
+            })
+            .collect(),
+    };
+    let payload =
+        serde_json::to_string(&cached).context("unable to serialize support source index")?;
+    fs::write(cache_path, payload)
+        .with_context(|| format!("unable to write support source index {}", cache_path.display()))
+}
+
+fn support_root_signatures(
+    stdlib_root: &Path,
+    external_roots: &[ExternalSupportRoot],
+) -> Result<Vec<CachedSupportRoot>> {
+    let mut roots = vec![cached_support_root("bundled_stdlib", stdlib_root, false)?];
+    for root in external_roots {
+        roots.push(cached_support_root("external", &root.path, root.allow_untyped_runtime)?);
+    }
+    roots.sort();
+    Ok(roots)
+}
+
+fn cached_support_root(
+    kind: &str,
+    path: &Path,
+    allow_untyped_runtime: bool,
+) -> Result<CachedSupportRoot> {
+    let modified_unix_ms = path
+        .metadata()
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+    Ok(CachedSupportRoot {
+        kind: kind.to_owned(),
+        path: path.display().to_string(),
+        allow_untyped_runtime,
+        modified_unix_ms,
+    })
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct BundledStdlibVersionFilter {
     pub min_python: Option<String>,
@@ -629,4 +830,126 @@ fn allows_runtime_with_stub_pair(module_sources: &[&DiscoveredSource]) -> bool {
 struct ExternalSupportRootProbe {
     path: String,
     allow_untyped_runtime: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{env, fs, time::SystemTime};
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    fn write_executable_script(path: &Path, script: &str) {
+        fs::write(path, script).expect("script should be written");
+        let mut permissions =
+            fs::metadata(path).expect("script metadata should exist").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("script permissions should be updated");
+    }
+
+    fn temp_project_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let root = env::temp_dir().join(format!("typepython-project-{test_name}-{unique}"));
+        fs::create_dir_all(&root).expect("temp project directory should be created");
+        root
+    }
+
+    fn remove_temp_project_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn support_source_index_writes_cache_file() {
+        let project_dir = temp_project_dir("support_source_index_writes_cache_file");
+        let result = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            fs::create_dir_all(project_dir.join("site-packages/demo"))
+                .expect("support package directory should be created");
+            fs::write(project_dir.join("site-packages/demo/__init__.pyi"), "pass\n")
+                .expect("support package stub should be written");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("typepython.toml should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let index = support_source_index(&config, &config.config.project.target_python)
+                .expect("index should build");
+            let cache_path =
+                support_source_index_cache_path(&config, &config.config.project.target_python);
+
+            (index.sources_by_module().contains_key("demo"), cache_path.is_file())
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let (has_demo, cache_exists) = result;
+        assert!(has_demo);
+        assert!(cache_exists);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_cached_support_source_index_round_trips_cached_entries() {
+        let project_dir =
+            temp_project_dir("load_cached_support_source_index_round_trips_cached_entries");
+        let result = {
+            let probe = project_dir.join("python-probe");
+            write_executable_script(
+                &probe,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ] && printf '%s' \"$2\" | grep -q version_info; then\n  printf '3.10\\n'\nelse\n  printf '[]\\n'\nfi\n",
+            );
+            fs::create_dir_all(project_dir.join("site-packages/demo"))
+                .expect("support package directory should be created");
+            fs::write(project_dir.join("site-packages/demo/__init__.pyi"), "pass\n")
+                .expect("support package stub should be written");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                format!(
+                    "[project]\nsrc = [\"src\"]\n\n[resolution]\ntype_roots = [\"{}\"]\npython_executable = \"{}\"\n",
+                    project_dir.join("site-packages").display(),
+                    probe.display()
+                ),
+            )
+            .expect("typepython.toml should be written");
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+            let external_roots =
+                configured_external_type_roots(&config).expect("external roots should resolve");
+            let cache_path =
+                support_source_index_cache_path(&config, &config.config.project.target_python);
+            let index = support_source_index(&config, &config.config.project.target_python)
+                .expect("index should build");
+            let cached = load_cached_support_source_index(
+                &cache_path,
+                &config.config.project.target_python,
+                &stdlib_root,
+                &external_roots,
+            )
+            .expect("cache load should succeed")
+            .expect("cache should be valid");
+
+            (
+                index.sources_by_module().get("demo").map(Vec::len),
+                cached.sources_by_module().get("demo").map(Vec::len),
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        assert_eq!(result.0, Some(1));
+        assert_eq!(result.0, result.1);
+    }
 }
