@@ -34,6 +34,7 @@ use crate::{
 struct RuntimeImportabilityResult {
     importable: bool,
     error: Option<String>,
+    public_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +279,7 @@ pub(crate) fn verify_runtime_public_name_parity(
 
 fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
     if let Some(runtime_path) = &artifact.runtime_path {
         if !runtime_path.exists() {
@@ -326,7 +328,9 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
 
     if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
         if runtime_path.exists() && stub_path.exists() {
-            if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
+            if let Some(diagnostic) =
+                verify_emitted_declaration_surface(config, &out_root, runtime_path, stub_path)
+            {
                 diagnostics.push(diagnostic);
             }
         }
@@ -465,7 +469,7 @@ fn verify_runtime_public_name_parity_for_artifact(
         ));
         return diagnostics;
     }
-    let runtime_names = match runtime_public_names(config, runtime_path) {
+    let runtime_names = match runtime_public_names(config, out_root, &module_name, runtime_path) {
         Ok(names) => names,
         Err(error) => {
             diagnostics.push(Diagnostic::error(
@@ -543,9 +547,15 @@ fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -
 
 fn runtime_public_names(
     config: &ConfigHandle,
+    out_root: &Path,
+    module_name: &str,
     runtime_path: &Path,
 ) -> std::result::Result<BTreeSet<String>, String> {
-    public_names_from_module_file(config, runtime_path)
+    if let Some(names) = static_all_names(config, runtime_path)? {
+        return Ok(names);
+    }
+
+    runtime_public_names_from_import(config, out_root, module_name)
 }
 
 fn verify_runtime_module_importability(
@@ -585,6 +595,49 @@ fn verify_runtime_module_importability(
     } else {
         Err(result.error.unwrap_or_else(|| format!("module `{module_name}` could not be imported")))
     }
+}
+
+fn runtime_public_names_from_import(
+    config: &ConfigHandle,
+    out_root: &Path,
+    module_name: &str,
+) -> std::result::Result<BTreeSet<String>, String> {
+    let probe_dir = runtime_import_probe_dir(module_name)?;
+    let interpreter = resolve_python_executable(config);
+    let output = ProcessCommand::new(&interpreter)
+        .current_dir(&probe_dir)
+        .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
+        .arg(out_root)
+        .arg(module_name)
+        .output()
+        .map_err(|error| {
+            format!(
+                "unable to inspect runtime public names with `{}`: {error}",
+                interpreter.display()
+            )
+        });
+    let _ = fs::remove_dir_all(&probe_dir);
+    let output = output?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr_suffix =
+            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
+        return Err(format!(
+            "runtime public-name probe exited with status {}{}",
+            output.status, stderr_suffix
+        ));
+    }
+    let result = serde_json::from_slice::<RuntimeImportabilityResult>(&output.stdout)
+        .map_err(|error| format!("unable to parse runtime public-name output: {error}"))?;
+    if !result.importable {
+        return Err(result
+            .error
+            .unwrap_or_else(|| format!("module `{module_name}` could not be imported")));
+    }
+    result
+        .public_names
+        .map(|names| names.into_iter().collect())
+        .ok_or_else(|| format!("runtime module `{module_name}` did not report public names"))
 }
 
 fn runtime_import_probe_dir(module_name: &str) -> std::result::Result<PathBuf, String> {
@@ -911,17 +964,25 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
     }
 }
 
-fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> Option<Diagnostic> {
+fn verify_emitted_declaration_surface(
+    config: &ConfigHandle,
+    out_root: &Path,
+    runtime_path: &Path,
+    stub_path: &Path,
+) -> Option<Diagnostic> {
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
+    let module_name = logical_module_name_from_runtime_path(out_root, runtime_path)?;
+    let runtime_names = runtime_public_names(config, out_root, &module_name, runtime_path).ok()?;
+    let authoritative_names = authoritative_public_names(config, stub_path).ok()?;
 
     let runtime_surface = declaration_surface(&runtime_syntax)
         .into_iter()
-        .filter(is_public_surface_entry)
+        .filter(|entry| surface_entry_is_exported(entry, &runtime_names))
         .collect::<BTreeSet<_>>();
     let stub_surface = declaration_surface(&stub_syntax)
         .into_iter()
-        .filter(is_public_surface_entry)
+        .filter(|entry| surface_entry_is_exported(entry, &authoritative_names))
         .collect::<BTreeSet<_>>();
 
     if runtime_surface == stub_surface {
@@ -1266,6 +1327,13 @@ fn is_public_surface_entry(entry: &SurfaceEntry) -> bool {
     match &entry.owner {
         Some(owner) => !owner.starts_with('_'),
         None => true,
+    }
+}
+
+fn surface_entry_is_exported(entry: &SurfaceEntry, exported_names: &BTreeSet<String>) -> bool {
+    match &entry.owner {
+        Some(owner) => exported_names.contains(owner),
+        None => exported_names.contains(&entry.name),
     }
 }
 

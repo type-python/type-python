@@ -660,6 +660,50 @@ fn verify_build_artifacts_reports_function_signature_surface_mismatch() {
 }
 
 #[test]
+fn verify_build_artifacts_accepts_dynamic_runtime_all_exports() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_accepts_dynamic_runtime_all_exports");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def exports():\n    return [\"build_user\"]\n\n__all__ = exports()\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__: list[str] = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
 fn verify_build_artifacts_reports_runtime_statements_inside_stub() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_reports_runtime_statements_inside_stub");
@@ -2350,6 +2394,41 @@ fn verify_runtime_public_name_parity_uses_top_level_non_underscore_names_when_al
     remove_temp_project_dir(&project_dir);
 
     assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn verify_runtime_public_name_parity_accepts_dynamic_runtime_all_exports() {
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_accepts_dynamic_runtime_all_exports");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def exports():\n    return [\"build_user\"]\n\n__all__ = exports()\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__: list[str] = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
 }
 
 #[test]
