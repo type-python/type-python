@@ -312,6 +312,17 @@ During development, option 3 means you can run `python -m typepython check --pro
 - Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
 - If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist.
 
+### Publishing to PyPI
+
+The repository publishes to PyPI through GitHub Actions Trusted Publishing in the `pypi` environment. No PyPI API token is required in repository secrets or workflow `env`.
+
+1. Update `version` in `pyproject.toml`.
+2. Commit the version bump and push it to GitHub.
+3. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
+4. The `publish` workflow validates the tag/version match, builds the sdist and Linux wheel, runs `twine check`, and then publishes to PyPI.
+
+The current publish workflow builds on `ubuntu-latest`, so each release uploads the source distribution and a Linux wheel. Add macOS and Windows wheel jobs if you want `pip install type-python` to avoid a local Rust toolchain on those platforms as well.
+
 ## Pull Request Workflow
 
 ### Before opening a PR

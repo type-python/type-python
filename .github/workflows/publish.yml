@@ -1,0 +1,95 @@
+name: publish
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate release tag format and package version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${{ github.event.release.tag_name }}"
+          if [[ ! "$tag" =~ ^v[0-9].+ ]]; then
+            echo "Release tag must start with v and match the package version, for example v0.1.0"
+            exit 1
+          fi
+
+          expected_version="${tag#v}"
+          package_version="$(
+            python - <<'PY'
+            from pathlib import Path
+            import tomllib
+
+            pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+            print(pyproject["project"]["version"])
+            PY
+          )"
+
+          if [[ "$package_version" != "$expected_version" ]]; then
+            echo "Release tag ${tag} does not match pyproject.toml version ${package_version}"
+            exit 1
+          fi
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade build twine
+
+      - name: Build Python distribution artifacts
+        run: python -m build --sdist --wheel
+
+      - name: Validate Python distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distribution
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/type-python/
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distribution
+          path: dist
+
+      - name: Publish distribution artifacts to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
