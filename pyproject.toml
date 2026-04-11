@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "type-python"
-version = "0.0.6"
+version = "0.0.7"
 description = "A statically-typed authoring language that compiles to standard Python"
 readme = { file = "README-PyPI.md", content-type = "text/markdown" }
 license = "MIT"
