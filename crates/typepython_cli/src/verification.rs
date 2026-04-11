@@ -1024,6 +1024,10 @@ fn verify_stub_syntax_rules(
                 ));
             }
             typepython_syntax::SyntaxStatement::Value(statement)
+                if statement.owner_name.is_none()
+                    && statement.annotation.is_none()
+                    && statement.names == [String::from("__all__")] => {}
+            typepython_syntax::SyntaxStatement::Value(statement)
                 if statement.owner_name.is_none() && statement.annotation.is_none() =>
             {
                 return Some(Diagnostic::error(
