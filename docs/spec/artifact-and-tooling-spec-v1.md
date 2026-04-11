@@ -976,6 +976,51 @@ The cache SHOULD track:
 - If only implementation details change and public summary is unchanged, dependents SHOULD NOT be rechecked
 - If public summary changes, direct and transitive dependents MUST be invalidated
 
+#### 17.3.1 Invalidation Inputs
+
+For v1, an implementation MUST classify incremental invalidation inputs into at least the following buckets:
+
+- **Direct source changes**: a project module was added, removed, renamed, or its authoritative source text changed
+- **Public-summary changes**: the persisted public summary for a module differs from the previous build
+- **Bundled support-surface changes**: the bundled stdlib snapshot identity differs from the previous build state
+
+An implementation MAY track additional invalidation inputs such as changes in external type roots, partial-stub package composition, or resolver configuration, but it MUST treat any such input conservatively enough that stale public summaries are never reused.
+
+#### 17.3.2 Affected-Module Set
+
+Given:
+
+- `direct_changes`: the set of project modules directly edited, added, removed, or otherwise invalidated before summary comparison
+- `summary_changed`: the set of modules whose public summaries were added, removed, or changed relative to the previous snapshot
+- `reverse_importers(m)`: the transitive reverse-import closure for module `m`
+
+the affected-module set for semantic rechecking MUST satisfy:
+
+- every module in `direct_changes` MUST be rechecked
+- every module in `summary_changed` MUST be treated as invalidated
+- every direct or transitive importer of a module in `summary_changed` MUST be rechecked
+- modules outside that affected set MAY reuse prior semantic summaries if their own direct input surface is unchanged
+
+An implementation MAY conservatively recheck additional modules, but it MUST NOT omit any module required by the rules above.
+
+#### 17.3.3 Output-Reuse Rules
+
+If a frontend reuses previously materialized build outputs rather than only semantic summaries, it MUST additionally verify all of the following before declaring the build up to date:
+
+- the previous and current public-summary sets are semantically equal
+- the previous and current bundled-stdlib snapshot identities are equal
+- the persisted build artifacts still exist and are structurally valid for the current build tree
+
+If any of those checks fail, the frontend MUST rebuild or re-emit the affected outputs even if the project source files themselves are unchanged.
+
+#### 17.3.4 Non-Source Support Inputs
+
+Changes in bundled or discovered support surfaces can change type-checking results even when project source text is unchanged. Therefore:
+
+- changing the bundled stdlib snapshot identity MUST invalidate any cached summary state derived from the previous snapshot
+- if an implementation consumes external support roots, stub packages, or inferred shadow stubs, it SHOULD treat changes in the authoritative support surface as invalidation inputs
+- when precise support-surface dependency tracking is unavailable, implementations MAY conservatively invalidate all project modules
+
 ### 17.4 Standard Library
 
 TypePython Core v1 MUST ship with a pinned typeshed snapshot or equivalent bundled stdlib type source, filtered by `target_python`.
