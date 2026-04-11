@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use notify::RecursiveMode;
+use rayon::prelude::*;
 use typepython_binding::bind;
 use typepython_checking::{
     check_with_binding_metadata, collect_effective_callable_stub_overrides,
@@ -306,7 +307,7 @@ pub(crate) fn load_syntax_trees(
     target_python: &str,
 ) -> Result<Vec<typepython_syntax::SyntaxTree>> {
     sources
-        .iter()
+        .par_iter()
         .map(|source| {
             let mut source_file = SourceFile::from_path(&source.path)
                 .with_context(|| format!("unable to read {}", source.path.display()))?;
@@ -399,7 +400,7 @@ fn analyze_pipeline_state(
     config: &ConfigHandle,
     prepared: &PreparedPipelineSyntax,
 ) -> Result<AnalyzedPipelineState> {
-    let bindings: Vec<_> = prepared.all_syntax_trees.iter().map(bind).collect();
+    let bindings: Vec<_> = prepared.all_syntax_trees.par_iter().map(bind).collect();
     let graph = build(&bindings);
     let mut diagnostics = check_with_binding_metadata(
         &graph,
@@ -681,7 +682,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let lowering_results: Vec<_> =
         prepared
             .syntax_trees
-            .iter()
+            .par_iter()
             .map(|tree| lower_with_options(tree, &lowering_options))
             .collect();
     let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
