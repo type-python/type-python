@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from typing import cast
 
-from setuptools import Command, setup
+from setuptools import Command, Distribution, setup
 from setuptools.command.build_py import build_py as _build_py
 
 try:
@@ -19,6 +19,13 @@ except ImportError:
 
 
 ROOT = pathlib.Path(__file__).resolve().parent
+
+
+class BinaryDistribution(Distribution):
+    # Tell setuptools/wheel that this distribution contains platform-specific
+    # binaries so wheel contents are laid out under platlib instead of purelib.
+    def has_ext_modules(self) -> bool:
+        return True
 
 
 class build_py(_build_py):
@@ -67,4 +74,4 @@ if _bdist_wheel is not None:
     cmdclass["bdist_wheel"] = cast(type[Command], bdist_wheel)
 
 
-setup(cmdclass=cmdclass)
+setup(cmdclass=cmdclass, distclass=BinaryDistribution)
