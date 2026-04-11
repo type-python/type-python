@@ -50,6 +50,22 @@ pub(crate) struct PipelineSnapshot {
     pub(crate) diagnostics: DiagnosticReport,
 }
 
+#[derive(Debug)]
+struct PreparedPipelineSyntax {
+    source_paths: Vec<PathBuf>,
+    syntax_trees: Vec<typepython_syntax::SyntaxTree>,
+    all_syntax_trees: Vec<typepython_syntax::SyntaxTree>,
+}
+
+#[derive(Debug)]
+struct AnalyzedPipelineState {
+    graph: typepython_graph::ModuleGraph,
+    diagnostics: DiagnosticReport,
+    incremental: IncrementalState,
+    tracked_modules: usize,
+    pre_lowering_emit_plan: Vec<EmitArtifact>,
+}
+
 pub(crate) fn should_emit_build_outputs(
     config: &ConfigHandle,
     snapshot: &PipelineSnapshot,
@@ -307,6 +323,158 @@ pub(crate) fn load_syntax_trees(
         .collect::<Result<Vec<_>>>()
 }
 
+fn blocked_pipeline_snapshot(
+    discovered_sources: usize,
+    diagnostics: DiagnosticReport,
+) -> PipelineSnapshot {
+    PipelineSnapshot {
+        lowered_modules: Vec::new(),
+        emit_plan: Vec::new(),
+        stub_contexts: BTreeMap::new(),
+        incremental: IncrementalState::default(),
+        tracked_modules: 0,
+        discovered_sources,
+        emit_blocked_by_pipeline: true,
+        diagnostics,
+    }
+}
+
+fn blocked_pipeline_snapshot_with_incremental(
+    discovered_sources: usize,
+    diagnostics: DiagnosticReport,
+    incremental: IncrementalState,
+    tracked_modules: usize,
+) -> PipelineSnapshot {
+    PipelineSnapshot {
+        lowered_modules: Vec::new(),
+        emit_plan: Vec::new(),
+        stub_contexts: BTreeMap::new(),
+        incremental,
+        tracked_modules,
+        discovered_sources,
+        emit_blocked_by_pipeline: true,
+        diagnostics,
+    }
+}
+
+fn prepare_pipeline_syntax(
+    config: &ConfigHandle,
+    discovery_sources: &[DiscoveredSource],
+) -> Result<PreparedPipelineSyntax> {
+    let source_paths: Vec<_> =
+        discovery_sources.iter().map(|source| source.path.clone()).collect();
+    let syntax_trees = load_syntax_trees(
+        discovery_sources,
+        config.config.typing.conditional_returns,
+        &config.config.project.target_python,
+    )?;
+    let shadow_stub_syntax = if config.config.typing.infer_passthrough {
+        let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
+            &syntax_trees,
+            config.config.typing.conditional_returns,
+            &config.config.project.target_python,
+        )?;
+        if !shadow_stub_syntax.is_empty() {
+            let cache_root =
+                config.resolve_relative_path(&config.config.project.cache_dir).join("shadow-stubs");
+            write_shadow_stub_cache(&cache_root, &shadow_stub_syntax)?;
+        }
+        shadow_stub_syntax
+    } else {
+        Vec::new()
+    };
+    let mut all_syntax_trees =
+        if config.config.typing.infer_passthrough && !shadow_stub_syntax.is_empty() {
+            replace_local_python_surfaces_with_shadow_stubs(&syntax_trees, shadow_stub_syntax)
+        } else {
+            syntax_trees.clone()
+        };
+    let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
+    all_syntax_trees.extend(checking_support_syntax);
+
+    Ok(PreparedPipelineSyntax { source_paths, syntax_trees, all_syntax_trees })
+}
+
+fn analyze_pipeline_state(
+    config: &ConfigHandle,
+    prepared: &PreparedPipelineSyntax,
+) -> Result<AnalyzedPipelineState> {
+    let bindings: Vec<_> = prepared.all_syntax_trees.iter().map(bind).collect();
+    let graph = build(&bindings);
+    let mut diagnostics = check_with_binding_metadata(
+        &graph,
+        &bindings,
+        config.config.typing.require_explicit_overrides,
+        config.config.typing.enable_sealed_exhaustiveness,
+        config.config.typing.report_deprecated,
+        config.config.typing.strict,
+        config.config.typing.warn_unsafe,
+        config.config.typing.imports,
+        None,
+    )
+    .diagnostics;
+    diagnostics = filter_project_diagnostics(&diagnostics, &prepared.source_paths);
+    apply_type_ignore_directives(&prepared.syntax_trees, &mut diagnostics);
+
+    let stdlib_snapshot =
+        Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
+    let incremental = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        config.config.typing.imports,
+        None,
+        stdlib_snapshot,
+    );
+    let tracked_modules = incremental.fingerprints.len();
+    let planned_sources: Vec<_> = prepared
+        .syntax_trees
+        .iter()
+        .map(|tree| PlannedModuleSource {
+            source_path: tree.source.path.clone(),
+            source_kind: tree.source.kind,
+        })
+        .collect();
+    let pre_lowering_emit_plan = plan_emits_for_sources(config, &planned_sources);
+
+    Ok(AnalyzedPipelineState {
+        graph,
+        diagnostics,
+        incremental,
+        tracked_modules,
+        pre_lowering_emit_plan,
+    })
+}
+
+fn can_reuse_cached_pipeline_outputs(
+    config: &ConfigHandle,
+    previous: &IncrementalState,
+    analyzed: &AnalyzedPipelineState,
+) -> bool {
+    let snapshot_diff = diff(previous, &analyzed.incremental);
+    snapshot_diff.added.is_empty()
+        && snapshot_diff.removed.is_empty()
+        && snapshot_diff.changed.is_empty()
+        && previous.summaries == analyzed.incremental.summaries
+        && previous.stdlib_snapshot == analyzed.incremental.stdlib_snapshot
+        && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
+}
+
+fn reusable_cached_pipeline_snapshot(
+    discovered_sources: usize,
+    analyzed: AnalyzedPipelineState,
+) -> PipelineSnapshot {
+    PipelineSnapshot {
+        lowered_modules: Vec::new(),
+        emit_plan: analyzed.pre_lowering_emit_plan,
+        stub_contexts: BTreeMap::new(),
+        incremental: analyzed.incremental,
+        tracked_modules: analyzed.tracked_modules,
+        discovered_sources,
+        emit_blocked_by_pipeline: false,
+        diagnostics: analyzed.diagnostics,
+    }
+}
+
 fn load_support_syntax_trees(
     config: &ConfigHandle,
     surface_syntax_trees: &[typepython_syntax::SyntaxTree],
@@ -482,145 +650,63 @@ pub(crate) fn run_with_pipeline(
 pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let discovery = collect_source_paths(config)?;
     if discovery.diagnostics.has_errors() {
-        return Ok(PipelineSnapshot {
-            lowered_modules: Vec::new(),
-            emit_plan: Vec::new(),
-            stub_contexts: BTreeMap::new(),
-            incremental: IncrementalState::default(),
-            tracked_modules: 0,
-            discovered_sources: discovery.sources.len(),
-            emit_blocked_by_pipeline: true,
-            diagnostics: discovery.diagnostics,
-        });
+        return Ok(blocked_pipeline_snapshot(
+            discovery.sources.len(),
+            discovery.diagnostics,
+        ));
     }
 
-    let source_paths: Vec<_> = discovery.sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees = load_syntax_trees(
-        &discovery.sources,
-        config.config.typing.conditional_returns,
-        &config.config.project.target_python,
-    )?;
-    let shadow_stub_syntax = if config.config.typing.infer_passthrough {
-        let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
-            &syntax_trees,
-            config.config.typing.conditional_returns,
-            &config.config.project.target_python,
-        )?;
-        if !shadow_stub_syntax.is_empty() {
-            let cache_root =
-                config.resolve_relative_path(&config.config.project.cache_dir).join("shadow-stubs");
-            write_shadow_stub_cache(&cache_root, &shadow_stub_syntax)?;
-        }
-        shadow_stub_syntax
-    } else {
-        Vec::new()
-    };
-    let mut all_syntax_trees =
-        if config.config.typing.infer_passthrough && !shadow_stub_syntax.is_empty() {
-            replace_local_python_surfaces_with_shadow_stubs(&syntax_trees, shadow_stub_syntax)
-        } else {
-            syntax_trees.clone()
-        };
-    let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
-    all_syntax_trees.extend(checking_support_syntax);
-    let mut parse_diagnostics = collect_parse_diagnostics(&all_syntax_trees);
-    apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
+    let prepared = prepare_pipeline_syntax(config, &discovery.sources)?;
+    let mut parse_diagnostics = collect_parse_diagnostics(&prepared.all_syntax_trees);
+    apply_type_ignore_directives(&prepared.syntax_trees, &mut parse_diagnostics);
     if parse_diagnostics.has_errors() {
-        return Ok(PipelineSnapshot {
-            lowered_modules: Vec::new(),
-            emit_plan: Vec::new(),
-            stub_contexts: BTreeMap::new(),
-            incremental: IncrementalState::default(),
-            tracked_modules: 0,
-            discovered_sources: source_paths.len(),
-            emit_blocked_by_pipeline: true,
-            diagnostics: parse_diagnostics,
-        });
+        return Ok(blocked_pipeline_snapshot(
+            prepared.source_paths.len(),
+            parse_diagnostics,
+        ));
     }
 
-    let bindings: Vec<_> = all_syntax_trees.iter().map(bind).collect();
-    let graph = build(&bindings);
-    let mut diagnostics = check_with_binding_metadata(
-        &graph,
-        &bindings,
-        config.config.typing.require_explicit_overrides,
-        config.config.typing.enable_sealed_exhaustiveness,
-        config.config.typing.report_deprecated,
-        config.config.typing.strict,
-        config.config.typing.warn_unsafe,
-        config.config.typing.imports,
-        None,
-    )
-    .diagnostics;
-    diagnostics = filter_project_diagnostics(&diagnostics, &source_paths);
-    apply_type_ignore_directives(&syntax_trees, &mut diagnostics);
-
-    let stdlib_snapshot =
-        Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
-    let incremental = semantic_incremental_state_with_binding_metadata(
-        &graph,
-        &bindings,
-        config.config.typing.imports,
-        None,
-        stdlib_snapshot,
-    );
-    let tracked_modules = incremental.fingerprints.len();
-    let planned_sources: Vec<_> = syntax_trees
-        .iter()
-        .map(|tree| PlannedModuleSource {
-            source_path: tree.source.path.clone(),
-            source_kind: tree.source.kind,
-        })
-        .collect();
-    let emit_plan = plan_emits_for_sources(config, &planned_sources);
+    let analyzed = analyze_pipeline_state(config, &prepared)?;
     if let Some(previous) = load_previous_incremental_state(config)? {
-        let snapshot_diff = diff(&previous, &incremental);
-        if snapshot_diff.added.is_empty()
-            && snapshot_diff.removed.is_empty()
-            && snapshot_diff.changed.is_empty()
-            && previous.summaries == incremental.summaries
-            && previous.stdlib_snapshot == incremental.stdlib_snapshot
-            && !verify_build_artifacts(config, &emit_plan).has_errors()
-        {
-            return Ok(PipelineSnapshot {
-                lowered_modules: Vec::new(),
-                emit_plan,
-                stub_contexts: BTreeMap::new(),
-                incremental,
-                tracked_modules,
-                discovered_sources: source_paths.len(),
-                emit_blocked_by_pipeline: false,
-                diagnostics,
-            });
+        if can_reuse_cached_pipeline_outputs(config, &previous, &analyzed) {
+            return Ok(reusable_cached_pipeline_snapshot(
+                prepared.source_paths.len(),
+                analyzed,
+            ));
         }
     }
 
     let lowering_options =
         LoweringOptions { target_python: config.config.project.target_python.clone() };
     let lowering_results: Vec<_> =
-        syntax_trees.iter().map(|tree| lower_with_options(tree, &lowering_options)).collect();
+        prepared
+            .syntax_trees
+            .iter()
+            .map(|tree| lower_with_options(tree, &lowering_options))
+            .collect();
     let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
+    let mut diagnostics = analyzed.diagnostics;
     if lowering_diagnostics.has_errors() {
         diagnostics.diagnostics.extend(lowering_diagnostics.diagnostics);
-        return Ok(PipelineSnapshot {
-            lowered_modules: Vec::new(),
-            emit_plan: Vec::new(),
-            stub_contexts: BTreeMap::new(),
-            incremental,
-            tracked_modules,
-            discovered_sources: source_paths.len(),
-            emit_blocked_by_pipeline: true,
+        return Ok(blocked_pipeline_snapshot_with_incremental(
+            prepared.source_paths.len(),
             diagnostics,
-        });
+            analyzed.incremental,
+            analyzed.tracked_modules,
+        ));
     }
 
     let lowered_modules: Vec<_> =
         lowering_results.into_iter().map(|result| result.module).collect();
-    let stub_contexts = build_typepython_stub_contexts(&syntax_trees, &lowered_modules, &graph);
+    let stub_contexts = build_typepython_stub_contexts(
+        &prepared.syntax_trees,
+        &lowered_modules,
+        &analyzed.graph,
+    );
     diagnostics.diagnostics.extend(
         public_surface_completeness_diagnostics(
             config,
-            &syntax_trees,
+            &prepared.syntax_trees,
             &lowered_modules,
             &stub_contexts,
         )
@@ -632,9 +718,9 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         lowered_modules,
         emit_plan,
         stub_contexts,
-        incremental,
-        tracked_modules,
-        discovered_sources: source_paths.len(),
+        incremental: analyzed.incremental,
+        tracked_modules: analyzed.tracked_modules,
+        discovered_sources: prepared.source_paths.len(),
         emit_blocked_by_pipeline: false,
         diagnostics,
     })
