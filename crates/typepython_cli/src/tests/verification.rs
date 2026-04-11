@@ -308,6 +308,93 @@ fn run_verify_skips_runtime_import_probes_by_default() {
 }
 
 #[test]
+fn run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled() {
+    let project_dir = temp_project_dir(
+        "run_verify_reports_runtime_import_failure_when_unsafe_runtime_imports_enabled",
+    );
+    let verify_result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.py"),
+            "def exports():\n    return [\"build_user\"]\n\n__all__ = exports()\n\nraise RuntimeError(\"boom\")\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: Vec::new(),
+            unsafe_runtime_imports: true,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::from(1));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_verify_ignores_project_python_executable_by_default() {
+    let project_dir = temp_project_dir("run_verify_ignores_project_python_executable_by_default");
+    let marker_path = project_dir.join("python-executed.txt");
+    let verify_result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join("bin")).expect("test setup should succeed");
+        write_executable_script(
+            &project_dir.join("bin/fake-python.sh"),
+            &format!("#!/bin/sh\nprintf 'executed' > '{}'\nexit 97\n", marker_path.display()),
+        );
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                "[project]\nsrc = [\"src\"]\n\n[resolution]\npython_executable = \"bin{}fake-python.sh\"\n",
+                MAIN_SEPARATOR
+            ),
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.py"),
+            "def exports():\n    return [\"build_user\"]\n\n__all__ = exports()\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: Vec::new(),
+            unsafe_runtime_imports: false,
+        })
+        .expect("verify should run")
+    };
+    let marker_exists = marker_path.exists();
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::SUCCESS);
+    assert!(!marker_exists);
+}
+
+#[test]
 fn verify_build_artifacts_accepts_present_runtime_stub_and_marker_files() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_accepts_present_runtime_stub_and_marker_files");
@@ -719,6 +806,50 @@ fn verify_build_artifacts_accepts_dynamic_runtime_all_exports() {
         fs::write(
             project_dir.join(".typepython/build/app/__init__.pyi"),
             "__all__: list[str] = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{}", diagnostics.as_text());
+}
+
+#[test]
+fn verify_build_artifacts_accepts_dynamic_runtime_all_tuple_helper_exports() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_accepts_dynamic_runtime_all_tuple_helper_exports");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "def exports():\n    return (\"build_user\",)\n\n__all__ = exports()\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
         )
         .expect("test setup should succeed");
         fs::write(project_dir.join(".typepython/build/app/py.typed"), "")

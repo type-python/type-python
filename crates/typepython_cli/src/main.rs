@@ -20,7 +20,9 @@ use clap::Parser;
 use notify::{Config as NotifyConfig, RecommendedWatcher, Watcher};
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
-use typepython_config::{ConfigError, ConfigHandle, ConfigSource, load};
+use typepython_config::{
+    ConfigError, ConfigHandle, ConfigSource, load, load_without_python_executable_validation,
+};
 use typepython_diagnostics::DiagnosticReport;
 
 use crate::cli::{Cli, Command, InitArgs, OutputFormat, RunArgs};
@@ -271,15 +273,28 @@ fn resolve_python_executable(config: &ConfigHandle) -> PathBuf {
 }
 
 fn load_project(project: Option<&PathBuf>) -> Result<ConfigHandle> {
-    let start = match project {
+    let start = project_start_dir(project)?;
+
+    load(start).context("unable to load TypePython project configuration")
+}
+
+fn load_project_without_python_executable_validation(
+    project: Option<&PathBuf>,
+) -> Result<ConfigHandle> {
+    let start = project_start_dir(project)?;
+
+    load_without_python_executable_validation(start)
+        .context("unable to load TypePython project configuration")
+}
+
+fn project_start_dir(project: Option<&PathBuf>) -> Result<PathBuf> {
+    Ok(match project {
         Some(path) if path.is_file() => {
             path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
         }
         Some(path) => path.clone(),
         None => env::current_dir().context("unable to determine current directory")?,
-    };
-
-    load(start).context("unable to load TypePython project configuration")
+    })
 }
 
 fn write_file(path: &Path, content: &str, force: bool) -> Result<()> {

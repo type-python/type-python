@@ -390,7 +390,11 @@ struct RawPyProjectTool {
 }
 
 impl Config {
-    fn validate(&self, config_path: &Path) -> Result<(), ConfigError> {
+    fn validate(
+        &self,
+        config_path: &Path,
+        validate_python_executable_flag: bool,
+    ) -> Result<(), ConfigError> {
         let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
 
         validate_target_python(config_path, &self.project.target_python)?;
@@ -403,13 +407,15 @@ impl Config {
         validate_resolution_base_url(config_path, config_dir, &self.resolution.base_url)?;
         validate_resolution_paths(config_path, &self.resolution.paths)?;
 
-        if let Some(python_executable) = &self.resolution.python_executable {
-            validate_python_executable(
-                config_path,
-                config_dir,
-                python_executable,
-                &self.project.target_python,
-            )?;
+        if validate_python_executable_flag {
+            if let Some(python_executable) = &self.resolution.python_executable {
+                validate_python_executable(
+                    config_path,
+                    config_dir,
+                    python_executable,
+                    &self.project.target_python,
+                )?;
+            }
         }
 
         validate_emit_preserve_comments(config_path, self.emit.preserve_comments)?;
@@ -581,12 +587,27 @@ impl TypingConfig {
 /// Discovers and loads TypePython configuration by searching upwards from a
 /// starting directory.
 pub fn load(start_dir: impl AsRef<Path>) -> Result<ConfigHandle, ConfigError> {
+    load_impl(start_dir, true)
+}
+
+/// Discovers and loads TypePython configuration while skipping execution-based
+/// validation of `resolution.python_executable`.
+pub fn load_without_python_executable_validation(
+    start_dir: impl AsRef<Path>,
+) -> Result<ConfigHandle, ConfigError> {
+    load_impl(start_dir, false)
+}
+
+fn load_impl(
+    start_dir: impl AsRef<Path>,
+    validate_python_executable_flag: bool,
+) -> Result<ConfigHandle, ConfigError> {
     let start_dir = start_dir.as_ref();
 
     for directory in start_dir.ancestors() {
         let typepython_path = directory.join("typepython.toml");
         if typepython_path.is_file() {
-            let config = load_typepython_toml(&typepython_path)?;
+            let config = load_typepython_toml(&typepython_path, validate_python_executable_flag)?;
             return Ok(ConfigHandle {
                 config_dir: directory.to_path_buf(),
                 config_path: typepython_path,
@@ -597,7 +618,9 @@ pub fn load(start_dir: impl AsRef<Path>) -> Result<ConfigHandle, ConfigError> {
 
         let pyproject_path = directory.join("pyproject.toml");
         if pyproject_path.is_file() {
-            if let Some(config) = load_pyproject_toml(&pyproject_path)? {
+            if let Some(config) =
+                load_pyproject_toml(&pyproject_path, validate_python_executable_flag)?
+            {
                 return Ok(ConfigHandle {
                     config_dir: directory.to_path_buf(),
                     config_path: pyproject_path,
@@ -611,20 +634,26 @@ pub fn load(start_dir: impl AsRef<Path>) -> Result<ConfigHandle, ConfigError> {
     Err(ConfigError::NotFound(start_dir.to_path_buf()))
 }
 
-fn load_typepython_toml(path: &Path) -> Result<Config, ConfigError> {
+fn load_typepython_toml(
+    path: &Path,
+    validate_python_executable_flag: bool,
+) -> Result<Config, ConfigError> {
     let raw = read_toml::<RawConfig>(path)?;
     let config = Config::from_raw(raw);
-    config.validate(path)?;
+    config.validate(path, validate_python_executable_flag)?;
     Ok(config)
 }
 
-fn load_pyproject_toml(path: &Path) -> Result<Option<Config>, ConfigError> {
+fn load_pyproject_toml(
+    path: &Path,
+    validate_python_executable_flag: bool,
+) -> Result<Option<Config>, ConfigError> {
     let raw = read_toml::<RawPyProject>(path)?;
     let maybe_config = raw.tool.and_then(|tool| tool.typepython);
     maybe_config
         .map(|raw_config| {
             let config = Config::from_raw(raw_config);
-            config.validate(path)?;
+            config.validate(path, validate_python_executable_flag)?;
             Ok(config)
         })
         .transpose()
@@ -933,7 +962,7 @@ fn format_stderr_suffix(stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigSource, load};
+    use super::{ConfigSource, load, load_without_python_executable_validation};
     use std::{
         env, fs,
         path::{Path, PathBuf},
@@ -1204,6 +1233,55 @@ mod tests {
         assert_eq!(
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_without_python_executable_validation_does_not_execute_repo_relative_interpreter() {
+        let project_dir = temp_project_dir(
+            "load_without_python_executable_validation_does_not_execute_repo_relative_interpreter",
+        );
+        let marker_path = project_dir.join("python-executed.txt");
+        let executable = project_dir.join("bin/fake-python.sh");
+        fs::create_dir_all(executable.parent().expect("bin parent should exist"))
+            .expect("bin directory should be created");
+        fs::write(
+            &executable,
+            format!("#!/bin/sh\nprintf 'executed' > '{}'\nexit 97\n", marker_path.display()),
+        )
+        .expect("fake python executable should be written");
+        let mut permissions = fs::metadata(&executable)
+            .expect("fake python metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions)
+            .expect("fake python executable should be chmodded");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                concat!(
+                    "[project]\n",
+                    "target_python = \"3.10\"\n\n",
+                    "[resolution]\n",
+                    "python_executable = \"bin{}fake-python.sh\"\n"
+                ),
+                std::path::MAIN_SEPARATOR
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load_without_python_executable_validation(&project_dir);
+        let marker_exists = marker_path.exists();
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected config to load without executing interpreter");
+        assert!(!marker_exists);
+        let expected_path = format!("bin{}fake-python.sh", std::path::MAIN_SEPARATOR);
+        assert_eq!(
+            handle.config.resolution.python_executable.as_deref(),
+            Some(expected_path.as_str())
         );
     }
 

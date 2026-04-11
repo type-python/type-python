@@ -27,7 +27,8 @@ use crate::pipeline::{
 };
 use crate::{
     CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
-    exit_code, load_project, print_summary, resolve_python_executable,
+    exit_code, load_project, load_project_without_python_executable_validation, print_summary,
+    resolve_python_executable,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -75,7 +76,14 @@ pub(crate) fn supplied_verify_artifacts(args: &VerifyArgs) -> Vec<SuppliedVerify
 }
 
 pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
-    let config = load_project(args.run.project.as_ref())?;
+    let mut config = if args.unsafe_runtime_imports {
+        load_project(args.run.project.as_ref())?
+    } else {
+        load_project_without_python_executable_validation(args.run.project.as_ref())?
+    };
+    if !args.unsafe_runtime_imports {
+        config.config.resolution.python_executable = None;
+    }
     ensure_output_dirs(&config)?;
     let snapshot = run_pipeline(&config)?;
     let mut notes = vec![String::from(
