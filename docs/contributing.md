@@ -23,7 +23,7 @@ cd type-python
 make ci
 ```
 
-The `make ci` target runs: format check -> clippy lint -> all tests -> bench compile check -> Python packaging validation.
+The `make ci` target runs: format check -> clippy lint -> fast workspace tests -> CLI verification tests -> bench compile check -> Python packaging validation.
 
 ### Building
 
@@ -71,6 +71,7 @@ type-python/
     typepython_checking/     # Type checker (largest test suite)
     typepython_lowering/     # TypePython -> Python lowering
     typepython_emit/         # Output generation
+    typepython_project/      # Shared project discovery/support utilities
     typepython_incremental/  # Incremental build state
     typepython_lsp/          # Language server
     typepython_cli/          # CLI binary (depends on all crates)
@@ -84,7 +85,7 @@ type-python/
 
 ## Crate Dependency Graph
 
-The 11 crates form a layered architecture. Each crate owns a single compilation phase with clear boundaries:
+The 12 crates form a layered architecture. Most crates own a single compilation phase; `typepython_project` is shared support code used by the CLI and LSP layers:
 
 ```
 typepython_diagnostics          <-- Foundation (no internal deps)
@@ -97,13 +98,15 @@ typepython_diagnostics          <-- Foundation (no internal deps)
   |     |     |
   |     |     +-- typepython_graph       <-- Module graph
   |     |     |
-  |     |     +-- typepython_checking    <-- Type checker (+ config, graph)
+  |     |     +-- typepython_checking    <-- Type checker (+ config, graph, incremental)
   |     |
   |     +-- typepython_lowering <-- Python lowering
   |           |
-  |           +-- typepython_emit        <-- Output generation (+ config)
+  |           +-- typepython_emit        <-- Output generation (+ config, syntax)
   |
-  +-- typepython_incremental    <-- Fingerprinting (+ graph, binding)
+  +-- typepython_project        <-- Discovery/support helpers (+ config, emit, syntax)
+  |
+  +-- typepython_incremental    <-- Fingerprinting (+ graph, binding, syntax)
   |
   +-- typepython_lsp            <-- Language server (depends on most crates)
   |
@@ -130,11 +133,11 @@ typepython_diagnostics          <-- Foundation (no internal deps)
 
 ### Crate Boundaries
 
-Each crate owns a single compilation phase. Key rules:
+Crates keep narrow ownership boundaries. Key rules:
 
 - **No circular dependencies** between crates
 - **typepython_diagnostics** is the only crate that every other crate may depend on
-- **typepython_cli** and **typepython_lsp** are the only crates that depend on all others
+- **typepython_cli** depends on every other internal crate; **typepython_lsp** depends on most of them
 - Keep public APIs minimal: expose only what downstream crates need
 - Use `pub(crate)` for internal items
 
@@ -156,20 +159,23 @@ Each crate owns a single compilation phase. Key rules:
 
 ### Test Distribution
 
+The counts below are a current snapshot from `cargo test -p <crate> -- --list`; they will drift as the workspace evolves.
+
 | Crate                    | Tests    | Focus                                         |
 | ------------------------ | -------- | --------------------------------------------- |
-| `typepython_checking`    | ~394     | Type checking rules, assignability, narrowing |
-| `typepython_syntax`      | ~83      | Parsing, metadata extraction, error recovery  |
-| `typepython_cli`         | ~59      | End-to-end pipeline, init, verify, watch      |
-| `typepython_lowering`    | ~36      | TypePython-to-Python lowering, source maps    |
-| `typepython_binding`     | ~19      | Symbol extraction, declaration kinds          |
-| `typepython_lsp`         | ~17      | LSP methods, diagnostics publishing           |
-| `typepython_config`      | ~15      | Config discovery, validation, profiles        |
-| `typepython_emit`        | ~12      | Artifact planning, stub generation            |
-| `typepython_incremental` | ~6       | Fingerprinting, snapshot diff                 |
-| `typepython_graph`       | ~5       | Module graph, prelude injection               |
-| `typepython_diagnostics` | 0        | Data-only crate (no logic to test)            |
-| **Total**                | **~646** |                                               |
+| `typepython_checking`    | 480      | Type checking rules, assignability, narrowing |
+| `typepython_syntax`      | 106      | Parsing, metadata extraction, error recovery  |
+| `typepython_cli`         | 105      | End-to-end pipeline, init, verify, watch      |
+| `typepython_lowering`    | 65       | TypePython-to-Python lowering, source maps    |
+| `typepython_lsp`         | 50       | LSP methods, diagnostics publishing           |
+| `typepython_binding`     | 40       | Symbol extraction, declaration kinds          |
+| `typepython_emit`        | 31       | Artifact planning, stub generation            |
+| `typepython_config`      | 24       | Config discovery, validation, profiles        |
+| `typepython_incremental` | 21       | Fingerprinting, snapshot diff                 |
+| `typepython_diagnostics` | 16       | Diagnostic rendering and serialization        |
+| `typepython_graph`       | 15       | Module graph, prelude injection               |
+| `typepython_project`     | 13       | Project discovery, support-source utilities   |
+| **Total**                | **~966** |                                               |
 
 ### Running Tests
 
@@ -277,18 +283,18 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 
 ## Makefile Targets
 
-| Target           | Command                                                      | Description            |
-| ---------------- | ------------------------------------------------------------ | ---------------------- |
-| `make bootstrap` | `./scripts/bootstrap-rust.sh`                                | Install Rust toolchain |
-| `make fmt`       | `cargo fmt --all`                                            | Format all code        |
-| `make fmt-check` | `cargo fmt --all --check`                                    | Check formatting (CI)  |
-| `make check`     | `cargo check --workspace`                                    | Check compilation      |
-| `make lint`      | `cargo clippy --workspace --all-targets -- -D warnings`      | Lint with clippy       |
-| `make test`      | `cargo test --workspace`                                     | Run all tests          |
-| `make docs`      | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Generate rustdoc       |
-| `make package-check` | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*` | Validate Python package artifacts |
-| `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8` | Sync Rust and Python package versions |
-| `make ci`        | `fmt-check` + `lint` + `test` + `bench-check` + `package-check` | Full CI pipeline       |
+| Target                            | Command                                                                                        | Description                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `make bootstrap`                  | `./scripts/bootstrap-rust.sh`                                                                  | Install Rust toolchain                |
+| `make fmt`                        | `cargo fmt --all`                                                                              | Format all code                       |
+| `make fmt-check`                  | `cargo fmt --all --check`                                                                      | Check formatting (CI)                 |
+| `make check`                      | `cargo check --workspace`                                                                      | Check compilation                     |
+| `make lint`                       | `cargo clippy --workspace --all-targets -- -D warnings`                                        | Lint with clippy                      |
+| `make test`                       | `cargo test --workspace`                                                                       | Run all tests                         |
+| `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
+| `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
+| `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
+| `make ci`                         | `fmt-check` + `lint` + `test-fast` + `test-cli-verification` + `bench-check` + `package-check` | Repository validation target          |
 
 ## Python Packaging
 
@@ -296,11 +302,13 @@ The Python package (`type-python` on PyPI, `import typepython`) is a thin bridge
 
 ### Build flow
 
-1. `pip install -e .` triggers `setup.py`
-2. Custom `build_py` class runs `cargo build --release -p typepython-cli`
-3. Built binary is copied to `typepython/bin/typepython` (or `.exe` on Windows)
-4. Permissions set to 0o755
+1. A wheel build or non-editable install (`python -m build --wheel`, `python -m pip install .`) triggers the custom `build_py` path in `setup.py`
+2. That path runs `cargo build --release -p typepython-cli`
+3. The built binary is copied to `typepython/bin/typepython` (or `.exe` on Windows)
+4. Permissions are set to 0o755
 5. `bdist_wheel` is marked as non-pure and tagged as `py3-none-<platform>`
+
+Editable installs (`python -m pip install -e .`) are different: they install the Python bridge from the checkout, but they do not guarantee a bundled CLI binary. In a repository checkout, the bridge usually falls back to `cargo run`.
 
 ### Binary resolution order
 
@@ -354,11 +362,10 @@ Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, wh
 
 GitHub Actions runs on every push to `main` and every PR:
 
-1. **Format check** -- `cargo fmt --all --check`
-2. **Lint** -- `cargo clippy --workspace --all-targets -- -D warnings`
-3. **Test** -- `cargo test --workspace`
+1. **workspace-fast** -- format, lint, `cargo test --workspace -- --skip tests::verification::`, bench compile check, downstream checker smoke, and Python package validation
+2. **cli-verification** -- `cargo test -p typepython-cli tests::verification::`
 
-All three must pass for a PR to merge.
+Together these jobs cover the repository validation path that `make ci` approximates locally.
 
 ## Common Contribution Tasks
 
@@ -393,7 +400,7 @@ Diagnostic::error("TPY4XXX", "Description of the issue")
 
 ### Adding a Type Checking Rule
 
-Type checking rules live in `typepython_checking/src/lib.rs`. Each rule is a function that takes the `ModuleGraph` and produces diagnostics.
+Type checking rules live in the `typepython_checking` crate (with the main orchestration in `src/lib.rs` and supporting logic split across focused modules). Each rule contributes diagnostics over the module graph and related semantic caches.
 
 1. Define the check function:
 
@@ -409,21 +416,21 @@ fn my_new_check_diagnostics(graph: &ModuleGraph, /* options */) -> Vec<Diagnosti
 ```
 
 2. Call it from the `check_with_options()` function
-3. Add test cases (this crate has ~394 tests -- follow existing patterns)
+3. Add test cases (this crate has the largest test suite in the workspace -- follow existing patterns)
 4. Document any new diagnostic codes
 
 ### Adding a CLI Command
 
-1. Add the command variant to the `Cli` enum in `typepython_cli/src/main.rs`
+1. Add the command variant/args to `typepython_cli/src/cli.rs`
 2. Add clap derive attributes for flags and arguments
 3. Implement the handler function
-4. Wire it into the `match` statement in `main()`
+4. Wire it into the command dispatch in `typepython_cli/src/main.rs`
 5. Add integration tests
 6. Document in `docs/cli-reference.md`
 
 ### Modifying the Lowering
 
-Lowering transformations live in `typepython_lowering/src/lib.rs`. When modifying how TypePython constructs lower to Python:
+Lowering transformations live in the `typepython_lowering` crate (primarily `src/core.rs` plus helper modules such as `typeddict.rs`). When modifying how TypePython constructs lower to Python:
 
 1. Update the lowering logic in the `lower()` or `lower_with_options()` path
 2. Ensure source maps are maintained (every output line should map back to a source line)

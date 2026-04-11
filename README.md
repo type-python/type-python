@@ -186,8 +186,8 @@ See [configuration reference](docs/configuration.md).
 ## Contributing
 
 ```bash
-make ci              # format + lint + test + bench-check + package-check
-make test            # run all 846 tests
+make ci              # format + lint + split test suites + bench-check + package-check
+make test            # run the full workspace test suite
 make bench           # run performance benchmarks
 make bump-version VERSION=0.0.8  # sync Rust + Python package versions
 make snapshot-review # review insta snapshot changes

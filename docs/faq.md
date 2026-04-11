@@ -10,7 +10,7 @@ TypePython is a statically-typed authoring language that compiles to standard Py
 
 No. TypePython is a **compiler** and **type checker**. The output is standard Python code. There is no custom runtime or interpreter -- your emitted `.py` files run on CPython, PyPy, or any other Python implementation.
 
-### How does TypePython relate to mypy / pyright / pytype?
+### How does TypePython relate to external type checkers?
 
 TypePython is a **source language** with its own syntax extensions (`.tpy` files), not just a type checker for existing Python. It:
 
@@ -19,7 +19,7 @@ TypePython is a **source language** with its own syntax extensions (`.tpy` files
 - Includes its own type checker, LSP, and build system
 - Ships with bundled stdlib typing data
 
-You can use mypy or pyright on the **emitted** `.py`/`.pyi` files, since those are standard Python. See [Interoperability](interop.md) for the full lowering map, semantic boundary details, and PEP 561 compliance.
+You can use mypy, pyright, or similar tools on the **emitted** `.py`/`.pyi` files, since those are standard Python. See [Interoperability](interop.md) for the full lowering map, semantic boundary details, and PEP 561 compliance.
 
 ### What Python versions does TypePython target?
 
@@ -96,16 +96,15 @@ Including upper bounds (`T: Base`), constraint lists (`T: (A, B, C)`), defaults 
 
 ### How do I install TypePython?
 
-The fastest way:
+The fastest way for most users:
 
 ```bash
-git clone https://github.com/type-python/type-python.git
-cd type-python
-./scripts/bootstrap-rust.sh
-cargo build --release -p typepython-cli
+python -m pip install type-python
 ```
 
-Or via pip: `pip install -e .`
+From a local checkout, use `python -m pip install .` after bootstrapping Rust if you want the package entry points backed by a bundled CLI binary.
+
+Use `python -m pip install -e .` only when developing the repository itself. Editable installs are checkout-oriented and may rely on `cargo run` or `TYPEPYTHON_BIN` at runtime rather than a bundled binary.
 
 ### What does `typepython build` output?
 
@@ -183,7 +182,7 @@ Ensure there's a `typepython.toml` (or `pyproject.toml` with `[tool.typepython]`
 
 The Python bridge can't find the binary. Either:
 - Set `TYPEPYTHON_BIN=/path/to/typepython`
-- Install the bundled binary: `pip install -e .`
+- Install a bundled binary via `python -m pip install type-python` or `python -m pip install .`
 - Run from the repository checkout with `cargo` available
 
 ### Build produces no output files

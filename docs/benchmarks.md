@@ -10,7 +10,7 @@ micro-benchmarks. Results are stored under `target/criterion/`.
 Measures end-to-end parsing of `.tpy` source text into the syntax tree.
 
 | Benchmark | Input |
-| ----------------------------- | --------------------------------------------------------------------------------------------------- |‰
+| ----------------------------- | --------------------------------------------------------------------------------------------------- |
 | `parse_small_module` | A short module with one function and one class |
 | `parse_medium_module` | 50 functions and 10 classes |
 | `parse_typepython_extensions` | TypePython-specific syntax: interfaces, data/sealed classes, type aliases, overloads, unsafe blocks |
@@ -50,12 +50,28 @@ Checked-in baseline evidence for the current checker suite lives in
 | `check_solver_direct_calls_medium` | 64 repetitions of the same semantic-solver/direct-call mix                                         |
 | `check_semantic_incremental_summary_medium` | Semantic summary snapshot generation over the 64-repetition checker graph                         |
 
+### incremental (`typepython_lsp`)
+
+Measures end-to-end LSP edit sessions over a 48-module workspace using the
+stdio JSON-RPC server path.
+
+| Benchmark                                 | Input                                                                |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| `lsp_incremental_impl_edit_session_48_modules` | An implementation-only edit followed by a hover request            |
+| `lsp_incremental_public_edit_session_48_modules` | A public-signature edit followed by a hover request               |
+
 ## Running benchmarks
 
-Run all benchmark suites:
+Run the core benchmark suites tracked by the Makefile:
 
 ```sh
 cargo bench --workspace --bench parse --bench lower --bench graph --bench checker
+```
+
+Run the LSP incremental suite separately:
+
+```sh
+cargo bench -p typepython-lsp --bench incremental
 ```
 
 Compile-check benchmarks without running them (used in CI):
@@ -63,6 +79,9 @@ Compile-check benchmarks without running them (used in CI):
 ```sh
 cargo bench --workspace --no-run
 ```
+
+`cargo bench --workspace --no-run` compiles every benchmark target in the
+workspace, including the LSP incremental bench.
 
 ## Baselines
 
@@ -83,11 +102,14 @@ After intentional performance changes, update the stored baseline:
 cargo bench --workspace --bench parse --bench lower --bench graph --bench checker -- --save-baseline v0.1.0
 ```
 
+The checked-in baseline flow currently applies to the core parse/lower/graph/checker
+suites. The LSP incremental benchmark is intentionally documented separately.
+
 ### Makefile targets
 
 | Target                | Description                                                     |
 | --------------------- | --------------------------------------------------------------- |
-| `make bench`          | Run all benchmark suites, including the checker solver baseline |
-| `make bench-check`    | Compile benchmarks without running                              |
-| `make bench-baseline` | Save the v0.1.0 baseline                                        |
-| `make bench-compare`  | Compare current performance against the v0.1.0 baseline         |
+| `make bench`          | Run the core parse/lower/graph/checker suites                   |
+| `make bench-check`    | Compile all workspace benchmarks without running them           |
+| `make bench-baseline` | Save the v0.1.0 baseline for the core suites                    |
+| `make bench-compare`  | Compare the core suites against the v0.1.0 baseline             |

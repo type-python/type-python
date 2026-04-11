@@ -1,6 +1,6 @@
 # Architecture
 
-TypePython is implemented as a virtual Cargo workspace containing 11 Rust crates. Each crate owns a single phase of the compilation pipeline, with clear boundaries enforced by crate-level dependencies.
+TypePython is implemented as a virtual Cargo workspace containing 12 Rust crates. Most crates align to a specific compilation phase; `typepython_project` provides shared project-discovery and support-source utilities used around the core pipeline by the CLI and LSP layers.
 
 ## Compilation Pipeline
 
@@ -50,6 +50,10 @@ TypePython is implemented as a virtual Cargo workspace containing 11 Rust crates
               |                    |    Detect changed modules
               +--------------------+
                        |
+                       +-----> typepython_project   Shared source discovery,
+                       |                             support-source indexing,
+                       |                             inferred shadow stubs
+                       |
               +--------+--------+
               |                 |
               v                 v
@@ -73,20 +77,22 @@ typepython_diagnostics          (no internal deps -- foundation crate)
        |    typepython_binding  (diagnostics, syntax)
        |         ^
        |         |
-       |    typepython_graph    (diagnostics, binding)
+       |    typepython_graph    (binding, syntax)
        |         ^
        |         |
-       |    typepython_checking (diagnostics, syntax, binding, graph)
+       |    typepython_checking (binding, config, diagnostics, graph, incremental, syntax)
        |
        +--- typepython_lowering (diagnostics, syntax)
        |
-       +--- typepython_emit     (diagnostics, config, lowering)
+       +--- typepython_emit     (config, lowering, syntax)
        |
-       +--- typepython_incremental (diagnostics, graph)
+       +--- typepython_project  (config, diagnostics, emit, syntax)
        |
-       +--- typepython_cli      (all crates)
+       +--- typepython_incremental (binding, graph, syntax)
        |
-       +--- typepython_lsp      (all crates)
+       +--- typepython_cli      (all other internal crates)
+       |
+       +--- typepython_lsp      (binding, checking, config, diagnostics, emit, graph, incremental, project, syntax)
 ```
 
 ## Crate Details
@@ -289,9 +295,20 @@ Plans output artifacts and generates type stubs.
 **Features:**
 
 - Stub generation with value/callable overrides and synthetic methods
-- Runtime validator injection for TypedDict classes (experimental)
+- Runtime validator injection for data classes (experimental)
 - `py.typed` marker file writing for PEP 561 compliance
 - Optional `.pyc` bytecode compilation
+
+### typepython_project
+
+Shared project/discovery support used by the CLI and LSP layers.
+
+**Responsibilities:**
+
+- Project source discovery with `include` / `exclude` handling
+- External support source indexing and Python executable resolution
+- Inferred shadow-stub generation for local `.py` files when `typing.infer_passthrough = true`
+- Shadow-stub cache materialization for incremental reuse
 
 ### typepython_incremental
 
@@ -318,7 +335,7 @@ User-facing binary implementing all commands.
 
 **Full pipeline steps:**
 
-1. `discover_sources()` -- glob-based source discovery
+1. `collect_source_paths()` -- glob-based source discovery
 2. `load_syntax_trees()` -- parse all files
 3. `apply_type_ignore_directives()` -- process `# type: ignore`
 4. `bind()` -- extract symbols
@@ -326,8 +343,8 @@ User-facing binary implementing all commands.
 6. `check_with_options()` -- run type checker
 7. `lower_with_options()` -- convert to Python
 8. `plan_emits()` -- plan output paths
-9. `snapshot()` -- capture fingerprints
-10. `write_runtime_outputs()` -- write files to disk
+9. `write_runtime_outputs()` -- materialize runtime and stub outputs
+10. `write_incremental_snapshot()` -- persist module fingerprints and summaries
 
 **Embedded resources:** Project init templates from `templates/`.
 

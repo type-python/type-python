@@ -1,6 +1,6 @@
 # Interoperability with External Type Checkers
 
-TypePython compiles `.tpy` source to standard `.py` and `.pyi` files. This document explains how the emitted artifacts interact with external type checkers (mypy, pyright, pytype), what compatibility guarantees hold, and where semantic differences exist.
+TypePython compiles `.tpy` source to standard `.py` and `.pyi` files. This document explains how the emitted artifacts interact with external type checkers such as mypy and pyright, what compatibility guarantees hold, and where semantic differences exist.
 
 ## Design Principle
 
