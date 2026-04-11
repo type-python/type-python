@@ -103,6 +103,7 @@ pub struct ModuleCheckResult {
 }
 
 impl ModuleCheckResult {
+    /// Flattens per-module diagnostics into a single report in module iteration order.
     #[must_use]
     pub fn diagnostics(&self) -> DiagnosticReport {
         let mut diagnostics = DiagnosticReport::default();
@@ -113,6 +114,7 @@ impl ModuleCheckResult {
     }
 }
 
+/// Stub override derived from checker-resolved callable information.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EffectiveCallableStubOverride {
     pub module_key: String,
@@ -123,6 +125,7 @@ pub struct EffectiveCallableStubOverride {
     pub returns: String,
 }
 
+/// Synthetic method emitted into authoritative stubs for checker-synthesized behavior.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SyntheticMethodStub {
     pub module_key: String,
@@ -472,6 +475,7 @@ pub fn check(graph: &ModuleGraph) -> CheckResult {
     )
 }
 
+/// Runs the checker with the caller-controlled option surface used by the CLI and tests.
 #[must_use]
 pub fn check_with_options(
     graph: &ModuleGraph,
@@ -499,6 +503,7 @@ pub fn check_with_options(
     clippy::too_many_arguments,
     reason = "mirrors the public checker option surface while threading binding metadata"
 )]
+/// Runs the checker with precomputed binding metadata to avoid recomputing source-derived facts.
 pub fn check_with_binding_metadata(
     graph: &ModuleGraph,
     bindings: &[BindingTable],

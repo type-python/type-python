@@ -60,12 +60,14 @@ pub struct ModuleSurfaceFacts {
     pub dataclass_transform_module_info: typepython_syntax::DataclassTransformModuleInfo,
 }
 
+/// Wrapper around a parsed type expression captured from bound source text.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BoundTypeExpr {
     pub expr: typepython_syntax::TypeExpr,
 }
 
 impl BoundTypeExpr {
+    /// Parses text into a bound type expression, falling back to a name node when parsing fails.
     #[must_use]
     pub fn new(text: impl Into<String>) -> Self {
         let text = text.into();
@@ -75,23 +77,27 @@ impl BoundTypeExpr {
         }
     }
 
+    /// Wraps an already parsed type expression.
     #[must_use]
     pub fn from_expr(expr: typepython_syntax::TypeExpr) -> Self {
         Self { expr }
     }
 
+    /// Renders the bound expression back to canonical text form.
     #[must_use]
     pub fn render(&self) -> String {
         self.expr.render()
     }
 }
 
+/// Resolved symbol portion of an import target such as `pkg.mod.Name`.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BoundImportSymbolTarget {
     pub module_key: String,
     pub symbol_name: String,
 }
 
+/// Structured import target extracted from a declaration.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BoundImportTarget {
     pub raw_target: String,
@@ -100,6 +106,7 @@ pub struct BoundImportTarget {
 }
 
 impl BoundImportTarget {
+    /// Builds a structured import target from the source-authored raw import string.
     #[must_use]
     pub fn new(raw_target: impl Into<String>) -> Self {
         let raw_target = raw_target.into();
@@ -112,6 +119,7 @@ impl BoundImportTarget {
     }
 }
 
+/// Bound callable signature used by later graph and checker phases.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BoundCallableSignature {
     pub params: Vec<typepython_syntax::DirectFunctionParamSite>,

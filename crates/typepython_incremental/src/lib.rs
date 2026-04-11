@@ -217,6 +217,7 @@ fn snapshot_from_summaries(
     IncrementalState { fingerprints, summaries: summaries.to_vec(), stdlib_snapshot }
 }
 
+/// Computes the structural diff between two incremental snapshots.
 #[must_use]
 pub fn diff(previous: &IncrementalState, current: &IncrementalState) -> SnapshotDiff {
     let mut snapshot_diff = SnapshotDiff::default();
@@ -323,6 +324,7 @@ pub fn affected_modules(
     affected
 }
 
+/// Serializes the incremental snapshot to the on-disk JSON format.
 pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&SnapshotFile {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -332,6 +334,7 @@ pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::E
     })
 }
 
+/// Deserializes and validates an incremental snapshot from its persisted JSON form.
 pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecodeError> {
     let snapshot: SnapshotFile = serde_json::from_str(contents)
         .map_err(|error| SnapshotDecodeError::InvalidJson(error.to_string()))?;

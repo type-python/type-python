@@ -14,6 +14,7 @@ fn rewrite_to_stub_source(python: &str) -> Result<String, io::Error> {
     generate_typepython_stub_source(&module, &TypePythonStubContext::default())
 }
 
+/// Generates the authoritative `.pyi` surface for a lowered TypePython module.
 pub fn generate_typepython_stub_source(
     module: &LoweredModule,
     context: &TypePythonStubContext,

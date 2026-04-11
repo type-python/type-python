@@ -1,5 +1,6 @@
 use super::*;
 
+/// Materializes planned runtime and stub artifacts to disk and optionally writes `py.typed`.
 pub fn write_runtime_outputs(
     artifacts: &[EmitArtifact],
     modules: &[LoweredModule],
