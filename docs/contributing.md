@@ -179,6 +179,12 @@ make test
 # or
 cargo test --workspace
 
+# Fast workspace suite (skips the heavy CLI verification module)
+make test-fast
+
+# Heavy CLI verification suite only
+make test-cli-verification
+
 # Tests for a specific crate
 cargo test -p typepython-checking
 

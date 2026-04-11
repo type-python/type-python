@@ -2,7 +2,7 @@ CARGO ?= cargo
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check lint test bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check lint test test-fast test-cli-verification bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -21,6 +21,12 @@ lint:
 
 test:
 	$(CARGO) test --workspace
+
+test-fast:
+	$(CARGO) test --workspace -- --skip tests::verification::
+
+test-cli-verification:
+	$(CARGO) test -p typepython-cli tests::verification::
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
@@ -49,4 +55,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification bench-check package-check

@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  workspace:
+  workspace-fast:
     runs-on: ubuntu-latest
 
     steps:
@@ -27,8 +27,8 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --workspace
+      - name: Test Fast Workspace Suite
+        run: cargo test --workspace -- --skip tests::verification::
 
       - name: Bench compile check
         run: cargo bench --workspace --no-run
@@ -52,3 +52,25 @@ jobs:
 
       - name: Validate Python distribution metadata
         run: python -m twine check dist/*
+
+  cli-verification:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal \
+            --component rustfmt \
+            --component clippy
+          rustup default 1.94.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test CLI Verification Suite
+        run: cargo test -p typepython-cli tests::verification::
