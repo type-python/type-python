@@ -42,3 +42,17 @@ packages = ["typepython"]
 
 [tool.setuptools.package-data]
 typepython = ["bin/*"]
+
+[tool.cibuildwheel]
+build = "cp312-*"
+skip = ["*-musllinux_*"]
+build-verbosity = 1
+test-command = "python {project}/scripts/quickstart_smoke.py"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux2014"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }
+before-all = [
+  "command -v curl >/dev/null 2>&1 || yum install -y curl",
+  "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.0",
+]

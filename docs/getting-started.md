@@ -47,7 +47,7 @@ typepython --help
 python -m typepython --help
 ```
 
-For published PyPI installs, the same package interface is used. Published wheels are platform-specific because they bundle the Rust CLI binary; if no wheel is available for your platform, `pip` falls back to the source distribution and requires Rust + `cargo`.
+For published PyPI installs, the same package interface is used. Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
 
 ### Option 3: Custom binary location
 

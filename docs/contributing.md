@@ -310,7 +310,7 @@ During development, option 3 means you can run `python -m typepython check --pro
 
 - Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
 - Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
-- If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist.
+- If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist. The release workflow uses `cibuildwheel` to publish Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64 wheels.
 
 ### Publishing to PyPI
 
@@ -319,9 +319,9 @@ The repository publishes to PyPI through GitHub Actions Trusted Publishing in th
 1. Update `version` in `pyproject.toml`.
 2. Commit the version bump and push it to GitHub.
 3. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
-4. The `publish` workflow validates the tag/version match, builds the sdist, runs `twine check`, and then publishes to PyPI.
+4. The `publish` workflow validates the tag/version match, builds the sdist, builds wheel artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start install/build flow, runs `twine check`, and then publishes to PyPI.
 
-The current publish workflow uploads only the source distribution. A wheel built directly on `ubuntu-latest` gets the platform tag `linux_x86_64`, which PyPI rejects for public uploads. Add dedicated macOS and Windows wheel jobs and a proper manylinux or musllinux Linux wheel pipeline if you want `pip install type-python` to avoid a local Rust toolchain on those platforms as well.
+Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, which gives PyPI-compatible Linux wheel tags for the bundled CLI binary. If you expand wheel coverage to more architectures later, keep that manylinux or musllinux compatibility requirement in place.
 
 ## Pull Request Workflow
 

@@ -20,7 +20,7 @@ typepython --help
 ```
 
 The Python package bridge supports Python 3.9+. Generated TypePython projects currently target Python 3.10, 3.11, or 3.12.
-Published wheels are platform-specific because they bundle the Rust CLI binary. If PyPI does not have a wheel for your platform, `pip` falls back to the source distribution and requires Rust + `cargo`.
+Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
 The workspace MSRV is Rust 1.85. `./scripts/bootstrap-rust.sh` installs the pinned Rust 1.94.0 development toolchain used by CI.
 
 Or build from source:

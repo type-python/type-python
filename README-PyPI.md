@@ -11,7 +11,7 @@ pip install type-python
 typepython --help
 ```
 
-Published wheels are platform-specific because they bundle the Rust CLI binary. If PyPI does not have a prebuilt wheel for your platform, `pip` falls back to the source distribution and requires a Rust toolchain with `cargo`.
+Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require a Rust toolchain with `cargo`.
 
 The Python package bridge supports Python 3.9+. Generated TypePython projects currently target Python 3.10, 3.11, or 3.12.
 
