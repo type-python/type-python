@@ -127,7 +127,7 @@ At minimum:
 - Public API completeness tests under `require_known_public_types = true`
 - Parser-accepts / checker-rejects tests for still-deferred `.tpy` constructs
 - `ParamSpec` / `Concatenate` consumption and source-authored forwarding tests
-- `verify` command tests for runtime/type-surface public-name mismatch
+- `verify` command tests for structural public-name mismatch, plus runtime/type-surface public-name mismatch when runtime-assisted verification is enabled
 - Built-in type transform tests (`Partial`, `Pick`, `Omit`, `Readonly`, `Mutable`, composition, generic input, error cases)
 - Experimental conditional return lowering tests (coverage checking, generic conditional return, mutual exclusion with `overload def`)
 - Migration report output tests (coverage percentages, high-impact file ranking)

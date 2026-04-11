@@ -797,7 +797,7 @@ The following mappings are normative where the corresponding rule is triggered:
 - Assignment to, augmented assignment through, or deletion of a known read-only `TypedDict` item: `TPY4016`
 - Incomplete experimental conditional-return coverage: `TPY4018`
 - Use of a deprecated declaration when `typing.report_deprecated` is not `ignore`: `TPY4101`
-- `typepython verify` detecting a mismatch between runtime-visible public names and the authoritative type surface: `TPY5003`
+- `typepython verify` detecting a structural or runtime-assisted public-surface mismatch against the authoritative type surface: `TPY5003`
 
 General assignability failures that do not fall into one of the more specific categories above continue to use `TPY4001`.
 
@@ -1067,10 +1067,13 @@ It MUST at minimum:
 
 - load the authoritative public type surface for each selected module (summary and/or emitted `.pyi`)
 - enforce `typing.require_known_public_types` on that public surface
-- when runtime modules are importable through the configured or default interpreter, compare public-name presence between the runtime module and the authoritative type surface using the rules from Section 11.3
+- compare structural public-name presence between the emitted runtime module and the authoritative type surface using the rules from Section 11.3, without requiring runtime imports
+- when runtime-assisted verification is explicitly enabled and runtime modules are importable through the configured or default interpreter, implementations MAY additionally compare runtime-visible public-name presence between the imported runtime module and the authoritative type surface using the rules from Section 11.3
 - when wheel or sdist artifacts are supplied for verification, confirm the typed-publication requirements from Section 13.6.4
 
 Runtime verification in v1 is name- and declaration-surface-oriented. It MUST NOT require byte-for-byte equivalence of default values, docstrings, or implementation internals.
+
+Implementations MUST document whether runtime-assisted verification is enabled by default or gated behind an explicit opt-in, and MUST treat any mode that imports emitted project modules as executing project-controlled code.
 
 If any required verification check fails, the command MUST return a failing exit status and MUST surface at least one diagnostic explaining the mismatch.
 

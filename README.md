@@ -114,7 +114,7 @@ TypePython is an authoring layer, not a replacement for external checkers. One i
 - **Incremental state and caching** -- fingerprint snapshots, cached artifacts, and LSP rechecks for changed modules plus affected dependents ([architecture](docs/architecture.md))
 - **Full toolchain** -- `init`, `check`, `build`, `watch`, `clean`, `verify`, `migrate` ([CLI reference](docs/cli-reference.md))
 - **LSP server** -- hover, go-to-definition, references, rename, completions, signature help, document symbols, workspace symbols, formatting, code actions, real-time diagnostics ([LSP](docs/lsp.md))
-- **Publication-ready** -- `typepython verify` validates runtime/stub parity, packaged wheel/sdist contents, and optional public API completeness checks ([interop](docs/interop.md))
+- **Publication-ready** -- `typepython verify` performs structural publication checks by default, validates packaged wheel/sdist contents, and can opt into runtime import parity checks for trusted builds ([interop](docs/interop.md))
 - **Bundled stdlib stubs** -- typing data for Python 3.10-3.12 standard library, no external dependencies
 
 ## Examples
@@ -138,7 +138,8 @@ typepython build   --project .          # Emit .py + .pyi
 typepython watch   --project .          # Rebuild on changes
 typepython clean   --project .          # Remove build artifacts
 typepython lsp     --project .          # Start language server
-typepython verify  --project .          # Validate for publication
+typepython verify  --project .          # Structural publication validation
+typepython verify  --project . --unsafe-runtime-imports # Also import emitted modules for runtime parity checks
 typepython migrate --project . --report # Migration coverage report
 ```
 
