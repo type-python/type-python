@@ -4,11 +4,11 @@ TypePython emits structured diagnostics with unique error codes organized by cat
 
 ## Severity Levels
 
-| Severity  | Meaning              | Effect                                                               |
-| --------- | -------------------- | -------------------------------------------------------------------- |
+| Severity  | Meaning              | Effect                                                                                                      |
+| --------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `error`   | Build-blocking issue | Sets `has_errors()`; `no_emit_on_error = false` still allows best-effort emit for non-fatal pipeline stages |
-| `warning` | Non-fatal issue      | Does not block build                                                 |
-| `note`    | Informational        | Additional context                                                   |
+| `warning` | Non-fatal issue      | Does not block build                                                                                        |
+| `note`    | Informational        | Additional context                                                                                          |
 
 ## Diagnostic Structure
 
@@ -302,11 +302,11 @@ Severity controlled by `typing.report_deprecated`: `"error"`, `"warning"`, or `"
 
 ### TPY5xxx -- Emit and Stub Generation
 
-| Code      | Severity | Description                                                          |
-| --------- | -------- | -------------------------------------------------------------------- |
-| `TPY5001` | error    | Stub (`.pyi`) generation failure                                     |
+| Code      | Severity | Description                                                                                    |
+| --------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `TPY5001` | error    | Stub (`.pyi`) generation failure                                                               |
 | `TPY5002` | error    | Best-effort emit was disabled by `no_emit_on_error = true` after semantic errors were reported |
-| `TPY5003` | error    | Verify failure for missing or mismatched emitted/published artifacts |
+| `TPY5003` | error    | Verify failure for missing or mismatched emitted/published artifacts                           |
 
 **TPY5002 example:**
 

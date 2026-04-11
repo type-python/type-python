@@ -33,12 +33,12 @@ TypePython aims to track the current Core v1 draft closely, and the repository i
 
 ### What's the difference between `unknown` and `dynamic`?
 
-| | `unknown` | `dynamic` |
-|---|---|---|
-| Safety | Safe -- must narrow before use | Unsafe -- escape hatch |
-| Member access | Error until narrowed | Always allowed |
-| Assignability | Only to `unknown`/`dynamic`/`object` | To and from everything |
-| Equivalent to | A strict `object` | TypeScript `any` / Python `Any` |
+|               | `unknown`                            | `dynamic`                       |
+| ------------- | ------------------------------------ | ------------------------------- |
+| Safety        | Safe -- must narrow before use       | Unsafe -- escape hatch          |
+| Member access | Error until narrowed                 | Always allowed                  |
+| Assignability | Only to `unknown`/`dynamic`/`object` | To and from everything          |
+| Equivalent to | A strict `object`                    | TypeScript `any` / Python `Any` |
 
 Use `unknown` at safety boundaries (external input, untyped packages). Use `dynamic` only when you explicitly want to opt out of type checking.
 
@@ -109,6 +109,7 @@ Use `python -m pip install -e .` only when developing the repository itself. Edi
 ### What does `typepython build` output?
 
 Given a `.tpy` source file, the build produces:
+
 - A `.py` file (lowered standard Python)
 - A `.pyi` file (type stub for external tools)
 - A `py.typed` marker (PEP 561 compliance)
@@ -117,6 +118,7 @@ Given a `.tpy` source file, the build produces:
 ### Can I use TypePython alongside existing Python tools?
 
 Yes. The emitted `.py` and `.pyi` files are standard Python. You can:
+
 - Run them with any Python interpreter
 - Use mypy/pyright on the output
 - Package them with setuptools/flit/poetry
@@ -127,6 +129,7 @@ Some TypePython-specific guarantees (sealed exhaustiveness, `unknown` strictness
 ### How does incremental building work?
 
 TypePython computes a fingerprint (FNV-1a hash) for each module's public API. On subsequent builds:
+
 - If a module's source changed but its public API fingerprint is the same: dependents are NOT rechecked
 - If the public API changed: direct and transitive dependents are rechecked
 
@@ -147,15 +150,16 @@ The first one found wins.
 
 ### What's the difference between the typing profiles?
 
-| Profile | Use case | Strictness |
-|---|---|---|
-| `library` | Published packages | Maximum: strict + require known public types |
-| `application` | Applications | High: strict, relaxed public API |
-| `migration` | Gradual adoption | Minimum: lenient, dynamic imports |
+| Profile       | Use case           | Strictness                                   |
+| ------------- | ------------------ | -------------------------------------------- |
+| `library`     | Published packages | Maximum: strict + require known public types |
+| `application` | Applications       | High: strict, relaxed public API             |
+| `migration`   | Gradual adoption   | Minimum: lenient, dynamic imports            |
 
 ### How do I handle imports from untyped packages?
 
 Three options:
+
 1. Set `typing.imports = "dynamic"` -- treat as `dynamic` (no checking)
 2. Set `typing.imports = "unknown"` (default) -- treat as `unknown` (must narrow)
 3. Write `.pyi` stubs and add their directory to `resolution.type_roots`
@@ -181,6 +185,7 @@ Ensure there's a `typepython.toml` (or `pyproject.toml` with `[tool.typepython]`
 ### "Unable to locate the TypePython Rust CLI"
 
 The Python bridge can't find the binary. Either:
+
 - Set `TYPEPYTHON_BIN=/path/to/typepython`
 - Install a bundled binary via `python -m pip install type-python` or `python -m pip install .`
 - Run from the repository checkout with `cargo` available

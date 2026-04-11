@@ -26,10 +26,10 @@ cargo bench -p typepython-checking --bench checker
 
 Recorded from a successful local run on Tue Apr 07 2026.
 
-| Benchmark | Measured time range |
-| --- | --- |
-| `check_solver_direct_calls_small` | `388.77 µs .. 390.61 µs` |
-| `check_solver_direct_calls_medium` | `3.1233 ms .. 3.1894 ms` |
+| Benchmark                                   | Measured time range      |
+| ------------------------------------------- | ------------------------ |
+| `check_solver_direct_calls_small`           | `388.77 µs .. 390.61 µs` |
+| `check_solver_direct_calls_medium`          | `3.1233 ms .. 3.1894 ms` |
 | `check_semantic_incremental_summary_medium` | `15.552 µs .. 15.805 µs` |
 
 Criterion also reported these runs as regressions relative to the currently

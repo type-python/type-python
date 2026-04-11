@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-binding"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "typepython-diagnostics",
  "typepython-syntax",
@@ -1787,7 +1787,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-checking"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "typepython-binding",
@@ -1800,7 +1800,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-cli"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1829,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-config"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -1838,7 +1838,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-diagnostics"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1846,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-emit"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "insta",
  "littrs-ruff-python-ast",
@@ -1859,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-graph"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "typepython-binding",
@@ -1868,7 +1868,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-incremental"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1879,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-lowering"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "insta",
@@ -1892,7 +1892,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-lsp"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -1914,7 +1914,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-project"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "glob",
@@ -1928,7 +1928,7 @@ dependencies = [
 
 [[package]]
 name = "typepython-syntax"
-version = "0.0.8"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "littrs-ruff-python-ast",

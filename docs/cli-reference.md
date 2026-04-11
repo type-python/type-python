@@ -59,9 +59,9 @@ Type-check the project without emitting output files. Use this for fast feedback
 typepython check [OPTIONS]
 ```
 
-| Flag             | Description       |
-| ---------------- | ----------------- |
-| `--project PATH` | Project directory |
+| Flag              | Description                     |
+| ----------------- | ------------------------------- |
+| `--project PATH`  | Project directory               |
 | `--format FORMAT` | Output format: `text` or `json` |
 
 **Pipeline steps:** discover sources -> parse -> bind -> build graph -> type check
@@ -116,9 +116,9 @@ Full compilation: type-check, lower to Python, emit `.py` and `.pyi` files, upda
 typepython build [OPTIONS]
 ```
 
-| Flag             | Description       |
-| ---------------- | ----------------- |
-| `--project PATH` | Project directory |
+| Flag              | Description                     |
+| ----------------- | ------------------------------- |
+| `--project PATH`  | Project directory               |
 | `--format FORMAT` | Output format: `text` or `json` |
 
 **Pipeline steps:** discover -> parse -> bind -> graph -> check -> lower -> plan emits -> snapshot -> write outputs
@@ -164,9 +164,9 @@ File-watching mode: rebuild automatically when source files change.
 typepython watch [OPTIONS]
 ```
 
-| Flag             | Description       |
-| ---------------- | ----------------- |
-| `--project PATH` | Project directory |
+| Flag              | Description                     |
+| ----------------- | ------------------------------- |
+| `--project PATH`  | Project directory               |
 | `--format FORMAT` | Output format: `text` or `json` |
 
 **Behavior:**
@@ -256,12 +256,12 @@ Validate build artifacts for publication. Checks consistency between runtime and
 typepython verify [OPTIONS]
 ```
 
-| Flag             | Description                                      |
-| ---------------- | ------------------------------------------------ |
-| `--project PATH` | Project directory                                |
-| `--format FORMAT` | Output format: `text` or `json`                  |
-| `--wheel PATH`   | Path to a `.whl` file to verify (repeatable)     |
-| `--sdist PATH`   | Path to a `.tar.gz` sdist to verify (repeatable) |
+| Flag                | Description                                                                |
+| ------------------- | -------------------------------------------------------------------------- |
+| `--project PATH`    | Project directory                                                          |
+| `--format FORMAT`   | Output format: `text` or `json`                                            |
+| `--wheel PATH`      | Path to a `.whl` file to verify (repeatable)                               |
+| `--sdist PATH`      | Path to a `.tar.gz` sdist to verify (repeatable)                           |
 | `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
 
 **Checks performed:**
