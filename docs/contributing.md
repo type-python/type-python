@@ -281,6 +281,7 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 | `make test`      | `cargo test --workspace`                                     | Run all tests          |
 | `make docs`      | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` | Generate rustdoc       |
 | `make package-check` | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*` | Validate Python package artifacts |
+| `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8` | Sync Rust and Python package versions |
 | `make ci`        | `fmt-check` + `lint` + `test` + `bench-check` + `package-check` | Full CI pipeline       |
 
 ## Python Packaging
@@ -309,6 +310,7 @@ During development, option 3 means you can run `python -m typepython check --pro
 ### Release hygiene
 
 - Build release artifacts from a clean checkout. The source distribution uses `MANIFEST.in` with `graft` rules over the Rust workspace and bundled stdlib snapshot, so untracked files under packaged directories can be swept into a locally-built sdist.
+- Use `make bump-version VERSION=X.Y.Z` for version updates. This synchronizes `Cargo.toml`, `Cargo.lock`, `pyproject.toml`, and `typepython/__init__.py` in one step.
 - Validate both artifacts before publishing: `python -m build --sdist --wheel` and `python -m twine check dist/*`.
 - If you intend `pip install type-python` to work without a Rust toolchain, publish platform wheels for each supported target in addition to the sdist. The release workflow uses `cibuildwheel` to publish Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64 wheels.
 
@@ -316,10 +318,12 @@ During development, option 3 means you can run `python -m typepython check --pro
 
 The repository publishes to PyPI through GitHub Actions Trusted Publishing in the `pypi` environment. No PyPI API token is required in repository secrets or workflow `env`.
 
-1. Update `version` in `pyproject.toml`.
-2. Commit the version bump and push it to GitHub.
-3. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
-4. The `publish` workflow validates the tag/version match, builds the sdist, builds wheel artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start install/build flow, runs `twine check`, and then publishes to PyPI.
+1. Choose the release version `X.Y.Z`.
+2. Run `make bump-version VERSION=X.Y.Z`.
+3. Optionally verify the sync guard with `cargo test -p typepython-cli packaged_versions_stay_in_sync`.
+4. Commit the version bump and push it to GitHub.
+5. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
+6. The `publish` workflow validates the tag/version match, builds the sdist, builds wheel artifacts with `cibuildwheel`, smoke-tests each wheel with a Quick Start install/build flow, runs `twine check`, and then publishes to PyPI.
 
 Linux wheel publishing uses the `manylinux2014` image through `cibuildwheel`, which gives PyPI-compatible Linux wheel tags for the bundled CLI binary. If you expand wheel coverage to more architectures later, keep that manylinux or musllinux compatibility requirement in place.
 

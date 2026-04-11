@@ -2,7 +2,7 @@ CARGO ?= cargo
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check lint test bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci
+.PHONY: bootstrap fmt fmt-check check lint test bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -32,6 +32,10 @@ package-check:
 	rm -rf dist
 	$(PYTHON) -m build --sdist --wheel
 	$(PYTHON) -m twine check dist/*
+
+bump-version:
+	@test -n "$(VERSION)" || (echo "Usage: make bump-version VERSION=0.0.8" && exit 1)
+	$(PYTHON) scripts/bump_version.py $(VERSION)
 
 bench-baseline:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker -- --save-baseline v0.1.0

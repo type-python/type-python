@@ -90,6 +90,37 @@ fn embedded_config_template_rewrites_sections_under_tool_typepython() {
 }
 
 #[test]
+fn packaged_versions_stay_in_sync() {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let pyproject =
+        fs::read_to_string(workspace_root.join("pyproject.toml")).expect("pyproject should exist");
+    let package_init = fs::read_to_string(workspace_root.join("typepython/__init__.py"))
+        .expect("typepython package should exist");
+    let cargo_lock =
+        fs::read_to_string(workspace_root.join("Cargo.lock")).expect("Cargo.lock should exist");
+    let version = env!("CARGO_PKG_VERSION");
+
+    assert!(pyproject.contains(&format!("version = \"{version}\"")));
+    assert!(package_init.contains(&format!("__version__ = \"{version}\"")));
+    for package in [
+        "typepython-binding",
+        "typepython-checking",
+        "typepython-cli",
+        "typepython-config",
+        "typepython-diagnostics",
+        "typepython-emit",
+        "typepython-graph",
+        "typepython-incremental",
+        "typepython-lowering",
+        "typepython-lsp",
+        "typepython-project",
+        "typepython-syntax",
+    ] {
+        assert!(cargo_lock.contains(&format!("name = \"{package}\"\nversion = \"{version}\"")));
+    }
+}
+
+#[test]
 fn init_project_embeds_config_into_existing_pyproject() {
     let project_dir = temp_project_dir("init_project_embeds_config_into_existing_pyproject");
     fs::write(project_dir.join("pyproject.toml"), "[build-system]\nrequires = [\"setuptools\"]\n")
