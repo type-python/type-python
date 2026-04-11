@@ -276,13 +276,13 @@ fn infer_variadic_annotation_bindings_detailed(
             None
         } else {
             Some(join_semantic_type_candidates(
-                variadic_starred_types
-                    .iter()
-                    .map(|ty| lower_type_text_or_name(ty))
-                    .collect(),
+                variadic_starred_types.iter().map(|ty| lower_type_text_or_name(ty)).collect(),
             ))
         };
-        solver.record_type_pack_binding(&type_pack_name, TypePackBinding { types: fixed_types, variadic_tail });
+        solver.record_type_pack_binding(
+            &type_pack_name,
+            TypePackBinding { types: fixed_types, variadic_tail },
+        );
         return Ok(());
     }
 

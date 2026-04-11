@@ -1321,16 +1321,13 @@ mod tests {
         let root = temp_project_dir("external_runtime_allowed_requires_partial_stub_fallback");
         let result = {
             fs::create_dir_all(root.join("demo")).expect("test setup should succeed");
-            fs::create_dir_all(root.join("demo-stubs/demo"))
-                .expect("test setup should succeed");
+            fs::create_dir_all(root.join("demo-stubs/demo")).expect("test setup should succeed");
             fs::write(root.join("demo/runtime.py"), "pass\n").expect("test setup should succeed");
             fs::write(root.join("demo-stubs/py.typed"), "partial\n")
                 .expect("test setup should succeed");
 
-            let support_root = ExternalSupportRoot {
-                path: root.clone(),
-                allow_untyped_runtime: false,
-            };
+            let support_root =
+                ExternalSupportRoot { path: root.clone(), allow_untyped_runtime: false };
             let runtime_path = root.join("demo/runtime.py");
             let allowed_without_stub = external_runtime_allowed(&support_root, &runtime_path);
 

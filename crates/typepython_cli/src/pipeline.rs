@@ -45,9 +45,9 @@ use crate::{
 mod loading;
 mod stubs;
 
+pub(crate) use self::loading::load_syntax_trees;
 use self::loading::{PreparedPipelineSyntax, prepare_pipeline_syntax};
 use self::stubs::build_typepython_stub_contexts;
-pub(crate) use self::loading::load_syntax_trees;
 
 #[derive(Debug)]
 pub(crate) struct PipelineSnapshot {
@@ -364,9 +364,7 @@ fn analyze_pipeline_state(
         Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
     let source_hashes = syntax_tree_source_hashes(&prepared.all_syntax_trees);
     let incremental = match previous {
-        Some(previous)
-            if previous.stdlib_snapshot == stdlib_snapshot =>
-        {
+        Some(previous) if previous.stdlib_snapshot == stdlib_snapshot => {
             let current_sources =
                 IncrementalState::default().with_source_hashes(source_hashes.clone());
             let direct_changes = source_change_modules(previous, &current_sources);
@@ -498,41 +496,31 @@ pub(crate) fn run_with_pipeline(
 pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     let discovery = collect_source_paths(config)?;
     if discovery.diagnostics.has_errors() {
-        return Ok(blocked_pipeline_snapshot(
-            discovery.sources.len(),
-            discovery.diagnostics,
-        ));
+        return Ok(blocked_pipeline_snapshot(discovery.sources.len(), discovery.diagnostics));
     }
 
     let prepared = prepare_pipeline_syntax(config, &discovery.sources)?;
     let mut parse_diagnostics = collect_parse_diagnostics(&prepared.all_syntax_trees);
     apply_type_ignore_directives(&prepared.syntax_trees, &mut parse_diagnostics);
     if parse_diagnostics.has_errors() {
-        return Ok(blocked_pipeline_snapshot(
-            prepared.source_paths.len(),
-            parse_diagnostics,
-        ));
+        return Ok(blocked_pipeline_snapshot(prepared.source_paths.len(), parse_diagnostics));
     }
 
     let previous = load_previous_incremental_state(config)?;
     let analyzed = analyze_pipeline_state(config, &prepared, previous.as_ref())?;
     if let Some(previous) = previous {
         if can_reuse_cached_pipeline_outputs(config, &previous, &analyzed) {
-            return Ok(reusable_cached_pipeline_snapshot(
-                prepared.source_paths.len(),
-                analyzed,
-            ));
+            return Ok(reusable_cached_pipeline_snapshot(prepared.source_paths.len(), analyzed));
         }
     }
 
     let lowering_options =
         LoweringOptions { target_python: config.config.project.target_python.clone() };
-    let lowering_results: Vec<_> =
-        prepared
-            .syntax_trees
-            .par_iter()
-            .map(|tree| lower_with_options(tree, &lowering_options))
-            .collect();
+    let lowering_results: Vec<_> = prepared
+        .syntax_trees
+        .par_iter()
+        .map(|tree| lower_with_options(tree, &lowering_options))
+        .collect();
     let lowering_diagnostics = collect_lowering_diagnostics(&lowering_results);
     let mut diagnostics = analyzed.diagnostics;
     if lowering_diagnostics.has_errors() {
@@ -547,11 +535,8 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
 
     let lowered_modules: Vec<_> =
         lowering_results.into_iter().map(|result| result.module).collect();
-    let stub_contexts = build_typepython_stub_contexts(
-        &prepared.syntax_trees,
-        &lowered_modules,
-        &analyzed.graph,
-    );
+    let stub_contexts =
+        build_typepython_stub_contexts(&prepared.syntax_trees, &lowered_modules, &analyzed.graph);
     diagnostics.diagnostics.extend(
         public_surface_completeness_diagnostics(
             config,
@@ -650,10 +635,8 @@ pub(crate) fn compile_runtime_bytecode(
     artifacts: &[EmitArtifact],
 ) -> Result<usize> {
     let interpreter = resolve_python_executable(config);
-    let runtime_paths = artifacts
-        .iter()
-        .filter_map(|artifact| artifact.runtime_path.clone())
-        .collect::<Vec<_>>();
+    let runtime_paths =
+        artifacts.iter().filter_map(|artifact| artifact.runtime_path.clone()).collect::<Vec<_>>();
 
     runtime_paths
         .par_iter()

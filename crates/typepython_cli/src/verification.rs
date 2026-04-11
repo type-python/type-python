@@ -405,19 +405,16 @@ fn verify_external_checker(
     out_root: &Path,
     checker: &str,
 ) -> Option<Diagnostic> {
-    let output = match ProcessCommand::new(checker)
-        .arg(out_root)
-        .current_dir(&config.config_dir)
-        .output()
-    {
-        Ok(output) => output,
-        Err(error) => {
-            return Some(Diagnostic::error(
-                "TPY5003",
-                format!("unable to run external checker `{checker}`: {error}"),
-            ));
-        }
-    };
+    let output =
+        match ProcessCommand::new(checker).arg(out_root).current_dir(&config.config_dir).output() {
+            Ok(output) => output,
+            Err(error) => {
+                return Some(Diagnostic::error(
+                    "TPY5003",
+                    format!("unable to run external checker `{checker}`: {error}"),
+                ));
+            }
+        };
     if output.status.success() {
         return None;
     }
@@ -446,7 +443,8 @@ fn verify_runtime_public_name_parity_for_artifact(
     artifact: &EmitArtifact,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) else {
+    let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
+    else {
         return diagnostics;
     };
     if !(runtime_path.exists() && stub_path.exists()) {

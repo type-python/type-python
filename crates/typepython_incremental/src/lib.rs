@@ -1211,11 +1211,7 @@ mod tests {
 
         assert_eq!(
             source_change_modules(&previous, &current),
-            BTreeSet::from([
-                String::from("pkg.a"),
-                String::from("pkg.b"),
-                String::from("pkg.c"),
-            ])
+            BTreeSet::from([String::from("pkg.a"), String::from("pkg.b"), String::from("pkg.c"),])
         );
     }
 

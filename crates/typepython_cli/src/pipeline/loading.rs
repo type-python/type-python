@@ -34,8 +34,7 @@ pub(super) fn prepare_pipeline_syntax(
     config: &ConfigHandle,
     discovery_sources: &[DiscoveredSource],
 ) -> Result<PreparedPipelineSyntax> {
-    let source_paths: Vec<_> =
-        discovery_sources.iter().map(|source| source.path.clone()).collect();
+    let source_paths: Vec<_> = discovery_sources.iter().map(|source| source.path.clone()).collect();
     let syntax_trees = load_syntax_trees(
         discovery_sources,
         config.config.typing.conditional_returns,
