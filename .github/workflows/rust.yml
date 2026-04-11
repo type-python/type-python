@@ -28,7 +28,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test Fast Workspace Suite
-        run: cargo test --workspace -- --skip tests::verification::
+        run: 'cargo test --workspace -- --skip tests::verification::'
 
       - name: Bench compile check
         run: cargo bench --workspace --no-run
@@ -73,4 +73,4 @@ jobs:
           python-version: "3.12"
 
       - name: Test CLI Verification Suite
-        run: cargo test -p typepython-cli tests::verification::
+        run: 'cargo test -p typepython-cli tests::verification::'
