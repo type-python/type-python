@@ -4,26 +4,59 @@ This guide walks you through installing TypePython, creating your first project,
 
 ## Prerequisites
 
-- **Rust 1.94.0** -- pinned development/CI toolchain for compiling TypePython (workspace MSRV: 1.85)
-- **Python 3.9+** -- required for the Python package bridge (optional; you can use the Rust binary directly)
+- **Rust 1.94.0** -- required when building TypePython from source or installing from a local checkout/source distribution (workspace MSRV: 1.85)
+- **Python 3.9+** -- required for the Python package interface and packaging checks (optional if you only use a prebuilt Rust binary directly)
 - **Git** -- to clone the repository
 
 TypePython projects themselves currently target Python 3.10, 3.11, or 3.12 via `project.target_python`.
 
 ## Installation
 
-### Option 1: From source (recommended for development)
+Choose the path that matches how you want to use TypePython.
+
+### Option 1: Published package (recommended for most users)
 
 ```bash
-# Clone the repository
+python -m pip install type-python
+typepython --help
+python -m typepython --help
+```
+
+Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
+
+### Option 2: Local checkout installed as a package
+
+```bash
 git clone https://github.com/type-python/type-python.git
 cd type-python
 
-# Bootstrap the Rust toolchain (installs Rust 1.94.0 with clippy + rustfmt)
+# Install the pinned Rust toolchain (installs Rust 1.94.0 with clippy + rustfmt)
 ./scripts/bootstrap-rust.sh
 
-# Verify everything works
-make ci
+# Build a local wheel and install the package entry points
+python -m pip install .
+typepython --help
+```
+
+This path installs the same Python package interface as the published package, but builds it from your local checkout.
+
+If you specifically want an editable install while developing the repository itself:
+
+```bash
+python -m pip install -e .
+```
+
+Editable installs are checkout-oriented. The Python wrapper looks for the CLI in this order: `TYPEPYTHON_BIN`, a bundled package binary, then `cargo run` from the repository checkout. If you want an installed `typepython` command that works independently of the checkout, prefer `python -m pip install .`.
+
+### Option 3: Directly from a source checkout (recommended for compiler development)
+
+```bash
+git clone https://github.com/type-python/type-python.git
+cd type-python
+./scripts/bootstrap-rust.sh
+
+# Run the CLI without installing a Python package
+cargo run -p typepython-cli -- --help
 ```
 
 The compiled binary will be at `target/release/typepython` after a release build:
@@ -33,25 +66,20 @@ cargo build --release -p typepython-cli
 ./target/release/typepython --help
 ```
 
-### Option 2: Python package (pip install)
+If you want to run the maintainer/CI validation suite from a source checkout, install the packaging tools first:
 
 ```bash
-pip install -e .
+python -m pip install build twine
+make ci
 ```
 
-This compiles the Rust binary during installation and bundles it into the Python package. After installation:
+`make ci` is a repository validation target, not a prerequisite for using the compiler interactively.
 
-```bash
-# All equivalent:
-typepython --help
-python -m typepython --help
-```
+Unless noted otherwise, the rest of this guide shows commands as `typepython ...`. If you are using a source checkout without installing the package, substitute `cargo run -p typepython-cli -- ...` or `./target/release/typepython ...`.
 
-For published PyPI installs, the same package interface is used. Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
+### Option 4: Custom binary location
 
-### Option 3: Custom binary location
-
-If you have a pre-built binary, point to it with the `TYPEPYTHON_BIN` environment variable:
+If you have a pre-built binary, point the Python wrapper at it with the `TYPEPYTHON_BIN` environment variable:
 
 ```bash
 export TYPEPYTHON_BIN=/path/to/typepython
@@ -87,6 +115,8 @@ my-project/
 ```
 
 `typepython init --embed-pyproject` still writes the same starter source tree, but it appends `[tool.typepython]` to an existing `pyproject.toml` instead of creating `typepython.toml`.
+
+`--embed-pyproject` requires an existing `pyproject.toml`. It fails if `typepython.toml` already exists, or if `pyproject.toml` already contains `[tool.typepython]`.
 
 ### Manual setup
 
@@ -238,13 +268,17 @@ Output:
 ```
 check:
   config: /path/to/project/typepython.toml (typepython.toml)
-  discovered sources: 5
-  lowered modules: 4
-  planned artifacts: 5
-  tracked modules: 8
+  discovered sources: 1
+  lowered modules: 1
+  planned artifacts: 1
+  tracked modules: 4
   note: compiler pipeline, artifact planning, and verification completed for the loaded project
-src/app/models.tpy:12:5  TPY4001  error  Type 'str' is not assignable to 'int'
+error[TPY4001]: function `bad` in module `/path/to/project/src/app/__init__.tpy` returns `str` where `bad` expects `int`
+  --> /path/to/project/src/app/__init__.tpy:2:1-2:1
+  = note: reason: `str` is not assignable to `int` under semantic type checking
 ```
+
+The summary counts depend on your project size and incremental state. Current diagnostics also include additional notes such as inferred and declared types where relevant.
 
 ### Build (emit .py + .pyi)
 
@@ -277,7 +311,9 @@ Watches for file changes and rebuilds automatically with configurable debounce (
 
 ### JSON output
 
-All commands support JSON output for CI/tooling integration:
+The project-oriented commands `check`, `build`, `watch`, `verify`, and `migrate` support JSON output for CI/tooling integration.
+
+`typepython init` and `typepython clean` do not support `--format`. `typepython lsp` always speaks JSON-RPC over stdio instead of CLI JSON output.
 
 ```bash
 typepython check --project . --format json
@@ -289,14 +325,19 @@ typepython check --project . --format json
     "diagnostics": [
       {
         "code": "TPY4001",
+        "message": "function `bad` in module `/path/to/project/src/app/__init__.tpy` returns `str` where `bad` expects `int`",
+        "notes": [
+          "reason: `str` is not assignable to `int` under semantic type checking",
+          "inferred return type: `str`",
+          "declared return type: `int`"
+        ],
         "severity": "error",
-        "message": "Type 'str' is not assignable to 'int'",
         "span": {
-          "path": "src/app/models.tpy",
-          "line": 12,
-          "column": 5,
-          "end_line": 12,
-          "end_column": 20
+          "path": "/path/to/project/src/app/__init__.tpy",
+          "line": 2,
+          "column": 1,
+          "end_line": 2,
+          "end_column": 1
         },
         "suggestions": []
       }
@@ -306,13 +347,13 @@ typepython check --project . --format json
     "command": "check",
     "config_path": "/path/to/project/typepython.toml",
     "config_source": "type_python_toml",
-    "discovered_sources": 5,
-    "lowered_modules": 4,
+    "discovered_sources": 1,
+    "lowered_modules": 1,
     "notes": [
       "compiler pipeline, artifact planning, and verification completed for the loaded project"
     ],
-    "planned_artifacts": 5,
-    "tracked_modules": 8
+    "planned_artifacts": 1,
+    "tracked_modules": 4
   }
 }
 ```

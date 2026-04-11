@@ -8,12 +8,12 @@ The `typepython` command-line tool provides all TypePython compiler and tooling 
 typepython [COMMAND] [OPTIONS]
 ```
 
-All commands that operate on a project accept:
+Project-oriented commands use these shared options:
 
-| Flag             | Description                                                |
-| ---------------- | ---------------------------------------------------------- | ------------------------------- |
-| `--project PATH` | Path to the project directory (default: current directory) |
-| `--format text   | json`                                                      | Output format (default: `text`) |
+- `check`, `build`, `watch`, `verify`, and `migrate` accept `--project PATH` and `--format text|json`
+- `clean` accepts `--project PATH`
+- `lsp` accepts `--project PATH` and speaks JSON-RPC over stdio instead of CLI JSON output
+- `init` has its own command-specific flags
 
 ## Commands
 
@@ -41,7 +41,7 @@ typepython init [OPTIONS]
       __init__.tpy          # Starter source: def greet(name: str) -> str
 ```
 
-`--embed-pyproject` keeps the same `src/app/__init__.tpy` starter file, but it requires an existing `pyproject.toml` and fails if `typepython.toml` already exists.
+`--embed-pyproject` keeps the same `src/app/__init__.tpy` starter file, but it requires an existing `pyproject.toml` and fails if `typepython.toml` already exists or `pyproject.toml` already defines `[tool.typepython]`.
 
 **Example:**
 
@@ -60,9 +60,9 @@ typepython check [OPTIONS]
 ```
 
 | Flag             | Description       |
-| ---------------- | ----------------- | ------------- |
+| ---------------- | ----------------- |
 | `--project PATH` | Project directory |
-| `--format text   | json`             | Output format |
+| `--format FORMAT` | Output format: `text` or `json` |
 
 **Pipeline steps:** discover sources -> parse -> bind -> build graph -> type check
 
@@ -117,9 +117,9 @@ typepython build [OPTIONS]
 ```
 
 | Flag             | Description       |
-| ---------------- | ----------------- | ------------- |
+| ---------------- | ----------------- |
 | `--project PATH` | Project directory |
-| `--format text   | json`             | Output format |
+| `--format FORMAT` | Output format: `text` or `json` |
 
 **Pipeline steps:** discover -> parse -> bind -> graph -> check -> lower -> plan emits -> snapshot -> write outputs
 
@@ -163,9 +163,9 @@ typepython watch [OPTIONS]
 ```
 
 | Flag             | Description       |
-| ---------------- | ----------------- | ------------- |
+| ---------------- | ----------------- |
 | `--project PATH` | Project directory |
-| `--format text   | json`             | Output format |
+| `--format FORMAT` | Output format: `text` or `json` |
 
 **Behavior:**
 
@@ -224,6 +224,8 @@ typepython lsp [OPTIONS]
 
 **Transport:** stdio-based JSON-RPC 2.0
 
+`typepython lsp` reuses the standard run-args parser, but `--format json` is rejected because the command already speaks JSON-RPC over stdio.
+
 **Supported LSP methods:**
 
 - `textDocument/hover` -- type information at cursor
@@ -255,8 +257,10 @@ typepython verify [OPTIONS]
 | Flag             | Description                                      |
 | ---------------- | ------------------------------------------------ |
 | `--project PATH` | Project directory                                |
+| `--format FORMAT` | Output format: `text` or `json`                  |
 | `--wheel PATH`   | Path to a `.whl` file to verify (repeatable)     |
 | `--sdist PATH`   | Path to a `.tar.gz` sdist to verify (repeatable) |
+| `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
 
 **Checks performed:**
 
@@ -287,6 +291,7 @@ typepython migrate [OPTIONS]
 
 | Flag                  | Description                                     |
 | --------------------- | ----------------------------------------------- |
+| `--format FORMAT`     | Output format: `text` or `json`                 |
 | `--project PATH`      | Project directory                               |
 | `--report`            | Print a typing coverage summary                 |
 | `--emit-stubs PATH`   | Generate `.pyi` stubs from inferred `.py` types |

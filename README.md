@@ -142,7 +142,7 @@ typepython verify  --project .          # Validate for publication
 typepython migrate --project . --report # Migration coverage report
 ```
 
-Project-oriented commands except `clean` support `--format text|json`. `typepython lsp` always speaks JSON-RPC over stdio rather than CLI JSON output. See [CLI reference](docs/cli-reference.md).
+Project-oriented commands `check`, `build`, `watch`, `verify`, and `migrate` support `--format text|json`. `clean` does not. `typepython lsp` speaks JSON-RPC over stdio rather than CLI JSON output. See [CLI reference](docs/cli-reference.md).
 
 ## Configuration
 
