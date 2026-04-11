@@ -1,0 +1,42 @@
+from typing import TypedDict
+
+
+interface Serializable:
+    def to_text(self) -> str: ...
+
+
+data class User(Serializable):
+    user_id: int
+    name: str
+
+    def to_text(self) -> str:
+        return f"{self.user_id}:{self.name}"
+
+
+class UserInfo(TypedDict):
+    user_id: int
+    name: str
+
+
+typealias UserPatch = Partial[UserInfo]
+typealias UserTuple = tuple[int, str]
+
+
+overload def parse_user(value: UserInfo) -> User: ...
+overload def parse_user(value: UserTuple) -> User: ...
+
+
+def parse_user(value: UserInfo | UserTuple) -> User:
+    if isinstance(value, tuple):
+        return User(user_id=value[0], name=value[1])
+    return User(user_id=value["user_id"], name=value["name"])
+
+
+def update_name(user: User, patch: UserPatch) -> User:
+    if "name" in patch:
+        return User(user_id=user.user_id, name=patch["name"])
+    return user
+
+
+def render_all(items: list[Serializable]) -> list[str]:
+    return [item.to_text() for item in items]

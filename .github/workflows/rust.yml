@@ -41,6 +41,12 @@ jobs:
       - name: Install packaging tools
         run: python -m pip install --upgrade build twine
 
+      - name: Install downstream checker smoke tools
+        run: python -m pip install --upgrade mypy pyright
+
+      - name: Run downstream checker smoke test
+        run: python scripts/downstream_checker_smoke.py
+
       - name: Build Python distribution artifacts
         run: python -m build --sdist --wheel
 

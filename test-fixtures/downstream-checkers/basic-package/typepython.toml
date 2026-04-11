@@ -1,0 +1,12 @@
+[project]
+src = ["src"]
+target_python = "3.10"
+
+[typing]
+profile = "application"
+strict = true
+strict_nulls = true
+
+[emit]
+emit_pyi = true
+no_emit_on_error = true
