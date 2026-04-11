@@ -39,15 +39,7 @@ jobs:
           fi
 
           expected_version="${tag#v}"
-          package_version="$(
-            python - <<'PY'
-            from pathlib import Path
-            import tomllib
-
-            pyproject = tomllib.loads(Path("pyproject.toml").read_text())
-            print(pyproject["project"]["version"])
-            PY
-          )"
+          package_version="$(python -c 'from pathlib import Path; import tomllib; print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
 
           if [[ "$package_version" != "$expected_version" ]]; then
             echo "Release tag ${tag} does not match pyproject.toml version ${package_version}"
