@@ -439,6 +439,7 @@ fn can_reuse_cached_pipeline_outputs(
     snapshot_diff.added.is_empty()
         && snapshot_diff.removed.is_empty()
         && snapshot_diff.changed.is_empty()
+        && previous.source_hashes == analyzed.incremental.source_hashes
         && previous.summaries == analyzed.incremental.summaries
         && previous.stdlib_snapshot == analyzed.incremental.stdlib_snapshot
         && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()

@@ -364,6 +364,64 @@ fn run_pipeline_invalidates_cache_when_public_summary_changes() {
 }
 
 #[test]
+fn run_pipeline_invalidates_cache_when_source_hash_changes_without_public_summary_change() {
+    let project_dir = temp_project_dir(
+        "run_pipeline_invalidates_cache_when_source_hash_changes_without_public_summary_change",
+    );
+    let (diagnostics, lowered_modules, planned_artifacts, runtime_source) = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app.py");
+
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        write_runtime_outputs(
+            &first.emit_plan,
+            &first.lowered_modules,
+            config.config.emit.write_py_typed,
+            false,
+            Some(&first.stub_contexts),
+        )
+        .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &config.resolve_relative_path(&config.config.project.cache_dir),
+            &first.incremental,
+        )
+        .expect("test setup should succeed");
+
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 2\n")
+            .expect("test setup should succeed");
+
+        let second = run_pipeline(&config).expect("test setup should succeed");
+        write_runtime_outputs(
+            &second.emit_plan,
+            &second.lowered_modules,
+            config.config.emit.write_py_typed,
+            false,
+            Some(&second.stub_contexts),
+        )
+        .expect("test setup should succeed");
+
+        (
+            second.diagnostics,
+            second.lowered_modules.len(),
+            second.emit_plan.len(),
+            fs::read_to_string(runtime_path).expect("runtime output should exist"),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty());
+    assert_eq!(lowered_modules, 1);
+    assert_eq!(planned_artifacts, 1);
+    assert!(runtime_source.contains("return 2"));
+    assert!(!runtime_source.contains("return 1"));
+}
+
+#[test]
 fn build_diagnostics_adds_emit_blocked_error_when_configured() {
     let project_dir = temp_project_dir("build_diagnostics_adds_emit_blocked_error_when_configured");
     let rendered = {
