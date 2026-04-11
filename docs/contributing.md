@@ -319,9 +319,9 @@ The repository publishes to PyPI through GitHub Actions Trusted Publishing in th
 1. Update `version` in `pyproject.toml`.
 2. Commit the version bump and push it to GitHub.
 3. Create a GitHub release from a tag named `vX.Y.Z`, where `X.Y.Z` exactly matches `pyproject.toml`.
-4. The `publish` workflow validates the tag/version match, builds the sdist and Linux wheel, runs `twine check`, and then publishes to PyPI.
+4. The `publish` workflow validates the tag/version match, builds the sdist, runs `twine check`, and then publishes to PyPI.
 
-The current publish workflow builds on `ubuntu-latest`, so each release uploads the source distribution and a Linux wheel. Add macOS and Windows wheel jobs if you want `pip install type-python` to avoid a local Rust toolchain on those platforms as well.
+The current publish workflow uploads only the source distribution. A wheel built directly on `ubuntu-latest` gets the platform tag `linux_x86_64`, which PyPI rejects for public uploads. Add dedicated macOS and Windows wheel jobs and a proper manylinux or musllinux Linux wheel pipeline if you want `pip install type-python` to avoid a local Rust toolchain on those platforms as well.
 
 ## Pull Request Workflow
 
