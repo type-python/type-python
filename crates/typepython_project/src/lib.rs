@@ -1107,4 +1107,242 @@ mod tests {
         assert!(index.module_sources("typing").is_some());
         assert!(index.module_sources("collections").is_none());
     }
+
+    #[test]
+    fn logical_module_path_resolves_package_init_and_module_files() {
+        let root = PathBuf::from("/project/src");
+
+        assert_eq!(
+            logical_module_path(&root, &root.join("app/__init__.tpy")),
+            Some(String::from("app"))
+        );
+        assert_eq!(
+            logical_module_path(&root, &root.join("app/models.tpy")),
+            Some(String::from("app.models"))
+        );
+        assert_eq!(logical_module_path(&root, &root.join("__init__.tpy")), None);
+    }
+
+    #[test]
+    fn module_path_prefixes_strip_wildcard_and_walk_parents() {
+        let prefixes = module_path_prefixes("demo.api.handlers.*").collect::<Vec<_>>();
+
+        assert_eq!(prefixes, vec!["demo.api.handlers", "demo.api", "demo"]);
+    }
+
+    #[test]
+    fn sort_sources_by_type_authority_prefers_typepython_then_stub_then_python() {
+        let mut sources = vec![
+            DiscoveredSource {
+                path: PathBuf::from("src/app.py"),
+                root: PathBuf::from("src"),
+                kind: SourceKind::Python,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+            DiscoveredSource {
+                path: PathBuf::from("src/app.pyi"),
+                root: PathBuf::from("src"),
+                kind: SourceKind::Stub,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+            DiscoveredSource {
+                path: PathBuf::from("src/app.tpy"),
+                root: PathBuf::from("src"),
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+        ];
+
+        sort_sources_by_type_authority(&mut sources);
+
+        assert_eq!(
+            sources.iter().map(|source| source.kind).collect::<Vec<_>>(),
+            vec![SourceKind::TypePython, SourceKind::Stub, SourceKind::Python]
+        );
+    }
+
+    #[test]
+    fn detect_module_collisions_allows_python_stub_pair_in_same_root() {
+        let root = PathBuf::from("src");
+        let sources = vec![
+            DiscoveredSource {
+                path: root.join("app.py"),
+                root: root.clone(),
+                kind: SourceKind::Python,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+            DiscoveredSource {
+                path: root.join("app.pyi"),
+                root: root.clone(),
+                kind: SourceKind::Stub,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+        ];
+
+        assert!(detect_module_collisions(&sources, std::slice::from_ref(&root)).is_empty());
+    }
+
+    #[test]
+    fn detect_module_collisions_reports_cross_root_duplicates() {
+        let first_root = PathBuf::from("src");
+        let second_root = PathBuf::from("vendor");
+        let sources = vec![
+            DiscoveredSource {
+                path: first_root.join("app.py"),
+                root: first_root.clone(),
+                kind: SourceKind::Python,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+            DiscoveredSource {
+                path: second_root.join("app.pyi"),
+                root: second_root.clone(),
+                kind: SourceKind::Stub,
+                logical_module: String::from("app"),
+                load_as_inferred_stub: false,
+            },
+        ];
+
+        let collisions =
+            detect_module_collisions(&sources, &[first_root.clone(), second_root.clone()]);
+        assert_eq!(collisions.len(), 1);
+        assert_eq!(collisions[0].logical_module, "app");
+    }
+
+    #[test]
+    fn parse_bundled_stdlib_version_filter_reads_metadata_header() {
+        let filter = parse_bundled_stdlib_version_filter(
+            "# typepython: min-python=3.10 max-python=3.11\n# comment\n\ndef demo() -> int: ...\n",
+        );
+
+        assert_eq!(filter.min_python.as_deref(), Some("3.10"));
+        assert_eq!(filter.max_python.as_deref(), Some("3.11"));
+        assert!(filter.allows("3.10"));
+        assert!(filter.allows("3.11"));
+        assert!(!filter.allows("3.12"));
+    }
+
+    #[test]
+    fn external_logical_module_path_resolves_stub_distribution_layout() {
+        let root = PathBuf::from("/site-packages");
+        let stub_path = root.join("demo-stubs/demo/submodule.pyi");
+
+        assert_eq!(
+            external_logical_module_path(&root, &stub_path),
+            Some(String::from("demo.submodule"))
+        );
+    }
+
+    #[test]
+    fn discover_project_source_for_path_respects_patterns_and_module_name() {
+        let project_dir = temp_project_dir("discover_project_source_for_path");
+        let result = {
+            fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+            fs::write(
+                project_dir.join("typepython.toml"),
+                concat!(
+                    "[project]\n",
+                    "src = [\"src\"]\n",
+                    "include = [\"src/**/*.tpy\"]\n",
+                    "exclude = [\"src/app/excluded/**\"]\n"
+                ),
+            )
+            .expect("test setup should succeed");
+            let kept = project_dir.join("src/app/models.tpy");
+            fs::write(&kept, "pass\n").expect("test setup should succeed");
+            let excluded = project_dir.join("src/app/excluded/hidden.tpy");
+            fs::create_dir_all(excluded.parent().expect("excluded parent should exist"))
+                .expect("test setup should succeed");
+            fs::write(&excluded, "pass\n").expect("test setup should succeed");
+
+            let config = typepython_config::load(&project_dir).expect("config should load");
+            let include_patterns =
+                compile_patterns(&config, &config.config.project.include, "project.include")
+                    .expect("include patterns should compile");
+            let exclude_patterns =
+                compile_patterns(&config, &config.config.project.exclude, "project.exclude")
+                    .expect("exclude patterns should compile");
+            let roots = source_roots(&config);
+
+            (
+                discover_project_source_for_path(
+                    &config,
+                    &roots,
+                    &include_patterns,
+                    &exclude_patterns,
+                    &kept,
+                )
+                .expect("kept source should resolve"),
+                discover_project_source_for_path(
+                    &config,
+                    &roots,
+                    &include_patterns,
+                    &exclude_patterns,
+                    &excluded,
+                )
+                .expect("excluded source should evaluate"),
+            )
+        };
+        remove_temp_project_dir(&project_dir);
+
+        let (kept, excluded) = result;
+        assert_eq!(
+            kept.expect("kept source should be selected").logical_module,
+            String::from("app.models")
+        );
+        assert!(excluded.is_none());
+    }
+
+    #[test]
+    fn external_runtime_allowed_accepts_typed_runtime_package_without_stub_distribution() {
+        let root = temp_project_dir("external_runtime_allowed_accepts_typed_runtime");
+        let result = {
+            fs::create_dir_all(root.join("demo")).expect("test setup should succeed");
+            fs::write(root.join("demo/py.typed"), "").expect("test setup should succeed");
+            fs::write(root.join("demo/runtime.py"), "pass\n").expect("test setup should succeed");
+
+            external_runtime_allowed(
+                &ExternalSupportRoot { path: root.clone(), allow_untyped_runtime: false },
+                &root.join("demo/runtime.py"),
+            )
+        };
+        remove_temp_project_dir(&root);
+
+        assert!(result);
+    }
+
+    #[test]
+    fn external_runtime_allowed_requires_missing_module_for_partial_stub_fallback() {
+        let root = temp_project_dir("external_runtime_allowed_requires_partial_stub_fallback");
+        let result = {
+            fs::create_dir_all(root.join("demo")).expect("test setup should succeed");
+            fs::create_dir_all(root.join("demo-stubs/demo"))
+                .expect("test setup should succeed");
+            fs::write(root.join("demo/runtime.py"), "pass\n").expect("test setup should succeed");
+            fs::write(root.join("demo-stubs/py.typed"), "partial\n")
+                .expect("test setup should succeed");
+
+            let support_root = ExternalSupportRoot {
+                path: root.clone(),
+                allow_untyped_runtime: false,
+            };
+            let runtime_path = root.join("demo/runtime.py");
+            let allowed_without_stub = external_runtime_allowed(&support_root, &runtime_path);
+
+            fs::write(root.join("demo-stubs/demo/runtime.pyi"), "def build() -> None: ...\n")
+                .expect("test setup should succeed");
+            let blocked_with_stub = external_runtime_allowed(&support_root, &runtime_path);
+
+            (allowed_without_stub, blocked_with_stub)
+        };
+        remove_temp_project_dir(&root);
+
+        assert!(result.0);
+        assert!(!result.1);
+    }
 }
