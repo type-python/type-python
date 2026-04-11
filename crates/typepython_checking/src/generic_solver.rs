@@ -253,6 +253,111 @@ impl GenericSolverState {
     }
 }
 
+fn infer_variadic_annotation_bindings_detailed(
+    solver: &mut GenericSolverState,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &SemanticType,
+    positional_types: &[String],
+    positional_index: usize,
+    variadic_starred_types: &[String],
+) -> Result<(), GenericSolveFailure> {
+    if extract_param_spec_args_name_from_semantic(annotation).is_some() {
+        return Ok(());
+    }
+    if let Some(type_pack_name) =
+        type_pack_name_from_unpack_semantic_annotation(annotation, &solver.metadata.type_pack_names)
+    {
+        let fixed_types = positional_types[positional_index..]
+            .iter()
+            .map(|ty| lower_type_text_or_name(ty))
+            .collect::<Vec<_>>();
+        let variadic_tail = if variadic_starred_types.is_empty() {
+            None
+        } else {
+            Some(join_semantic_type_candidates(
+                variadic_starred_types
+                    .iter()
+                    .map(|ty| lower_type_text_or_name(ty))
+                    .collect(),
+            ))
+        };
+        solver.record_type_pack_binding(&type_pack_name, TypePackBinding { types: fixed_types, variadic_tail });
+        return Ok(());
+    }
+
+    let existing = solver.current_bindings_detailed(node, nodes)?;
+    for actual in positional_types.iter().skip(positional_index) {
+        let actual_type = lower_type_text_or_name(actual);
+        let bindings = infer_generic_type_param_bindings(
+            node,
+            nodes,
+            annotation,
+            &actual_type,
+            &solver.metadata.type_names,
+            &existing,
+            &solver.metadata.type_pack_names,
+        )
+        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+            annotation: annotation.clone(),
+            actual: actual_type,
+        })?;
+        solver.record_bindings(bindings);
+    }
+
+    Ok(())
+}
+
+fn infer_single_argument_bindings_detailed(
+    solver: &mut GenericSolverState,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    annotation: &SemanticType,
+    actual_type: SemanticType,
+    actual_value: Option<&typepython_syntax::DirectExprMetadata>,
+) -> Result<(), GenericSolveFailure> {
+    let annotation_mentions_param_spec = annotation.callable_parts().is_some_and(|(params, _)| {
+        callable_param_expr_mentions_param_spec_semantic(params, &solver.metadata.param_spec_names)
+    });
+    let existing = solver.current_bindings_detailed(node, nodes)?;
+    let bindings = infer_callable_param_spec_bindings(
+        node,
+        nodes,
+        annotation,
+        &actual_type,
+        actual_value,
+        &solver.metadata.type_names,
+        &solver.metadata.param_spec_names,
+        &existing,
+    )
+    .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
+        annotation: annotation.clone(),
+        actual: actual_type.clone(),
+    })?;
+    solver.record_bindings(bindings);
+    if annotation_mentions_param_spec {
+        return Ok(());
+    }
+
+    let existing = solver.current_bindings_detailed(node, nodes)?;
+    let bindings = infer_generic_type_param_bindings(
+        node,
+        nodes,
+        annotation,
+        &actual_type,
+        &solver.metadata.type_names,
+        &existing,
+        &solver.metadata.type_pack_names,
+    )
+    .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
+        annotation: annotation.clone(),
+        actual: actual_type,
+    })?;
+    solver.record_bindings(bindings);
+
+    Ok(())
+}
+
 fn solve_collected_generic_constraints_detailed(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
@@ -593,104 +698,30 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
         };
         let annotation = lower_type_text_or_name(&annotation_text);
         if param.variadic {
-            if extract_param_spec_args_name_from_semantic(&annotation).is_some() {
-                positional_index = positional_types.len();
-                continue;
-            }
-            if let Some(type_pack_name) = type_pack_name_from_unpack_semantic_annotation(
+            infer_variadic_annotation_bindings_detailed(
+                &mut solver,
+                node,
+                nodes,
                 &annotation,
-                &solver.metadata.type_pack_names,
-            ) {
-                let fixed_types = positional_types[positional_index..]
-                    .iter()
-                    .map(|ty| lower_type_text_or_name(ty))
-                    .collect::<Vec<_>>();
-                let variadic_tail = if variadic_starred_types.is_empty() {
-                    None
-                } else {
-                    Some(join_semantic_type_candidates(
-                        variadic_starred_types
-                            .iter()
-                            .map(|ty| lower_type_text_or_name(ty))
-                            .collect(),
-                    ))
-                };
-                solver.record_type_pack_binding(
-                    &type_pack_name,
-                    TypePackBinding { types: fixed_types, variadic_tail },
-                );
-                positional_index = positional_types.len();
-                continue;
-            }
-            let existing = solver.current_bindings_detailed(node, nodes)?;
-            for actual in positional_types.iter().skip(positional_index) {
-                let actual_type = lower_type_text_or_name(actual);
-                let bindings = infer_generic_type_param_bindings(
-                    node,
-                    nodes,
-                    &annotation,
-                    &actual_type,
-                    &solver.metadata.type_names,
-                    &existing,
-                    &solver.metadata.type_pack_names,
-                )
-                .ok_or_else(|| {
-                    GenericSolveFailure::TypeBindingInferenceFailed {
-                        annotation: annotation.clone(),
-                        actual: actual_type,
-                    }
-                })?;
-                solver.record_bindings(bindings);
-            }
+                &positional_types,
+                positional_index,
+                &variadic_starred_types,
+            )?;
             positional_index = positional_types.len();
             continue;
         }
         let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
-        let annotation_mentions_param_spec =
-            annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(
-                    params,
-                    &solver.metadata.param_spec_names,
-                )
-            });
-        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
-        let bindings = infer_callable_param_spec_bindings(
+        infer_single_argument_bindings_detailed(
+            &mut solver,
             node,
             nodes,
             &annotation,
-            &actual_type,
+            actual_type,
             call.arg_values.get(positional_index),
-            &solver.metadata.type_names,
-            &solver.metadata.param_spec_names,
-            &existing,
-        )
-        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type.clone(),
-        })?;
-        solver.record_bindings(bindings);
-        if annotation_mentions_param_spec {
-            positional_index += 1;
-            continue;
-        }
-        let existing = solver.current_bindings_detailed(node, nodes)?;
-        let bindings = infer_generic_type_param_bindings(
-            node,
-            nodes,
-            &annotation,
-            &actual_type,
-            &solver.metadata.type_names,
-            &existing,
-            &solver.metadata.type_pack_names,
-        )
-        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type,
-        })?;
-        solver.record_bindings(bindings);
+        )?;
         positional_index += 1;
     }
 
@@ -704,48 +735,15 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
             continue;
         };
         let annotation = lower_type_text_or_name(&annotation_text);
-        let annotation_mentions_param_spec =
-            annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(
-                    params,
-                    &solver.metadata.param_spec_names,
-                )
-            });
-        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
-        let bindings = infer_callable_param_spec_bindings(
+        infer_single_argument_bindings_detailed(
+            &mut solver,
             node,
             nodes,
             &annotation,
-            &actual_type,
+            actual_type,
             call.keyword_arg_values.get(index),
-            &solver.metadata.type_names,
-            &solver.metadata.param_spec_names,
-            &existing,
-        )
-        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type.clone(),
-        })?;
-        solver.record_bindings(bindings);
-        if annotation_mentions_param_spec {
-            continue;
-        }
-        let existing = solver.current_bindings_detailed(node, nodes)?;
-        let bindings = infer_generic_type_param_bindings(
-            node,
-            nodes,
-            &annotation,
-            &actual_type,
-            &solver.metadata.type_names,
-            &existing,
-            &solver.metadata.type_pack_names,
-        )
-        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type,
-        })?;
-        solver.record_bindings(bindings);
+        )?;
     }
 
     solver.finish_detailed(node, nodes)
@@ -775,104 +773,30 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
             continue;
         };
         if param.variadic {
-            if extract_param_spec_args_name_from_semantic(&annotation).is_some() {
-                positional_index = positional_types.len();
-                continue;
-            }
-            if let Some(type_pack_name) = type_pack_name_from_unpack_semantic_annotation(
+            infer_variadic_annotation_bindings_detailed(
+                &mut solver,
+                node,
+                nodes,
                 &annotation,
-                &solver.metadata.type_pack_names,
-            ) {
-                let fixed_types = positional_types[positional_index..]
-                    .iter()
-                    .map(|ty| lower_type_text_or_name(ty))
-                    .collect::<Vec<_>>();
-                let variadic_tail = if variadic_starred_types.is_empty() {
-                    None
-                } else {
-                    Some(join_semantic_type_candidates(
-                        variadic_starred_types
-                            .iter()
-                            .map(|ty| lower_type_text_or_name(ty))
-                            .collect(),
-                    ))
-                };
-                solver.record_type_pack_binding(
-                    &type_pack_name,
-                    TypePackBinding { types: fixed_types, variadic_tail },
-                );
-                positional_index = positional_types.len();
-                continue;
-            }
-            let existing = solver.current_bindings_detailed(node, nodes)?;
-            for actual in positional_types.iter().skip(positional_index) {
-                let actual_type = lower_type_text_or_name(actual);
-                let bindings = infer_generic_type_param_bindings(
-                    node,
-                    nodes,
-                    &annotation,
-                    &actual_type,
-                    &solver.metadata.type_names,
-                    &existing,
-                    &solver.metadata.type_pack_names,
-                )
-                .ok_or_else(|| {
-                    GenericSolveFailure::TypeBindingInferenceFailed {
-                        annotation: annotation.clone(),
-                        actual: actual_type,
-                    }
-                })?;
-                solver.record_bindings(bindings);
-            }
+                &positional_types,
+                positional_index,
+                &variadic_starred_types,
+            )?;
             positional_index = positional_types.len();
             continue;
         }
         let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
-        let annotation_mentions_param_spec =
-            annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(
-                    params,
-                    &solver.metadata.param_spec_names,
-                )
-            });
-        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
-        let bindings = infer_callable_param_spec_bindings(
+        infer_single_argument_bindings_detailed(
+            &mut solver,
             node,
             nodes,
             &annotation,
-            &actual_type,
+            actual_type,
             call.arg_values.get(positional_index),
-            &solver.metadata.type_names,
-            &solver.metadata.param_spec_names,
-            &existing,
-        )
-        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type.clone(),
-        })?;
-        solver.record_bindings(bindings);
-        if annotation_mentions_param_spec {
-            positional_index += 1;
-            continue;
-        }
-        let existing = solver.current_bindings_detailed(node, nodes)?;
-        let bindings = infer_generic_type_param_bindings(
-            node,
-            nodes,
-            &annotation,
-            &actual_type,
-            &solver.metadata.type_names,
-            &existing,
-            &solver.metadata.type_pack_names,
-        )
-        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type,
-        })?;
-        solver.record_bindings(bindings);
+        )?;
         positional_index += 1;
     }
 
@@ -885,48 +809,15 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         let Some(annotation) = param.annotation.clone() else {
             continue;
         };
-        let annotation_mentions_param_spec =
-            annotation.callable_parts().is_some_and(|(params, _)| {
-                callable_param_expr_mentions_param_spec_semantic(
-                    params,
-                    &solver.metadata.param_spec_names,
-                )
-            });
-        let existing = solver.current_bindings_detailed(node, nodes)?;
         let actual_type = lower_type_text_or_name(actual);
-        let bindings = infer_callable_param_spec_bindings(
+        infer_single_argument_bindings_detailed(
+            &mut solver,
             node,
             nodes,
             &annotation,
-            &actual_type,
+            actual_type,
             call.keyword_arg_values.get(index),
-            &solver.metadata.type_names,
-            &solver.metadata.param_spec_names,
-            &existing,
-        )
-        .ok_or_else(|| GenericSolveFailure::ParamSpecInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type.clone(),
-        })?;
-        solver.record_bindings(bindings);
-        if annotation_mentions_param_spec {
-            continue;
-        }
-        let existing = solver.current_bindings_detailed(node, nodes)?;
-        let bindings = infer_generic_type_param_bindings(
-            node,
-            nodes,
-            &annotation,
-            &actual_type,
-            &solver.metadata.type_names,
-            &existing,
-            &solver.metadata.type_pack_names,
-        )
-        .ok_or_else(|| GenericSolveFailure::TypeBindingInferenceFailed {
-            annotation: annotation.clone(),
-            actual: actual_type,
-        })?;
-        solver.record_bindings(bindings);
+        )?;
     }
 
     solver.finish_detailed(node, nodes)
