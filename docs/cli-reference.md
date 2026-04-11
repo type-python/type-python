@@ -263,6 +263,7 @@ typepython verify [OPTIONS]
 | `--wheel PATH`      | Path to a `.whl` file to verify (repeatable)                               |
 | `--sdist PATH`      | Path to a `.tar.gz` sdist to verify (repeatable)                           |
 | `--checker COMMAND` | Run an external type checker against the emitted build output (repeatable) |
+| `--unsafe-runtime-imports` | Import emitted runtime modules to compare runtime-visible public names; this executes project-controlled Python code |
 
 **Checks performed:**
 
@@ -270,6 +271,8 @@ typepython verify [OPTIONS]
 - Runtime/type surface consistency: names in `.py` match names in `.pyi`
 - Wheel/sdist structure validation
 - `py.typed` marker presence
+
+By default, `verify` stays on structural checks and does not import emitted runtime modules. Pass `--unsafe-runtime-imports` if you also want runtime-visible public-name parity checks for cases like dynamically computed `__all__`.
 
 **Example:**
 
@@ -279,6 +282,9 @@ typepython verify --project .
 
 # Verify a built wheel
 typepython verify --project . --wheel dist/my_package-1.0.0-py3-none-any.whl
+
+# Also import emitted runtime modules for public-name parity checks
+typepython verify --project . --unsafe-runtime-imports
 ```
 
 ---

@@ -88,6 +88,11 @@ pub(crate) struct VerifyArgs {
         help = "Run an external type checker against the emitted build output (repeatable)"
     )]
     pub(crate) checkers: Vec<String>,
+    #[arg(
+        long = "unsafe-runtime-imports",
+        help = "Import emitted runtime modules during verification to compare runtime-visible public names; this executes project-controlled Python code"
+    )]
+    pub(crate) unsafe_runtime_imports: bool,
 }
 
 #[derive(Debug, Args)]

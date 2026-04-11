@@ -88,6 +88,8 @@ The `typepython verify` command performs structural consistency checks that help
 
 These checks catch the class of bugs where `.pyi` declarations drift from the actual runtime code -- the same problem that plagues hand-maintained `.d.ts` files in the TypeScript ecosystem.
 
+`typepython verify` stays on structural validation by default. If you need runtime-visible public-name parity checks for modules with dynamically computed exports, pass `--unsafe-runtime-imports`; that mode executes emitted project code in a subprocess and should only be used for trusted builds.
+
 ## Semantic Differences at the Boundary
 
 While the emitted `.pyi` files are syntactically and structurally compatible with all major type checkers, some TypePython-specific semantic guarantees **do not transfer** across the boundary. This is by design: the standard Python typing system does not have equivalents for these concepts.

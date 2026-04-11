@@ -102,9 +102,18 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
         diagnostics = verify_build_artifacts(&config, &snapshot.emit_plan);
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
-        diagnostics
-            .diagnostics
-            .extend(verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics);
+        if args.unsafe_runtime_imports {
+            diagnostics.diagnostics.extend(
+                verify_runtime_public_name_parity(&config, &snapshot.emit_plan).diagnostics,
+            );
+            notes.push(String::from(
+                "imported emitted runtime modules to compare runtime-visible public names",
+            ));
+        } else {
+            notes.push(String::from(
+                "skipped runtime import probes; pass --unsafe-runtime-imports to execute emitted modules during verification",
+            ));
+        }
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
         diagnostics.diagnostics.extend(
@@ -469,7 +478,7 @@ fn verify_runtime_public_name_parity_for_artifact(
         ));
         return diagnostics;
     }
-    let runtime_names = match runtime_public_names(config, out_root, &module_name, runtime_path) {
+    let runtime_names = match runtime_public_names_from_import(config, out_root, &module_name) {
         Ok(names) => names,
         Err(error) => {
             diagnostics.push(Diagnostic::error(
@@ -547,15 +556,9 @@ fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -
 
 fn runtime_public_names(
     config: &ConfigHandle,
-    out_root: &Path,
-    module_name: &str,
     runtime_path: &Path,
 ) -> std::result::Result<BTreeSet<String>, String> {
-    if let Some(names) = static_all_names(config, runtime_path)? {
-        return Ok(names);
-    }
-
-    runtime_public_names_from_import(config, out_root, module_name)
+    public_names_from_module_file(config, runtime_path)
 }
 
 fn verify_runtime_module_importability(
@@ -966,14 +969,13 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
 
 fn verify_emitted_declaration_surface(
     config: &ConfigHandle,
-    out_root: &Path,
+    _out_root: &Path,
     runtime_path: &Path,
     stub_path: &Path,
 ) -> Option<Diagnostic> {
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
-    let module_name = logical_module_name_from_runtime_path(out_root, runtime_path)?;
-    let runtime_names = runtime_public_names(config, out_root, &module_name, runtime_path).ok()?;
+    let runtime_names = runtime_public_names(config, runtime_path).ok()?;
     let authoritative_names = authoritative_public_names(config, stub_path).ok()?;
 
     let runtime_surface = declaration_surface(&runtime_syntax)

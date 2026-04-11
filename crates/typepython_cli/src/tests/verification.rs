@@ -59,6 +59,7 @@ fn run_verify_bootstraps_outputs_after_clean_project() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
 
@@ -116,6 +117,7 @@ fn run_verify_bootstraps_bytecode_after_clean_when_emit_pyc_is_enabled() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            unsafe_runtime_imports: false,
         })
         .expect("verify should succeed");
 
@@ -156,6 +158,7 @@ fn run_verify_invokes_external_checker_on_emitted_output() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
+            unsafe_runtime_imports: false,
         })
         .expect("verify should succeed with a passing checker");
 
@@ -191,6 +194,7 @@ fn run_verify_reports_external_checker_failure() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: vec![checker_path.display().to_string()],
+            unsafe_runtime_imports: false,
         })
         .expect("verify should complete with checker diagnostics")
     };
@@ -220,6 +224,7 @@ fn run_verify_reports_python_companion_stub_signature_mismatch() {
             wheels: Vec::new(),
             sdists: Vec::new(),
             checkers: Vec::new(),
+            unsafe_runtime_imports: false,
         })
         .expect("verify should run")
     };
@@ -258,12 +263,48 @@ fn run_verify_reports_python_companion_stub_signature_mismatch_in_wheel() {
             wheels: vec![wheel_path],
             sdists: Vec::new(),
             checkers: Vec::new(),
+            unsafe_runtime_imports: false,
         })
         .expect("verify should run")
     };
     remove_temp_project_dir(&project_dir);
 
     assert_eq!(verify_result, ExitCode::from(1));
+}
+
+#[test]
+fn run_verify_skips_runtime_import_probes_by_default() {
+    let project_dir = temp_project_dir("run_verify_skips_runtime_import_probes_by_default");
+    let verify_result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.py"),
+            "def exports():\n    return [\"build_user\"]\n\n__all__ = exports()\n\nraise RuntimeError(\"boom\")\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+
+        run_verify(VerifyArgs {
+            run: super::RunArgs {
+                project: Some(project_dir.clone()),
+                format: super::OutputFormat::Json,
+            },
+            wheels: Vec::new(),
+            sdists: Vec::new(),
+            checkers: Vec::new(),
+            unsafe_runtime_imports: false,
+        })
+        .expect("verify should run")
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(verify_result, ExitCode::SUCCESS);
 }
 
 #[test]
@@ -2476,6 +2517,43 @@ fn verify_runtime_public_name_parity_accepts_dynamic_runtime_all_exports() {
 }
 
 #[test]
+fn verify_runtime_public_name_parity_reports_invalid_runtime_all_members() {
+    let project_dir =
+        temp_project_dir("verify_runtime_public_name_parity_reports_invalid_runtime_all_members");
+    let rendered = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "__all__ = [\"build_user\", 1]\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("__all__ must contain only strings"));
+}
+
+#[test]
 fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
     let project_dir =
         temp_project_dir("verify_runtime_public_name_parity_reports_runtime_import_failure");
@@ -2543,7 +2621,7 @@ if printf '%s' "$*" | grep -q 'importlib.import_module'; then
   if printf ' %s ' "$*" | grep -Eq ' -(I|S) '; then
     printf '{"importable": false, "error": "ModuleNotFoundError: No module named demo_dep"}\n'
   else
-    printf '{"importable": true}\n'
+    printf '{"importable": true, "public_names": ["build_user"]}\n'
   fi
   exit 0
 fi
@@ -2583,6 +2661,7 @@ fn verify_command_parses_supplied_artifact_flags() {
         "verify",
         "--project",
         "examples/hello-world",
+        "--unsafe-runtime-imports",
         "--wheel",
         "dist/pkg.whl",
         "--sdist",
@@ -2596,6 +2675,7 @@ fn verify_command_parses_supplied_artifact_flags() {
     };
     let supplied = supplied_verify_artifacts(&args);
     assert_eq!(args.checkers, vec![String::from("pyright")]);
+    assert!(args.unsafe_runtime_imports);
     assert_eq!(supplied.len(), 2);
     assert!(supplied.iter().any(|artifact| {
         matches!(artifact.kind, SuppliedArtifactKind::Wheel)
