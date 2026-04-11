@@ -272,7 +272,7 @@ typepython verify [OPTIONS]
 - Wheel/sdist structure validation
 - `py.typed` marker presence
 
-By default, `verify` stays on structural checks and does not import emitted runtime modules. Pass `--unsafe-runtime-imports` if you also want runtime-visible public-name parity checks for cases like dynamically computed `__all__`.
+By default, `verify` stays on structural checks and does not import emitted runtime modules. In that safe mode, TypePython may ignore a project-controlled `resolution.python_executable` and fall back to the host default interpreter for structural helper probes and interpreter-backed package discovery. Pass `--unsafe-runtime-imports` if you also want runtime-visible public-name parity checks for cases like dynamically computed `__all__` and verification against the configured interpreter environment.
 
 **Example:**
 

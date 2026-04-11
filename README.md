@@ -138,7 +138,7 @@ typepython build   --project .          # Emit .py + .pyi
 typepython watch   --project .          # Rebuild on changes
 typepython clean   --project .          # Remove build artifacts
 typepython lsp     --project .          # Start language server
-typepython verify  --project .          # Structural publication validation
+typepython verify  --project .          # Structural publication validation (safe mode may ignore a project-controlled interpreter)
 typepython verify  --project . --unsafe-runtime-imports # Also import emitted modules for runtime parity checks
 typepython migrate --project . --report # Migration coverage report
 ```

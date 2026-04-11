@@ -1692,7 +1692,7 @@ At minimum:
 - An installed distribution that provides importable `.pyi` modules for a package is treated as a stub package and takes precedence over the corresponding runtime `.py` modules for the modules it defines.
 - If a stub package is explicitly marked partial (for example, via a `py.typed` marker indicating partial coverage), the resolver MUST merge the stub package and runtime package trees, preferring `.pyi` where present and falling through to the runtime package where absent.
 - If no partial-stub marker is present, provided stub modules are authoritative for the modules they define.
-- Installed-package resolution MUST use `resolution.python_executable` when configured. Otherwise the implementation MUST use a deterministic default interpreter and SHOULD surface that interpreter in verbose output, logs, or environment diagnostics.
+- Installed-package resolution MUST use `resolution.python_executable` when configured, except in an explicitly documented safe structural verification mode that avoids executing a project-controlled interpreter. In that safe mode, the implementation MUST use a deterministic default interpreter and SHOULD surface that interpreter or override in verbose output, logs, command notes, or environment diagnostics.
 
 ### 12.6 Standard Library and Typeshed
 

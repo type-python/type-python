@@ -86,7 +86,7 @@ target_python = "3.10"                           # "3.10", "3.11", or "3.12"
 [resolution]
 base_url = "."                                    # Reserved; only project-root default is supported today
 type_roots = []                                   # Extra stub directories
-python_executable = null                          # Interpreter used for installed-package resolution
+python_executable = null                          # Interpreter used for installed-package resolution outside safe structural verify mode
 
 [resolution.paths]
 # "@app/*" = ["src/app/*"]                       # Reserved; non-empty tables are rejected today
@@ -138,12 +138,12 @@ When this schema is embedded in `pyproject.toml`, the same tables appear under `
 | ------------------- | -------------- | -------------------------------------------------------------------------------------------- |
 | `base_url`          | string         | Reserved for non-relative path resolution; current implementations only support the default project root (`.`) |
 | `type_roots`        | list[string]   | Directories searched for stub packages before installed packages                             |
-| `python_executable` | string \| null | Interpreter used to locate installed packages and, when supported, verification subprocesses |
+| `python_executable` | string \| null | Interpreter used to locate installed packages and, when supported, verification subprocesses; safe structural verify MAY ignore project-controlled interpreters |
 | `paths`             | table          | Reserved for alias mapping from module patterns to filesystem patterns; current implementations reject non-empty tables |
 
 Path mappings are reserved for future static resolution support. Current implementations MUST reject non-empty tables rather than silently ignoring them.
 
-If `python_executable` is configured and its resolved Python major/minor version is incompatible with `project.target_python`, configuration loading MUST diagnose `TPY1002`.
+If `python_executable` is configured and its resolved Python major/minor version is incompatible with `project.target_python`, ordinary configuration loading MUST diagnose `TPY1002`. A safe structural verification mode MAY bypass execution-based validation of a project-controlled interpreter, but it MUST document that behavior and surface when the configured interpreter was ignored.
 
 **`[emit]` fields:**
 
@@ -1073,7 +1073,7 @@ It MUST at minimum:
 
 Runtime verification in v1 is name- and declaration-surface-oriented. It MUST NOT require byte-for-byte equivalence of default values, docstrings, or implementation internals.
 
-Implementations MUST document whether runtime-assisted verification is enabled by default or gated behind an explicit opt-in, and MUST treat any mode that imports emitted project modules as executing project-controlled code.
+Implementations MUST document whether runtime-assisted verification is enabled by default or gated behind an explicit opt-in, MUST treat any mode that imports emitted project modules as executing project-controlled code, and MUST document whether safe structural verify ignores a configured project interpreter for package discovery or helper probes.
 
 If any required verification check fails, the command MUST return a failing exit status and MUST surface at least one diagnostic explaining the mismatch.
 

@@ -67,6 +67,9 @@ base_url = "."
 type_roots = []
 
 # Path to the Python executable for resolving installed packages.
+# Safe structural `typepython verify` may ignore a project-controlled interpreter
+# and use the host default interpreter instead; use `--unsafe-runtime-imports`
+# when you need verification against the configured interpreter environment.
 # Default: null (auto-detect)
 python_executable = null
 

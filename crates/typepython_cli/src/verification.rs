@@ -81,6 +81,8 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     } else {
         load_project_without_python_executable_validation(args.run.project.as_ref())?
     };
+    let safe_verify_ignored_python_executable =
+        !args.unsafe_runtime_imports && config.config.resolution.python_executable.is_some();
     if !args.unsafe_runtime_imports {
         config.config.resolution.python_executable = None;
     }
@@ -121,6 +123,11 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
             notes.push(String::from(
                 "skipped runtime import probes; pass --unsafe-runtime-imports to execute emitted modules during verification",
             ));
+            if safe_verify_ignored_python_executable {
+                notes.push(String::from(
+                    "ignored configured resolution.python_executable in safe verify mode; rerun with --unsafe-runtime-imports to verify against that interpreter environment",
+                ));
+            }
         }
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
