@@ -12,6 +12,7 @@ use typepython_binding::bind;
 use typepython_checking::{
     check_with_binding_metadata, collect_effective_callable_stub_overrides,
     collect_synthetic_method_stubs, semantic_incremental_state_with_binding_metadata,
+    semantic_incremental_state_with_reused_summaries,
 };
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -39,6 +40,13 @@ use crate::{
     remove_dir_if_exists, resolve_python_executable,
 };
 
+mod loading;
+mod stubs;
+
+use self::loading::{PreparedPipelineSyntax, prepare_pipeline_syntax};
+use self::stubs::build_typepython_stub_contexts;
+pub(crate) use self::loading::load_syntax_trees;
+
 #[derive(Debug)]
 pub(crate) struct PipelineSnapshot {
     pub(crate) lowered_modules: Vec<LoweredModule>,
@@ -49,13 +57,6 @@ pub(crate) struct PipelineSnapshot {
     pub(crate) discovered_sources: usize,
     pub(crate) emit_blocked_by_pipeline: bool,
     pub(crate) diagnostics: DiagnosticReport,
-}
-
-#[derive(Debug)]
-struct PreparedPipelineSyntax {
-    source_paths: Vec<PathBuf>,
-    syntax_trees: Vec<typepython_syntax::SyntaxTree>,
-    all_syntax_trees: Vec<typepython_syntax::SyntaxTree>,
 }
 
 #[derive(Debug)]
@@ -301,29 +302,6 @@ pub(crate) fn format_watch_rebuild_note(changed_paths: &BTreeSet<PathBuf>) -> St
     }
 }
 
-pub(crate) fn load_syntax_trees(
-    sources: &[DiscoveredSource],
-    enable_conditional_returns: bool,
-    target_python: &str,
-) -> Result<Vec<typepython_syntax::SyntaxTree>> {
-    sources
-        .par_iter()
-        .map(|source| {
-            let mut source_file = SourceFile::from_path(&source.path)
-                .with_context(|| format!("unable to read {}", source.path.display()))?;
-            source_file.logical_module = source.logical_module.clone();
-            Ok(typepython_syntax::parse_with_options(
-                source_file,
-                typepython_syntax::ParseOptions {
-                    enable_conditional_returns,
-                    target_python: typepython_syntax::ParsePythonVersion::parse(target_python),
-                    target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
-                },
-            ))
-        })
-        .collect::<Result<Vec<_>>>()
-}
-
 fn blocked_pipeline_snapshot(
     discovered_sources: usize,
     diagnostics: DiagnosticReport,
@@ -356,44 +334,6 @@ fn blocked_pipeline_snapshot_with_incremental(
         emit_blocked_by_pipeline: true,
         diagnostics,
     }
-}
-
-fn prepare_pipeline_syntax(
-    config: &ConfigHandle,
-    discovery_sources: &[DiscoveredSource],
-) -> Result<PreparedPipelineSyntax> {
-    let source_paths: Vec<_> =
-        discovery_sources.iter().map(|source| source.path.clone()).collect();
-    let syntax_trees = load_syntax_trees(
-        discovery_sources,
-        config.config.typing.conditional_returns,
-        &config.config.project.target_python,
-    )?;
-    let shadow_stub_syntax = if config.config.typing.infer_passthrough {
-        let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
-            &syntax_trees,
-            config.config.typing.conditional_returns,
-            &config.config.project.target_python,
-        )?;
-        if !shadow_stub_syntax.is_empty() {
-            let cache_root =
-                config.resolve_relative_path(&config.config.project.cache_dir).join("shadow-stubs");
-            write_shadow_stub_cache(&cache_root, &shadow_stub_syntax)?;
-        }
-        shadow_stub_syntax
-    } else {
-        Vec::new()
-    };
-    let mut all_syntax_trees =
-        if config.config.typing.infer_passthrough && !shadow_stub_syntax.is_empty() {
-            replace_local_python_surfaces_with_shadow_stubs(&syntax_trees, shadow_stub_syntax)
-        } else {
-            syntax_trees.clone()
-        };
-    let checking_support_syntax = load_support_syntax_trees(config, &all_syntax_trees)?;
-    all_syntax_trees.extend(checking_support_syntax);
-
-    Ok(PreparedPipelineSyntax { source_paths, syntax_trees, all_syntax_trees })
 }
 
 fn analyze_pipeline_state(
@@ -474,145 +414,6 @@ fn reusable_cached_pipeline_snapshot(
         emit_blocked_by_pipeline: false,
         diagnostics: analyzed.diagnostics,
     }
-}
-
-fn load_support_syntax_trees(
-    config: &ConfigHandle,
-    surface_syntax_trees: &[typepython_syntax::SyntaxTree],
-) -> Result<Vec<typepython_syntax::SyntaxTree>> {
-    let project_modules = surface_syntax_trees
-        .iter()
-        .map(|tree| tree.source.logical_module.clone())
-        .collect::<BTreeSet<_>>();
-    let import_paths = collect_import_source_paths(surface_syntax_trees);
-    let external_import_paths = import_paths
-        .into_iter()
-        .filter(|import_path| !import_resolves_within_modules(import_path, &project_modules))
-        .collect::<Vec<_>>();
-    if external_import_paths.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let support_index = support_source_index(config, &config.config.project.target_python)?;
-
-    let mut queued_modules = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    for import_path in external_import_paths {
-        for module_key in support_index.matching_module_keys(&import_path) {
-            if queued_modules.insert(module_key.clone()) {
-                queue.push_back(module_key);
-            }
-        }
-    }
-
-    let mut loaded_modules = BTreeSet::new();
-    let mut loaded_paths = BTreeSet::new();
-    let mut support_syntax_trees = Vec::new();
-
-    while let Some(module_key) = queue.pop_front() {
-        if !loaded_modules.insert(module_key.clone()) {
-            continue;
-        }
-        let Some(module_sources) = support_index.module_sources(&module_key) else {
-            continue;
-        };
-
-        for source in module_sources.iter().cloned() {
-            if !loaded_paths.insert(source.path.clone()) {
-                continue;
-            }
-
-            let tree = if source.load_as_inferred_stub {
-                let runtime_source = fs::read_to_string(&source.path)
-                    .with_context(|| format!("unable to read {}", source.path.display()))?;
-                let stub_source =
-                    generate_inferred_stub_source(&runtime_source, InferredStubMode::Shadow)
-                        .with_context(|| {
-                            format!(
-                                "unable to synthesize shadow stub for {}",
-                                source.path.display()
-                            )
-                        })?;
-                typepython_syntax::parse_with_options(
-                    SourceFile {
-                        path: source.path.clone(),
-                        kind: SourceKind::Stub,
-                        logical_module: source.logical_module.clone(),
-                        text: stub_source,
-                    },
-                    typepython_syntax::ParseOptions {
-                        enable_conditional_returns: config.config.typing.conditional_returns,
-                        target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python,
-                        ),
-                        target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
-                    },
-                )
-            } else {
-                let mut source_file = SourceFile::from_path(&source.path)
-                    .with_context(|| format!("unable to read {}", source.path.display()))?;
-                source_file.logical_module = source.logical_module.clone();
-                typepython_syntax::parse_with_options(
-                    source_file,
-                    typepython_syntax::ParseOptions {
-                        enable_conditional_returns: config.config.typing.conditional_returns,
-                        target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python,
-                        ),
-                        target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
-                    },
-                )
-            };
-            for import_path in collect_import_source_paths(std::slice::from_ref(&tree)) {
-                for nested_module_key in support_index.matching_module_keys(&import_path) {
-                    if queued_modules.insert(nested_module_key.clone()) {
-                        queue.push_back(nested_module_key);
-                    }
-                }
-            }
-            support_syntax_trees.push(tree);
-        }
-    }
-
-    support_syntax_trees.sort_by(|left, right| left.source.path.cmp(&right.source.path));
-    Ok(support_syntax_trees)
-}
-
-fn collect_import_source_paths(syntax_trees: &[typepython_syntax::SyntaxTree]) -> Vec<String> {
-    syntax_trees
-        .iter()
-        .flat_map(|tree| tree.statements.iter())
-        .filter_map(|statement| match statement {
-            typepython_syntax::SyntaxStatement::Import(statement) => Some(
-                statement
-                    .bindings
-                    .iter()
-                    .map(|binding| binding.source_path.clone())
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        })
-        .flatten()
-        .collect()
-}
-
-fn import_resolves_within_modules(import_path: &str, module_keys: &BTreeSet<String>) -> bool {
-    module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
-}
-
-fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
-    let mut candidates = Vec::new();
-    let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);
-    loop {
-        if !current.is_empty() {
-            candidates.push(current);
-        }
-        let Some((parent, _)) = current.rsplit_once('.') else {
-            break;
-        };
-        current = parent;
-    }
-    candidates.into_iter()
 }
 
 pub(crate) fn run_with_pipeline(
@@ -725,185 +526,6 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         emit_blocked_by_pipeline: false,
         diagnostics,
     })
-}
-
-fn build_typepython_stub_contexts(
-    syntax_trees: &[typepython_syntax::SyntaxTree],
-    _lowered_modules: &[LoweredModule],
-    graph: &typepython_graph::ModuleGraph,
-) -> BTreeMap<PathBuf, TypePythonStubContext> {
-    let mut contexts = syntax_trees
-        .iter()
-        .filter(|tree| tree.source.kind == SourceKind::TypePython)
-        .map(|tree| {
-            let mut context = TypePythonStubContext::default();
-            collect_value_stub_overrides(&tree.statements, &mut context.value_overrides);
-            collect_sealed_stub_metadata(&tree.statements, &mut context.sealed_classes);
-            context.guarded_declaration_lines = collect_guarded_declaration_lines(&tree.statements);
-            (tree.source.path.clone(), context)
-        })
-        .collect::<BTreeMap<_, _>>();
-    let module_paths = syntax_trees
-        .iter()
-        .map(|tree| (tree.source.logical_module.clone(), tree.source.path.clone()))
-        .collect::<BTreeMap<_, _>>();
-
-    for override_signature in collect_effective_callable_stub_overrides(graph) {
-        let Some(path) = module_paths.get(&override_signature.module_key) else {
-            continue;
-        };
-        let Some(context) = contexts.get_mut(path) else {
-            continue;
-        };
-        context.callable_overrides.push(StubCallableOverride {
-            line: override_signature.line,
-            params: override_signature.params,
-            returns: Some(override_signature.returns),
-            use_async_syntax: false,
-            drop_non_builtin_decorators: true,
-        });
-    }
-
-    for synthetic_method in collect_synthetic_method_stubs(graph) {
-        let Some(path) = module_paths.get(&synthetic_method.module_key) else {
-            continue;
-        };
-        let Some(context) = contexts.get_mut(path) else {
-            continue;
-        };
-        context.synthetic_methods.push(StubSyntheticMethod {
-            class_line: synthetic_method.class_line,
-            name: synthetic_method.name,
-            method_kind: synthetic_method.method_kind,
-            params: synthetic_method.params,
-            returns: synthetic_method.returns,
-        });
-    }
-
-    contexts
-}
-
-fn collect_value_stub_overrides(
-    statements: &[typepython_syntax::SyntaxStatement],
-    overrides: &mut Vec<StubValueOverride>,
-) {
-    for statement in statements {
-        match statement {
-            typepython_syntax::SyntaxStatement::Value(statement)
-                if statement.annotation.is_none()
-                    && statement.owner_name.is_none()
-                    && statement.value_type.as_deref().is_some_and(|value| !value.is_empty()) =>
-            {
-                overrides.push(StubValueOverride {
-                    line: statement.line,
-                    annotation: statement.value_type.clone().unwrap_or_default(),
-                });
-            }
-            typepython_syntax::SyntaxStatement::Interface(statement)
-            | typepython_syntax::SyntaxStatement::DataClass(statement)
-            | typepython_syntax::SyntaxStatement::SealedClass(statement)
-            | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
-                collect_class_member_value_stub_overrides(&statement.members, overrides);
-            }
-            _ => {}
-        }
-    }
-}
-
-fn collect_class_member_value_stub_overrides(
-    members: &[typepython_syntax::ClassMember],
-    overrides: &mut Vec<StubValueOverride>,
-) {
-    for member in members {
-        if member.kind == typepython_syntax::ClassMemberKind::Field
-            && member.annotation.is_none()
-            && member.value_type.as_deref().is_some_and(|value| !value.is_empty())
-        {
-            overrides.push(StubValueOverride {
-                line: member.line,
-                annotation: member.value_type.clone().unwrap_or_default(),
-            });
-        }
-    }
-}
-
-fn collect_sealed_stub_metadata(
-    statements: &[typepython_syntax::SyntaxStatement],
-    sealed_classes: &mut Vec<StubSealedClass>,
-) {
-    let class_like = statements
-        .iter()
-        .filter_map(|statement| match statement {
-            typepython_syntax::SyntaxStatement::Interface(statement)
-            | typepython_syntax::SyntaxStatement::DataClass(statement)
-            | typepython_syntax::SyntaxStatement::ClassDef(statement) => {
-                Some((statement.name.clone(), statement.bases.clone()))
-            }
-            typepython_syntax::SyntaxStatement::SealedClass(statement) => {
-                Some((statement.name.clone(), statement.bases.clone()))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    for statement in statements.iter().filter_map(|statement| match statement {
-        typepython_syntax::SyntaxStatement::SealedClass(statement) => Some(statement),
-        _ => None,
-    }) {
-        let mut members = class_like
-            .iter()
-            .filter(|(candidate_name, bases)| {
-                candidate_name != &statement.name
-                    && bases.iter().any(|base| base == &statement.name)
-            })
-            .map(|(candidate_name, _)| candidate_name.clone())
-            .collect::<Vec<_>>();
-        members.sort();
-        sealed_classes.push(StubSealedClass {
-            line: statement.line,
-            name: statement.name.clone(),
-            members,
-        });
-    }
-}
-
-fn collect_guarded_declaration_lines(
-    statements: &[typepython_syntax::SyntaxStatement],
-) -> BTreeSet<usize> {
-    let guard_ranges = statements
-        .iter()
-        .filter_map(|statement| match statement {
-            typepython_syntax::SyntaxStatement::If(statement) => Some((
-                statement.true_start_line,
-                statement.true_end_line,
-                statement.false_start_line,
-                statement.false_end_line,
-            )),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    statements
-        .iter()
-        .filter_map(|statement| match statement {
-            typepython_syntax::SyntaxStatement::TypeAlias(statement) => Some(statement.line),
-            typepython_syntax::SyntaxStatement::Interface(statement)
-            | typepython_syntax::SyntaxStatement::DataClass(statement)
-            | typepython_syntax::SyntaxStatement::SealedClass(statement)
-            | typepython_syntax::SyntaxStatement::ClassDef(statement) => Some(statement.line),
-            typepython_syntax::SyntaxStatement::FunctionDef(statement)
-            | typepython_syntax::SyntaxStatement::OverloadDef(statement) => Some(statement.line),
-            _ => None,
-        })
-        .filter(|line| {
-            guard_ranges.iter().any(|(true_start, true_end, false_start, false_end)| {
-                (*line >= *true_start && *line <= *true_end)
-                    || false_start
-                        .zip(*false_end)
-                        .is_some_and(|(start, end)| *line >= start && *line <= end)
-            })
-        })
-        .collect()
 }
 
 fn load_previous_incremental_state(config: &ConfigHandle) -> Result<Option<IncrementalState>> {
