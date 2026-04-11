@@ -603,43 +603,47 @@ pub(crate) fn compile_runtime_bytecode(
     artifacts: &[EmitArtifact],
 ) -> Result<usize> {
     let interpreter = resolve_python_executable(config);
-    let mut compiled = 0usize;
+    let runtime_paths = artifacts
+        .iter()
+        .filter_map(|artifact| artifact.runtime_path.clone())
+        .collect::<Vec<_>>();
 
-    for artifact in artifacts {
-        let Some(runtime_path) = &artifact.runtime_path else {
-            continue;
-        };
-        let bytecode_path = bytecode_path_for(runtime_path)?;
-        if let Some(parent) = bytecode_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("unable to create bytecode directory {}", parent.display())
-            })?;
-        }
-        let status = ProcessCommand::new(&interpreter)
-            .args([
-                "-c",
-                "import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",
-            ])
-            .arg(runtime_path)
-            .arg(&bytecode_path)
-            .status()
-            .with_context(|| {
-                format!(
-                    "unable to run Python bytecode compiler `{}` for {}",
-                    interpreter.display(),
-                    runtime_path.display()
-                )
-            })?;
-        if !status.success() {
-            anyhow::bail!(
-                "Python bytecode compiler `{}` failed for {} with status {}",
+    runtime_paths
+        .par_iter()
+        .try_for_each(|runtime_path| compile_single_runtime_bytecode(&interpreter, runtime_path))?;
+
+    Ok(runtime_paths.len())
+}
+
+fn compile_single_runtime_bytecode(interpreter: &Path, runtime_path: &Path) -> Result<()> {
+    let bytecode_path = bytecode_path_for(runtime_path)?;
+    if let Some(parent) = bytecode_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("unable to create bytecode directory {}", parent.display()))?;
+    }
+    let status = ProcessCommand::new(interpreter)
+        .args([
+            "-c",
+            "import py_compile, sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)",
+        ])
+        .arg(runtime_path)
+        .arg(&bytecode_path)
+        .status()
+        .with_context(|| {
+            format!(
+                "unable to run Python bytecode compiler `{}` for {}",
                 interpreter.display(),
-                runtime_path.display(),
-                status
-            );
-        }
-        compiled += 1;
+                runtime_path.display()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!(
+            "Python bytecode compiler `{}` failed for {} with status {}",
+            interpreter.display(),
+            runtime_path.display(),
+            status
+        );
     }
 
-    Ok(compiled)
+    Ok(())
 }

@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
+use rayon::prelude::*;
 use tar::Archive as TarArchive;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -156,62 +157,12 @@ pub(crate) fn verify_build_artifacts(
     let mut diagnostics = DiagnosticReport::default();
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
-    for artifact in artifacts {
-        if let Some(runtime_path) = &artifact.runtime_path {
-            if !runtime_path.exists() {
-                diagnostics.push(Diagnostic::error(
-                    "TPY5003",
-                    format!("missing runtime artifact `{}`", runtime_path.display()),
-                ));
-            } else if let Some(diagnostic) = verify_emitted_text_artifact(runtime_path) {
-                diagnostics.push(diagnostic);
-            }
-            if config.config.emit.emit_pyc {
-                let bytecode_path = match bytecode_path_for(runtime_path) {
-                    Ok(path) => path,
-                    Err(error) => {
-                        diagnostics.push(Diagnostic::error(
-                            "TPY5003",
-                            format!(
-                                "unable to determine bytecode path for `{}`: {error}",
-                                runtime_path.display()
-                            ),
-                        ));
-                        continue;
-                    }
-                };
-                if !bytecode_path.exists() {
-                    diagnostics.push(Diagnostic::error(
-                        "TPY5003",
-                        format!("missing bytecode artifact `{}`", bytecode_path.display()),
-                    ));
-                }
-            }
-        }
-
-        if let Some(stub_path) = &artifact.stub_path {
-            if !stub_path.exists() {
-                diagnostics.push(Diagnostic::error(
-                    "TPY5003",
-                    format!("missing stub artifact `{}`", stub_path.display()),
-                ));
-            } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
-                diagnostics.push(diagnostic);
-            } else {
-                diagnostics.diagnostics.extend(stub_metadata_expectation_warnings(stub_path));
-            }
-        }
-
-        if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
-        {
-            if runtime_path.exists() && stub_path.exists() {
-                if let Some(diagnostic) =
-                    verify_emitted_declaration_surface(runtime_path, stub_path)
-                {
-                    diagnostics.push(diagnostic);
-                }
-            }
-        }
+    let artifact_diagnostics = artifacts
+        .par_iter()
+        .map(|artifact| verify_build_artifact(config, artifact))
+        .collect::<Vec<_>>();
+    for artifact_group in artifact_diagnostics {
+        diagnostics.diagnostics.extend(artifact_group);
     }
 
     if config.config.emit.write_py_typed {
@@ -270,61 +221,19 @@ pub(crate) fn verify_packaged_artifacts(
     let published_package_roots = published_package_roots(&expected_files);
     let published_top_level_surface_files = published_top_level_surface_files(&expected_files);
 
-    for artifact in supplied_artifacts {
-        match read_supplied_artifact_entries(artifact) {
-            Ok(entries) => {
-                for (relative_path, expected_bytes) in &expected_files {
-                    match entries.get(relative_path) {
-                        None => diagnostics.push(Diagnostic::error(
-                            "TPY5003",
-                            format!(
-                                "{} artifact `{}` is missing published file `{relative_path}`",
-                                artifact.kind.label(),
-                                artifact.path.display(),
-                            ),
-                        )),
-                        Some(actual_bytes) if actual_bytes != expected_bytes => {
-                            diagnostics.push(Diagnostic::error(
-                                "TPY5003",
-                                format!(
-                                    "{} artifact `{}` contains `{relative_path}` that diverges from the authoritative build output",
-                                    artifact.kind.label(),
-                                    artifact.path.display(),
-                                ),
-                            ));
-                        }
-                        Some(_) => {}
-                    }
-                }
-                for relative_path in entries.keys().filter(|path| {
-                    is_authoritative_publication_file(
-                        path,
-                        artifact.kind,
-                        &published_package_roots,
-                        &published_top_level_surface_files,
-                    )
-                }) {
-                    if !expected_files.contains_key(relative_path) {
-                        diagnostics.push(Diagnostic::error(
-                            "TPY5003",
-                            format!(
-                                "{} artifact `{}` contains unexpected published file `{relative_path}`",
-                                artifact.kind.label(),
-                                artifact.path.display(),
-                            ),
-                        ));
-                    }
-                }
-            }
-            Err(error) => diagnostics.push(Diagnostic::error(
-                "TPY5003",
-                format!(
-                    "unable to inspect {} artifact `{}`: {error}",
-                    artifact.kind.label(),
-                    artifact.path.display(),
-                ),
-            )),
-        }
+    let supplied_diagnostics = supplied_artifacts
+        .par_iter()
+        .map(|artifact| {
+            verify_supplied_artifact(
+                artifact,
+                &expected_files,
+                &published_package_roots,
+                &published_top_level_surface_files,
+            )
+        })
+        .collect::<Vec<_>>();
+    for diagnostic_group in supplied_diagnostics {
+        diagnostics.diagnostics.extend(diagnostic_group);
     }
 
     diagnostics
@@ -340,41 +249,11 @@ pub(crate) fn verify_external_checkers(
     }
 
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
-    for checker in checkers {
-        let output = match ProcessCommand::new(checker)
-            .arg(&out_root)
-            .current_dir(&config.config_dir)
-            .output()
-        {
-            Ok(output) => output,
-            Err(error) => {
-                diagnostics.push(Diagnostic::error(
-                    "TPY5003",
-                    format!("unable to run external checker `{checker}`: {error}"),
-                ));
-                continue;
-            }
-        };
-        if output.status.success() {
-            continue;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let details = [stdout, stderr]
-            .into_iter()
-            .filter(|stream| !stream.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
-        diagnostics.push(Diagnostic::error(
-            "TPY5003",
-            format!(
-                "external checker `{checker}` rejected emitted build output under `{}`{}",
-                out_root.display(),
-                suffix
-            ),
-        ));
-    }
+    let checker_diagnostics = checkers
+        .par_iter()
+        .filter_map(|checker| verify_external_checker(config, &out_root, checker))
+        .collect::<Vec<_>>();
+    diagnostics.diagnostics.extend(checker_diagnostics);
 
     diagnostics
 }
@@ -386,84 +265,261 @@ pub(crate) fn verify_runtime_public_name_parity(
     let mut diagnostics = DiagnosticReport::default();
     let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
-    for artifact in artifacts {
-        let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
-        else {
-            continue;
-        };
-        if !(runtime_path.exists() && stub_path.exists()) {
-            continue;
+    let artifact_diagnostics = artifacts
+        .par_iter()
+        .map(|artifact| verify_runtime_public_name_parity_for_artifact(config, &out_root, artifact))
+        .collect::<Vec<_>>();
+    for diagnostic_group in artifact_diagnostics {
+        diagnostics.diagnostics.extend(diagnostic_group);
+    }
+
+    diagnostics
+}
+
+fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Some(runtime_path) = &artifact.runtime_path {
+        if !runtime_path.exists() {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!("missing runtime artifact `{}`", runtime_path.display()),
+            ));
+        } else if let Some(diagnostic) = verify_emitted_text_artifact(runtime_path) {
+            diagnostics.push(diagnostic);
         }
-        let Some(module_name) = logical_module_name_from_runtime_path(&out_root, runtime_path)
-        else {
-            continue;
-        };
-        if let Err(error) = verify_runtime_module_importability(config, &out_root, &module_name) {
+        if config.config.emit.emit_pyc {
+            let bytecode_path = match bytecode_path_for(runtime_path) {
+                Ok(path) => path,
+                Err(error) => {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "unable to determine bytecode path for `{}`: {error}",
+                            runtime_path.display()
+                        ),
+                    ));
+                    return diagnostics;
+                }
+            };
+            if !bytecode_path.exists() {
+                diagnostics.push(Diagnostic::error(
+                    "TPY5003",
+                    format!("missing bytecode artifact `{}`", bytecode_path.display()),
+                ));
+            }
+        }
+    }
+
+    if let Some(stub_path) = &artifact.stub_path {
+        if !stub_path.exists() {
+            diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!("missing stub artifact `{}`", stub_path.display()),
+            ));
+        } else if let Some(diagnostic) = verify_emitted_text_artifact(stub_path) {
+            diagnostics.push(diagnostic);
+        } else {
+            diagnostics.extend(stub_metadata_expectation_warnings(stub_path));
+        }
+    }
+
+    if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
+        if runtime_path.exists() && stub_path.exists() {
+            if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
+                diagnostics.push(diagnostic);
+            }
+        }
+    }
+
+    diagnostics
+}
+
+fn verify_supplied_artifact(
+    artifact: &SuppliedVerifyArtifact,
+    expected_files: &BTreeMap<String, Vec<u8>>,
+    published_package_roots: &BTreeSet<String>,
+    published_top_level_surface_files: &BTreeSet<String>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    match read_supplied_artifact_entries(artifact) {
+        Ok(entries) => {
+            for (relative_path, expected_bytes) in expected_files {
+                match entries.get(relative_path) {
+                    None => diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "{} artifact `{}` is missing published file `{relative_path}`",
+                            artifact.kind.label(),
+                            artifact.path.display(),
+                        ),
+                    )),
+                    Some(actual_bytes) if actual_bytes != expected_bytes => {
+                        diagnostics.push(Diagnostic::error(
+                            "TPY5003",
+                            format!(
+                                "{} artifact `{}` contains `{relative_path}` that diverges from the authoritative build output",
+                                artifact.kind.label(),
+                                artifact.path.display(),
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                }
+            }
+            for relative_path in entries.keys().filter(|path| {
+                is_authoritative_publication_file(
+                    path,
+                    artifact.kind,
+                    published_package_roots,
+                    published_top_level_surface_files,
+                )
+            }) {
+                if !expected_files.contains_key(relative_path) {
+                    diagnostics.push(Diagnostic::error(
+                        "TPY5003",
+                        format!(
+                            "{} artifact `{}` contains unexpected published file `{relative_path}`",
+                            artifact.kind.label(),
+                            artifact.path.display(),
+                        ),
+                    ));
+                }
+            }
+        }
+        Err(error) => diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "unable to inspect {} artifact `{}`: {error}",
+                artifact.kind.label(),
+                artifact.path.display(),
+            ),
+        )),
+    }
+
+    diagnostics
+}
+
+fn verify_external_checker(
+    config: &ConfigHandle,
+    out_root: &Path,
+    checker: &str,
+) -> Option<Diagnostic> {
+    let output = match ProcessCommand::new(checker)
+        .arg(out_root)
+        .current_dir(&config.config_dir)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(Diagnostic::error(
+                "TPY5003",
+                format!("unable to run external checker `{checker}`: {error}"),
+            ));
+        }
+    };
+    if output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let details = [stdout, stderr]
+        .into_iter()
+        .filter(|stream| !stream.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
+
+    Some(Diagnostic::error(
+        "TPY5003",
+        format!(
+            "external checker `{checker}` rejected emitted build output under `{}`{}",
+            out_root.display(),
+            suffix
+        ),
+    ))
+}
+
+fn verify_runtime_public_name_parity_for_artifact(
+    config: &ConfigHandle,
+    out_root: &Path,
+    artifact: &EmitArtifact,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) else {
+        return diagnostics;
+    };
+    if !(runtime_path.exists() && stub_path.exists()) {
+        return diagnostics;
+    }
+    let Some(module_name) = logical_module_name_from_runtime_path(out_root, runtime_path) else {
+        return diagnostics;
+    };
+    if let Err(error) = verify_runtime_module_importability(config, out_root, &module_name) {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "runtime module `{}` from `{}` is not importable: {}",
+                module_name,
+                runtime_path.display(),
+                error,
+            ),
+        ));
+        return diagnostics;
+    }
+    let runtime_names = match runtime_public_names(config, runtime_path) {
+        Ok(names) => names,
+        Err(error) => {
             diagnostics.push(Diagnostic::error(
                 "TPY5003",
                 format!(
-                    "runtime module `{}` from `{}` is not importable: {}",
+                    "unable to inspect runtime public names for `{}` from `{}`: {error}",
                     module_name,
                     runtime_path.display(),
-                    error,
                 ),
             ));
-            continue;
+            return diagnostics;
         }
-        let runtime_names = match runtime_public_names(config, runtime_path) {
-            Ok(names) => names,
-            Err(error) => {
-                diagnostics.push(Diagnostic::error(
-                    "TPY5003",
-                    format!(
-                        "unable to inspect runtime public names for `{}` from `{}`: {error}",
-                        module_name,
-                        runtime_path.display(),
-                    ),
-                ));
-                continue;
-            }
-        };
-        let authoritative_names = match authoritative_public_names(config, stub_path) {
-            Ok(names) => names,
-            Err(error) => {
-                diagnostics.push(Diagnostic::error(
-                    "TPY5003",
-                    format!(
-                        "unable to determine authoritative public names for `{}` from `{}`: {error}",
-                        module_name,
-                        stub_path.display(),
-                    ),
-                ));
-                continue;
-            }
-        };
-
-        let missing_from_runtime =
-            authoritative_names.difference(&runtime_names).cloned().collect::<Vec<_>>();
-        let missing_from_type_surface =
-            runtime_names.difference(&authoritative_names).cloned().collect::<Vec<_>>();
-
-        if !missing_from_runtime.is_empty() {
+    };
+    let authoritative_names = match authoritative_public_names(config, stub_path) {
+        Ok(names) => names,
+        Err(error) => {
             diagnostics.push(Diagnostic::error(
                 "TPY5003",
                 format!(
-                    "runtime module `{}` is missing public names declared by the authoritative type surface: {}",
+                    "unable to determine authoritative public names for `{}` from `{}`: {error}",
                     module_name,
-                    missing_from_runtime.join(", "),
+                    stub_path.display(),
                 ),
             ));
+            return diagnostics;
         }
-        if !missing_from_type_surface.is_empty() {
-            diagnostics.push(Diagnostic::error(
-                "TPY5003",
-                format!(
-                    "authoritative type surface for `{}` is missing runtime public names: {}",
-                    module_name,
-                    missing_from_type_surface.join(", "),
-                ),
-            ));
-        }
+    };
+
+    let missing_from_runtime =
+        authoritative_names.difference(&runtime_names).cloned().collect::<Vec<_>>();
+    let missing_from_type_surface =
+        runtime_names.difference(&authoritative_names).cloned().collect::<Vec<_>>();
+
+    if !missing_from_runtime.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "runtime module `{}` is missing public names declared by the authoritative type surface: {}",
+                module_name,
+                missing_from_runtime.join(", "),
+            ),
+        ));
+    }
+    if !missing_from_type_surface.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "authoritative type surface for `{}` is missing runtime public names: {}",
+                module_name,
+                missing_from_type_surface.join(", "),
+            ),
+        ));
     }
 
     diagnostics
