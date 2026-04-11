@@ -22,7 +22,9 @@ use typepython_emit::{
     plan_emits, plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
-use typepython_incremental::{IncrementalState, decode_snapshot, diff, encode_snapshot};
+use typepython_incremental::{
+    IncrementalState, decode_snapshot, diff, encode_snapshot, source_change_modules,
+};
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_project::{
     inferred_shadow_stub_syntax_trees, replace_local_python_surfaces_with_shadow_stubs,
@@ -339,6 +341,7 @@ fn blocked_pipeline_snapshot_with_incremental(
 fn analyze_pipeline_state(
     config: &ConfigHandle,
     prepared: &PreparedPipelineSyntax,
+    previous: Option<&IncrementalState>,
 ) -> Result<AnalyzedPipelineState> {
     let bindings: Vec<_> = prepared.all_syntax_trees.par_iter().map(bind).collect();
     let graph = build(&bindings);
@@ -359,13 +362,33 @@ fn analyze_pipeline_state(
 
     let stdlib_snapshot =
         Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
-    let incremental = semantic_incremental_state_with_binding_metadata(
-        &graph,
-        &bindings,
-        config.config.typing.imports,
-        None,
-        stdlib_snapshot,
-    );
+    let source_hashes = syntax_tree_source_hashes(&prepared.all_syntax_trees);
+    let incremental = match previous {
+        Some(previous)
+            if previous.stdlib_snapshot == stdlib_snapshot =>
+        {
+            let current_sources =
+                IncrementalState::default().with_source_hashes(source_hashes.clone());
+            let direct_changes = source_change_modules(previous, &current_sources);
+            semantic_incremental_state_with_reused_summaries(
+                &graph,
+                &bindings,
+                config.config.typing.imports,
+                None,
+                &previous.summaries,
+                &direct_changes,
+                stdlib_snapshot.clone(),
+            )
+        }
+        Some(_) | None => semantic_incremental_state_with_binding_metadata(
+            &graph,
+            &bindings,
+            config.config.typing.imports,
+            None,
+            stdlib_snapshot.clone(),
+        ),
+    }
+    .with_source_hashes(source_hashes);
     let tracked_modules = incremental.fingerprints.len();
     let planned_sources: Vec<_> = prepared
         .syntax_trees
@@ -384,6 +407,29 @@ fn analyze_pipeline_state(
         tracked_modules,
         pre_lowering_emit_plan,
     })
+}
+
+fn syntax_tree_source_hashes(
+    syntax_trees: &[typepython_syntax::SyntaxTree],
+) -> BTreeMap<String, u64> {
+    syntax_trees
+        .iter()
+        .map(|tree| {
+            let mut hash = 0xcbf29ce484222325_u64;
+            for byte in tree
+                .source
+                .logical_module
+                .as_bytes()
+                .iter()
+                .chain([0_u8].iter())
+                .chain(tree.source.text.as_bytes().iter())
+            {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x100000001b3_u64);
+            }
+            (tree.source.logical_module.clone(), hash)
+        })
+        .collect()
 }
 
 fn can_reuse_cached_pipeline_outputs(
@@ -468,8 +514,9 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         ));
     }
 
-    let analyzed = analyze_pipeline_state(config, &prepared)?;
-    if let Some(previous) = load_previous_incremental_state(config)? {
+    let previous = load_previous_incremental_state(config)?;
+    let analyzed = analyze_pipeline_state(config, &prepared, previous.as_ref())?;
+    if let Some(previous) = previous {
         if can_reuse_cached_pipeline_outputs(config, &previous, &analyzed) {
             return Ok(reusable_cached_pipeline_snapshot(
                 prepared.source_paths.len(),

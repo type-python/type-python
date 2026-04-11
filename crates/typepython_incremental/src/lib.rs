@@ -7,7 +7,7 @@ use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, Gen
 use typepython_graph::ModuleGraph;
 use typepython_syntax::TypeExpr;
 
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 
 /// Fingerprint of one summary-bearing module.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -24,6 +24,8 @@ pub struct IncrementalState {
     /// Tracked fingerprints by module key.
     pub fingerprints: BTreeMap<String, u64>,
     #[serde(default)]
+    pub source_hashes: BTreeMap<String, u64>,
+    #[serde(default)]
     pub summaries: Vec<PublicSummary>,
     #[serde(default)]
     pub stdlib_snapshot: Option<String>,
@@ -33,6 +35,8 @@ pub struct IncrementalState {
 struct SnapshotFile {
     schema_version: u32,
     fingerprints: BTreeMap<String, u64>,
+    #[serde(default)]
+    source_hashes: BTreeMap<String, u64>,
     #[serde(default)]
     summaries: Vec<PublicSummary>,
     #[serde(default)]
@@ -174,6 +178,15 @@ impl std::fmt::Display for SnapshotDecodeError {
     }
 }
 
+impl IncrementalState {
+    /// Attaches source hashes used to detect direct source changes between snapshots.
+    #[must_use]
+    pub fn with_source_hashes(mut self, source_hashes: BTreeMap<String, u64>) -> Self {
+        self.source_hashes = source_hashes;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct SnapshotDiff {
     pub added: Vec<Fingerprint>,
@@ -214,7 +227,12 @@ fn snapshot_from_summaries(
         .map(|summary| (summary.module.clone(), summary_fingerprint(summary)))
         .collect();
 
-    IncrementalState { fingerprints, summaries: summaries.to_vec(), stdlib_snapshot }
+    IncrementalState {
+        fingerprints,
+        source_hashes: BTreeMap::new(),
+        summaries: summaries.to_vec(),
+        stdlib_snapshot,
+    }
 }
 
 /// Computes the structural diff between two incremental snapshots.
@@ -295,6 +313,32 @@ pub fn snapshot_diff_modules(snapshot_diff: &SnapshotDiff) -> BTreeSet<String> {
         .collect()
 }
 
+/// Collects the set of modules whose authoritative source surface changed between snapshots.
+#[must_use]
+pub fn source_change_modules(
+    previous: &IncrementalState,
+    current: &IncrementalState,
+) -> BTreeSet<String> {
+    let mut changed = BTreeSet::new();
+
+    for (module_key, source_hash) in &current.source_hashes {
+        match previous.source_hashes.get(module_key) {
+            Some(previous_hash) if previous_hash == source_hash => {}
+            _ => {
+                changed.insert(module_key.clone());
+            }
+        }
+    }
+
+    for module_key in previous.source_hashes.keys() {
+        if !current.source_hashes.contains_key(module_key) {
+            changed.insert(module_key.clone());
+        }
+    }
+
+    changed
+}
+
 /// Plans the module subset that must be rechecked after an incremental update.
 #[must_use]
 pub fn affected_modules(
@@ -329,6 +373,7 @@ pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::E
     serde_json::to_string_pretty(&SnapshotFile {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         fingerprints: state.fingerprints.clone(),
+        source_hashes: state.source_hashes.clone(),
         summaries: state.summaries.clone(),
         stdlib_snapshot: state.stdlib_snapshot.clone(),
     })
@@ -343,6 +388,7 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
     }
     Ok(IncrementalState {
         fingerprints: snapshot.fingerprints,
+        source_hashes: snapshot.source_hashes,
         summaries: snapshot.summaries,
         stdlib_snapshot: snapshot.stdlib_snapshot,
     })
@@ -548,7 +594,7 @@ mod tests {
         Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
         SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
         affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
-        snapshot_diff_modules,
+        snapshot_diff_modules, source_change_modules,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -567,6 +613,7 @@ mod tests {
                 (String::from("pkg.a"), 10),
                 (String::from("pkg.b"), 20),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -575,6 +622,7 @@ mod tests {
                 (String::from("pkg.b"), 30),
                 (String::from("pkg.c"), 40),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -595,6 +643,7 @@ mod tests {
     fn diff_reports_no_changes_for_identical_snapshots() {
         let state = IncrementalState {
             fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -609,6 +658,7 @@ mod tests {
     fn encode_snapshot_includes_schema_version() {
         let rendered = encode_snapshot(&IncrementalState {
             fingerprints: BTreeMap::from([(String::from("pkg.a"), 10)]),
+            source_hashes: BTreeMap::new(),
             summaries: vec![PublicSummary {
                 module: String::from("pkg.a"),
                 is_package_entry: false,
@@ -928,6 +978,7 @@ mod tests {
                 (String::from("pkg.y"), 2),
                 (String::from("pkg.z"), 3),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -953,6 +1004,7 @@ mod tests {
                 (String::from("pkg.a"), 10),
                 (String::from("pkg.b"), 20),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -987,6 +1039,7 @@ mod tests {
                 (String::from("mod.j"), 10),
                 (String::from("mod.k"), 11),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -1013,6 +1066,7 @@ mod tests {
                 (String::from("mod.m"), 13),
                 (String::from("mod.n"), 14),
             ]),
+            source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
         };
@@ -1048,6 +1102,10 @@ mod tests {
             fingerprints: BTreeMap::from([
                 (String::from("pkg.alpha"), 111),
                 (String::from("pkg.beta"), 222),
+            ]),
+            source_hashes: BTreeMap::from([
+                (String::from("pkg.alpha"), 1_111),
+                (String::from("pkg.beta"), 2_222),
             ]),
             summaries: vec![
                 PublicSummary {
@@ -1128,6 +1186,37 @@ mod tests {
         );
         let state = decode_snapshot(&json).expect("valid schema version should be accepted");
         assert_eq!(state.fingerprints.get("mod.a"), Some(&42));
+    }
+
+    #[test]
+    fn source_change_modules_tracks_added_removed_and_changed_sources() {
+        let previous = IncrementalState {
+            fingerprints: BTreeMap::new(),
+            source_hashes: BTreeMap::from([
+                (String::from("pkg.a"), 10),
+                (String::from("pkg.b"), 20),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+        let current = IncrementalState {
+            fingerprints: BTreeMap::new(),
+            source_hashes: BTreeMap::from([
+                (String::from("pkg.b"), 21),
+                (String::from("pkg.c"), 30),
+            ]),
+            summaries: Vec::new(),
+            stdlib_snapshot: None,
+        };
+
+        assert_eq!(
+            source_change_modules(&previous, &current),
+            BTreeSet::from([
+                String::from("pkg.a"),
+                String::from("pkg.b"),
+                String::from("pkg.c"),
+            ])
+        );
     }
 
     #[test]

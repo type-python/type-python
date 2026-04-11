@@ -416,6 +416,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                     (String::from("pkg.a"), 10),
                     (String::from("pkg.b"), 20),
                 ]),
+                source_hashes: std::collections::BTreeMap::new(),
                 summaries: vec![typepython_incremental::PublicSummary {
                     module: String::from("pkg.a"),
                     is_package_entry: false,
@@ -457,6 +458,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
     assert!(rendered.contains("pkg.b"));
     assert!(rendered.contains("\"exports\""));
     assert!(rendered.contains("\"imports\""));
+    assert!(rendered.contains("\"source_hashes\""));
     assert!(rendered.contains("\"sealedRoots\""));
     assert!(rendered.contains("\"solverFacts\""));
     assert!(rendered.contains("\"declarationSignature\""));

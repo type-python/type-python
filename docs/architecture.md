@@ -300,12 +300,14 @@ Fingerprint-based incremental build tracking.
 **IncrementalState** contains:
 
 - `fingerprints` -- `BTreeMap<module_key, u64>` using FNV-1a hash
+- `source_hashes` -- authoritative source-text hashes used to detect direct module changes
 - `summaries` -- public API summary per module (exports, imports, sealed roots)
 - `stdlib_snapshot` -- optional stdlib version tag
 
 **Rebuild rules:**
 
-- Implementation-only change (fingerprint same): dependents NOT rechecked
+- Direct source change (source hash differs): the changed module summary is recomputed
+- Implementation-only change (public summary fingerprint same): dependents NOT rechecked
 - Public summary change (fingerprint differs): direct and transitive dependents rechecked
 
 **Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`.

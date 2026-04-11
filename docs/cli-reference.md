@@ -123,6 +123,8 @@ typepython build [OPTIONS]
 
 **Pipeline steps:** discover -> parse -> bind -> graph -> check -> lower -> plan emits -> snapshot -> write outputs
 
+When a previous snapshot is available, the CLI reuses unchanged semantic summaries based on persisted source hashes before deciding whether full output reuse is safe.
+
 **Output artifacts:**
 
 - `.py` files -- lowered Python in `out_dir`
