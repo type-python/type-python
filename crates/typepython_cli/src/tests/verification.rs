@@ -1276,6 +1276,7 @@ fn verify_publication_metadata_reports_requires_python_mismatch_for_native_outpu
                 runtime_path: Some(project_dir.join("build/app/__init__.py")),
                 stub_path: Some(project_dir.join("build/app/__init__.pyi")),
             }],
+            None,
             &[],
         )
         .as_text()
@@ -1323,6 +1324,7 @@ fn verify_publication_metadata_reports_missing_typing_extensions_baseline_in_whe
                 runtime_path: Some(project_dir.join("build/app/__init__.py")),
                 stub_path: Some(project_dir.join("build/app/__init__.pyi")),
             }],
+            None,
             &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
         )
         .as_text()
@@ -1368,6 +1370,7 @@ fn verify_publication_metadata_accepts_matching_requires_python_for_native_outpu
                 runtime_path: Some(project_dir.join("build/app/__init__.py")),
                 stub_path: Some(project_dir.join("build/app/__init__.pyi")),
             }],
+            None,
             &[],
         )
         .as_text()
@@ -1416,6 +1419,7 @@ fn verify_publication_metadata_accepts_typing_extensions_baseline_when_declared(
                 runtime_path: Some(project_dir.join("build/app/__init__.py")),
                 stub_path: Some(project_dir.join("build/app/__init__.pyi")),
             }],
+            None,
             &[],
         )
         .as_text()
@@ -1423,6 +1427,60 @@ fn verify_publication_metadata_accepts_typing_extensions_baseline_when_declared(
     remove_temp_project_dir(&project_dir);
 
     assert!(!rendered.contains("TPY5003"), "{rendered}");
+}
+
+#[test]
+fn verify_publication_metadata_prefers_lowered_module_requirements_when_available() {
+    let project_dir = temp_project_dir(
+        "verify_publication_metadata_prefers_lowered_module_requirements_when_available",
+    );
+    let rendered = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\n",
+        )
+        .expect("pyproject.toml should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "pass\n")
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), "pass\n")
+            .expect("stub artifact should be written");
+
+        let config = load(&project_dir).expect("config should load");
+        verify_publication_metadata(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            Some(&[typepython_lowering::LoweredModule {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                source_kind: typepython_syntax::SourceKind::TypePython,
+                python_source: String::from("pass\n"),
+                source_map: Vec::new(),
+                span_map: Vec::new(),
+                required_imports: Vec::new(),
+                metadata: typepython_lowering::LoweringMetadata {
+                    has_generic_type_params: false,
+                    has_typed_dict_transforms: false,
+                    has_sealed_classes: false,
+                    required_runtime_features: std::collections::BTreeSet::from([
+                        typepython_target::RuntimeFeature::GenericDefaults,
+                    ]),
+                    required_backports: std::collections::BTreeSet::new(),
+                },
+            }]),
+            &[],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("at least `3.13`"));
 }
 
 #[test]

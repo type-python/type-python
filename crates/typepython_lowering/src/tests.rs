@@ -9,7 +9,7 @@ use typepython_syntax::{
     SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
     TypeParamKind, UnsafeStatement, parse,
 };
-use typepython_target::{EmitStyle, PythonTarget};
+use typepython_target::{EmitStyle, PythonTarget, RuntimeFeature};
 
 fn compat_options(version: &str) -> LoweringOptions {
     LoweringOptions {
@@ -595,6 +595,8 @@ fn lower_rewrites_non_generic_overload_with_import() {
             has_generic_type_params: false,
             has_typed_dict_transforms: false,
             has_sealed_classes: false,
+            required_runtime_features: std::collections::BTreeSet::new(),
+            required_backports: std::collections::BTreeSet::new(),
         }
     );
 }
@@ -816,6 +818,14 @@ fn lower_native_mode_preserves_pep_695_syntax() {
         "type Pair[T] = tuple[T, T]\n\nclass Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n"
     );
     assert!(lowered.module.required_imports.is_empty());
+    assert!(lowered.module.metadata.required_runtime_features.contains(&RuntimeFeature::TypeStmt));
+    assert!(
+        lowered
+            .module
+            .metadata
+            .required_runtime_features
+            .contains(&RuntimeFeature::InlineTypeParams)
+    );
 }
 
 #[test]
@@ -1301,6 +1311,13 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
     assert!(lowered.module.python_source.contains("-> typing_extensions.Self"));
     assert!(lowered.module.python_source.contains("typing_extensions.ReadOnly[bool]"));
     assert!(lowered.module.python_source.contains("-> typing_extensions.TypeIs[int]"));
+    assert!(
+        lowered
+            .module
+            .metadata
+            .required_backports
+            .contains(&super::BackportRequirement::TypingExtensionsAtLeast412)
+    );
 }
 
 #[test]

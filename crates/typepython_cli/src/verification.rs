@@ -17,7 +17,7 @@ use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{EmitArtifact, TypePythonStubContext, generate_typepython_stub_source};
 use typepython_incremental::decode_snapshot;
-use typepython_lowering::LoweredModule;
+use typepython_lowering::{BackportRequirement, LoweredModule};
 use typepython_syntax::{SourceFile, SourceKind};
 use typepython_target::PythonTarget;
 use zip::ZipArchive;
@@ -168,9 +168,15 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
         );
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
-        diagnostics
-            .diagnostics
-            .extend(verify_publication_metadata(&config, &snapshot.emit_plan, &supplied_verify_artifacts(&args)).diagnostics);
+        diagnostics.diagnostics.extend(
+            verify_publication_metadata(
+                &config,
+                &snapshot.emit_plan,
+                Some(&snapshot.lowered_modules),
+                &supplied_verify_artifacts(&args),
+            )
+            .diagnostics,
+        );
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
         diagnostics
@@ -299,10 +305,12 @@ pub(crate) fn verify_packaged_artifacts(
 pub(crate) fn verify_publication_metadata(
     config: &ConfigHandle,
     artifacts: &[EmitArtifact],
+    modules: Option<&[LoweredModule]>,
     supplied_artifacts: &[SuppliedVerifyArtifact],
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
-    let requirements = publication_requirements_from_artifacts(artifacts);
+    let requirements =
+        modules.map(|modules| publication_requirements_from_modules(artifacts, modules)).unwrap_or_else(|| publication_requirements_from_artifacts(artifacts));
 
     if let Some(metadata) = local_project_package_metadata(config) {
         diagnostics
@@ -366,6 +374,36 @@ fn publication_requirements_from_artifacts(artifacts: &[EmitArtifact]) -> Public
             requirements.min_python =
                 max_python_target(requirements.min_python, file_requirements.min_python);
             requirements.needs_typing_extensions |= file_requirements.needs_typing_extensions;
+        }
+    }
+
+    requirements
+}
+
+fn publication_requirements_from_modules(
+    artifacts: &[EmitArtifact],
+    modules: &[LoweredModule],
+) -> PublicationRequirements {
+    let modules_by_source =
+        modules.iter().map(|module| (module.source_path.as_path(), module)).collect::<BTreeMap<_, _>>();
+    let mut requirements = PublicationRequirements::default();
+
+    for artifact in artifacts {
+        let Some(module) = modules_by_source.get(artifact.source_path.as_path()) else {
+            continue;
+        };
+        for feature in &module.metadata.required_runtime_features {
+            requirements.min_python = max_python_target(
+                requirements.min_python,
+                Some(PythonTarget::min_runtime_for(*feature)),
+            );
+        }
+        if module
+            .metadata
+            .required_backports
+            .contains(&BackportRequirement::TypingExtensionsAtLeast412)
+        {
+            requirements.needs_typing_extensions = true;
         }
     }
 

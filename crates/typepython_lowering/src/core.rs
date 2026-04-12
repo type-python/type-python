@@ -72,6 +72,13 @@ pub struct LoweringMetadata {
     pub has_generic_type_params: bool,
     pub has_typed_dict_transforms: bool,
     pub has_sealed_classes: bool,
+    pub required_runtime_features: BTreeSet<RuntimeFeature>,
+    pub required_backports: BTreeSet<BackportRequirement>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub enum BackportRequirement {
+    TypingExtensionsAtLeast412,
 }
 
 struct InsertedLineTracker<'a> {
@@ -521,6 +528,19 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         lowered.push('\n');
     }
 
+    let required_runtime_features = collect_required_runtime_features(
+        &type_aliases,
+        &interfaces,
+        &data_classes,
+        &sealed_classes,
+        &class_defs,
+        &function_defs,
+        &overloads,
+        &lowered,
+        options,
+    );
+    let required_backports = collect_required_backports(&lowered);
+
     LoweredText {
         python_source: lowered,
         source_map,
@@ -530,6 +550,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             has_generic_type_params,
             has_typed_dict_transforms,
             has_sealed_classes,
+            required_runtime_features,
+            required_backports,
         },
     }
 }
@@ -996,6 +1018,119 @@ fn has_any_generic_type_params(
         || class_defs.values().any(|statement| !statement.type_params.is_empty())
         || function_defs.values().any(|statement| !statement.type_params.is_empty())
         || overloads.values().any(|statement| !statement.type_params.is_empty())
+}
+
+fn collect_required_runtime_features(
+    type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
+    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    lowered: &str,
+    options: &LoweringOptions,
+) -> BTreeSet<RuntimeFeature> {
+    let mut features = BTreeSet::new();
+
+    if type_aliases.values().any(|statement| can_use_native_typealias(statement, options)) {
+        features.insert(RuntimeFeature::TypeStmt);
+    }
+    if interfaces
+        .values()
+        .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || data_classes
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || sealed_classes
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || class_defs
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || function_defs
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || overloads
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options))
+        || type_aliases
+            .values()
+            .any(|statement| can_use_native_typealias(statement, options) && !statement.type_params.is_empty())
+    {
+        features.insert(RuntimeFeature::InlineTypeParams);
+    }
+    if type_aliases
+        .values()
+        .any(|statement| can_use_native_typealias(statement, options) && type_params_have_defaults(&statement.type_params))
+        || interfaces
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+        || data_classes
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+        || sealed_classes
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+        || class_defs
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+        || function_defs
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+        || overloads
+            .values()
+            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
+    {
+        features.insert(RuntimeFeature::GenericDefaults);
+    }
+
+    if imports_symbol_from_module(lowered, "typing", "ReadOnly") || lowered.contains("typing.ReadOnly")
+    {
+        features.insert(RuntimeFeature::TypingReadOnly);
+    }
+    if imports_symbol_from_module(lowered, "typing", "TypeIs") || lowered.contains("typing.TypeIs") {
+        features.insert(RuntimeFeature::TypingTypeIs);
+    }
+    if imports_symbol_from_module(lowered, "typing", "NoDefault")
+        || lowered.contains("typing.NoDefault")
+    {
+        features.insert(RuntimeFeature::TypingNoDefault);
+    }
+    if imports_symbol_from_module(lowered, "warnings", "deprecated")
+        || lowered.contains("warnings.deprecated")
+    {
+        features.insert(RuntimeFeature::WarningsDeprecated);
+    }
+
+    features
+}
+
+fn collect_required_backports(lowered: &str) -> BTreeSet<BackportRequirement> {
+    let mut backports = BTreeSet::new();
+    if lowered.contains("typing_extensions.")
+        || lowered.lines().any(|line| line.trim_start().starts_with("from typing_extensions import "))
+        || lowered.lines().any(|line| line.trim_start() == "import typing_extensions")
+    {
+        backports.insert(BackportRequirement::TypingExtensionsAtLeast412);
+    }
+    backports
+}
+
+fn type_params_have_defaults(type_params: &[typepython_syntax::TypeParam]) -> bool {
+    type_params.iter().any(|type_param| type_param.default.is_some())
+}
+
+fn imports_symbol_from_module(source: &str, module: &str, symbol: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == format!("from {module} import {symbol}")
+            || (trimmed.starts_with(&format!("from {module} import "))
+                && trimmed
+                    .trim_start_matches(&format!("from {module} import "))
+                    .split(',')
+                    .any(|entry| entry.trim().split_once(" as ").map(|(name, _)| name.trim()).unwrap_or(entry.trim()) == symbol))
+    })
 }
 
 fn rewrite_unsafe_line(line: &str) -> String {
