@@ -1,0 +1,10 @@
+---
+source: crates/typepython_emit/src/tests.rs
+expression: stub
+---
+type Pair[T = int] = tuple[T, T]
+
+class Box[T = int](Base):
+    value: T
+
+def first[T = int](value: T = 1) -> T: ...

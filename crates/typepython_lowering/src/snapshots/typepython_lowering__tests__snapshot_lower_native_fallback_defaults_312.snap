@@ -1,0 +1,11 @@
+---
+source: crates/typepython_lowering/src/tests.rs
+expression: lowered.module.python_source
+---
+from typing_extensions import TypeVar
+T = TypeVar("T", default="int")
+from typing import TypeAlias
+Pair: TypeAlias = tuple[T, T]
+
+def first(value: T = 1) -> T:
+    return value

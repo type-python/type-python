@@ -2503,6 +2503,36 @@ fn snapshot_lower_compat_imports_312() {
 }
 
 #[test]
+fn snapshot_lower_native_generics_313() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("native-generics.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "typealias Pair[T = int] = tuple[T, T]\n\nclass Box[T = int](Base):\n    value: T\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+        ),
+    });
+    let lowered = lower_with_options(&tree, &native_options("3.13"));
+    assert!(lowered.diagnostics.is_empty());
+    insta::assert_snapshot!(lowered.module.python_source);
+}
+
+#[test]
+fn snapshot_lower_native_fallback_defaults_312() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("native-default-fallback.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "typealias Pair[T = int] = tuple[T, T]\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+        ),
+    });
+    let lowered = lower_with_options(&tree, &native_options("3.12"));
+    assert!(lowered.diagnostics.is_empty());
+    insta::assert_snapshot!(lowered.module.python_source);
+}
+
+#[test]
 fn snapshot_lower_passthrough_python_source() {
     let tree = parse(SourceFile {
         path: PathBuf::from("passthrough.py"),

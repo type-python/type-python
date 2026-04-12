@@ -1,0 +1,11 @@
+---
+source: crates/typepython_lowering/src/tests.rs
+expression: lowered.module.python_source
+---
+type Pair[T = int] = tuple[T, T]
+
+class Box[T = int](Base):
+    value: T
+
+def first[T = int](value: T = 1) -> T:
+    return value

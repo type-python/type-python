@@ -981,6 +981,24 @@ fn snapshot_inferred_migration_stub() {
     insta::assert_snapshot!(stub);
 }
 
+#[test]
+fn snapshot_stub_native_pep695_surface() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/native_generics.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "type Pair[T = int] = tuple[T, T]\n\nclass Box[T = int](Base):\n    value: T\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+        ),
+        source_map: (1..=7).map(|i| SourceMapEntry { original_line: i, lowered_line: i }).collect(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("native pep695 stub generation should succeed");
+    insta::assert_snapshot!(stub);
+}
+
 fn temp_dir(test_name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
