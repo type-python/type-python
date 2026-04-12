@@ -90,6 +90,8 @@ pub struct SummaryExport {
     pub exported_type_expr: Option<TypeExpr>,
     #[serde(rename = "typeParams")]
     pub type_params: Vec<SummaryTypeParam>,
+    #[serde(rename = "requiredRuntimeFeatures", default)]
+    pub required_runtime_features: Vec<String>,
     pub public: bool,
 }
 
@@ -451,6 +453,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             exported_type: None,
             exported_type_expr: summary_type_expr(declaration),
             type_params: declaration.type_params.iter().map(summary_type_param).collect(),
+            required_runtime_features: Vec::new(),
             public: !declaration.name.starts_with('_'),
         })
         .collect::<Vec<_>>();
@@ -737,6 +740,7 @@ mod tests {
                         default: None,
                         default_expr: None,
                     }],
+                    required_runtime_features: Vec::new(),
                     public: true,
                 }],
                 imports: vec![String::from("pkg.base")],
@@ -904,6 +908,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        required_runtime_features: Vec::new(),
                         public: true,
                     },
                     SummaryExport {
@@ -924,6 +929,7 @@ mod tests {
                             default: None,
                             default_expr: None,
                         }],
+                        required_runtime_features: Vec::new(),
                         public: true,
                     },
                     SummaryExport {
@@ -935,6 +941,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        required_runtime_features: Vec::new(),
                         public: true,
                     },
                     SummaryExport {
@@ -955,6 +962,7 @@ mod tests {
                             default: Some(String::from("str")),
                             default_expr: None,
                         }],
+                        required_runtime_features: Vec::new(),
                         public: true,
                     },
                 ],
@@ -1206,6 +1214,7 @@ mod tests {
                             default: Some(String::from("Comparable")),
                             default_expr: None,
                         }],
+                        required_runtime_features: Vec::new(),
                         public: true,
                     }],
                     imports: vec![String::from("pkg.base")],
@@ -1228,6 +1237,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        required_runtime_features: Vec::new(),
                         public: true,
                     }],
                     imports: Vec::new(),

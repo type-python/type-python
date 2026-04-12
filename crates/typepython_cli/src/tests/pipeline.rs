@@ -622,6 +622,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        required_runtime_features: Vec::new(),
                         public: true,
                     }],
                     imports: vec![String::from("pkg.base")],

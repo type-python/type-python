@@ -859,8 +859,24 @@ fn semantic_summary_export(
         exported_type,
         exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
+        required_runtime_features: required_runtime_features_for_export(declaration),
         public: !declaration.name.starts_with('_'),
     }
+}
+
+fn required_runtime_features_for_export(declaration: &Declaration) -> Vec<String> {
+    if declaration.type_params.is_empty() {
+        return Vec::new();
+    }
+
+    let mut features = vec![String::from("inline_type_params")];
+    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+        features.push(String::from("generic_defaults"));
+    }
+    if declaration.kind == DeclarationKind::TypeAlias {
+        features.insert(0, String::from("type_stmt"));
+    }
+    features
 }
 
 fn semantic_declaration_fact(

@@ -176,6 +176,73 @@ fn semantic_incremental_state_reuses_unchanged_public_summaries() {
 }
 
 #[test]
+fn semantic_incremental_summary_preserves_native_runtime_feature_markers() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.py");
+    let source_text = "type Pair[T = int] = tuple[T, T]\n\nclass Box[T = int]:\n    value: T\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n";
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::Python,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let bindings = vec![bind(&tree)];
+    let graph = build(&bindings);
+    let summary = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        None,
+        typepython_incremental::SnapshotMetadata::default(),
+    )
+    .summaries
+    .into_iter()
+    .find(|summary| summary.module == "app")
+    .expect("summary should exist");
+
+    let pair = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "Pair")
+        .expect("Pair export should exist");
+    let box_export = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "Box")
+        .expect("Box export should exist");
+    let first = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "first")
+        .expect("first export should exist");
+
+    assert_eq!(
+        pair.required_runtime_features,
+        vec![
+            String::from("type_stmt"),
+            String::from("inline_type_params"),
+            String::from("generic_defaults"),
+        ]
+    );
+    assert_eq!(
+        box_export.required_runtime_features,
+        vec![String::from("inline_type_params"), String::from("generic_defaults")]
+    );
+    assert_eq!(
+        first.required_runtime_features,
+        vec![String::from("inline_type_params"), String::from("generic_defaults")]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn check_propagates_generic_owner_arguments_into_member_reads() {
     let diagnostics = check_temp_typepython_source(
         "class Box[T]:\n    value: T\n\ndef read(box: Box[int]) -> int:\n    return box.value\n",
