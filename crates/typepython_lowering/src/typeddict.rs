@@ -526,3 +526,138 @@ fn lowering_error(path: &std::path::Path, line: usize, construct: &str) -> Diagn
     )
     .with_span(Span::new(path.display().to_string(), line, 1, line, 1))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::{BTreeMap, BTreeSet};
+    use typepython_syntax::{ClassMember, ClassMemberKind};
+
+    fn annotation_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just(String::from("int")),
+            Just(String::from("str")),
+            Just(String::from("bool")),
+            Just(String::from("list[int]")),
+            Just(String::from("tuple[str, int]")),
+            Just(String::from("dict[str, int]")),
+            Just(String::from("int | None")),
+        ]
+    }
+
+    fn fields_strategy() -> impl Strategy<Value = BTreeMap<String, String>> {
+        prop::collection::btree_map("[a-z][a-z0-9_]{0,6}", annotation_strategy(), 1..=6)
+    }
+
+    prop_compose! {
+        fn fields_and_subset_strategy()
+            (fields in fields_strategy())
+            (selected in prop::sample::subsequence(
+                fields.keys().cloned().collect::<Vec<_>>(),
+                0..=fields.len(),
+            ), fields in Just(fields)) -> (Vec<ClassMember>, BTreeSet<String>) {
+                (field_members(&fields), selected.into_iter().collect())
+            }
+    }
+
+    fn field_members(fields: &BTreeMap<String, String>) -> Vec<ClassMember> {
+        fields
+            .iter()
+            .enumerate()
+            .map(|(index, (name, annotation))| field_member(name, annotation, index + 1))
+            .collect()
+    }
+
+    fn field_member(name: &str, annotation: &str, line: usize) -> ClassMember {
+        ClassMember {
+            name: name.to_owned(),
+            kind: ClassMemberKind::Field,
+            method_kind: None,
+            annotation: Some(annotation.to_owned()),
+            annotation_expr: None,
+            value_type: None,
+            params: Vec::new(),
+            returns: None,
+            returns_expr: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            line,
+        }
+    }
+
+    fn field_annotations(members: &[ClassMember]) -> Vec<(String, String)> {
+        members
+            .iter()
+            .map(|member| {
+                (
+                    member.name.clone(),
+                    member.annotation.clone().unwrap_or_else(|| String::from("object")),
+                )
+            })
+            .collect()
+    }
+
+    fn field_names(members: &[ClassMember]) -> Vec<String> {
+        members.iter().map(|member| member.name.clone()).collect()
+    }
+
+    proptest! {
+        #[test]
+        fn required_after_partial_restores_field_annotations(fields in fields_strategy()) {
+            let members = field_members(&fields);
+            let partial = apply_transform_to_members("Partial", &members, &[]);
+            let required = apply_transform_to_members("Required_", &partial, &[]);
+
+            prop_assert_eq!(field_annotations(&required), field_annotations(&members));
+        }
+
+        #[test]
+        fn mutable_after_readonly_restores_field_annotations(fields in fields_strategy()) {
+            let members = field_members(&fields);
+            let readonly = apply_transform_to_members("Readonly", &members, &[]);
+            let mutable = apply_transform_to_members("Mutable", &readonly, &[]);
+
+            prop_assert_eq!(field_annotations(&mutable), field_annotations(&members));
+        }
+
+        #[test]
+        fn pick_and_omit_partition_fields((members, selected) in fields_and_subset_strategy()) {
+            let key_args = selected.iter().map(String::as_str).collect::<Vec<_>>();
+            let picked = apply_transform_to_members("Pick", &members, &key_args);
+            let omitted = apply_transform_to_members("Omit", &members, &key_args);
+
+            let expected_picked = members
+                .iter()
+                .filter(|member| selected.contains(&member.name))
+                .map(|member| member.name.clone())
+                .collect::<Vec<_>>();
+            let expected_omitted = members
+                .iter()
+                .filter(|member| !selected.contains(&member.name))
+                .map(|member| member.name.clone())
+                .collect::<Vec<_>>();
+            let picked_names = field_names(&picked);
+            let omitted_names = field_names(&omitted);
+
+            prop_assert_eq!(&picked_names, &expected_picked);
+            prop_assert_eq!(&omitted_names, &expected_omitted);
+
+            let picked_set = picked_names.iter().cloned().collect::<BTreeSet<_>>();
+            let omitted_set = omitted_names.iter().cloned().collect::<BTreeSet<_>>();
+            let original_set = field_names(&members).into_iter().collect::<BTreeSet<_>>();
+
+            prop_assert!(picked_set.is_disjoint(&omitted_set));
+            prop_assert_eq!(
+                picked_set.union(&omitted_set).cloned().collect::<BTreeSet<_>>(),
+                original_set
+            );
+        }
+    }
+}

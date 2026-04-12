@@ -1888,6 +1888,7 @@ dependencies = [
  "littrs-ruff-python-ast",
  "littrs-ruff-python-parser",
  "littrs-ruff-text-size",
+ "proptest",
  "typepython-diagnostics",
  "typepython-syntax",
 ]
