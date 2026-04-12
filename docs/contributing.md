@@ -23,7 +23,7 @@ cd type-python
 make ci
 ```
 
-The `make ci` target runs: format check -> clippy lint -> fast workspace tests -> CLI verification tests -> bench compile check -> Python packaging validation.
+The `make ci` target runs: format check -> clippy lint -> fast workspace tests -> CLI verification tests -> downstream checker smoke -> bench compile check -> Python packaging validation.
 
 ### Building
 
@@ -190,6 +190,9 @@ make test-fast
 
 # Heavy CLI verification suite only
 make test-cli-verification
+
+# Checker-backed end-to-end smoke suite (.tpy -> build -> mypy/pyright/ty)
+make test-downstream-checkers
 
 # Tests for a specific crate
 cargo test -p typepython-checking
@@ -366,6 +369,17 @@ GitHub Actions runs on every push to `main` and every PR:
 2. **cli-verification** -- `cargo test -p typepython-cli tests::verification::`
 
 Together these jobs cover the repository validation path that `make ci` approximates locally.
+
+The downstream checker smoke suite currently covers:
+
+- `basic-package` on Python 3.10
+- `rich-package` on Python 3.10 and 3.12
+- `compat-package` on Python 3.10, 3.11, and 3.12, with emitted import-source assertions before mypy / pyright / ty
+
+For focused local runs, `scripts/downstream_checker_smoke.py` accepts:
+
+- `TYPEPYTHON_DOWNSTREAM_FIXTURES=compat-package`
+- `TYPEPYTHON_DOWNSTREAM_CHECKERS=pyright,ty`
 
 ## Common Contribution Tasks
 

@@ -52,7 +52,7 @@ When emitting `.pyi` stubs, the compiler selects the import source based on `tar
 | Construct    | Python 3.10         | Python 3.11         | Python 3.12         |
 | ------------ | ------------------- | ------------------- | ------------------- |
 | `TypeGuard`  | `typing_extensions` | `typing`            | `typing`            |
-| `TypeIs`     | `typing_extensions` | `typing_extensions` | `typing`            |
+| `TypeIs`     | `typing_extensions` | `typing_extensions` | `typing_extensions` |
 | `ReadOnly`   | `typing_extensions` | `typing_extensions` | `typing_extensions` |
 | `override`   | `typing_extensions` | `typing_extensions` | `typing`            |
 | `deprecated` | `typing_extensions` | `typing_extensions` | `typing_extensions` |

@@ -1,0 +1,33 @@
+import typing
+from typing import TypedDict
+
+
+class BaseWidget:
+    def clone(self) -> typing.Self:
+        return self
+
+
+data class Widget(BaseWidget):
+    widget_id: int
+    name: str
+
+    @typing.override
+    def clone(self) -> typing.Self:
+        return Widget(widget_id=self.widget_id, name=self.name)
+
+
+class WidgetRecord(TypedDict):
+    widget_id: typing.ReadOnly[int]
+    name: str
+
+
+def legacy_name(widget: Widget) -> str:
+    return widget.name
+
+
+def is_widget_id(value: object) -> typing.TypeIs[int]:
+    return isinstance(value, int)
+
+
+def parse_widget_record(record: WidgetRecord) -> Widget:
+    return Widget(widget_id=record["widget_id"], name=record["name"])
