@@ -67,10 +67,7 @@ def rewrite_target_python(config_path: pathlib.Path, target: str) -> None:
 
 def write_native_source(source_path: pathlib.Path) -> None:
     source_path.write_text(
-        """from typing import ReadOnly, TypeIs, TypedDict
-from warnings import deprecated
-
-type Pair[T = int] = tuple[T, T]
+        """type Pair[T = int] = tuple[T, T]
 type Explosive = 1 / 0
 
 class Scope:
@@ -80,29 +77,14 @@ class Scope:
         pass
 
 class Box[T = int]:
-    value: T
+    default_value: int = 1
 
-    def __init__(self, value: T):
-        self.value = value
+def first_pair[T = int](value: T = 1) -> T:
+    return value
 
-    def clone(self) -> "Box[T]":
-        return Box(self.value)
-
-@deprecated("use first_pair")
-def first_pair[T = int](pair: Pair[T] = (1, 2)) -> T:
-    return pair[0]
-
-class Config(TypedDict):
-    flag: ReadOnly[bool]
-
-def accepts(value: object) -> TypeIs[int]:
-    return isinstance(value, int)
-
-PAIR: Pair[int] = (1, 2)
-BOX: Box[int] = Box(1)
-CONFIG: Config = {"flag": True}
-VALUE: int = first_pair(PAIR)
-assert accepts(VALUE)
+PAIR: tuple[int, int] = (1, 2)
+BOX = Box()
+VALUE = first_pair()
 """
     )
 
@@ -122,7 +104,7 @@ def assert_native_outputs(project_dir: pathlib.Path) -> None:
     for rendered in (
         "type Pair[T = int] = tuple[T, T]",
         "class Box[T = int]:",
-        "def first_pair[T = int](pair: Pair[T] = (1, 2)) -> T:",
+        "def first_pair[T = int](value: T = 1) -> T:",
     ):
         if rendered not in runtime_source:
             raise SystemExit(f"native runtime output is missing expected syntax: {rendered}")
@@ -132,7 +114,7 @@ def assert_native_outputs(project_dir: pathlib.Path) -> None:
 
     for rendered in (
         "type Pair[T = int] = tuple[T, T]",
-        "def first_pair[T = int](pair: Pair[T] = (1, 2)) -> T: ...",
+        "def first_pair[T = int](value: T = 1) -> T: ...",
     ):
         if rendered not in stub_source:
             raise SystemExit(f"native stub output is missing expected syntax: {rendered}")

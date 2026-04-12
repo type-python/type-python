@@ -1,7 +1,4 @@
-use std::{
-    fmt,
-    str::FromStr,
-};
+use std::{fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -145,13 +142,11 @@ impl PythonTarget {
             "TypeVarTuple" | "Unpack" => {
                 Some(if self >= Self::PYTHON_3_11 { "typing" } else { "typing_extensions" })
             }
-            "ReadOnly" => {
-                Some(if self.supports(RuntimeFeature::TypingReadOnly) {
-                    "typing"
-                } else {
-                    "typing_extensions"
-                })
-            }
+            "ReadOnly" => Some(if self.supports(RuntimeFeature::TypingReadOnly) {
+                "typing"
+            } else {
+                "typing_extensions"
+            }),
             "TypeIs" => Some(if self.supports(RuntimeFeature::TypingTypeIs) {
                 "typing"
             } else {

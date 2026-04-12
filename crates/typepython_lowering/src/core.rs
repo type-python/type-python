@@ -303,10 +303,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             .is_some_and(|(transform, _)| TYPEDICT_TRANSFORMS.contains(&transform))
     });
     let has_sealed_classes = !sealed_classes.is_empty();
-    let needs_typing_extensions_runtime_type_params = runtime_type_params
-        .values()
-        .any(|type_param| type_param.default.is_some())
-        && !options.target_python.supports_generic_defaults();
+    let needs_typing_extensions_runtime_type_params =
+        runtime_type_params.values().any(|type_param| type_param.default.is_some())
+            && !options.target_python.supports_generic_defaults();
     let has_runtime_typevars = runtime_type_params
         .values()
         .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVar);
@@ -381,7 +380,8 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         if has_runtime_typevartuples
             && !has_typevartuple_import(&tree.source.text, typevartuple_owner)
         {
-            inserted_lines.emit_required_import(rewrite_typevartuple_import_line(typevartuple_owner));
+            inserted_lines
+                .emit_required_import(rewrite_typevartuple_import_line(typevartuple_owner));
         }
         if needs_unpack_import && !has_unpack_import(&tree.source.text, unpack_owner) {
             inserted_lines.emit_required_import(rewrite_unpack_import_line(unpack_owner));
@@ -679,10 +679,8 @@ fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) ->
                 if source_module == owner {
                     continue;
                 }
-                normalized = normalized.replace(
-                    &format!("{source_module}.{symbol}"),
-                    &format!("{owner}.{symbol}"),
-                );
+                normalized = normalized
+                    .replace(&format!("{source_module}.{symbol}"), &format!("{owner}.{symbol}"));
             }
         }
     }
@@ -1000,18 +998,19 @@ fn has_compat_generic_class_like_declarations(
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     options: &LoweringOptions,
 ) -> bool {
-    interfaces
-        .values()
-        .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
-        || data_classes
-            .values()
-            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
-        || sealed_classes
-            .values()
-            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
-        || class_defs
-            .values()
-            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
+    interfaces.values().any(|statement| {
+        !statement.type_params.is_empty()
+            && !can_use_native_type_params(&statement.type_params, options)
+    }) || data_classes.values().any(|statement| {
+        !statement.type_params.is_empty()
+            && !can_use_native_type_params(&statement.type_params, options)
+    }) || sealed_classes.values().any(|statement| {
+        !statement.type_params.is_empty()
+            && !can_use_native_type_params(&statement.type_params, options)
+    }) || class_defs.values().any(|statement| {
+        !statement.type_params.is_empty()
+            && !can_use_native_type_params(&statement.type_params, options)
+    })
 }
 
 fn has_any_generic_type_params(
@@ -1066,42 +1065,44 @@ fn collect_required_runtime_features(
         || overloads
             .values()
             .any(|statement| can_use_native_type_params(&statement.type_params, options))
-        || type_aliases
-            .values()
-            .any(|statement| can_use_native_typealias(statement, options) && !statement.type_params.is_empty())
+        || type_aliases.values().any(|statement| {
+            can_use_native_typealias(statement, options) && !statement.type_params.is_empty()
+        })
     {
         features.insert(RuntimeFeature::InlineTypeParams);
     }
-    if type_aliases
-        .values()
-        .any(|statement| can_use_native_typealias(statement, options) && type_params_have_defaults(&statement.type_params))
-        || interfaces
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-        || data_classes
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-        || sealed_classes
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-        || class_defs
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-        || function_defs
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-        || overloads
-            .values()
-            .any(|statement| can_use_native_type_params(&statement.type_params, options) && type_params_have_defaults(&statement.type_params))
-    {
+    if type_aliases.values().any(|statement| {
+        can_use_native_typealias(statement, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || interfaces.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || data_classes.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || sealed_classes.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || class_defs.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || function_defs.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) || overloads.values().any(|statement| {
+        can_use_native_type_params(&statement.type_params, options)
+            && type_params_have_defaults(&statement.type_params)
+    }) {
         features.insert(RuntimeFeature::GenericDefaults);
     }
 
-    if imports_symbol_from_module(lowered, "typing", "ReadOnly") || lowered.contains("typing.ReadOnly")
+    if imports_symbol_from_module(lowered, "typing", "ReadOnly")
+        || lowered.contains("typing.ReadOnly")
     {
         features.insert(RuntimeFeature::TypingReadOnly);
     }
-    if imports_symbol_from_module(lowered, "typing", "TypeIs") || lowered.contains("typing.TypeIs") {
+    if imports_symbol_from_module(lowered, "typing", "TypeIs") || lowered.contains("typing.TypeIs")
+    {
         features.insert(RuntimeFeature::TypingTypeIs);
     }
     if imports_symbol_from_module(lowered, "typing", "NoDefault")
@@ -1121,7 +1122,9 @@ fn collect_required_runtime_features(
 fn collect_required_backports(lowered: &str) -> BTreeSet<BackportRequirement> {
     let mut backports = BTreeSet::new();
     if lowered.contains("typing_extensions.")
-        || lowered.lines().any(|line| line.trim_start().starts_with("from typing_extensions import "))
+        || lowered
+            .lines()
+            .any(|line| line.trim_start().starts_with("from typing_extensions import "))
         || lowered.lines().any(|line| line.trim_start() == "import typing_extensions")
     {
         backports.insert(BackportRequirement::TypingExtensionsAtLeast412);
@@ -1278,10 +1281,16 @@ fn imports_symbol_from_module(source: &str, module: &str, symbol: &str) -> bool 
         let trimmed = line.trim();
         trimmed == format!("from {module} import {symbol}")
             || (trimmed.starts_with(&format!("from {module} import "))
-                && trimmed
-                    .trim_start_matches(&format!("from {module} import "))
-                    .split(',')
-                    .any(|entry| entry.trim().split_once(" as ").map(|(name, _)| name.trim()).unwrap_or(entry.trim()) == symbol))
+                && trimmed.trim_start_matches(&format!("from {module} import ")).split(',').any(
+                    |entry| {
+                        entry
+                            .trim()
+                            .split_once(" as ")
+                            .map(|(name, _)| name.trim())
+                            .unwrap_or(entry.trim())
+                            == symbol
+                    },
+                ))
     })
 }
 
@@ -1433,7 +1442,8 @@ fn rewrite_interface_line(
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let mut extras = vec![String::from("Protocol")];
-    if !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options)
+    if !statement.type_params.is_empty()
+        && !can_use_native_type_params(&statement.type_params, options)
     {
         extras.push(generic_base(statement));
     }
@@ -1593,14 +1603,7 @@ fn render_native_type_params(type_params: &[typepython_syntax::TypeParam]) -> St
         return String::new();
     }
 
-    format!(
-        "[{}]",
-        type_params
-            .iter()
-            .map(render_native_type_param)
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
+    format!("[{}]", type_params.iter().map(render_native_type_param).collect::<Vec<_>>().join(", "))
 }
 
 fn render_native_type_param(type_param: &typepython_syntax::TypeParam) -> String {

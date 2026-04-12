@@ -64,7 +64,9 @@ mod baseline_tests {
         assert!(versions.contains("_interpqueues: 3.13-"));
         assert!(versions.contains("_zstd: 3.14-"));
         assert!(typing.contains("from annotationlib import Format"));
-        assert!(typing.contains("\"get_protocol_members\", \"is_protocol\", \"NoDefault\", \"TypeIs\", \"ReadOnly\""));
+        assert!(typing.contains(
+            "\"get_protocol_members\", \"is_protocol\", \"NoDefault\", \"TypeIs\", \"ReadOnly\""
+        ));
         assert!(baseline.contains("target_range = \"3.10-3.14\""));
     }
 }

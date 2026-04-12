@@ -469,12 +469,12 @@ fn verify_build_artifacts_accepts_native_type_alias_surface() {
             project_dir.join(".typepython/build/app/__init__.py"),
             "type Pair[T] = tuple[T, T]\n",
         )
-            .expect("runtime artifact should be written");
+        .expect("runtime artifact should be written");
         fs::write(
             project_dir.join(".typepython/build/app/__init__.pyi"),
             "type Pair[T] = tuple[T, T]\n",
         )
-            .expect("stub artifact should be written");
+        .expect("stub artifact should be written");
         fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
             .expect("marker should be written");
         write_incremental_snapshot(
@@ -501,8 +501,9 @@ fn verify_build_artifacts_accepts_native_type_alias_surface() {
 
 #[test]
 fn verify_build_artifacts_accepts_native_generic_class_and_function_surface() {
-    let project_dir =
-        temp_project_dir("verify_build_artifacts_accepts_native_generic_class_and_function_surface");
+    let project_dir = temp_project_dir(
+        "verify_build_artifacts_accepts_native_generic_class_and_function_surface",
+    );
     let rendered = {
         fs::write(
             project_dir.join("typepython.toml"),
@@ -1243,8 +1244,9 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
 
 #[test]
 fn verify_publication_metadata_reports_requires_python_mismatch_for_native_output() {
-    let project_dir =
-        temp_project_dir("verify_publication_metadata_reports_requires_python_mismatch_for_native_output");
+    let project_dir = temp_project_dir(
+        "verify_publication_metadata_reports_requires_python_mismatch_for_native_output",
+    );
     let rendered = {
         fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
         fs::write(
@@ -1257,16 +1259,10 @@ fn verify_publication_metadata_reports_requires_python_mismatch_for_native_outpu
             "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\n",
         )
         .expect("pyproject.toml should be written");
-        fs::write(
-            project_dir.join("build/app/__init__.py"),
-            "type Pair[T = int] = tuple[T, T]\n",
-        )
-        .expect("runtime artifact should be written");
-        fs::write(
-            project_dir.join("build/app/__init__.pyi"),
-            "type Pair[T = int] = tuple[T, T]\n",
-        )
-        .expect("stub artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("stub artifact should be written");
 
         let config = load(&project_dir).expect("config should load");
         verify_publication_metadata(
@@ -1337,8 +1333,9 @@ fn verify_publication_metadata_reports_missing_typing_extensions_baseline_in_whe
 
 #[test]
 fn verify_publication_metadata_accepts_matching_requires_python_for_native_output() {
-    let project_dir =
-        temp_project_dir("verify_publication_metadata_accepts_matching_requires_python_for_native_output");
+    let project_dir = temp_project_dir(
+        "verify_publication_metadata_accepts_matching_requires_python_for_native_output",
+    );
     let rendered = {
         fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
         fs::write(
@@ -1351,16 +1348,10 @@ fn verify_publication_metadata_accepts_matching_requires_python_for_native_outpu
             "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.13\"\n",
         )
         .expect("pyproject.toml should be written");
-        fs::write(
-            project_dir.join("build/app/__init__.py"),
-            "type Pair[T = int] = tuple[T, T]\n",
-        )
-        .expect("runtime artifact should be written");
-        fs::write(
-            project_dir.join("build/app/__init__.pyi"),
-            "type Pair[T = int] = tuple[T, T]\n",
-        )
-        .expect("stub artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.py"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("runtime artifact should be written");
+        fs::write(project_dir.join("build/app/__init__.pyi"), "type Pair[T = int] = tuple[T, T]\n")
+            .expect("stub artifact should be written");
 
         let config = load(&project_dir).expect("config should load");
         verify_publication_metadata(

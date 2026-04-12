@@ -75,7 +75,8 @@ fn run_pipeline_keeps_lowering_when_checker_fails() {
 #[test]
 fn run_pipeline_emits_native_syntax_for_target_python_313() {
     let runtime_source = {
-        let project_dir = temp_project_dir("run_pipeline_emits_native_syntax_for_target_python_313");
+        let project_dir =
+            temp_project_dir("run_pipeline_emits_native_syntax_for_target_python_313");
         fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
         fs::write(
             project_dir.join("typepython.toml"),
@@ -156,7 +157,8 @@ fn run_pipeline_respects_target_and_emit_style_matrix_for_generic_output() {
             fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
             fs::write(project_dir.join("typepython.toml"), case.config)
                 .expect("test setup should succeed");
-            fs::write(project_dir.join("src/app.tpy"), case.source).expect("test setup should succeed");
+            fs::write(project_dir.join("src/app.tpy"), case.source)
+                .expect("test setup should succeed");
             let config = load(&project_dir).expect("test setup should succeed");
             let snapshot = run_pipeline(&config).expect("test setup should succeed");
             let runtime_source = snapshot
@@ -447,18 +449,16 @@ fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
 #[test]
 fn run_pipeline_invalidates_cache_when_emit_style_changes() {
     let (lowered_modules, runtime_source) = {
-        let project_dir = temp_project_dir("run_pipeline_invalidates_cache_when_emit_style_changes");
+        let project_dir =
+            temp_project_dir("run_pipeline_invalidates_cache_when_emit_style_changes");
         fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
         fs::write(
             project_dir.join("typepython.toml"),
             "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
         )
         .expect("test setup should succeed");
-        fs::write(
-            project_dir.join("src/app.tpy"),
-            "typealias Pair[T = int] = tuple[T, T]\n",
-        )
-        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "typealias Pair[T = int] = tuple[T, T]\n")
+            .expect("test setup should succeed");
         let config = load(&project_dir).expect("test setup should succeed");
 
         let first = run_pipeline(&config).expect("test setup should succeed");

@@ -534,7 +534,11 @@ fn summary_runtime_semantics(
     match declaration.kind {
         DeclarationKind::TypeAlias => Some(RuntimeTypingSemantics {
             form: RuntimeTypingForm::TypeAliasType,
-            type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+            type_param_names: declaration
+                .type_params
+                .iter()
+                .map(|type_param| type_param.name.clone())
+                .collect(),
             annotation_scope_owner: Some(declaration.name.clone()),
             lazy_alias_value: true,
             local_type_params_hidden_from_globals: true,
@@ -543,7 +547,11 @@ fn summary_runtime_semantics(
         DeclarationKind::Class if !declaration.type_params.is_empty() => {
             Some(RuntimeTypingSemantics {
                 form: RuntimeTypingForm::NativeGenericClass,
-                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                type_param_names: declaration
+                    .type_params
+                    .iter()
+                    .map(|type_param| type_param.name.clone())
+                    .collect(),
                 annotation_scope_owner: Some(declaration.name.clone()),
                 lazy_alias_value: false,
                 local_type_params_hidden_from_globals: true,
@@ -555,7 +563,11 @@ fn summary_runtime_semantics(
         {
             Some(RuntimeTypingSemantics {
                 form: RuntimeTypingForm::NativeGenericFunction,
-                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                type_param_names: declaration
+                    .type_params
+                    .iter()
+                    .map(|type_param| type_param.name.clone())
+                    .collect(),
                 annotation_scope_owner: Some(declaration.name.clone()),
                 lazy_alias_value: false,
                 local_type_params_hidden_from_globals: true,
@@ -627,9 +639,7 @@ fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
         kind: Some(match type_param.kind {
             typepython_binding::GenericTypeParamKind::TypeVar => String::from("typevar"),
             typepython_binding::GenericTypeParamKind::ParamSpec => String::from("paramspec"),
-            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
-                String::from("typevartuple")
-            }
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => String::from("typevartuple"),
         }),
         name: type_param.name.clone(),
         bound: type_param.rendered_bound(),

@@ -309,13 +309,16 @@ pub(crate) fn verify_publication_metadata(
     supplied_artifacts: &[SuppliedVerifyArtifact],
 ) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
-    let requirements =
-        modules.map(|modules| publication_requirements_from_modules(artifacts, modules)).unwrap_or_else(|| publication_requirements_from_artifacts(artifacts));
+    let requirements = modules
+        .map(|modules| publication_requirements_from_modules(artifacts, modules))
+        .unwrap_or_else(|| publication_requirements_from_artifacts(artifacts));
 
     if let Some(metadata) = local_project_package_metadata(config) {
-        diagnostics
-            .diagnostics
-            .extend(publication_metadata_diagnostics("project metadata", &requirements, &metadata));
+        diagnostics.diagnostics.extend(publication_metadata_diagnostics(
+            "project metadata",
+            &requirements,
+            &metadata,
+        ));
     }
 
     for artifact in supplied_artifacts {
@@ -363,9 +366,8 @@ fn publication_requirements_from_artifacts(artifacts: &[EmitArtifact]) -> Public
     let mut requirements = PublicationRequirements::default();
 
     for artifact in artifacts {
-        for path in [artifact.runtime_path.as_ref(), artifact.stub_path.as_ref()]
-            .into_iter()
-            .flatten()
+        for path in
+            [artifact.runtime_path.as_ref(), artifact.stub_path.as_ref()].into_iter().flatten()
         {
             let Ok(source) = fs::read_to_string(path) else {
                 continue;
@@ -384,8 +386,10 @@ fn publication_requirements_from_modules(
     artifacts: &[EmitArtifact],
     modules: &[LoweredModule],
 ) -> PublicationRequirements {
-    let modules_by_source =
-        modules.iter().map(|module| (module.source_path.as_path(), module)).collect::<BTreeMap<_, _>>();
+    let modules_by_source = modules
+        .iter()
+        .map(|module| (module.source_path.as_path(), module))
+        .collect::<BTreeMap<_, _>>();
     let mut requirements = PublicationRequirements::default();
 
     for artifact in artifacts {
@@ -447,10 +451,8 @@ fn publication_requirements_from_source(source: &str) -> PublicationRequirements
                 requirements.min_python =
                     max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
                 if native_type_params_include_default(trimmed) {
-                    requirements.min_python = max_python_target(
-                        requirements.min_python,
-                        Some(PythonTarget::PYTHON_3_13),
-                    );
+                    requirements.min_python =
+                        max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
                 }
             }
         }
@@ -527,9 +529,11 @@ fn supplied_artifact_package_metadata(
     parse_package_metadata_text(metadata)
 }
 
-fn parse_package_metadata_text(bytes: &[u8]) -> std::result::Result<Option<PackageMetadata>, String> {
-    let rendered =
-        String::from_utf8(bytes.to_vec()).map_err(|error| format!("invalid UTF-8 metadata: {error}"))?;
+fn parse_package_metadata_text(
+    bytes: &[u8],
+) -> std::result::Result<Option<PackageMetadata>, String> {
+    let rendered = String::from_utf8(bytes.to_vec())
+        .map_err(|error| format!("invalid UTF-8 metadata: {error}"))?;
     let mut requires_python = None;
     let mut requires_dist = Vec::new();
     for line in rendered.lines() {

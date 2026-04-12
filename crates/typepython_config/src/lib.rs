@@ -1318,7 +1318,8 @@ mod tests {
 
     #[test]
     fn accepts_target_python_313_with_native_default_emit_style() {
-        let project_dir = temp_project_dir("accepts_target_python_313_with_native_default_emit_style");
+        let project_dir =
+            temp_project_dir("accepts_target_python_313_with_native_default_emit_style");
         fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.13\"\n")
             .expect("typepython.toml should be written");
 

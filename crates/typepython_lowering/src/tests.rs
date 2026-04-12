@@ -898,7 +898,10 @@ fn lower_generic_emit_style_matrix_covers_target_and_default_combinations() {
                 "type Pair[T = int] = tuple[T, T]",
                 "def first[T = int](value: T = 1) -> T:",
             ],
-            forbidden_fragments: &["TypeVar(\"T\", default=\"int\")", "Pair: TypeAlias = tuple[T, T]"],
+            forbidden_fragments: &[
+                "TypeVar(\"T\", default=\"int\")",
+                "Pair: TypeAlias = tuple[T, T]",
+            ],
         },
         Case {
             name: "compat-314-modern-owners-legacy-generics",
@@ -910,7 +913,11 @@ fn lower_generic_emit_style_matrix_covers_target_and_default_combinations() {
                 "TypeVar(\"T\")",
                 "Pair: TypeAlias = tuple[T, T]",
             ],
-            forbidden_fragments: &["typing_extensions.ReadOnly", "typing_extensions.TypeIs", "type Pair[T] ="],
+            forbidden_fragments: &[
+                "typing_extensions.ReadOnly",
+                "typing_extensions.TypeIs",
+                "type Pair[T] =",
+            ],
         },
     ];
 
@@ -2595,8 +2602,7 @@ fn snapshot_lower_compat_qualified_names_310() {
             "import typing\nimport warnings\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n",
         ),
     });
-    let lowered =
-        lower_with_options(&tree, &compat_options("3.10"));
+    let lowered = lower_with_options(&tree, &compat_options("3.10"));
     assert!(lowered.diagnostics.is_empty());
     insta::assert_snapshot!(lowered.module.python_source);
 }
@@ -2611,8 +2617,7 @@ fn snapshot_lower_compat_imports_312() {
             "from typing_extensions import Self, Required, NotRequired, dataclass_transform, override, ReadOnly, TypeIs\nfrom warnings import deprecated\n\n@deprecated(\"use new_api\")\nclass Box:\n    @override\n    def clone(self) -> Self:\n        ...\n",
         ),
     });
-    let lowered =
-        lower_with_options(&tree, &compat_options("3.12"));
+    let lowered = lower_with_options(&tree, &compat_options("3.12"));
     assert!(lowered.diagnostics.is_empty());
     insta::assert_snapshot!(lowered.module.python_source);
 }

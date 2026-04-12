@@ -26,10 +26,9 @@ use typepython_config::{DiagnosticLevel, ImportFallback};
 use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionApplicability};
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
-    IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary,
-    SnapshotMetadata, SummaryCallableSignature, SummaryDeclarationFact, SummaryExport,
-    SummaryImportSymbolTarget, SummaryImportTarget, SummarySignatureParam, SummaryTypeParam,
-    snapshot_with_summaries,
+    IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SnapshotMetadata,
+    SummaryCallableSignature, SummaryDeclarationFact, SummaryExport, SummaryImportSymbolTarget,
+    SummaryImportTarget, SummarySignatureParam, SummaryTypeParam, snapshot_with_summaries,
 };
 use typepython_syntax::SourceKind;
 use typepython_target::{RuntimeFeature, RuntimeTypingForm, RuntimeTypingSemantics};
@@ -881,7 +880,11 @@ fn summary_runtime_semantics(
     match declaration.kind {
         DeclarationKind::TypeAlias => Some(RuntimeTypingSemantics {
             form: RuntimeTypingForm::TypeAliasType,
-            type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+            type_param_names: declaration
+                .type_params
+                .iter()
+                .map(|type_param| type_param.name.clone())
+                .collect(),
             annotation_scope_owner: Some(declaration.name.clone()),
             lazy_alias_value: true,
             local_type_params_hidden_from_globals: true,
@@ -890,7 +893,11 @@ fn summary_runtime_semantics(
         DeclarationKind::Class if !declaration.type_params.is_empty() => {
             Some(RuntimeTypingSemantics {
                 form: RuntimeTypingForm::NativeGenericClass,
-                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                type_param_names: declaration
+                    .type_params
+                    .iter()
+                    .map(|type_param| type_param.name.clone())
+                    .collect(),
                 annotation_scope_owner: Some(declaration.name.clone()),
                 lazy_alias_value: false,
                 local_type_params_hidden_from_globals: true,
@@ -902,7 +909,11 @@ fn summary_runtime_semantics(
         {
             Some(RuntimeTypingSemantics {
                 form: RuntimeTypingForm::NativeGenericFunction,
-                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                type_param_names: declaration
+                    .type_params
+                    .iter()
+                    .map(|type_param| type_param.name.clone())
+                    .collect(),
                 annotation_scope_owner: Some(declaration.name.clone()),
                 lazy_alias_value: false,
                 local_type_params_hidden_from_globals: true,
@@ -913,10 +924,7 @@ fn summary_runtime_semantics(
     }
 }
 
-fn runtime_semantic_features(
-    declaration: &Declaration,
-    is_alias: bool,
-) -> Vec<RuntimeFeature> {
+fn runtime_semantic_features(declaration: &Declaration, is_alias: bool) -> Vec<RuntimeFeature> {
     let mut features = Vec::new();
     if is_alias {
         features.push(RuntimeFeature::TypeStmt);
@@ -1136,9 +1144,7 @@ fn summary_type_param(type_param: &typepython_binding::GenericTypeParam) -> Summ
         kind: Some(match type_param.kind {
             typepython_binding::GenericTypeParamKind::TypeVar => String::from("typevar"),
             typepython_binding::GenericTypeParamKind::ParamSpec => String::from("paramspec"),
-            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
-                String::from("typevartuple")
-            }
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => String::from("typevartuple"),
         }),
         name: type_param.name.clone(),
         bound: type_param.rendered_bound(),

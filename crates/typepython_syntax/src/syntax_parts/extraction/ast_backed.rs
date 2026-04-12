@@ -445,9 +445,8 @@ pub(in super::super) fn extract_ast_backed_statement(
 ) -> Option<SyntaxStatement> {
     match stmt {
         Stmt::TypeAlias(stmt) => Some(SyntaxStatement::TypeAlias(TypeAliasStatement {
-            name: extract_direct_name(stmt.name.as_ref()).or_else(|| {
-                slice_range(source, stmt.name.range()).map(str::to_owned)
-            })?,
+            name: extract_direct_name(stmt.name.as_ref())
+                .or_else(|| slice_range(source, stmt.name.range()).map(str::to_owned))?,
             type_params: extract_ast_type_params(
                 path,
                 source,
