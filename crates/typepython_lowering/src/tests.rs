@@ -18,6 +18,13 @@ fn compat_options(version: &str) -> LoweringOptions {
     }
 }
 
+fn native_options(version: &str) -> LoweringOptions {
+    LoweringOptions {
+        target_python: PythonTarget::parse(version).expect("test target should parse"),
+        emit_style: EmitStyle::Native,
+    }
+}
+
 #[test]
 fn lower_rewrites_top_level_unsafe_blocks() {
     let lowered = lower(&SyntaxTree {
@@ -787,6 +794,49 @@ fn lower_rewrites_generic_ordinary_class_and_function_headers() {
             SourceMapEntry { original_line: 5, lowered_line: 8 },
         ]
     );
+}
+
+#[test]
+fn lower_native_mode_preserves_pep_695_syntax() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("native-generics.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "typealias Pair[T] = tuple[T, T]\n\nclass Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
+            ),
+        }),
+        &native_options("3.13"),
+    );
+
+    assert!(lowered.diagnostics.is_empty());
+    assert_eq!(
+        lowered.module.python_source,
+        "type Pair[T] = tuple[T, T]\n\nclass Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n"
+    );
+    assert!(lowered.module.required_imports.is_empty());
+}
+
+#[test]
+fn lower_native_mode_falls_back_for_generic_defaults_before_313() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("native-default-fallback.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "typealias Pair[T = int] = tuple[T, T]\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+            ),
+        }),
+        &native_options("3.12"),
+    );
+
+    assert!(lowered.diagnostics.is_empty());
+    assert!(lowered.module.python_source.contains("TypeVar(\"T\", default=\"int\")"));
+    assert!(lowered.module.python_source.contains("Pair: TypeAlias = tuple[T, T]"));
+    assert!(!lowered.module.python_source.contains("type Pair[T = int]"));
+    assert!(!lowered.module.python_source.contains("def first[T = int]"));
 }
 
 #[test]

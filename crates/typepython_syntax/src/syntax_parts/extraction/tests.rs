@@ -3617,6 +3617,26 @@ fn parse_filters_guarded_typealias_declarations_by_selected_branch() {
 }
 
 #[test]
+fn parse_python_native_type_alias_statement() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("native-type-alias.py"),
+        kind: SourceKind::Python,
+        logical_module: String::new(),
+        text: String::from("type Pair[T] = tuple[T, T]\n"),
+    });
+
+    assert!(tree.diagnostics.is_empty());
+    assert!(tree.statements.iter().any(|statement| matches!(
+        statement,
+        SyntaxStatement::TypeAlias(TypeAliasStatement { name, value, type_params, line, .. })
+            if name == "Pair"
+                && value == "tuple[T, T]"
+                && type_params.len() == 1
+                && *line == 1
+    )));
+}
+
+#[test]
 fn parse_marks_final_decorated_classes_and_methods() {
     let tree = parse(SourceFile {
         path: PathBuf::from("final-decorators.py"),

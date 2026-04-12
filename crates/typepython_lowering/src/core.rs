@@ -272,12 +272,23 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         &class_defs,
         &function_defs,
         &overloads,
+        options,
     );
-    let generic_class_like_declarations = has_generic_class_like_declarations(
+    let generic_class_like_declarations = has_compat_generic_class_like_declarations(
         &interfaces,
         &data_classes,
         &sealed_classes,
         &class_defs,
+        options,
+    );
+    let has_generic_type_params = has_any_generic_type_params(
+        &type_aliases,
+        &interfaces,
+        &data_classes,
+        &sealed_classes,
+        &class_defs,
+        &function_defs,
+        &overloads,
     );
     let has_typed_dict_transforms = type_aliases.values().any(|statement| {
         parse_transform_expr(statement.value.trim())
@@ -382,7 +393,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         for (name, type_param) in &runtime_type_params {
             inserted_lines.emit_synthetic_line(rewrite_typevar_line(name, type_param));
         }
-        if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
+        if type_aliases.values().any(|statement| !can_use_native_typealias(statement, options))
+            && !has_typealias_import(&tree.source.text)
+        {
             inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
         }
         if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
@@ -423,53 +436,62 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
 
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
-        let replacement_lines = if let Some(statement) = type_aliases.get(&line_number) {
-            if let Some(expanded) =
-                try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
-            {
-                expanded
+        let (replacement_lines, preserve_variadic_syntax) =
+            if let Some(statement) = type_aliases.get(&line_number) {
+                if let Some(expanded) =
+                    try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
+                {
+                    (expanded, false)
+                } else {
+                    (
+                        vec![rewrite_typealias_line(line, statement, options)],
+                        can_use_native_typealias(statement, options),
+                    )
+                }
+            } else if let Some(statement) = interfaces.get(&line_number) {
+                (
+                    vec![rewrite_interface_line(line, statement, options)],
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if let Some(statement) = data_classes.get(&line_number) {
+                (
+                    rewrite_data_class_lines(line, statement, options).into_iter().collect(),
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if let Some(statement) = overloads.get(&line_number) {
+                (
+                    rewrite_overload_lines(line, statement, options).into_iter().collect(),
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if let Some(statement) = sealed_classes.get(&line_number) {
+                (
+                    vec![rewrite_sealed_class_line(line, statement, options)],
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if let Some(statement) = class_defs.get(&line_number) {
+                (
+                    vec![rewrite_class_def_line(line, statement, options)],
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if let Some(statement) = function_defs.get(&line_number) {
+                (
+                    vec![rewrite_function_def_line(line, statement, options)],
+                    can_use_native_type_params(&statement.type_params, options),
+                )
+            } else if unsafe_lines.contains(&line_number) {
+                (vec![rewrite_unsafe_line(line)], false)
             } else {
-                vec![typepython_syntax::normalize_source_variadic_type_syntax(
-                    &rewrite_typealias_line(line, statement),
-                )]
-            }
-        } else if let Some(statement) = interfaces.get(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(&rewrite_interface_line(
-                line, statement,
-            ))]
-        } else if let Some(statement) = data_classes.get(&line_number) {
-            rewrite_data_class_lines(line, statement)
-                .into_iter()
-                .map(|replacement| {
-                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
-                })
-                .collect()
-        } else if overloads.contains_key(&line_number) {
-            rewrite_overload_lines(line)
-                .into_iter()
-                .map(|replacement| {
-                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
-                })
-                .collect()
-        } else if let Some(statement) = sealed_classes.get(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(
-                &rewrite_sealed_class_line(line, statement),
-            )]
-        } else if let Some(statement) = class_defs.get(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(&rewrite_class_def_line(
-                line, statement,
-            ))]
-        } else if function_defs.contains_key(&line_number) {
-            vec![typepython_syntax::normalize_source_variadic_type_syntax(
-                &rewrite_function_def_line(line),
-            )]
-        } else if unsafe_lines.contains(&line_number) {
-            vec![rewrite_unsafe_line(line)]
-        } else {
-            vec![line.to_owned()]
-        };
+                (vec![line.to_owned()], false)
+            };
         let replacement_lines = replacement_lines
             .into_iter()
+            .map(|replacement| {
+                if preserve_variadic_syntax {
+                    replacement
+                } else {
+                    typepython_syntax::normalize_source_variadic_type_syntax(&replacement)
+                }
+            })
             .flat_map(|replacement| normalize_target_compatibility_line(&replacement, options))
             .collect::<Vec<_>>();
 
@@ -505,7 +527,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         span_map,
         required_imports,
         metadata: LoweringMetadata {
-            has_generic_type_params: !runtime_type_params.is_empty(),
+            has_generic_type_params,
             has_typed_dict_transforms,
             has_sealed_classes,
         },
@@ -840,10 +862,14 @@ fn collect_runtime_type_params(
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
     overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    options: &LoweringOptions,
 ) -> std::collections::BTreeMap<String, RuntimeTypeParam> {
     let mut type_params = std::collections::BTreeMap::new();
 
     for statement in type_aliases.values() {
+        if can_use_native_typealias(statement, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -851,6 +877,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in interfaces.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -858,6 +887,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in data_classes.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -865,6 +897,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in sealed_classes.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -872,6 +907,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in class_defs.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -879,6 +917,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in function_defs.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -886,6 +927,9 @@ fn collect_runtime_type_params(
         }
     }
     for statement in overloads.values() {
+        if can_use_native_type_params(&statement.type_params, options) {
+            continue;
+        }
         for type_param in &statement.type_params {
             type_params
                 .entry(type_param.name.clone())
@@ -915,16 +959,43 @@ impl RuntimeTypeParam {
     }
 }
 
-fn has_generic_class_like_declarations(
+fn has_compat_generic_class_like_declarations(
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
     class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    options: &LoweringOptions,
 ) -> bool {
-    interfaces.values().any(|statement| !statement.type_params.is_empty())
+    interfaces
+        .values()
+        .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
+        || data_classes
+            .values()
+            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
+        || sealed_classes
+            .values()
+            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
+        || class_defs
+            .values()
+            .any(|statement| !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options))
+}
+
+fn has_any_generic_type_params(
+    type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
+    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+) -> bool {
+    type_aliases.values().any(|statement| !statement.type_params.is_empty())
+        || interfaces.values().any(|statement| !statement.type_params.is_empty())
         || data_classes.values().any(|statement| !statement.type_params.is_empty())
         || sealed_classes.values().any(|statement| !statement.type_params.is_empty())
         || class_defs.values().any(|statement| !statement.type_params.is_empty())
+        || function_defs.values().any(|statement| !statement.type_params.is_empty())
+        || overloads.values().any(|statement| !statement.type_params.is_empty())
 }
 
 fn rewrite_unsafe_line(line: &str) -> String {
@@ -933,10 +1004,23 @@ fn rewrite_unsafe_line(line: &str) -> String {
     format!("{indentation}if True:")
 }
 
-fn rewrite_typealias_line(line: &str, statement: &typepython_syntax::TypeAliasStatement) -> String {
+fn rewrite_typealias_line(
+    line: &str,
+    statement: &typepython_syntax::TypeAliasStatement,
+    options: &LoweringOptions,
+) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    format!("{indentation}{}: TypeAlias = {}", statement.name, statement.value)
+    if can_use_native_typealias(statement, options) {
+        format!(
+            "{indentation}type {}{} = {}",
+            statement.name,
+            render_native_type_params(&statement.type_params),
+            statement.value
+        )
+    } else {
+        format!("{indentation}{}: TypeAlias = {}", statement.name, statement.value)
+    }
 }
 
 fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
@@ -1057,50 +1141,85 @@ fn has_module_import(source: &str, module: &str) -> bool {
 fn rewrite_interface_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
+    options: &LoweringOptions,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let mut extras = vec![String::from("Protocol")];
-    if !statement.type_params.is_empty() {
+    if !statement.type_params.is_empty() && !can_use_native_type_params(&statement.type_params, options)
+    {
         extras.push(generic_base(statement));
     }
-    let bases = append_bases(&statement.header_suffix, &extras);
-    format!("{indentation}class {}{}:", statement.name, bases)
+    let bases = append_bases(&runtime_header_suffix(statement), &extras);
+    format!(
+        "{indentation}class {}{}{}:",
+        statement.name,
+        native_type_param_list_if_enabled(&statement.type_params, options),
+        bases
+    )
 }
 
 fn rewrite_data_class_lines(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
+    options: &LoweringOptions,
 ) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement);
+    let bases = append_optional_generic_base(statement, options);
 
-    [format!("{indentation}@dataclass"), format!("{indentation}class {}{}:", statement.name, bases)]
+    [
+        format!("{indentation}@dataclass"),
+        format!(
+            "{indentation}class {}{}{}:",
+            statement.name,
+            native_type_param_list_if_enabled(&statement.type_params, options),
+            bases
+        ),
+    ]
 }
 
 fn rewrite_sealed_class_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
+    options: &LoweringOptions,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement);
+    let bases = append_optional_generic_base(statement, options);
 
-    format!("{indentation}class {}{}:  # tpy:sealed", statement.name, bases)
+    format!(
+        "{indentation}class {}{}{}:  # tpy:sealed",
+        statement.name,
+        native_type_param_list_if_enabled(&statement.type_params, options),
+        bases
+    )
 }
 
 fn rewrite_class_def_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
+    options: &LoweringOptions,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement);
-    format!("{indentation}class {}{}:", statement.name, bases)
+    let bases = append_optional_generic_base(statement, options);
+    format!(
+        "{indentation}class {}{}{}:",
+        statement.name,
+        native_type_param_list_if_enabled(&statement.type_params, options),
+        bases
+    )
 }
 
-fn rewrite_function_def_line(line: &str) -> String {
+fn rewrite_function_def_line(
+    line: &str,
+    statement: &typepython_syntax::FunctionStatement,
+    options: &LoweringOptions,
+) -> String {
+    if can_use_native_type_params(&statement.type_params, options) {
+        return line.to_owned();
+    }
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let trimmed = line.trim_start();
@@ -1152,9 +1271,98 @@ fn split_bracketed(input: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn append_optional_generic_base(statement: &typepython_syntax::NamedBlockStatement) -> String {
+fn can_use_native_type_params(
+    type_params: &[typepython_syntax::TypeParam],
+    options: &LoweringOptions,
+) -> bool {
+    options.emit_style == EmitStyle::Native
+        && options.target_python.supports_inline_type_params()
+        && (options.target_python.supports_generic_defaults()
+            || !type_params.iter().any(|type_param| type_param.default.is_some()))
+}
+
+fn can_use_native_typealias(
+    statement: &typepython_syntax::TypeAliasStatement,
+    options: &LoweringOptions,
+) -> bool {
+    options.emit_style == EmitStyle::Native
+        && options.target_python.supports_type_stmt()
+        && can_use_native_type_params(&statement.type_params, options)
+}
+
+fn native_type_param_list_if_enabled(
+    type_params: &[typepython_syntax::TypeParam],
+    options: &LoweringOptions,
+) -> String {
+    if can_use_native_type_params(type_params, options) {
+        render_native_type_params(type_params)
+    } else {
+        String::new()
+    }
+}
+
+fn render_native_type_params(type_params: &[typepython_syntax::TypeParam]) -> String {
+    if type_params.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "[{}]",
+        type_params
+            .iter()
+            .map(render_native_type_param)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn render_native_type_param(type_param: &typepython_syntax::TypeParam) -> String {
+    let prefix = match type_param.kind {
+        typepython_syntax::TypeParamKind::TypeVar => "",
+        typepython_syntax::TypeParamKind::ParamSpec => "**",
+        typepython_syntax::TypeParamKind::TypeVarTuple => "*",
+    };
+    let mut rendered = if !type_param.constraints.is_empty() {
+        format!(
+            "{}: ({})",
+            type_param.name,
+            if type_param.constraint_exprs.is_empty() {
+                type_param.constraints.join(", ")
+            } else {
+                type_param
+                    .constraint_exprs
+                    .iter()
+                    .map(typepython_syntax::TypeExpr::render)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        )
+    } else if let Some(bound) = &type_param.bound_expr {
+        format!("{}: {}", type_param.name, bound.render())
+    } else if let Some(bound) = &type_param.bound {
+        format!("{}: {}", type_param.name, bound)
+    } else {
+        type_param.name.clone()
+    };
+    rendered.insert_str(0, prefix);
+    if let Some(default) = &type_param.default_expr {
+        rendered.push_str(" = ");
+        rendered.push_str(&default.render());
+    } else if let Some(default) = &type_param.default {
+        rendered.push_str(" = ");
+        rendered.push_str(default);
+    }
+    rendered
+}
+
+fn append_optional_generic_base(
+    statement: &typepython_syntax::NamedBlockStatement,
+    options: &LoweringOptions,
+) -> String {
     let header_suffix = runtime_header_suffix(statement);
     if statement.type_params.is_empty() {
+        if header_suffix.is_empty() { String::new() } else { header_suffix }
+    } else if can_use_native_type_params(&statement.type_params, options) {
         if header_suffix.is_empty() { String::new() } else { header_suffix }
     } else {
         append_bases(&header_suffix, &[generic_base(statement)])
@@ -1309,12 +1517,20 @@ fn has_dataclass_import(source: &str) -> bool {
     })
 }
 
-fn rewrite_overload_lines(line: &str) -> [String; 2] {
+fn rewrite_overload_lines(
+    line: &str,
+    statement: &typepython_syntax::FunctionStatement,
+    options: &LoweringOptions,
+) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let rewritten =
         line.trim_start().strip_prefix("overload ").unwrap_or_else(|| line.trim_start()).to_owned();
-    let rewritten = strip_generic_type_params(&rewritten);
+    let rewritten = if can_use_native_type_params(&statement.type_params, options) {
+        rewritten
+    } else {
+        strip_generic_type_params(&rewritten)
+    };
 
     [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
 }

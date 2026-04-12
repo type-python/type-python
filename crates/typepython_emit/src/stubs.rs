@@ -1416,6 +1416,17 @@ fn collect_authoritative_stub_edits(
     for statement in suite {
         match statement {
             Stmt::Import(_) | Stmt::ImportFrom(_) => {}
+            Stmt::TypeAlias(type_alias) => {
+                let start_line = offset_to_line(source, type_alias.range.start().to_usize());
+                let end_offset = type_alias.range.end().to_usize().saturating_sub(1);
+                let end_line =
+                    offset_to_line(source, end_offset.max(type_alias.range.start().to_usize()));
+                edits.push(StubEdit {
+                    start_line,
+                    end_line,
+                    replacement: slice_range(source, type_alias.range()).map(str::to_owned),
+                });
+            }
             Stmt::FunctionDef(function) => {
                 let function_line = offset_to_line(source, function.name.range.start().to_usize());
                 let start_line = function

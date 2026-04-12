@@ -444,6 +444,22 @@ pub(in super::super) fn extract_ast_backed_statement(
     diagnostics: &mut DiagnosticReport,
 ) -> Option<SyntaxStatement> {
     match stmt {
+        Stmt::TypeAlias(stmt) => Some(SyntaxStatement::TypeAlias(TypeAliasStatement {
+            name: extract_direct_name(stmt.name.as_ref()).or_else(|| {
+                slice_range(source, stmt.name.range()).map(str::to_owned)
+            })?,
+            type_params: extract_ast_type_params(
+                path,
+                source,
+                stmt.type_params.as_deref(),
+                line,
+                "type alias declaration",
+                diagnostics,
+            )?,
+            value: slice_range(source, stmt.value.range()).map(str::to_owned)?,
+            value_expr: slice_range(source, stmt.value.range()).and_then(TypeExpr::parse),
+            line,
+        })),
         Stmt::ClassDef(stmt) => {
             let deprecation_message = deprecated_decorator_message(&stmt.decorator_list);
             let mut statement = NamedBlockStatement {

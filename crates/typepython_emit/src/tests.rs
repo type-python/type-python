@@ -790,6 +790,27 @@ fn generate_typepython_stub_source_handles_import_statements() {
 }
 
 #[test]
+fn generate_typepython_stub_source_preserves_native_type_alias_surface() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/native_alias.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "type Pair[T] = tuple[T, T]\n\ndef first[T](value: T) -> T:\n    return value\n",
+        ),
+        source_map: Vec::new(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("native alias stub should generate");
+
+    assert!(stub.contains("type Pair[T] = tuple[T, T]"));
+    assert!(stub.contains("def first[T](value: T) -> T: ..."));
+}
+
+#[test]
 fn generate_inferred_shadow_stub_handles_empty_module() {
     let stub = generate_inferred_stub_source("", InferredStubMode::Shadow)
         .expect("empty shadow stub generation should succeed");
