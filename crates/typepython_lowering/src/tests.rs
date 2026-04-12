@@ -9,6 +9,14 @@ use typepython_syntax::{
     SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
     TypeParamKind, UnsafeStatement, parse,
 };
+use typepython_target::{EmitStyle, PythonTarget};
+
+fn compat_options(version: &str) -> LoweringOptions {
+    LoweringOptions {
+        target_python: PythonTarget::parse(version).expect("test target should parse"),
+        emit_style: EmitStyle::Compat,
+    }
+}
 
 #[test]
 fn lower_rewrites_top_level_unsafe_blocks() {
@@ -865,7 +873,7 @@ fn lower_rewrites_typevartuple_helpers_for_target_python_310() {
             type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         },
-        &LoweringOptions { target_python: String::from("3.10") },
+        &compat_options("3.10"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -912,7 +920,7 @@ fn lower_rewrites_typevartuple_helpers_for_target_python_311() {
             type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         },
-        &LoweringOptions { target_python: String::from("3.11") },
+        &compat_options("3.11"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -1204,7 +1212,7 @@ fn lower_prefers_typing_notrequired_for_target_python_311() {
             type_ignore_directives: Vec::new(),
             diagnostics: DiagnosticReport::default(),
         },
-        &LoweringOptions { target_python: String::from("3.11") },
+        &compat_options("3.11"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -1231,7 +1239,7 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
                 "import typing\nimport warnings\n\n@warnings.deprecated(\"use new_api\")\nclass Box:\n    @typing.override\n    def clone(self) -> typing.Self:\n        ...\n\nclass Config(typing.TypedDict):\n    flag: typing.ReadOnly[bool]\n\ndef accepts(value: object) -> typing.TypeIs[int]:\n    ...\n",
             ),
         }),
-        &LoweringOptions { target_python: String::from("3.10") },
+        &compat_options("3.10"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -1256,7 +1264,7 @@ fn lower_rewrites_compat_import_sources_for_target_python_312() {
                 "from typing_extensions import Self, Required, NotRequired, dataclass_transform, override, ReadOnly, TypeIs\nfrom warnings import deprecated\n\n@deprecated(\"use new_api\")\nclass Box:\n    @override\n    def clone(self) -> Self:\n        ...\n",
             ),
         }),
-        &LoweringOptions { target_python: String::from("3.12") },
+        &compat_options("3.12"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -1283,7 +1291,7 @@ fn lower_rewrites_variadic_generic_compat_import_sources_for_target_python_310()
                 "from typing import TypeVarTuple, Unpack\nTs = TypeVarTuple(\"Ts\")\nvalue: typing.Unpack[Ts]\n",
             ),
         }),
-        &LoweringOptions { target_python: String::from("3.10") },
+        &compat_options("3.10"),
     );
 
     assert!(lowered.diagnostics.is_empty());
@@ -2401,7 +2409,7 @@ fn snapshot_lower_compat_qualified_names_310() {
         ),
     });
     let lowered =
-        lower_with_options(&tree, &LoweringOptions { target_python: String::from("3.10") });
+        lower_with_options(&tree, &compat_options("3.10"));
     assert!(lowered.diagnostics.is_empty());
     insta::assert_snapshot!(lowered.module.python_source);
 }
@@ -2417,7 +2425,7 @@ fn snapshot_lower_compat_imports_312() {
         ),
     });
     let lowered =
-        lower_with_options(&tree, &LoweringOptions { target_python: String::from("3.12") });
+        lower_with_options(&tree, &compat_options("3.12"));
     assert!(lowered.diagnostics.is_empty());
     insta::assert_snapshot!(lowered.module.python_source);
 }

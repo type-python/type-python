@@ -1893,6 +1893,7 @@ dependencies = [
  "proptest",
  "typepython-diagnostics",
  "typepython-syntax",
+ "typepython-target",
 ]
 
 [[package]]

@@ -111,12 +111,13 @@ impl<'a> InsertedLineTracker<'a> {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LoweringOptions {
-    pub target_python: String,
+    pub target_python: PythonTarget,
+    pub emit_style: EmitStyle,
 }
 
 impl Default for LoweringOptions {
     fn default() -> Self {
-        Self { target_python: String::from("3.10") }
+        Self { target_python: PythonTarget::default(), emit_style: EmitStyle::Compat }
     }
 }
 
@@ -283,8 +284,10 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             .is_some_and(|(transform, _)| TYPEDICT_TRANSFORMS.contains(&transform))
     });
     let has_sealed_classes = !sealed_classes.is_empty();
-    let needs_typing_extensions_runtime_type_params =
-        runtime_type_params.values().any(|type_param| type_param.default.is_some());
+    let needs_typing_extensions_runtime_type_params = runtime_type_params
+        .values()
+        .any(|type_param| type_param.default.is_some())
+        && !options.target_python.supports_generic_defaults();
     let has_runtime_typevars = runtime_type_params
         .values()
         .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVar);
@@ -296,8 +299,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVarTuple);
     let needs_unpack_import =
         has_unqualified_symbol_usage(&tree.source.text, "Unpack") || has_runtime_typevartuples;
-    let uses_typing_extensions_variadic_generics =
-        !prefers_typing_variadic_generics(&options.target_python);
+    let typevartuple_owner =
+        options.target_python.stdlib_owner("TypeVarTuple").unwrap_or("typing_extensions");
+    let unpack_owner = options.target_python.stdlib_owner("Unpack").unwrap_or("typing_extensions");
     let needs_typing_module_import =
         compatibility_normalized_lines.iter().any(|line| line.contains("typing."))
             && !has_module_import(&tree.source.text, "typing");
@@ -320,32 +324,48 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             lowered_line_number: &mut lowered_line_number,
         };
         if has_runtime_typevars
-            && !has_typevar_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
+            && !has_typevar_import(
+                &tree.source.text,
+                if needs_typing_extensions_runtime_type_params {
+                    "typing_extensions"
+                } else {
+                    "typing"
+                },
+            )
         {
             inserted_lines.emit_required_import(rewrite_typevar_import_line(
-                needs_typing_extensions_runtime_type_params,
+                if needs_typing_extensions_runtime_type_params {
+                    "typing_extensions"
+                } else {
+                    "typing"
+                },
             ));
         }
         if has_runtime_paramspecs
-            && !has_paramspec_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
+            && !has_paramspec_import(
+                &tree.source.text,
+                if needs_typing_extensions_runtime_type_params {
+                    "typing_extensions"
+                } else {
+                    "typing"
+                },
+            )
         {
             inserted_lines.emit_required_import(rewrite_paramspec_import_line(
-                needs_typing_extensions_runtime_type_params,
+                if needs_typing_extensions_runtime_type_params {
+                    "typing_extensions"
+                } else {
+                    "typing"
+                },
             ));
         }
         if has_runtime_typevartuples
-            && !has_typevartuple_import(&tree.source.text, uses_typing_extensions_variadic_generics)
+            && !has_typevartuple_import(&tree.source.text, typevartuple_owner)
         {
-            inserted_lines.emit_required_import(rewrite_typevartuple_import_line(
-                uses_typing_extensions_variadic_generics,
-            ));
+            inserted_lines.emit_required_import(rewrite_typevartuple_import_line(typevartuple_owner));
         }
-        if needs_unpack_import
-            && !has_unpack_import(&tree.source.text, uses_typing_extensions_variadic_generics)
-        {
-            inserted_lines.emit_required_import(rewrite_unpack_import_line(
-                uses_typing_extensions_variadic_generics,
-            ));
+        if needs_unpack_import && !has_unpack_import(&tree.source.text, unpack_owner) {
+            inserted_lines.emit_required_import(rewrite_unpack_import_line(unpack_owner));
         }
         if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Generic"));
@@ -394,8 +414,10 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                 || v.starts_with("Mutable[")
         });
         if needs_readonly_import && !has_readonly_import(&tree.source.text) {
-            inserted_lines
-                .emit_required_import(String::from("from typing_extensions import ReadOnly"));
+            inserted_lines.emit_required_import(format!(
+                "from {} import ReadOnly",
+                options.target_python.stdlib_owner("ReadOnly").unwrap_or("typing_extensions")
+            ));
         }
     }
 
@@ -524,54 +546,14 @@ fn inserted_span_map_entry(
 }
 
 fn rewrite_notrequired_import_line(options: &LoweringOptions) -> String {
-    if prefers_typing_notrequired(&options.target_python) {
-        String::from("from typing import NotRequired")
-    } else {
-        String::from("from typing_extensions import NotRequired")
-    }
+    format!(
+        "from {} import NotRequired",
+        options.target_python.stdlib_owner("NotRequired").unwrap_or("typing_extensions")
+    )
 }
 
-fn prefers_typing_self(target_python: &str) -> bool {
-    matches!(target_python.trim(), "3.11" | "3.12")
-}
-
-fn prefers_typing_required_family(target_python: &str) -> bool {
-    matches!(target_python.trim(), "3.11" | "3.12")
-}
-
-fn prefers_typing_override(target_python: &str) -> bool {
-    matches!(target_python.trim(), "3.12")
-}
-
-fn prefers_typing_variadic_generics(target_python: &str) -> bool {
-    matches!(target_python.trim(), "3.11" | "3.12")
-}
-
-fn compat_module_for_symbol(symbol: &str, target_python: &str) -> Option<&'static str> {
-    match symbol {
-        "Self" => {
-            Some(if prefers_typing_self(target_python) { "typing" } else { "typing_extensions" })
-        }
-        "Required" | "NotRequired" | "dataclass_transform" => {
-            Some(if prefers_typing_required_family(target_python) {
-                "typing"
-            } else {
-                "typing_extensions"
-            })
-        }
-        "override" => Some(if prefers_typing_override(target_python) {
-            "typing"
-        } else {
-            "typing_extensions"
-        }),
-        "TypeVarTuple" | "Unpack" => Some(if prefers_typing_variadic_generics(target_python) {
-            "typing"
-        } else {
-            "typing_extensions"
-        }),
-        "ReadOnly" | "TypeIs" | "deprecated" => Some("typing_extensions"),
-        _ => None,
-    }
+fn compat_module_for_symbol(symbol: &str, target_python: PythonTarget) -> Option<&'static str> {
+    target_python.stdlib_owner(symbol)
 }
 
 fn normalize_target_compatibility_line(line: &str, options: &LoweringOptions) -> Vec<String> {
@@ -582,7 +564,7 @@ fn normalize_target_compatibility_line(line: &str, options: &LoweringOptions) ->
     {
         let indentation = &line[..line.len() - trimmed.len()];
         let normalized =
-            normalize_import_from_line(indentation, module, names, &options.target_python);
+            normalize_import_from_line(indentation, module, names, options.target_python);
         if normalized.len() != 1 || normalized[0].trim() != trimmed {
             return normalized;
         }
@@ -595,7 +577,7 @@ fn normalize_import_from_line(
     indentation: &str,
     module: &str,
     names: &str,
-    target_python: &str,
+    target_python: PythonTarget,
 ) -> Vec<String> {
     let mut grouped = std::collections::BTreeMap::<String, Vec<String>>::new();
     let mut order = Vec::<String>::new();
@@ -623,42 +605,30 @@ fn normalize_import_from_line(
 
 fn normalize_target_compatibility_text(text: &str, options: &LoweringOptions) -> String {
     let mut normalized = text.to_owned();
-    let target_python = options.target_python.trim();
-
-    normalized = normalized.replace("warnings.deprecated", "typing_extensions.deprecated");
-    normalized = normalized.replace("typing.ReadOnly", "typing_extensions.ReadOnly");
-    normalized = normalized.replace("typing.TypeIs", "typing_extensions.TypeIs");
-
-    if prefers_typing_self(target_python) {
-        normalized = normalized.replace("typing_extensions.Self", "typing.Self");
-    } else {
-        normalized = normalized.replace("typing.Self", "typing_extensions.Self");
-    }
-
-    if prefers_typing_required_family(target_python) {
-        normalized = normalized.replace("typing_extensions.Required", "typing.Required");
-        normalized = normalized.replace("typing_extensions.NotRequired", "typing.NotRequired");
-        normalized = normalized
-            .replace("typing_extensions.dataclass_transform", "typing.dataclass_transform");
-    } else {
-        normalized = normalized.replace("typing.Required", "typing_extensions.Required");
-        normalized = normalized.replace("typing.NotRequired", "typing_extensions.NotRequired");
-        normalized = normalized
-            .replace("typing.dataclass_transform", "typing_extensions.dataclass_transform");
-    }
-
-    if prefers_typing_override(target_python) {
-        normalized = normalized.replace("typing_extensions.override", "typing.override");
-    } else {
-        normalized = normalized.replace("typing.override", "typing_extensions.override");
-    }
-
-    if prefers_typing_variadic_generics(target_python) {
-        normalized = normalized.replace("typing_extensions.TypeVarTuple", "typing.TypeVarTuple");
-        normalized = normalized.replace("typing_extensions.Unpack", "typing.Unpack");
-    } else {
-        normalized = normalized.replace("typing.TypeVarTuple", "typing_extensions.TypeVarTuple");
-        normalized = normalized.replace("typing.Unpack", "typing_extensions.Unpack");
+    for symbol in [
+        "Self",
+        "Required",
+        "NotRequired",
+        "dataclass_transform",
+        "override",
+        "TypeVarTuple",
+        "Unpack",
+        "ReadOnly",
+        "TypeIs",
+        "NoDefault",
+        "deprecated",
+    ] {
+        if let Some(owner) = options.target_python.stdlib_owner(symbol) {
+            for source_module in ["typing", "typing_extensions", "warnings"] {
+                if source_module == owner {
+                    continue;
+                }
+                normalized = normalized.replace(
+                    &format!("{source_module}.{symbol}"),
+                    &format!("{owner}.{symbol}"),
+                );
+            }
+        }
     }
 
     normalized
@@ -849,10 +819,6 @@ fn statement_uses_dynamic_intrinsic(statement: &SyntaxStatement) -> bool {
     }
 }
 
-fn prefers_typing_notrequired(target_python: &str) -> bool {
-    matches!(target_python.trim(), "3.11" | "3.12")
-}
-
 fn header_line_for_statement(source: &str, start_line: usize) -> usize {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = start_line.saturating_sub(1);
@@ -1005,8 +971,7 @@ fn has_typealias_import(source: &str) -> bool {
     })
 }
 
-fn has_typevar_import(source: &str, from_typing_extensions: bool) -> bool {
-    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+fn has_typevar_import(source: &str, module: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == format!("from {module} import TypeVar")
@@ -1015,8 +980,7 @@ fn has_typevar_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
-fn has_paramspec_import(source: &str, from_typing_extensions: bool) -> bool {
-    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+fn has_paramspec_import(source: &str, module: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == format!("from {module} import ParamSpec")
@@ -1025,8 +989,7 @@ fn has_paramspec_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
-fn has_typevartuple_import(source: &str, from_typing_extensions: bool) -> bool {
-    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+fn has_typevartuple_import(source: &str, module: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == format!("from {module} import TypeVarTuple")
@@ -1035,8 +998,7 @@ fn has_typevartuple_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
-fn has_unpack_import(source: &str, from_typing_extensions: bool) -> bool {
-    let module = if from_typing_extensions { "typing_extensions" } else { "typing" };
+fn has_unpack_import(source: &str, module: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim();
         trimmed == format!("from {module} import Unpack")
@@ -1045,36 +1007,20 @@ fn has_unpack_import(source: &str, from_typing_extensions: bool) -> bool {
     })
 }
 
-fn rewrite_typevar_import_line(from_typing_extensions: bool) -> String {
-    if from_typing_extensions {
-        String::from("from typing_extensions import TypeVar")
-    } else {
-        String::from("from typing import TypeVar")
-    }
+fn rewrite_typevar_import_line(module: &str) -> String {
+    format!("from {module} import TypeVar")
 }
 
-fn rewrite_paramspec_import_line(from_typing_extensions: bool) -> String {
-    if from_typing_extensions {
-        String::from("from typing_extensions import ParamSpec")
-    } else {
-        String::from("from typing import ParamSpec")
-    }
+fn rewrite_paramspec_import_line(module: &str) -> String {
+    format!("from {module} import ParamSpec")
 }
 
-fn rewrite_typevartuple_import_line(from_typing_extensions: bool) -> String {
-    if from_typing_extensions {
-        String::from("from typing_extensions import TypeVarTuple")
-    } else {
-        String::from("from typing import TypeVarTuple")
-    }
+fn rewrite_typevartuple_import_line(module: &str) -> String {
+    format!("from {module} import TypeVarTuple")
 }
 
-fn rewrite_unpack_import_line(from_typing_extensions: bool) -> String {
-    if from_typing_extensions {
-        String::from("from typing_extensions import Unpack")
-    } else {
-        String::from("from typing import Unpack")
-    }
+fn rewrite_unpack_import_line(module: &str) -> String {
+    format!("from {module} import Unpack")
 }
 
 fn has_unqualified_symbol_usage(source: &str, symbol: &str) -> bool {

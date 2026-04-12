@@ -539,8 +539,10 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
         }
     }
 
-    let lowering_options =
-        LoweringOptions { target_python: config.config.project.target_python.to_string() };
+    let lowering_options = LoweringOptions {
+        target_python: config.config.project.target_python,
+        emit_style: config.config.emit.emit_style,
+    };
     let lowering_results: Vec<_> = prepared
         .syntax_trees
         .par_iter()

@@ -14,6 +14,7 @@ littrs-ruff-python-parser = "0.6.2"
 littrs-ruff-text-size = "0.6.2"
 typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-syntax = { path = "../typepython_syntax" }
+typepython-target = { path = "../typepython_target" }
 
 [dev-dependencies]
 criterion.workspace = true
