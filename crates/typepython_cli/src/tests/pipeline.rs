@@ -73,6 +73,40 @@ fn run_pipeline_keeps_lowering_when_checker_fails() {
 }
 
 #[test]
+fn run_pipeline_emits_native_syntax_for_target_python_313() {
+    let runtime_source = {
+        let project_dir = temp_project_dir("run_pipeline_emits_native_syntax_for_target_python_313");
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "typealias Pair[T = int] = tuple[T, T]\n\nclass Box[T = int]:\n    value: T\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let snapshot = run_pipeline(&config).expect("test setup should succeed");
+        let runtime_source = snapshot
+            .lowered_modules
+            .iter()
+            .find(|module| module.source_path.ends_with("src/app/__init__.tpy"))
+            .map(|module| module.python_source.clone())
+            .expect("expected lowered runtime source");
+        remove_temp_project_dir(&project_dir);
+        runtime_source
+    };
+
+    assert!(runtime_source.contains("type Pair[T = int] = tuple[T, T]"));
+    assert!(runtime_source.contains("class Box[T = int]:"));
+    assert!(runtime_source.contains("def first[T = int](value: T = 1) -> T:"));
+    assert!(!runtime_source.contains("TypeVar("));
+}
+
+#[test]
 fn run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed");
@@ -324,6 +358,106 @@ fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
     assert!(second.diagnostics.is_empty());
     assert!(second.lowered_modules.is_empty());
     assert_eq!(second.emit_plan.len(), 1);
+}
+
+#[test]
+fn run_pipeline_invalidates_cache_when_emit_style_changes() {
+    let (lowered_modules, runtime_source) = {
+        let project_dir = temp_project_dir("run_pipeline_invalidates_cache_when_emit_style_changes");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            "typealias Pair[T = int] = tuple[T, T]\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        write_runtime_outputs(
+            &first.emit_plan,
+            &first.lowered_modules,
+            config.config.emit.write_py_typed,
+            false,
+            Some(&first.stub_contexts),
+        )
+        .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &config.resolve_relative_path(&config.config.project.cache_dir),
+            &first.incremental,
+        )
+        .expect("test setup should succeed");
+
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n\n[emit]\nemit_style = \"compat\"\n",
+        )
+        .expect("test setup should succeed");
+        let compat_config = load(&project_dir).expect("test setup should succeed");
+        let second = run_pipeline(&compat_config).expect("test setup should succeed");
+        let runtime_source = second
+            .lowered_modules
+            .iter()
+            .find(|module| module.source_path.ends_with("src/app.tpy"))
+            .map(|module| module.python_source.clone())
+            .expect("expected rebuilt runtime source");
+        let result = (second.lowered_modules.len(), runtime_source);
+        remove_temp_project_dir(&project_dir);
+        result
+    };
+
+    assert_eq!(lowered_modules, 1);
+    assert!(runtime_source.contains("TypeVar(\"T\", default=\"int\")"));
+    assert!(runtime_source.contains("Pair: TypeAlias = tuple[T, T]"));
+}
+
+#[test]
+fn run_pipeline_invalidates_cache_when_analysis_python_changes() {
+    let lowered_modules = {
+        let project_dir =
+            temp_project_dir("run_pipeline_invalidates_cache_when_analysis_python_changes");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n\n[resolution]\nanalysis_python = \"3.13\"\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        write_runtime_outputs(
+            &first.emit_plan,
+            &first.lowered_modules,
+            config.config.emit.write_py_typed,
+            false,
+            Some(&first.stub_contexts),
+        )
+        .expect("test setup should succeed");
+        write_incremental_snapshot(
+            &config.resolve_relative_path(&config.config.project.cache_dir),
+            &first.incremental,
+        )
+        .expect("test setup should succeed");
+
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n\n[resolution]\nanalysis_python = \"3.14\"\n",
+        )
+        .expect("test setup should succeed");
+        let updated_config = load(&project_dir).expect("test setup should succeed");
+        let second = run_pipeline(&updated_config).expect("test setup should succeed");
+        let lowered_modules = second.lowered_modules.len();
+        remove_temp_project_dir(&project_dir);
+        lowered_modules
+    };
+
+    assert_eq!(lowered_modules, 1);
 }
 
 #[test]

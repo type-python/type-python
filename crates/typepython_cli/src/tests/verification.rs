@@ -500,6 +500,54 @@ fn verify_build_artifacts_accepts_native_type_alias_surface() {
 }
 
 #[test]
+fn verify_build_artifacts_accepts_native_generic_class_and_function_surface() {
+    let project_dir =
+        temp_project_dir("verify_build_artifacts_accepts_native_generic_class_and_function_surface");
+    let rendered = {
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("typepython.toml should be written");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("build dir should be created");
+        fs::create_dir_all(project_dir.join(".typepython/cache"))
+            .expect("cache dir should be created");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "class Box[T = int]:\n    value: T\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+        )
+        .expect("runtime artifact should be written");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "class Box[T = int]:\n    value: T\n\ndef first[T = int](value: T = 1) -> T: ...\n",
+        )
+        .expect("stub artifact should be written");
+        fs::write(project_dir.join(".typepython/build/app/py.typed"), "")
+            .expect("marker should be written");
+        write_incremental_snapshot(
+            &project_dir.join(".typepython/cache"),
+            &IncrementalState::default(),
+        )
+        .expect("snapshot should be written");
+
+        let config = load(&project_dir).expect("config should load");
+        verify_build_artifacts(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(!rendered.contains("TPY5003"), "{rendered}");
+}
+
+#[test]
 fn verify_build_artifacts_warns_about_comment_only_stub_metadata() {
     let project_dir =
         temp_project_dir("verify_build_artifacts_warns_about_comment_only_stub_metadata");
