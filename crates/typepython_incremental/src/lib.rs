@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
 use typepython_graph::ModuleGraph;
-use typepython_syntax::TypeExpr;
+use typepython_syntax::{SourceKind, TypeExpr};
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 
@@ -90,6 +90,8 @@ pub struct SummaryExport {
     pub exported_type_expr: Option<TypeExpr>,
     #[serde(rename = "typeParams")]
     pub type_params: Vec<SummaryTypeParam>,
+    #[serde(rename = "runtimeForm", default)]
+    pub runtime_form: Option<String>,
     #[serde(rename = "requiredRuntimeFeatures", default)]
     pub required_runtime_features: Vec<String>,
     pub public: bool,
@@ -453,6 +455,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             exported_type: None,
             exported_type_expr: summary_type_expr(declaration),
             type_params: declaration.type_params.iter().map(summary_type_param).collect(),
+            runtime_form: summary_runtime_form(node.module_kind, declaration),
             required_runtime_features: Vec::new(),
             public: !declaration.name.starts_with('_'),
         })
@@ -517,6 +520,27 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
         import_targets,
         sealed_roots,
         solver_facts: ModuleSolverFacts::default(),
+    }
+}
+
+fn summary_runtime_form(
+    module_kind: SourceKind,
+    declaration: &Declaration,
+) -> Option<String> {
+    if module_kind != SourceKind::Python {
+        return None;
+    }
+    match declaration.kind {
+        DeclarationKind::TypeAlias => Some(String::from("type_alias_type")),
+        DeclarationKind::Class if !declaration.type_params.is_empty() => {
+            Some(String::from("native_generic_class"))
+        }
+        DeclarationKind::Function | DeclarationKind::Overload
+            if !declaration.type_params.is_empty() =>
+        {
+            Some(String::from("native_generic_function"))
+        }
+        _ => None,
     }
 }
 
@@ -740,6 +764,7 @@ mod tests {
                         default: None,
                         default_expr: None,
                     }],
+                    runtime_form: None,
                     required_runtime_features: Vec::new(),
                     public: true,
                 }],
@@ -908,6 +933,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -929,6 +955,7 @@ mod tests {
                             default: None,
                             default_expr: None,
                         }],
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -941,6 +968,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -962,6 +990,7 @@ mod tests {
                             default: Some(String::from("str")),
                             default_expr: None,
                         }],
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -1214,6 +1243,7 @@ mod tests {
                             default: Some(String::from("Comparable")),
                             default_expr: None,
                         }],
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     }],
@@ -1237,6 +1267,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        runtime_form: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     }],

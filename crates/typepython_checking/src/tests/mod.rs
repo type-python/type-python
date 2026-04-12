@@ -225,10 +225,13 @@ fn semantic_incremental_summary_preserves_native_runtime_feature_markers() {
     assert!(pair.required_runtime_features.contains(&String::from("type_stmt")));
     assert!(pair.required_runtime_features.contains(&String::from("inline_type_params")));
     assert!(pair.required_runtime_features.contains(&String::from("generic_defaults")));
+    assert_eq!(pair.runtime_form.as_deref(), Some("type_alias_type"));
     assert!(box_export.required_runtime_features.contains(&String::from("inline_type_params")));
     assert!(box_export.required_runtime_features.contains(&String::from("generic_defaults")));
+    assert_eq!(box_export.runtime_form.as_deref(), Some("native_generic_class"));
     assert!(first.required_runtime_features.contains(&String::from("inline_type_params")));
     assert!(first.required_runtime_features.contains(&String::from("generic_defaults")));
+    assert_eq!(first.runtime_form.as_deref(), Some("native_generic_function"));
 
     let _ = fs::remove_dir_all(&root);
 }

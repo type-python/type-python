@@ -864,8 +864,30 @@ fn semantic_summary_export(
         exported_type,
         exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
+        runtime_form: summary_runtime_form(node.module_kind, declaration),
         required_runtime_features,
         public: !declaration.name.starts_with('_'),
+    }
+}
+
+fn summary_runtime_form(
+    module_kind: SourceKind,
+    declaration: &Declaration,
+) -> Option<String> {
+    if module_kind != SourceKind::Python {
+        return None;
+    }
+    match declaration.kind {
+        DeclarationKind::TypeAlias => Some(String::from("type_alias_type")),
+        DeclarationKind::Class if !declaration.type_params.is_empty() => {
+            Some(String::from("native_generic_class"))
+        }
+        DeclarationKind::Function | DeclarationKind::Overload
+            if !declaration.type_params.is_empty() =>
+        {
+            Some(String::from("native_generic_function"))
+        }
+        _ => None,
     }
 }
 
