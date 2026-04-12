@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 
+from typepython.annotation_compat import AnnotationFormat, get_annotations, supported_formats
+
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
@@ -147,6 +149,7 @@ import sys
 build_root = pathlib.Path(sys.argv[1])
 sys.path.insert(0, str(build_root))
 module = importlib.import_module("app")
+from typepython.annotation_compat import AnnotationFormat, get_annotations, supported_formats
 
 explosive_error = None
 try:
@@ -170,14 +173,13 @@ payload = {
 }
 
 if sys.version_info >= (3, 14):
-    import annotationlib
-
-    payload["annotationlib_box_has_value"] = "value" in annotationlib.get_annotations(
-        module.Box, format=annotationlib.Format.VALUE
+    payload["annotationlib_box_has_value"] = "value" in get_annotations(
+        module.Box, format=AnnotationFormat.VALUE
     )
-    payload["annotationlib_module_has_pair"] = "PAIR" in annotationlib.get_annotations(
-        module, format=annotationlib.Format.VALUE
+    payload["annotationlib_module_has_pair"] = "PAIR" in get_annotations(
+        module, format=AnnotationFormat.VALUE
     )
+    payload["annotationlib_supports_string"] = supported_formats().string
 
 print(json.dumps(payload))
 """
@@ -228,11 +230,13 @@ print(json.dumps(payload))
         )
     if sys.version_info >= (3, 14):
         if not payload.get("annotationlib_box_has_value"):
-            raise SystemExit("annotationlib.get_annotations(Box) did not expose the field annotations")
+            raise SystemExit("annotation compatibility layer did not expose Box annotations")
         if not payload.get("annotationlib_module_has_pair"):
             raise SystemExit(
-                "annotationlib.get_annotations(module) did not expose module-level annotations"
+                "annotation compatibility layer did not expose module-level annotations"
             )
+        if not payload.get("annotationlib_supports_string"):
+            raise SystemExit("annotation compatibility layer did not detect string-format support")
 
 
 def main() -> None:
