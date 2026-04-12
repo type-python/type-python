@@ -9,6 +9,7 @@ use typepython_binding::{
 use typepython_checking::{check, semantic_incremental_state_with_binding_metadata};
 use typepython_config::ImportFallback;
 use typepython_graph::{ModuleGraph, ModuleNode};
+use typepython_incremental::SnapshotMetadata;
 use typepython_syntax::{FunctionParam, SourceKind};
 
 fn param(name: &str, annotation: &str) -> FunctionParam {
@@ -351,6 +352,7 @@ fn bench_semantic_summary_medium(c: &mut Criterion) {
                 ImportFallback::Unknown,
                 None,
                 None,
+                SnapshotMetadata::default(),
             ))
         })
     });

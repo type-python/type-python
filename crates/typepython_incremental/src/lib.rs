@@ -7,7 +7,19 @@ use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, Gen
 use typepython_graph::ModuleGraph;
 use typepython_syntax::TypeExpr;
 
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotMetadata {
+    #[serde(default)]
+    pub target_python: Option<String>,
+    #[serde(default)]
+    pub analysis_python: Option<String>,
+    #[serde(default)]
+    pub emit_style: Option<String>,
+    #[serde(default)]
+    pub support_snapshot: Option<String>,
+}
 
 /// Fingerprint of one summary-bearing module.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -29,6 +41,8 @@ pub struct IncrementalState {
     pub summaries: Vec<PublicSummary>,
     #[serde(default)]
     pub stdlib_snapshot: Option<String>,
+    #[serde(default)]
+    pub metadata: SnapshotMetadata,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -41,6 +55,8 @@ struct SnapshotFile {
     summaries: Vec<PublicSummary>,
     #[serde(default)]
     stdlib_snapshot: Option<String>,
+    #[serde(default)]
+    metadata: SnapshotMetadata,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -185,6 +201,13 @@ impl IncrementalState {
         self.source_hashes = source_hashes;
         self
     }
+
+    /// Attaches build-context metadata that participates in cache reuse decisions.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: SnapshotMetadata) -> Self {
+        self.metadata = metadata;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -205,20 +228,22 @@ pub struct ModuleDependencyIndex {
 #[must_use]
 pub fn snapshot(graph: &ModuleGraph) -> IncrementalState {
     let mut summaries = graph.nodes.iter().map(public_summary).collect::<Vec<_>>();
-    snapshot_from_summaries(&mut summaries, None)
+    snapshot_from_summaries(&mut summaries, None, SnapshotMetadata::default())
 }
 
 #[must_use]
 pub fn snapshot_with_summaries(
     mut summaries: Vec<PublicSummary>,
     stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
 ) -> IncrementalState {
-    snapshot_from_summaries(&mut summaries, stdlib_snapshot)
+    snapshot_from_summaries(&mut summaries, stdlib_snapshot, metadata)
 }
 
 fn snapshot_from_summaries(
     summaries: &mut [PublicSummary],
     stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
 ) -> IncrementalState {
     summaries.sort_by(|left, right| left.module.cmp(&right.module));
 
@@ -232,6 +257,7 @@ fn snapshot_from_summaries(
         source_hashes: BTreeMap::new(),
         summaries: summaries.to_vec(),
         stdlib_snapshot,
+        metadata,
     }
 }
 
@@ -376,6 +402,7 @@ pub fn encode_snapshot(state: &IncrementalState) -> Result<String, serde_json::E
         source_hashes: state.source_hashes.clone(),
         summaries: state.summaries.clone(),
         stdlib_snapshot: state.stdlib_snapshot.clone(),
+        metadata: state.metadata.clone(),
     })
 }
 
@@ -391,6 +418,7 @@ pub fn decode_snapshot(contents: &str) -> Result<IncrementalState, SnapshotDecod
         source_hashes: snapshot.source_hashes,
         summaries: snapshot.summaries,
         stdlib_snapshot: snapshot.stdlib_snapshot,
+        metadata: snapshot.metadata,
     })
 }
 
@@ -592,9 +620,9 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
-        SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SummaryExport, SummaryTypeParam,
-        affected_modules, decode_snapshot, dependency_index, diff, encode_snapshot, snapshot,
-        snapshot_diff_modules, source_change_modules,
+        SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SnapshotMetadata, SummaryExport,
+        SummaryTypeParam, affected_modules, decode_snapshot, dependency_index, diff,
+        encode_snapshot, snapshot, snapshot_diff_modules, source_change_modules,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -616,6 +644,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
         let current = IncrementalState {
             fingerprints: BTreeMap::from([
@@ -625,6 +654,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
 
         let snapshot_diff = diff(&previous, &current);
@@ -646,6 +676,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
 
         let snapshot_diff = diff(&state, &state);
@@ -686,6 +717,7 @@ mod tests {
                 solver_facts: ModuleSolverFacts::default(),
             }],
             stdlib_snapshot: Some(String::from("fnv1a64:demo")),
+            metadata: SnapshotMetadata::default(),
         })
         .expect("snapshot encoding should succeed");
 
@@ -981,6 +1013,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
 
         let snapshot_diff = diff(&previous, &current);
@@ -1007,6 +1040,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
         let current = IncrementalState::default();
 
@@ -1042,6 +1076,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
         let current = IncrementalState {
             fingerprints: BTreeMap::from([
@@ -1069,6 +1104,7 @@ mod tests {
             source_hashes: BTreeMap::new(),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
 
         let snapshot_diff = diff(&previous, &current);
@@ -1155,6 +1191,12 @@ mod tests {
                 },
             ],
             stdlib_snapshot: Some(String::from("fnv1a64:stdlib_hash")),
+            metadata: SnapshotMetadata {
+                target_python: Some(String::from("3.10")),
+                analysis_python: Some(String::from("3.12")),
+                emit_style: Some(String::from("compat")),
+                support_snapshot: Some(String::from("fnv1a64:support_hash")),
+            },
         };
 
         let encoded = encode_snapshot(&original).expect("encoding should succeed");
@@ -1198,6 +1240,7 @@ mod tests {
             ]),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
         let current = IncrementalState {
             fingerprints: BTreeMap::new(),
@@ -1207,6 +1250,7 @@ mod tests {
             ]),
             summaries: Vec::new(),
             stdlib_snapshot: None,
+            metadata: SnapshotMetadata::default(),
         };
 
         assert_eq!(

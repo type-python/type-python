@@ -27,8 +27,9 @@ use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span, SuggestionAppli
 use typepython_graph::ModuleGraph;
 use typepython_incremental::{
     IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary,
-    SummaryCallableSignature, SummaryDeclarationFact, SummaryExport, SummaryImportSymbolTarget,
-    SummaryImportTarget, SummarySignatureParam, SummaryTypeParam, snapshot_with_summaries,
+    SnapshotMetadata, SummaryCallableSignature, SummaryDeclarationFact, SummaryExport,
+    SummaryImportSymbolTarget, SummaryImportTarget, SummarySignatureParam, SummaryTypeParam,
+    snapshot_with_summaries,
 };
 use typepython_syntax::SourceKind;
 mod assignments;
@@ -539,6 +540,7 @@ pub fn semantic_incremental_state_with_binding_metadata(
     import_fallback: ImportFallback,
     source_overrides: Option<&BTreeMap<String, String>>,
     stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
 ) -> IncrementalState {
     let bound_surface_facts = binding_surface_facts_by_module(bindings);
     let context = CheckerContext::new_with_bound_surface_facts(
@@ -549,7 +551,7 @@ pub fn semantic_incremental_state_with_binding_metadata(
     );
     let summaries =
         graph.nodes.iter().map(|node| semantic_public_summary(&context, node)).collect();
-    snapshot_with_summaries(summaries, stdlib_snapshot)
+    snapshot_with_summaries(summaries, stdlib_snapshot, metadata)
 }
 
 #[must_use]
@@ -561,6 +563,7 @@ pub fn semantic_incremental_state_with_reused_summaries(
     previous_summaries: &[PublicSummary],
     summary_rebuild_modules: &BTreeSet<String>,
     stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
 ) -> IncrementalState {
     let bound_surface_facts = binding_surface_facts_by_module(bindings);
     let context = CheckerContext::new_with_bound_surface_facts(
@@ -589,7 +592,7 @@ pub fn semantic_incremental_state_with_reused_summaries(
             }
         })
         .collect();
-    snapshot_with_summaries(summaries, stdlib_snapshot)
+    snapshot_with_summaries(summaries, stdlib_snapshot, metadata)
 }
 
 #[must_use]

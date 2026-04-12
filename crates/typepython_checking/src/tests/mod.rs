@@ -125,6 +125,7 @@ fn semantic_incremental_state_reuses_unchanged_public_summaries() {
         ImportFallback::Unknown,
         None,
         None,
+        typepython_incremental::SnapshotMetadata::default(),
     );
     let mut previous_summaries = baseline.summaries.clone();
     let sentinel_summary = {
@@ -152,6 +153,7 @@ fn semantic_incremental_state_reuses_unchanged_public_summaries() {
         &previous_summaries,
         &BTreeSet::from([String::from("app.a")]),
         None,
+        typepython_incremental::SnapshotMetadata::default(),
     );
 
     let reused_b = rebuilt

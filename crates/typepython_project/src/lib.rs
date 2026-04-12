@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    num::Wrapping,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
     time::UNIX_EPOCH,
@@ -546,6 +547,59 @@ pub fn support_source_index(
         &index,
     );
     Ok(index)
+}
+
+pub fn support_source_snapshot_identity(
+    config: &ConfigHandle,
+    target_python: &str,
+) -> Result<String> {
+    let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
+    let external_roots = configured_external_type_roots(config)?;
+    let mut files = bundled_stdlib_sources_for_root(&stdlib_root, target_python)?
+        .into_iter()
+        .map(|source| {
+            let relative = source.path.strip_prefix(&stdlib_root).ok().map(normalize_glob_path);
+            let bytes = fs::read(&source.path).ok();
+            relative.zip(bytes)
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut hash = Wrapping(0xcbf29ce484222325_u64);
+    let prime = Wrapping(0x100000001b3_u64);
+    for byte in target_python.as_bytes().iter().chain([0_u8].iter()) {
+        hash ^= Wrapping(u64::from(*byte));
+        hash *= prime;
+    }
+    for (relative, bytes) in files {
+        for byte in relative.as_bytes().iter().chain([0_u8].iter()).chain(bytes.iter()) {
+            hash ^= Wrapping(u64::from(*byte));
+            hash *= prime;
+        }
+    }
+    let mut roots = support_root_signatures(&stdlib_root, &external_roots)?;
+    roots.sort();
+    for root in roots {
+        for byte in root.kind.as_bytes().iter().chain([0_u8].iter()) {
+            hash ^= Wrapping(u64::from(*byte));
+            hash *= prime;
+        }
+        for byte in root.path.as_bytes().iter().chain([0_u8].iter()) {
+            hash ^= Wrapping(u64::from(*byte));
+            hash *= prime;
+        }
+        for byte in [u8::from(root.allow_untyped_runtime)] {
+            hash ^= Wrapping(u64::from(byte));
+            hash *= prime;
+        }
+        for byte in root.modified_unix_ms.unwrap_or_default().to_le_bytes() {
+            hash ^= Wrapping(u64::from(byte));
+            hash *= prime;
+        }
+    }
+
+    Ok(format!("fnv1a64:{:016x}", hash.0))
 }
 
 pub fn external_resolution_sources(config: &ConfigHandle) -> Result<Vec<DiscoveredSource>> {

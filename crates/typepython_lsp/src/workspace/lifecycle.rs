@@ -329,6 +329,12 @@ impl IncrementalWorkspace {
                 self.config.config.typing.imports,
                 Some(&source_overrides),
                 None,
+                typepython_incremental::SnapshotMetadata {
+                    target_python: Some(self.config.config.project.target_python.to_string()),
+                    analysis_python: Some(self.config.analysis_python().to_string()),
+                    emit_style: Some(self.config.config.emit.emit_style.to_string()),
+                    support_snapshot: None,
+                },
             )
         } else {
             semantic_incremental_state_with_reused_summaries(
@@ -339,6 +345,12 @@ impl IncrementalWorkspace {
                 &self.incremental.summaries,
                 &direct_changes,
                 None,
+                typepython_incremental::SnapshotMetadata {
+                    target_python: Some(self.config.config.project.target_python.to_string()),
+                    analysis_python: Some(self.config.analysis_python().to_string()),
+                    emit_style: Some(self.config.config.emit.emit_style.to_string()),
+                    support_snapshot: None,
+                },
             )
         };
         let current_dependency_index = dependency_index(&graph);

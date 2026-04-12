@@ -23,12 +23,13 @@ use typepython_emit::{
 };
 use typepython_graph::build;
 use typepython_incremental::{
-    IncrementalState, decode_snapshot, diff, encode_snapshot, source_change_modules,
+    IncrementalState, SnapshotMetadata, decode_snapshot, diff, encode_snapshot,
+    source_change_modules,
 };
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_project::{
     inferred_shadow_stub_syntax_trees, replace_local_python_surfaces_with_shadow_stubs,
-    write_shadow_stub_cache,
+    support_source_snapshot_identity, write_shadow_stub_cache,
 };
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
@@ -369,13 +370,24 @@ fn analyze_pipeline_state(
     diagnostics = filter_project_diagnostics(&diagnostics, &prepared.source_paths);
     apply_type_ignore_directives(&prepared.syntax_trees, &mut diagnostics);
 
-    let stdlib_snapshot =
-        Some(bundled_stdlib_snapshot_identity(&config.analysis_python().to_string())?);
+    let target_python = config.config.project.target_python.to_string();
+    let analysis_python = config.analysis_python().to_string();
+    let stdlib_snapshot = Some(bundled_stdlib_snapshot_identity(&analysis_python)?);
+    let snapshot_metadata = SnapshotMetadata {
+        target_python: Some(target_python),
+        analysis_python: Some(analysis_python.clone()),
+        emit_style: Some(config.config.emit.emit_style.to_string()),
+        support_snapshot: Some(support_source_snapshot_identity(config, &analysis_python)?),
+    };
     let source_hashes = syntax_tree_source_hashes(&prepared.all_syntax_trees);
     let incremental = match previous {
-        Some(previous) if previous.stdlib_snapshot == stdlib_snapshot => {
-            let current_sources =
-                IncrementalState::default().with_source_hashes(source_hashes.clone());
+        Some(previous)
+            if previous.stdlib_snapshot == stdlib_snapshot
+                && previous.metadata == snapshot_metadata =>
+        {
+            let current_sources = IncrementalState::default()
+                .with_source_hashes(source_hashes.clone())
+                .with_metadata(snapshot_metadata.clone());
             let direct_changes = source_change_modules(previous, &current_sources);
             semantic_incremental_state_with_reused_summaries(
                 &graph,
@@ -385,6 +397,7 @@ fn analyze_pipeline_state(
                 &previous.summaries,
                 &direct_changes,
                 stdlib_snapshot.clone(),
+                snapshot_metadata.clone(),
             )
         }
         Some(_) | None => semantic_incremental_state_with_binding_metadata(
@@ -393,6 +406,7 @@ fn analyze_pipeline_state(
             config.config.typing.imports,
             None,
             stdlib_snapshot.clone(),
+            snapshot_metadata.clone(),
         ),
     }
     .with_source_hashes(source_hashes);
@@ -451,6 +465,7 @@ fn can_reuse_cached_pipeline_outputs(
         && previous.source_hashes == analyzed.incremental.source_hashes
         && previous.summaries == analyzed.incremental.summaries
         && previous.stdlib_snapshot == analyzed.incremental.stdlib_snapshot
+        && previous.metadata == analyzed.incremental.metadata
         && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
 }
 

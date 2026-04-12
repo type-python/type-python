@@ -499,6 +499,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                     solver_facts: typepython_incremental::ModuleSolverFacts::default(),
                 }],
                 stdlib_snapshot: Some(String::from("fnv1a64:demo")),
+                metadata: typepython_incremental::SnapshotMetadata::default(),
             },
         )
         .expect("test setup should succeed");
