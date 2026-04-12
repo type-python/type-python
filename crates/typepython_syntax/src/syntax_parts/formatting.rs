@@ -184,8 +184,33 @@ pub fn normalize_source_variadic_type_syntax(text: &str) -> String {
             continue;
         };
         let operand = text[operand_start..operand_end].trim();
+        let bracket_is_type_context = if previous == Some('[') {
+            let mut cursor = index;
+            let mut result = false;
+            while cursor > 0 {
+                cursor -= 1;
+                let Some(character) = text[cursor..].chars().next() else {
+                    break;
+                };
+                if character.is_whitespace() {
+                    continue;
+                }
+                if character != '[' {
+                    break;
+                }
+                let before_bracket = text[..cursor].chars().next_back();
+                result = before_bracket.is_some_and(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '_' | ']' | '.')
+                });
+                break;
+            }
+            result
+        } else {
+            true
+        };
         if operand.is_empty()
             || matches!(delimiter, Some(':')) && matches!(previous, None | Some('(') | Some(','))
+            || previous == Some('[') && !bracket_is_type_context
             || !matches!(previous, None | Some('[') | Some(',') | Some(':') | Some('>') | Some('='))
         {
             normalized.push(character);
