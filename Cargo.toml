@@ -38,7 +38,7 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2"
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+zip = { version = "7.2", default-features = false, features = ["deflate"] }
 
 # Testing and benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
