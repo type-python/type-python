@@ -1,0 +1,23 @@
+# Parser and bundled stdlib baseline used by TypePython.
+# This file is intentionally repository-local rather than generated:
+# it gives reviewers one place to confirm the parser dependency set and
+# the stdlib snapshot claims that the project is built and tested against.
+
+[parser]
+littrs_ruff_python_ast = "0.6.2"
+littrs_ruff_python_parser = "0.6.2"
+littrs_ruff_text_size = "0.6.2"
+baseline = "Accepts native type aliases and inline type parameters used by Python 3.14-targeted TypePython output."
+
+[bundled_stdlib]
+source = "typeshed-derived bundled snapshot"
+version_index = "stdlib/VERSIONS"
+target_range = "3.10-3.14"
+evidence_modules = [
+  "_interpqueues: 3.13-",
+  "_zstd: 3.14-",
+]
+evidence_typing_markers = [
+  "typing.pyi imports annotationlib for 3.14",
+  "typing.pyi exports ReadOnly/TypeIs/NoDefault for 3.13+",
+]

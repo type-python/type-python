@@ -1944,6 +1944,7 @@ dependencies = [
  "littrs-ruff-text-size",
  "proptest",
  "serde",
+ "toml",
  "typepython-diagnostics",
 ]
 
