@@ -162,7 +162,7 @@ TypePython MUST NOT change the runtime meaning of ordinary Python syntax.
 
 ### 7.2 Target Python Version
 
-Core v1 targets Python 3.10, 3.11, or 3.12. The `target_python` configuration key MUST accept only these values.
+Core v1 targets Python 3.10 through 3.14. The `target_python` configuration key MUST accept only these values.
 
 This decision relies on:
 
@@ -1739,21 +1739,23 @@ Emission rules for target-version compatibility:
 
 ### 12.6.2 Target-Version Compatibility Matrix
 
-Core v1 targets Python 3.10, 3.11, and 3.12 runtimes, but it also consumes newer typing constructs through `typing_extensions` and other standardized backport locations. Emitters MUST therefore follow a deterministic compatibility matrix.
+Core v1 targets Python 3.10 through 3.14 runtimes. Emitters MUST therefore follow a deterministic compatibility matrix and a deterministic lowering strategy selected by `emit.emit_style`.
 
 | Construct                                        | Preferred source when available                              | Backport or fallback for Core v1 targets | Core v1 emit rule                                                                                                                             |
 | ------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TypeAlias`                                      | `typing.TypeAlias`                                           | none required for supported targets      | Emit assignment-style aliases using `TypeAlias`. Core v1 does not emit the Python 3.12 `type` statement.                                      |
+| `TypeAlias`                                      | `type` statement (3.12+) or `typing.TypeAlias`               | none required for supported targets      | In `compat` mode emit assignment-style aliases using `TypeAlias`. In `native` mode emit the `type` statement when the configured target supports it. |
 | `Self`                                           | `typing.Self` (3.11+)                                        | `typing_extensions.Self`                 | For target 3.10 emit `typing_extensions.Self`; otherwise prefer `typing.Self`.                                                                |
 | `Required`, `NotRequired`, `dataclass_transform` | `typing` (3.11+)                                             | `typing_extensions`                      | For target 3.10 emit `typing_extensions`; for 3.11+ prefer `typing`.                                                                          |
-| `override`                                       | `typing.override` (3.12+)                                    | `typing_extensions.override`             | For targets 3.10 and 3.11 emit `typing_extensions.override`; for 3.12 prefer `typing.override`.                                               |
-| `ReadOnly`, `TypeIs`                             | stdlib spellings exist only after the supported target range | `typing_extensions`                      | For all Core v1 targets, emit `typing_extensions.ReadOnly` and `typing_extensions.TypeIs` when these constructs appear in the public surface. |
-| `deprecated` decorator                           | `warnings.deprecated` (outside the supported target range)   | `typing_extensions.deprecated`           | For all Core v1 targets emit `typing_extensions.deprecated` when a deprecation decorator must appear in emitted code or stubs.                |
+| `override`                                       | `typing.override` (3.12+)                                    | `typing_extensions.override`             | For targets 3.10 and 3.11 emit `typing_extensions.override`; for 3.12+ prefer `typing.override`.                                              |
+| `ReadOnly`, `TypeIs`                             | `typing` (3.13+)                                             | `typing_extensions`                      | For targets below 3.13 emit `typing_extensions.ReadOnly` and `typing_extensions.TypeIs`; for 3.13+ prefer `typing`.                          |
+| `NoDefault`                                      | `typing` (3.13+)                                             | `typing_extensions`                      | For targets below 3.13 emit `typing_extensions.NoDefault` when it appears in the public surface; for 3.13+ prefer `typing.NoDefault`.        |
+| `deprecated` decorator                           | `warnings.deprecated` (3.13+)                                | `typing_extensions.deprecated`           | For targets below 3.13 emit `typing_extensions.deprecated`; for 3.13+ prefer `warnings.deprecated`.                                           |
 
 Additional deterministic rules:
 
-- Core v1 `.py` and `.pyi` emit MUST use legacy-compatible generic materialization (`TypeVar`, `Generic`, and ordinary annotation syntax) rather than Python 3.12 native type-parameter syntax.
-- A Core v1 implementation MAY parse or consume newer syntax in external inputs only when another tool in the environment has already lowered or normalized it to a form compatible with the configured `target_python`.
+- `emit.emit_style = "compat"` MUST use legacy-compatible generic materialization (`TypeVar`, `Generic`, and ordinary annotation syntax) rather than native type-parameter syntax.
+- `emit.emit_style = "native"` MUST preserve native type-parameter syntax when the configured `target_python` supports it, but it MUST fall back locally when a declaration requires runtime features not present in that target version.
+- A Core v1 implementation MUST be able to parse and consume newer syntax in external inputs whenever the configured analysis Python version and parser support that syntax.
 - If multiple compatible spellings are available for a target, the emitter MUST choose one deterministically and use the same choice for equivalent declarations within a build.
 
 ---

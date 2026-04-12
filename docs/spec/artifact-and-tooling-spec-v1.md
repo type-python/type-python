@@ -81,12 +81,13 @@ exclude = [".typepython/**", "dist/**", ".venv/**", "venv/**"]  # Exclude patter
 root_dir = "src"                                 # Logical source root
 out_dir = ".typepython/build"                   # Output directory
 cache_dir = ".typepython/cache"                  # Cache directory
-target_python = "3.10"                           # "3.10", "3.11", or "3.12"
+target_python = "3.10"                           # "3.10", "3.11", "3.12", "3.13", or "3.14"
 
 [resolution]
 base_url = "."                                    # Reserved; only project-root default is supported today
 type_roots = []                                   # Extra stub directories
 python_executable = null                          # Interpreter used for installed-package resolution outside safe structural verify mode
+analysis_python = "3.13"                          # Optional support-surface analysis interpreter version
 
 [resolution.paths]
 # "@app/*" = ["src/app/*"]                       # Reserved; non-empty tables are rejected today
@@ -98,6 +99,7 @@ write_py_typed = true                            # Emit py.typed marker
 preserve_comments = true                         # Current implementations always preserve comments when available
 no_emit_on_error = true                          # Block best-effort emit on semantic errors
 runtime_validators = false                       # Experimental: emit runtime validators for data class
+emit_style = "compat"                            # "compat" or "native"; defaults by target version
 
 [typing]
 profile = null                                    # "library", "application", or "migration"
@@ -130,7 +132,7 @@ When this schema is embedded in `pyproject.toml`, the same tables appear under `
 | `root_dir`      | string       | Logical root for relative output paths    |
 | `out_dir`       | string       | Root for emitted `.py` and `.pyi`         |
 | `cache_dir`     | string       | Root for incremental state                |
-| `target_python` | string       | Target version: `3.10`, `3.11`, or `3.12` |
+| `target_python` | string       | Target version: `3.10`, `3.11`, `3.12`, `3.13`, or `3.14` |
 
 **`[resolution]` fields:**
 
@@ -139,11 +141,12 @@ When this schema is embedded in `pyproject.toml`, the same tables appear under `
 | `base_url`          | string         | Reserved for non-relative path resolution; current implementations only support the default project root (`.`) |
 | `type_roots`        | list[string]   | Directories searched for stub packages before installed packages                             |
 | `python_executable` | string \| null | Interpreter used to locate installed packages and, when supported, verification subprocesses; safe structural verify MAY ignore project-controlled interpreters |
+| `analysis_python`  | string \| null | Python version used to select support-surface inputs; defaults to `project.target_python` when omitted |
 | `paths`             | table          | Reserved for alias mapping from module patterns to filesystem patterns; current implementations reject non-empty tables |
 
 Path mappings are reserved for future static resolution support. Current implementations MUST reject non-empty tables rather than silently ignoring them.
 
-If `python_executable` is configured and its resolved Python major/minor version is incompatible with `project.target_python`, ordinary configuration loading MUST diagnose `TPY1002`. A safe structural verification mode MAY bypass execution-based validation of a project-controlled interpreter, but it MUST document that behavior and surface when the configured interpreter was ignored.
+If `python_executable` is configured and its resolved Python major/minor version is incompatible with the effective analysis Python version, ordinary configuration loading MUST diagnose `TPY1002`. The effective analysis Python version is `resolution.analysis_python` when configured, otherwise `project.target_python`. A safe structural verification mode MAY bypass execution-based validation of a project-controlled interpreter, but it MUST document that behavior and surface when the configured interpreter was ignored.
 
 **`[emit]` fields:**
 
@@ -155,6 +158,7 @@ If `python_executable` is configured and its resolved Python major/minor version
 | `preserve_comments`  | bool | Reserved toggle for future comment-stripping control; current implementations always preserve comments when available |
 | `no_emit_on_error`   | bool | Block best-effort output after semantic/public-surface errors; discovery/parse/lowering remain hard blockers |
 | `runtime_validators` | bool | Experimental: emit `validate` classmethod on `data class` types |
+| `emit_style`         | string | Lowering strategy: `compat` preserves broad legacy compatibility, `native` preserves target-native typing syntax when supported |
 
 **`[typing]` fields:**
 

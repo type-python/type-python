@@ -123,6 +123,8 @@ At minimum:
 - `dataclass_transform` synthesis tests for decorator, base-class, and metaclass cases
 - PEP 561 partial-stub resolution tests
 - `typing` / `typing_extensions` equivalence and target-version emission tests
+- native/compat lowering mode tests for PEP 695 aliases, classes, and functions
+- `Requires-Python` and `typing_extensions` metadata conformance tests for `typepython verify`
 - wheel/sdist typed-artifact consistency tests for `py.typed` and emitted `.pyi`
 - Public API completeness tests under `require_known_public_types = true`
 - Parser-accepts / checker-rejects tests for still-deferred `.tpy` constructs

@@ -140,7 +140,7 @@ In the emitted `.pyi`, `PartialConfig` becomes a standalone `TypedDict` with all
 
 ### Decorator metadata
 
-`@deprecated` messages are preserved in `.pyi` stubs, with lowering normalizing the decorator to `typing_extensions.deprecated`. `@final` and `@override` are standard and fully understood. No information loss for these decorators.
+`@deprecated` messages are preserved in `.pyi` stubs. In compat mode lowering uses `typing_extensions.deprecated`; in native 3.13+ mode it prefers `warnings.deprecated`. `@final` and `@override` are standard and fully understood. No information loss for these decorators.
 
 ## Summary
 
