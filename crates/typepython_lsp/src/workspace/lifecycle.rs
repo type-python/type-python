@@ -10,7 +10,7 @@ impl SupportSourceCatalog {
         if self.index.is_none() {
             self.index = Some(typepython_project::support_source_index(
                 config,
-                &config.config.project.target_python.to_string(),
+                &config.analysis_python().to_string(),
             )?);
         }
         self.index.as_ref().ok_or_else(|| {
@@ -68,7 +68,7 @@ impl IncrementalWorkspace {
                     &source,
                     overlays.get(&source.path).map(|overlay| overlay.text.as_str()),
                     config.config.typing.conditional_returns,
-                    &config.config.project.target_python.to_string(),
+                    &config.analysis_python().to_string(),
                 )?;
             let (document, declarations) = index_document_state(syntax);
             project_documents.insert(
@@ -134,7 +134,7 @@ impl IncrementalWorkspace {
                     &source,
                     overlay.map(|document| document.text.as_str()),
                     self.config.config.typing.conditional_returns,
-                    &self.config.config.project.target_python.to_string(),
+                    &self.config.analysis_python().to_string(),
                 )?;
                 let (document, declarations) = index_document_state(syntax);
                 direct_changes.insert(source.logical_module.clone());
@@ -233,7 +233,7 @@ impl IncrementalWorkspace {
                 source,
                 None,
                 self.config.config.typing.conditional_returns,
-                &self.config.config.project.target_python.to_string(),
+                &self.config.analysis_python().to_string(),
             )?;
         let (document, declarations) = index_document_state(syntax);
         self.support_documents.insert(
@@ -268,7 +268,7 @@ impl IncrementalWorkspace {
         let shadow_stub_syntax = typepython_project::inferred_shadow_stub_syntax_trees(
             &project_syntax_trees,
             self.config.config.typing.conditional_returns,
-            &self.config.config.project.target_python.to_string(),
+            &self.config.analysis_python().to_string(),
         )?;
         if shadow_stub_syntax.is_empty() {
             Ok(project_syntax_trees)

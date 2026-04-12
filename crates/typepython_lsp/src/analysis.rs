@@ -126,7 +126,7 @@ impl AnalysisHost {
         self.support_index_prewarm_task = Some(std::thread::spawn(move || {
             let _ = typepython_project::support_source_index(
                 &config,
-                &config.config.project.target_python.to_string(),
+                &config.analysis_python().to_string(),
             );
         }));
     }

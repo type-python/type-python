@@ -53,6 +53,12 @@ impl ConfigHandle {
     pub fn resolve_relative_path(&self, relative: &str) -> PathBuf {
         self.config_dir.join(relative)
     }
+
+    /// Returns the Python version that should drive support-surface analysis.
+    #[must_use]
+    pub fn analysis_python(&self) -> PythonTarget {
+        self.config.resolution.analysis_python.unwrap_or(self.config.project.target_python)
+    }
 }
 
 /// Errors produced while discovering or loading TypePython config.
@@ -154,6 +160,10 @@ pub struct ResolutionConfig {
     pub type_roots: Vec<String>,
     /// Configured Python executable.
     pub python_executable: Option<String>,
+    /// Python version used when selecting support-surface inputs.
+    pub analysis_python: Option<PythonTarget>,
+    /// Original analysis-python text retained for diagnostics.
+    pub analysis_python_text: Option<String>,
     /// Static alias map.
     pub paths: BTreeMap<String, Vec<String>>,
 }
@@ -164,6 +174,8 @@ impl Default for ResolutionConfig {
             base_url: String::from("."),
             type_roots: Vec::new(),
             python_executable: None,
+            analysis_python: None,
+            analysis_python_text: None,
             paths: BTreeMap::new(),
         }
     }
@@ -341,6 +353,7 @@ struct RawResolutionConfig {
     base_url: Option<String>,
     type_roots: Option<Vec<String>>,
     python_executable: Option<String>,
+    analysis_python: Option<String>,
     #[serde(default)]
     paths: BTreeMap<String, Vec<String>>,
 }
@@ -418,6 +431,11 @@ impl Config {
         )?;
         validate_resolution_base_url(config_path, config_dir, &self.resolution.base_url)?;
         validate_resolution_paths(config_path, &self.resolution.paths)?;
+        validate_analysis_python(
+            config_path,
+            self.resolution.analysis_python,
+            self.resolution.analysis_python_text.as_deref(),
+        )?;
 
         if validate_python_executable_flag {
             if let Some(python_executable) = &self.resolution.python_executable {
@@ -425,7 +443,7 @@ impl Config {
                     config_path,
                     config_dir,
                     python_executable,
-                    &self.project.target_python,
+                    self.resolution.analysis_python.unwrap_or(self.project.target_python),
                 )?;
             }
         }
@@ -477,6 +495,11 @@ impl Config {
             if let Some(python_executable) = resolution.python_executable {
                 config.resolution.python_executable =
                     if python_executable == NULL_SENTINEL { None } else { Some(python_executable) };
+            }
+            if let Some(analysis_python) = resolution.analysis_python {
+                config.resolution.analysis_python =
+                    parse_target_python(&analysis_python).or(Some(PythonTarget::new(0, 0)));
+                config.resolution.analysis_python_text = Some(analysis_python);
             }
             if !resolution.paths.is_empty() {
                 config.resolution.paths = resolution.paths;
@@ -901,11 +924,35 @@ fn validate_target_python(
     }
 }
 
+fn validate_analysis_python(
+    config_path: &Path,
+    analysis_python: Option<PythonTarget>,
+    analysis_python_text: Option<&str>,
+) -> Result<(), ConfigError> {
+    let Some(analysis_python) = analysis_python else {
+        return Ok(());
+    };
+    match analysis_python {
+        PythonTarget::PYTHON_3_10
+        | PythonTarget::PYTHON_3_11
+        | PythonTarget::PYTHON_3_12
+        | PythonTarget::PYTHON_3_13
+        | PythonTarget::PYTHON_3_14 => Ok(()),
+        _ => Err(ConfigError::InvalidValue {
+            path: config_path.to_path_buf(),
+            message: format!(
+                "resolution.analysis_python = `{}` is unsupported; expected one of `3.10`, `3.11`, `3.12`, `3.13`, or `3.14`",
+                analysis_python_text.unwrap_or_default()
+            ),
+        }),
+    }
+}
+
 fn validate_python_executable(
     config_path: &Path,
     config_dir: &Path,
     python_executable: &str,
-    target_python: &PythonTarget,
+    analysis_python: PythonTarget,
 ) -> Result<(), ConfigError> {
     let executable_path = resolve_python_executable(config_dir, python_executable);
     let output = Command::new(&executable_path)
@@ -934,11 +981,11 @@ fn validate_python_executable(
     }
 
     let resolved_version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if resolved_version != target_python.to_string() {
+    if resolved_version != analysis_python.to_string() {
         return Err(ConfigError::InvalidValue {
             path: config_path.to_path_buf(),
             message: format!(
-                "resolution.python_executable = `{python_executable}` resolved to Python {resolved_version}, which is incompatible with project.target_python = `{target_python}`"
+                "resolution.python_executable = `{python_executable}` resolved to Python {resolved_version}, which is incompatible with effective analysis Python `{analysis_python}`"
             ),
         });
     }
@@ -1234,7 +1281,7 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("TPY1002"));
         assert!(message.contains("resolved to Python 3.11"));
-        assert!(message.contains("project.target_python = `3.10`"));
+        assert!(message.contains("effective analysis Python `3.10`"));
     }
 
     #[test]
@@ -1265,6 +1312,59 @@ mod tests {
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn accepts_analysis_python_distinct_from_target_python() {
+        let project_dir = temp_project_dir("accepts_analysis_python_distinct_from_target_python");
+        let executable = write_fake_python(&project_dir, "3.12");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            format!(
+                concat!(
+                    "[project]\n",
+                    "target_python = \"3.10\"\n\n",
+                    "[resolution]\n",
+                    "analysis_python = \"3.12\"\n",
+                    "python_executable = \"{}\"\n"
+                ),
+                executable.display()
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected explicit analysis_python to load");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_10);
+        assert_eq!(handle.config.resolution.analysis_python, Some(PythonTarget::PYTHON_3_12));
+        assert_eq!(handle.analysis_python(), PythonTarget::PYTHON_3_12);
+    }
+
+    #[test]
+    fn rejects_unsupported_analysis_python() {
+        let project_dir = temp_project_dir("rejects_unsupported_analysis_python");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            concat!(
+                "[project]\n",
+                "target_python = \"3.10\"\n\n",
+                "[resolution]\n",
+                "analysis_python = \"3.15\"\n"
+            ),
+        )
+        .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let error = load_result.expect_err("expected invalid analysis_python to fail");
+        let message = error.to_string();
+        assert!(message.contains("TPY1002"));
+        assert!(message.contains("resolution.analysis_python = `3.15`"));
     }
 
     #[cfg(unix)]
@@ -1480,6 +1580,7 @@ mod tests {
                     "target_python = \"3.11\"\n\n",
                     "[resolution]\n",
                     "type_roots = [\"stubs\", \"more-stubs\"]\n",
+                    "analysis_python = \"3.11\"\n",
                     "python_executable = \"{}\"\n\n",
                     "[format]\n",
                     "command = [\"python3\", \"{{workspace_root}}/tools/format.py\", \"{{file}}\"]\n",
@@ -1530,6 +1631,7 @@ mod tests {
             handle.config.resolution.type_roots,
             vec![String::from("stubs"), String::from("more-stubs")]
         );
+        assert_eq!(handle.config.resolution.analysis_python, Some(PythonTarget::PYTHON_3_11));
         assert_eq!(
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
@@ -1583,6 +1685,7 @@ mod tests {
                     "target_python = \"3.12\"\n\n",
                     "[tool.typepython.resolution]\n",
                     "type_roots = [\"stubs\"]\n",
+                    "analysis_python = \"3.12\"\n",
                     "python_executable = \"{}\"\n\n",
                     "[tool.typepython.format]\n",
                     "command = [\"ruff\", \"format\", \"{{file}}\"]\n",
@@ -1628,6 +1731,7 @@ mod tests {
         assert_eq!(handle.config.project.cache_dir, ".typepython/cache-data");
         assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_12);
         assert_eq!(handle.config.resolution.type_roots, vec![String::from("stubs")]);
+        assert_eq!(handle.config.resolution.analysis_python, Some(PythonTarget::PYTHON_3_12));
         assert_eq!(
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())

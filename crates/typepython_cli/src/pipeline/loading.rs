@@ -84,7 +84,7 @@ fn load_support_syntax_trees(
         return Ok(Vec::new());
     }
 
-    let support_index = support_source_index(config, &config.config.project.target_python.to_string())?;
+    let support_index = support_source_index(config, &config.analysis_python().to_string())?;
 
     let mut queued_modules = BTreeSet::new();
     let mut queue = VecDeque::new();
@@ -134,7 +134,7 @@ fn load_support_syntax_trees(
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
                         target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python.to_string(),
+                            &config.analysis_python().to_string(),
                         ),
                         target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },
@@ -148,7 +148,7 @@ fn load_support_syntax_trees(
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
                         target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python.to_string(),
+                            &config.analysis_python().to_string(),
                         ),
                         target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },
