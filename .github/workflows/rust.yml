@@ -115,6 +115,41 @@ jobs:
       - name: Run installed wheel smoke test
         run: python scripts/quickstart_smoke.py
 
+  native-target-build-verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal \
+            --component rustfmt \
+            --component clippy
+          rustup default 1.94.0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install wheel build tools
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Install built wheel
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Run native target build/verify smoke test
+        run: python scripts/native_target_smoke.py --target-python ${{ matrix.python-version }}
+
   platform-smoke:
     if: github.event_name == 'pull_request'
     strategy:
