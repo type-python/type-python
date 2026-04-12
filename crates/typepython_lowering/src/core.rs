@@ -300,86 +300,88 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
-    let mut inserted_lines = InsertedLineTracker {
-        source_path: &source_path,
-        emitted_path: &emitted_path,
-        lowered_lines: &mut lowered_lines,
-        required_imports: &mut required_imports,
-        span_map: &mut span_map,
-        lowered_line_number: &mut lowered_line_number,
-    };
-    if has_runtime_typevars
-        && !has_typevar_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
     {
-        inserted_lines.emit_required_import(rewrite_typevar_import_line(
-            needs_typing_extensions_runtime_type_params,
-        ));
+        let mut inserted_lines = InsertedLineTracker {
+            source_path: &source_path,
+            emitted_path: &emitted_path,
+            lowered_lines: &mut lowered_lines,
+            required_imports: &mut required_imports,
+            span_map: &mut span_map,
+            lowered_line_number: &mut lowered_line_number,
+        };
+        if has_runtime_typevars
+            && !has_typevar_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
+        {
+            inserted_lines.emit_required_import(rewrite_typevar_import_line(
+                needs_typing_extensions_runtime_type_params,
+            ));
+        }
+        if has_runtime_paramspecs
+            && !has_paramspec_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
+        {
+            inserted_lines.emit_required_import(rewrite_paramspec_import_line(
+                needs_typing_extensions_runtime_type_params,
+            ));
+        }
+        if has_runtime_typevartuples
+            && !has_typevartuple_import(&tree.source.text, uses_typing_extensions_variadic_generics)
+        {
+            inserted_lines.emit_required_import(rewrite_typevartuple_import_line(
+                uses_typing_extensions_variadic_generics,
+            ));
+        }
+        if needs_unpack_import
+            && !has_unpack_import(&tree.source.text, uses_typing_extensions_variadic_generics)
+        {
+            inserted_lines.emit_required_import(rewrite_unpack_import_line(
+                uses_typing_extensions_variadic_generics,
+            ));
+        }
+        if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import Generic"));
+        }
+        if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import Any"));
+        }
+        for (name, type_param) in &runtime_type_params {
+            inserted_lines.emit_synthetic_line(rewrite_typevar_line(name, type_param));
+        }
+        if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
+        }
+        if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import Protocol"));
+        }
+        if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from dataclasses import dataclass"));
+        }
+        if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
+            inserted_lines.emit_required_import(String::from("from typing import overload"));
+        }
+        // Check if any type alias uses a transform that generates NotRequired
+        let needs_notrequired_import = type_aliases.values().any(|stmt| {
+            let v = stmt.value.trim();
+            v == "Partial[User]"
+                || v == "Required_[UserUpdate]"
+                || v.starts_with("Partial[")
+                || v.starts_with("Required_[")
+        });
+        if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
+            inserted_lines.emit_required_import(rewrite_notrequired_import_line(options));
+        }
+        // Check if any type alias uses a transform that generates ReadOnly
+        let needs_readonly_import = type_aliases.values().any(|stmt| {
+            let v = stmt.value.trim();
+            v == "Readonly[Config]"
+                || v == "Mutable[Config]"
+                || v.starts_with("Readonly[")
+                || v.starts_with("Mutable[")
+        });
+        if needs_readonly_import && !has_readonly_import(&tree.source.text) {
+            inserted_lines
+                .emit_required_import(String::from("from typing_extensions import ReadOnly"));
+        }
     }
-    if has_runtime_paramspecs
-        && !has_paramspec_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
-    {
-        inserted_lines.emit_required_import(rewrite_paramspec_import_line(
-            needs_typing_extensions_runtime_type_params,
-        ));
-    }
-    if has_runtime_typevartuples
-        && !has_typevartuple_import(&tree.source.text, uses_typing_extensions_variadic_generics)
-    {
-        inserted_lines.emit_required_import(rewrite_typevartuple_import_line(
-            uses_typing_extensions_variadic_generics,
-        ));
-    }
-    if needs_unpack_import
-        && !has_unpack_import(&tree.source.text, uses_typing_extensions_variadic_generics)
-    {
-        inserted_lines.emit_required_import(rewrite_unpack_import_line(
-            uses_typing_extensions_variadic_generics,
-        ));
-    }
-    if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing import Generic"));
-    }
-    if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing import Any"));
-    }
-    for (name, type_param) in &runtime_type_params {
-        inserted_lines.emit_synthetic_line(rewrite_typevar_line(name, type_param));
-    }
-    if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
-    }
-    if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing import Protocol"));
-    }
-    if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from dataclasses import dataclass"));
-    }
-    if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing import overload"));
-    }
-    // Check if any type alias uses a transform that generates NotRequired
-    let needs_notrequired_import = type_aliases.values().any(|stmt| {
-        let v = stmt.value.trim();
-        v == "Partial[User]"
-            || v == "Required_[UserUpdate]"
-            || v.starts_with("Partial[")
-            || v.starts_with("Required_[")
-    });
-    if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
-        inserted_lines.emit_required_import(rewrite_notrequired_import_line(options));
-    }
-    // Check if any type alias uses a transform that generates ReadOnly
-    let needs_readonly_import = type_aliases.values().any(|stmt| {
-        let v = stmt.value.trim();
-        v == "Readonly[Config]"
-            || v == "Mutable[Config]"
-            || v.starts_with("Readonly[")
-            || v.starts_with("Mutable[")
-    });
-    if needs_readonly_import && !has_readonly_import(&tree.source.text) {
-        inserted_lines.emit_required_import(String::from("from typing_extensions import ReadOnly"));
-    }
-    drop(inserted_lines);
 
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
