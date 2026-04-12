@@ -8,7 +8,7 @@ This guide walks you through installing TypePython, creating your first project,
 - **Python 3.9+** -- required for the Python package interface and packaging checks (optional if you only use a prebuilt Rust binary directly)
 - **Git** -- to clone the repository
 
-TypePython projects themselves currently target Python 3.10, 3.11, or 3.12 via `project.target_python`.
+TypePython projects themselves currently target Python 3.10 through 3.14 via `project.target_python`.
 
 ## Installation
 

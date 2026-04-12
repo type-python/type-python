@@ -53,7 +53,7 @@ typepython.toml:1:1  TPY1001  error  Failed to read configuration: typepython.to
 **TPY1002 example:**
 
 ```
-typepython.toml:8:18  TPY1002  error  Invalid target_python "3.8": supported values are "3.10", "3.11", "3.12"
+typepython.toml:8:18  TPY1002  error  Invalid target_python "3.8": supported values are "3.10", "3.11", "3.12", "3.13", "3.14"
 ```
 
 ---

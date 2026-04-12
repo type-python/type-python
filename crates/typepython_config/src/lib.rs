@@ -912,13 +912,15 @@ fn validate_target_python(
     target_python_text: &str,
 ) -> Result<(), ConfigError> {
     match *target_python {
-        PythonTarget::PYTHON_3_10 | PythonTarget::PYTHON_3_11 | PythonTarget::PYTHON_3_12 => {
-            Ok(())
-        }
+        PythonTarget::PYTHON_3_10
+        | PythonTarget::PYTHON_3_11
+        | PythonTarget::PYTHON_3_12
+        | PythonTarget::PYTHON_3_13
+        | PythonTarget::PYTHON_3_14 => Ok(()),
         _ => Err(ConfigError::InvalidValue {
             path: config_path.to_path_buf(),
             message: format!(
-                "project.target_python = `{target_python_text}` is unsupported; expected one of `3.10`, `3.11`, or `3.12`"
+                "project.target_python = `{target_python_text}` is unsupported; expected one of `3.10`, `3.11`, `3.12`, `3.13`, or `3.14`"
             ),
         }),
     }
@@ -1312,6 +1314,21 @@ mod tests {
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
         );
+    }
+
+    #[test]
+    fn accepts_target_python_313_with_native_default_emit_style() {
+        let project_dir = temp_project_dir("accepts_target_python_313_with_native_default_emit_style");
+        fs::write(project_dir.join("typepython.toml"), "[project]\ntarget_python = \"3.13\"\n")
+            .expect("typepython.toml should be written");
+
+        let load_result = load(&project_dir);
+
+        remove_temp_project_dir(&project_dir);
+
+        let handle = load_result.expect("expected 3.13 target to load");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_13);
+        assert_eq!(handle.config.emit.emit_style, EmitStyle::Native);
     }
 
     #[test]

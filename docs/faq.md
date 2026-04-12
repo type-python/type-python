@@ -23,7 +23,7 @@ You can use mypy, pyright, or similar tools on the **emitted** `.py`/`.pyi` file
 
 ### What Python versions does TypePython target?
 
-TypePython can target Python 3.10, 3.11, or 3.12 via the `project.target_python` configuration. The target version affects compatibility-oriented lowering decisions, such as whether emitted helpers come from `typing` or `typing_extensions`.
+TypePython can target Python 3.10 through 3.14 via the `project.target_python` configuration. Targets 3.10-3.12 default to `emit.emit_style = "compat"`, while 3.13+ default to `emit.emit_style = "native"`. The target version affects both syntax preservation and whether emitted helpers come from `typing`, `warnings`, or `typing_extensions`.
 
 ### Is TypePython production-ready?
 

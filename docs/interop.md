@@ -34,9 +34,14 @@ Every TypePython-specific construct is lowered to an equivalent standard Python 
 | `unsafe: ...`                | Not represented (safety boundary is erased)                   | --             |
 | `sealed` marker              | Not represented (comment only in `.py`)                       | --             |
 
-### Conservative lowering strategy
+### Dual lowering strategy
 
-TypePython currently uses a compatibility-oriented lowering path for all supported `target_python` values (3.10, 3.11, 3.12). Even when targeting Python 3.12, emitted stubs use `TypeVar` + `TypeAlias` rather than PEP 695 native `type` statements or `def f[T]()` syntax. This maximizes compatibility with older versions of mypy and pyright.
+TypePython now supports two lowering modes:
+
+- `emit.emit_style = "compat"` preserves broad checker/runtime compatibility by lowering inline generics to `TypeVar` / `ParamSpec` / `TypeVarTuple` declarations and `TypeAlias`.
+- `emit.emit_style = "native"` preserves native typing syntax when the configured target runtime supports it, including `type Alias = ...`, `def f[T]`, and `class C[T]`.
+
+Targets 3.10-3.12 default to `compat`. Targets 3.13+ default to `native`, though every target can override the mode explicitly.
 
 ## `typing` / `typing_extensions` Equivalence
 
@@ -49,13 +54,13 @@ from typing_extensions import Protocol   # same type
 
 When emitting `.pyi` stubs, the compiler selects the import source based on `target_python`:
 
-| Construct    | Python 3.10         | Python 3.11         | Python 3.12         |
-| ------------ | ------------------- | ------------------- | ------------------- |
-| `TypeGuard`  | `typing_extensions` | `typing`            | `typing`            |
-| `TypeIs`     | `typing_extensions` | `typing_extensions` | `typing_extensions` |
-| `ReadOnly`   | `typing_extensions` | `typing_extensions` | `typing_extensions` |
-| `override`   | `typing_extensions` | `typing_extensions` | `typing`            |
-| `deprecated` | `typing_extensions` | `typing_extensions` | `typing_extensions` |
+| Construct    | Python 3.10         | Python 3.11         | Python 3.12         | Python 3.13+ |
+| ------------ | ------------------- | ------------------- | ------------------- | ------------ |
+| `TypeGuard`  | `typing_extensions` | `typing`            | `typing`            | `typing`     |
+| `TypeIs`     | `typing_extensions` | `typing_extensions` | `typing_extensions` | `typing`     |
+| `ReadOnly`   | `typing_extensions` | `typing_extensions` | `typing_extensions` | `typing`     |
+| `override`   | `typing_extensions` | `typing_extensions` | `typing`            | `typing`     |
+| `deprecated` | `typing_extensions` | `typing_extensions` | `typing_extensions` | `warnings`   |
 
 This ensures that mypy and pyright can resolve all imports for the given target version without needing manual `typing_extensions` fallbacks.
 

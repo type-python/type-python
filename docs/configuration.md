@@ -47,7 +47,7 @@ out_dir = ".typepython/build"
 cache_dir = ".typepython/cache"
 
 # Target Python version for lowering decisions.
-# Supported values: "3.10", "3.11", "3.12"
+# Supported values: "3.10", "3.11", "3.12", "3.13", "3.14"
 # Default: "3.10"
 target_python = "3.10"
 
@@ -72,6 +72,11 @@ type_roots = []
 # when you need verification against the configured interpreter environment.
 # Default: null (auto-detect)
 python_executable = null
+
+# Python version used for support-surface discovery and support-source parsing.
+# Defaults to project.target_python when omitted.
+# Supported values: "3.10", "3.11", "3.12", "3.13", "3.14"
+# analysis_python = "3.13"
 
 # Reserved for future static path mapping support.
 # Current implementation rejects non-empty alias tables.
@@ -130,6 +135,14 @@ no_emit_on_error = true
 # [Experimental] Emit runtime __tpy_validate__() methods on data classes.
 # Default: false
 runtime_validators = false
+
+# Lowering strategy for typing syntax.
+# "compat" preserves broad checker/runtime compatibility for older targets.
+# "native" preserves native typing syntax when the configured target supports it.
+# Default: target-dependent
+#   3.10-3.12 -> "compat"
+#   3.13-3.14 -> "native"
+emit_style = "compat"
 
 
 # ============================================================================

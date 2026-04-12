@@ -8,7 +8,7 @@
 
 **A statically-typed authoring language that compiles to standard Python.**
 
-Write `.tpy` files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits standard `.py` + `.pyi` artifacts for Python 3.10-3.12, using standard typing constructs and `typing_extensions` backports where needed, so the result can be checked by tools like mypy, pyright, or ty. No custom runtime, no proprietary type forms.
+Write `.tpy` files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits standard `.py` + `.pyi` artifacts for Python 3.10-3.14. Targets 3.10-3.12 default to a compatibility-oriented lowering path; targets 3.13+ default to native typing syntax when the runtime supports it. No custom runtime, no proprietary type forms.
 
 ---
 
@@ -19,7 +19,7 @@ pip install type-python
 typepython --help
 ```
 
-The Python package bridge supports Python 3.9+. Generated TypePython projects currently target Python 3.10, 3.11, or 3.12.
+The Python package bridge supports Python 3.9+. Generated TypePython projects can currently target Python 3.10 through 3.14.
 Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
 The workspace MSRV is Rust 1.85. `./scripts/bootstrap-rust.sh` installs the pinned Rust 1.94.0 development toolchain used by CI.
 
@@ -71,7 +71,7 @@ The compiler outputs:
 | `def first[T](xs: list[T]) -> T:` | Materialized `TypeVar` plus ordinary generic `def` |
 | `unsafe: eval(expr)`              | `if True: eval(expr)`                              |
 
-Emitted `.py` and `.pyi` use standard Python typing constructs plus `typing_extensions` compatibility imports when needed for the configured target version. Downstream consumers never need the TypePython compiler or a TypePython-specific runtime.
+Emitted `.py` and `.pyi` use standard Python typing constructs plus `typing_extensions` compatibility imports when needed for the configured target version. Targets 3.10-3.12 default to `emit.emit_style = "compat"`, while 3.13+ default to `emit.emit_style = "native"`. Downstream consumers never need the TypePython compiler or a TypePython-specific runtime.
 
 ## Why TypePython
 
@@ -107,7 +107,7 @@ TypePython is an authoring layer, not a replacement for external checkers. One i
 
 ## Features
 
-- **Compiles to Python** -- `.tpy` emits standard `.py` + `.pyi` for target Python 3.10-3.12, using `typing_extensions` compatibility imports when needed ([syntax guide](docs/syntax-guide.md))
+- **Compiles to Python** -- `.tpy` emits standard `.py` + `.pyi` for target Python 3.10-3.14, with compat/native emit styles chosen by target or overridden explicitly ([syntax guide](docs/syntax-guide.md))
 - **Rich type system** -- `unknown`, `dynamic`, `Never`, strict nulls, sealed exhaustiveness, generic defaults, TypeVarTuple ([type system](docs/type-system.md))
 - **Syntax extensions** -- `interface`, `data class`, `sealed class`, `overload def`, `typealias`, `unsafe:`, inline type parameters ([syntax guide](docs/syntax-guide.md))
 - **TypedDict utilities** -- `Partial`, `Required_`, `Readonly`, `Mutable`, `Pick`, `Omit` ([type system](docs/type-system.md))
@@ -115,7 +115,7 @@ TypePython is an authoring layer, not a replacement for external checkers. One i
 - **Full toolchain** -- `init`, `check`, `build`, `watch`, `clean`, `verify`, `migrate` ([CLI reference](docs/cli-reference.md))
 - **LSP server** -- hover, go-to-definition, references, rename, completions, signature help, document symbols, workspace symbols, formatting, code actions, real-time diagnostics ([LSP](docs/lsp.md))
 - **Publication-ready** -- `typepython verify` performs structural publication checks by default, validates packaged wheel/sdist contents, and can opt into runtime import parity checks for trusted builds ([interop](docs/interop.md))
-- **Bundled stdlib stubs** -- typing data for Python 3.10-3.12 standard library, no external dependencies
+- **Bundled stdlib stubs** -- typing data for Python 3.10-3.14 standard library, no external dependencies
 
 ## Examples
 
