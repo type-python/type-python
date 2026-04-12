@@ -52,7 +52,11 @@ fn build_migration_report_counts_file_coverage_and_boundaries() {
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
         let syntax_trees =
-            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+            load_syntax_trees(
+                &discovery.sources,
+                false,
+                &config.config.project.target_python.to_string(),
+            )
                 .expect("test setup should succeed");
         build_migration_report(&config, &syntax_trees)
     };
@@ -90,7 +94,11 @@ fn build_migration_report_ranks_high_impact_untyped_files() {
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
         let syntax_trees =
-            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+            load_syntax_trees(
+                &discovery.sources,
+                false,
+                &config.config.project.target_python.to_string(),
+            )
                 .expect("test setup should succeed");
         build_migration_report(&config, &syntax_trees)
     };

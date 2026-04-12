@@ -369,8 +369,9 @@ fn analyze_pipeline_state(
     diagnostics = filter_project_diagnostics(&diagnostics, &prepared.source_paths);
     apply_type_ignore_directives(&prepared.syntax_trees, &mut diagnostics);
 
-    let stdlib_snapshot =
-        Some(bundled_stdlib_snapshot_identity(&config.config.project.target_python)?);
+    let stdlib_snapshot = Some(bundled_stdlib_snapshot_identity(
+        &config.config.project.target_python.to_string(),
+    )?);
     let source_hashes = syntax_tree_source_hashes(&prepared.all_syntax_trees);
     let incremental = match previous {
         Some(previous) if previous.stdlib_snapshot == stdlib_snapshot => {
@@ -525,7 +526,7 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let lowering_options =
-        LoweringOptions { target_python: config.config.project.target_python.clone() };
+        LoweringOptions { target_python: config.config.project.target_python.to_string() };
     let lowering_results: Vec<_> = prepared
         .syntax_trees
         .par_iter()

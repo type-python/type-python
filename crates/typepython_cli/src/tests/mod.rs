@@ -353,7 +353,11 @@ fn run_pipeline_prefers_local_companion_stub_surfaces() {
         let config = load(&project_dir).expect("test setup should succeed");
         let discovery = collect_source_paths(&config).expect("test setup should succeed");
         let syntax =
-            load_syntax_trees(&discovery.sources, false, &config.config.project.target_python)
+            load_syntax_trees(
+                &discovery.sources,
+                false,
+                &config.config.project.target_python.to_string(),
+            )
                 .expect("test setup should succeed");
         let bindings = syntax.iter().map(bind).collect::<Vec<_>>();
         check_graph(&build_graph(&bindings)).diagnostics

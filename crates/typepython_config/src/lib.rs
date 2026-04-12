@@ -11,6 +11,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use typepython_target::{EmitStyle, PythonTarget};
 
 const NULL_SENTINEL: &str = "__TYPEPYTHON_NULL__";
 
@@ -115,7 +116,9 @@ pub struct ProjectConfig {
     /// Cache directory.
     pub cache_dir: String,
     /// Target Python version.
-    pub target_python: String,
+    pub target_python: PythonTarget,
+    /// Original target Python text retained for diagnostics.
+    pub target_python_text: String,
 }
 
 impl Default for ProjectConfig {
@@ -136,7 +139,8 @@ impl Default for ProjectConfig {
             root_dir: String::from("src"),
             out_dir: String::from(".typepython/build"),
             cache_dir: String::from(".typepython/cache"),
-            target_python: String::from("3.10"),
+            target_python: PythonTarget::default(),
+            target_python_text: String::from("3.10"),
         }
     }
 }
@@ -196,6 +200,8 @@ pub struct EmitConfig {
     pub no_emit_on_error: bool,
     /// Emit runtime validators.
     pub runtime_validators: bool,
+    /// Emission strategy for typing syntax and runtime compatibility.
+    pub emit_style: EmitStyle,
 }
 
 impl Default for EmitConfig {
@@ -207,6 +213,7 @@ impl Default for EmitConfig {
             preserve_comments: true,
             no_emit_on_error: true,
             runtime_validators: false,
+            emit_style: EmitStyle::Compat,
         }
     }
 }
@@ -347,6 +354,7 @@ struct RawEmitConfig {
     preserve_comments: Option<bool>,
     no_emit_on_error: Option<bool>,
     runtime_validators: Option<bool>,
+    emit_style: Option<EmitStyle>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -397,7 +405,11 @@ impl Config {
     ) -> Result<(), ConfigError> {
         let config_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
 
-        validate_target_python(config_path, &self.project.target_python)?;
+        validate_target_python(
+            config_path,
+            &self.project.target_python,
+            &self.project.target_python_text,
+        )?;
         validate_project_paths(
             config_path,
             config_dir,
@@ -447,9 +459,13 @@ impl Config {
                 config.project.cache_dir = cache_dir;
             }
             if let Some(target_python) = project.target_python {
-                config.project.target_python = target_python;
+                config.project.target_python =
+                    parse_target_python(&target_python).unwrap_or_else(|| PythonTarget::new(0, 0));
+                config.project.target_python_text = target_python;
             }
         }
+
+        config.emit.emit_style = config.project.target_python.default_emit_style();
 
         if let Some(resolution) = raw.resolution {
             if let Some(base_url) = resolution.base_url {
@@ -494,6 +510,9 @@ impl Config {
             }
             if let Some(runtime_validators) = emit.runtime_validators {
                 config.emit.runtime_validators = runtime_validators;
+            }
+            if let Some(emit_style) = emit.emit_style {
+                config.emit.emit_style = emit_style;
             }
         }
 
@@ -864,13 +883,19 @@ fn best_effort_existing_project_path(path: &Path) -> Option<PathBuf> {
     Some(normalize_lexical_path(&resolved))
 }
 
-fn validate_target_python(config_path: &Path, target_python: &str) -> Result<(), ConfigError> {
-    match target_python {
-        "3.10" | "3.11" | "3.12" => Ok(()),
+fn validate_target_python(
+    config_path: &Path,
+    target_python: &PythonTarget,
+    target_python_text: &str,
+) -> Result<(), ConfigError> {
+    match *target_python {
+        PythonTarget::PYTHON_3_10 | PythonTarget::PYTHON_3_11 | PythonTarget::PYTHON_3_12 => {
+            Ok(())
+        }
         _ => Err(ConfigError::InvalidValue {
             path: config_path.to_path_buf(),
             message: format!(
-                "project.target_python = `{target_python}` is unsupported; expected one of `3.10`, `3.11`, or `3.12`"
+                "project.target_python = `{target_python_text}` is unsupported; expected one of `3.10`, `3.11`, or `3.12`"
             ),
         }),
     }
@@ -880,7 +905,7 @@ fn validate_python_executable(
     config_path: &Path,
     config_dir: &Path,
     python_executable: &str,
-    target_python: &str,
+    target_python: &PythonTarget,
 ) -> Result<(), ConfigError> {
     let executable_path = resolve_python_executable(config_dir, python_executable);
     let output = Command::new(&executable_path)
@@ -909,7 +934,7 @@ fn validate_python_executable(
     }
 
     let resolved_version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if resolved_version != target_python {
+    if resolved_version != target_python.to_string() {
         return Err(ConfigError::InvalidValue {
             path: config_path.to_path_buf(),
             message: format!(
@@ -919,6 +944,10 @@ fn validate_python_executable(
     }
 
     Ok(())
+}
+
+fn parse_target_python(text: &str) -> Option<PythonTarget> {
+    PythonTarget::parse(text)
 }
 
 fn validate_formatter_config(config_path: &Path, format: &FormatConfig) -> Result<(), ConfigError> {
@@ -968,6 +997,7 @@ mod tests {
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
+    use typepython_target::{EmitStyle, PythonTarget};
 
     #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -989,7 +1019,8 @@ mod tests {
 
         let handle = load_result.expect("expected config discovery to succeed");
         assert_eq!(handle.source, ConfigSource::TypePythonToml);
-        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_11);
+        assert_eq!(handle.config.emit.emit_style, EmitStyle::Compat);
     }
 
     #[test]
@@ -1229,7 +1260,7 @@ mod tests {
         remove_temp_project_dir(&project_dir);
 
         let handle = load_result.expect("expected matching python_executable to succeed");
-        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_11);
         assert_eq!(
             handle.config.resolution.python_executable.as_deref(),
             Some(handle.resolve_relative_path("fake-python.sh").to_string_lossy().as_ref())
@@ -1305,7 +1336,7 @@ mod tests {
 
         let handle = load_result.expect("expected embedded pyproject config to load");
         assert_eq!(handle.source, ConfigSource::PyProject);
-        assert_eq!(handle.config.project.target_python, "3.12");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_12);
         assert_eq!(handle.config.watch.debounce_ms, 125);
     }
 
@@ -1494,7 +1525,7 @@ mod tests {
         assert_eq!(handle.config.project.root_dir, "pkg");
         assert_eq!(handle.config.project.out_dir, ".cache/build-out");
         assert_eq!(handle.config.project.cache_dir, ".cache/state");
-        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_11);
         assert_eq!(
             handle.config.resolution.type_roots,
             vec![String::from("stubs"), String::from("more-stubs")]
@@ -1517,6 +1548,7 @@ mod tests {
         assert!(!handle.config.emit.write_py_typed);
         assert!(!handle.config.emit.no_emit_on_error);
         assert!(handle.config.emit.runtime_validators);
+        assert_eq!(handle.config.emit.emit_style, EmitStyle::Compat);
         assert_eq!(handle.config.typing.profile, Some(super::TypingProfile::Migration));
         assert!(handle.config.typing.strict);
         assert!(!handle.config.typing.strict_nulls);
@@ -1594,7 +1626,7 @@ mod tests {
         assert_eq!(handle.config.project.root_dir, "src");
         assert_eq!(handle.config.project.out_dir, ".typepython/out");
         assert_eq!(handle.config.project.cache_dir, ".typepython/cache-data");
-        assert_eq!(handle.config.project.target_python, "3.12");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_12);
         assert_eq!(handle.config.resolution.type_roots, vec![String::from("stubs")]);
         assert_eq!(
             handle.config.resolution.python_executable.as_deref(),
@@ -1610,6 +1642,7 @@ mod tests {
         assert!(handle.config.emit.write_py_typed);
         assert!(handle.config.emit.no_emit_on_error);
         assert!(!handle.config.emit.runtime_validators);
+        assert_eq!(handle.config.emit.emit_style, EmitStyle::Compat);
         assert_eq!(handle.config.typing.profile, Some(super::TypingProfile::Library));
         assert!(!handle.config.typing.strict);
         assert!(handle.config.typing.strict_nulls);
@@ -1682,7 +1715,7 @@ mod tests {
 
         let handle = load_result.expect("expected parent typepython.toml to be discovered");
         assert_eq!(handle.source, ConfigSource::TypePythonToml);
-        assert_eq!(handle.config.project.target_python, "3.11");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_11);
     }
 
     #[test]
@@ -1703,7 +1736,7 @@ mod tests {
 
         let handle = load_result.expect("expected parent embedded pyproject to be discovered");
         assert_eq!(handle.source, ConfigSource::PyProject);
-        assert_eq!(handle.config.project.target_python, "3.12");
+        assert_eq!(handle.config.project.target_python, PythonTarget::PYTHON_3_12);
     }
 
     fn temp_project_dir(test_name: &str) -> PathBuf {

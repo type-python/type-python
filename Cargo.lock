@@ -1837,6 +1837,7 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+ "typepython-target",
 ]
 
 [[package]]
@@ -1941,6 +1942,13 @@ dependencies = [
  "proptest",
  "serde",
  "typepython-diagnostics",
+]
+
+[[package]]
+name = "typepython-target"
+version = "0.1.1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

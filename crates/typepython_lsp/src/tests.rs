@@ -1615,7 +1615,7 @@ fn did_open_background_mode_prewarms_support_index_cache() {
 
     let cache_path = typepython_project::support_source_index_cache_path(
         &config,
-        &config.config.project.target_python,
+        &config.config.project.target_python.to_string(),
     );
     let mut server = Server::new(config.clone());
     server.scheduler.enable_background_mode();

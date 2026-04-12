@@ -38,13 +38,13 @@ pub(super) fn prepare_pipeline_syntax(
     let syntax_trees = load_syntax_trees(
         discovery_sources,
         config.config.typing.conditional_returns,
-        &config.config.project.target_python,
+        &config.config.project.target_python.to_string(),
     )?;
     let shadow_stub_syntax = if config.config.typing.infer_passthrough {
         let shadow_stub_syntax = inferred_shadow_stub_syntax_trees(
             &syntax_trees,
             config.config.typing.conditional_returns,
-            &config.config.project.target_python,
+            &config.config.project.target_python.to_string(),
         )?;
         if !shadow_stub_syntax.is_empty() {
             let cache_root =
@@ -84,7 +84,7 @@ fn load_support_syntax_trees(
         return Ok(Vec::new());
     }
 
-    let support_index = support_source_index(config, &config.config.project.target_python)?;
+    let support_index = support_source_index(config, &config.config.project.target_python.to_string())?;
 
     let mut queued_modules = BTreeSet::new();
     let mut queue = VecDeque::new();
@@ -134,7 +134,7 @@ fn load_support_syntax_trees(
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
                         target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python,
+                            &config.config.project.target_python.to_string(),
                         ),
                         target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },
@@ -148,7 +148,7 @@ fn load_support_syntax_trees(
                     typepython_syntax::ParseOptions {
                         enable_conditional_returns: config.config.typing.conditional_returns,
                         target_python: typepython_syntax::ParsePythonVersion::parse(
-                            &config.config.project.target_python,
+                            &config.config.project.target_python.to_string(),
                         ),
                         target_platform: Some(typepython_syntax::ParseTargetPlatform::current()),
                     },

@@ -12,6 +12,7 @@ members = [
     "crates/typepython_lsp",
     "crates/typepython_project",
     "crates/typepython_syntax",
+    "crates/typepython_target",
 ]
 resolver = "3"
 

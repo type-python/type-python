@@ -79,7 +79,7 @@ pub fn inferred_shadow_stub_syntax_trees(
                 },
                 ParseOptions {
                     enable_conditional_returns,
-                    target_python: ParsePythonVersion::parse(target_python),
+                    target_python: ParsePythonVersion::parse(&target_python.to_string()),
                     target_platform: Some(ParseTargetPlatform::current()),
                 },
             ))
@@ -1017,10 +1017,11 @@ mod tests {
             )
             .expect("typepython.toml should be written");
             let config = typepython_config::load(&project_dir).expect("config should load");
-            let index = support_source_index(&config, &config.config.project.target_python)
+            let index =
+                support_source_index(&config, &config.config.project.target_python.to_string())
                 .expect("index should build");
             let cache_path =
-                support_source_index_cache_path(&config, &config.config.project.target_python);
+                support_source_index_cache_path(&config, &config.config.project.target_python.to_string());
 
             (index.sources_by_module().contains_key("demo"), cache_path.is_file())
         };
@@ -1059,13 +1060,16 @@ mod tests {
             let stdlib_root = bundled_stdlib_root(env!("CARGO_MANIFEST_DIR"));
             let external_roots =
                 configured_external_type_roots(&config).expect("external roots should resolve");
-            let cache_path =
-                support_source_index_cache_path(&config, &config.config.project.target_python);
-            let index = support_source_index(&config, &config.config.project.target_python)
+            let cache_path = support_source_index_cache_path(
+                &config,
+                &config.config.project.target_python.to_string(),
+            );
+            let index =
+                support_source_index(&config, &config.config.project.target_python.to_string())
                 .expect("index should build");
             let cached = load_cached_support_source_index(
                 &cache_path,
-                &config.config.project.target_python,
+                &config.config.project.target_python.to_string(),
                 &stdlib_root,
                 &external_roots,
             )
