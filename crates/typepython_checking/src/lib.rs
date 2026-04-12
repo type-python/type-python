@@ -1021,9 +1021,24 @@ fn summary_signature_param(
 
 fn summary_type_param(type_param: &typepython_binding::GenericTypeParam) -> SummaryTypeParam {
     SummaryTypeParam {
+        kind: Some(match type_param.kind {
+            typepython_binding::GenericTypeParamKind::TypeVar => String::from("typevar"),
+            typepython_binding::GenericTypeParamKind::ParamSpec => String::from("paramspec"),
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
+                String::from("typevartuple")
+            }
+        }),
         name: type_param.name.clone(),
         bound: type_param.rendered_bound(),
         bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
+        constraints: type_param.rendered_constraints(),
+        constraint_exprs: type_param
+            .constraint_exprs
+            .iter()
+            .map(|expr| expr.expr.clone())
+            .collect(),
+        default: type_param.rendered_default(),
+        default_expr: type_param.default_expr.as_ref().map(|expr| expr.expr.clone()),
     }
 }
 

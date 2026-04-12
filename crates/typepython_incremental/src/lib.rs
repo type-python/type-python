@@ -162,10 +162,21 @@ pub struct SummarySignatureParam {
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SummaryTypeParam {
+    #[serde(default)]
+    pub kind: Option<String>,
     pub name: String,
+    #[serde(default)]
     pub bound: Option<String>,
     #[serde(rename = "boundExpr", default)]
     pub bound_expr: Option<TypeExpr>,
+    #[serde(default)]
+    pub constraints: Vec<String>,
+    #[serde(rename = "constraintExprs", default)]
+    pub constraint_exprs: Vec<TypeExpr>,
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(rename = "defaultExpr", default)]
+    pub default_expr: Option<TypeExpr>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -547,9 +558,24 @@ fn summary_type_repr(declaration: &Declaration) -> String {
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
     SummaryTypeParam {
+        kind: Some(match type_param.kind {
+            typepython_binding::GenericTypeParamKind::TypeVar => String::from("typevar"),
+            typepython_binding::GenericTypeParamKind::ParamSpec => String::from("paramspec"),
+            typepython_binding::GenericTypeParamKind::TypeVarTuple => {
+                String::from("typevartuple")
+            }
+        }),
         name: type_param.name.clone(),
         bound: type_param.rendered_bound(),
         bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
+        constraints: type_param.rendered_constraints(),
+        constraint_exprs: type_param
+            .constraint_exprs
+            .iter()
+            .map(|expr| expr.expr.clone())
+            .collect(),
+        default: type_param.rendered_default(),
+        default_expr: type_param.default_expr.as_ref().map(|expr| expr.expr.clone()),
     }
 }
 
@@ -702,9 +728,14 @@ mod tests {
                     exported_type: None,
                     exported_type_expr: None,
                     type_params: vec![SummaryTypeParam {
+                        kind: Some(String::from("typevar")),
                         name: String::from("T"),
                         bound: Some(String::from("SupportsClose")),
                         bound_expr: None,
+                        constraints: Vec::new(),
+                        constraint_exprs: Vec::new(),
+                        default: None,
+                        default_expr: None,
                     }],
                     public: true,
                 }],
@@ -884,9 +915,14 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
+                            kind: Some(String::from("typevar")),
                             name: String::from("T"),
                             bound: Some(String::from("SupportsClose")),
                             bound_expr: None,
+                            constraints: Vec::new(),
+                            constraint_exprs: Vec::new(),
+                            default: None,
+                            default_expr: None,
                         }],
                         public: true,
                     },
@@ -910,9 +946,14 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
+                            kind: Some(String::from("typevar")),
                             name: String::from("T"),
                             bound: None,
                             bound_expr: None,
+                            constraints: vec![String::from("str"), String::from("bytes")],
+                            constraint_exprs: Vec::new(),
+                            default: Some(String::from("str")),
+                            default_expr: None,
                         }],
                         public: true,
                     },
@@ -1156,9 +1197,14 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: vec![SummaryTypeParam {
+                            kind: Some(String::from("typevar")),
                             name: String::from("T"),
                             bound: Some(String::from("Comparable")),
                             bound_expr: None,
+                            constraints: vec![String::from("Comparable"), String::from("Hashable")],
+                            constraint_exprs: Vec::new(),
+                            default: Some(String::from("Comparable")),
+                            default_expr: None,
                         }],
                         public: true,
                     }],
