@@ -1471,6 +1471,7 @@ fn verify_publication_metadata_prefers_lowered_module_requirements_when_availabl
                         typepython_target::RuntimeFeature::GenericDefaults,
                     ]),
                     required_backports: std::collections::BTreeSet::new(),
+                    export_runtime_semantics: std::collections::BTreeMap::new(),
                 },
             }]),
             &[],

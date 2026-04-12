@@ -107,6 +107,90 @@ fn run_pipeline_emits_native_syntax_for_target_python_313() {
 }
 
 #[test]
+fn run_pipeline_respects_target_and_emit_style_matrix_for_generic_output() {
+    struct Case<'a> {
+        name: &'a str,
+        config: &'a str,
+        source: &'a str,
+        expected_fragments: &'a [&'a str],
+        forbidden_fragments: &'a [&'a str],
+    }
+
+    let cases = [
+        Case {
+            name: "default-313-native",
+            config: "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+            source: "typealias Pair[T = int] = tuple[T, T]\n",
+            expected_fragments: &["type Pair[T = int] = tuple[T, T]"],
+            forbidden_fragments: &["TypeVar(", "Pair: TypeAlias = tuple[T, T]"],
+        },
+        Case {
+            name: "forced-313-compat",
+            config: "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n\n[emit]\nemit_style = \"compat\"\n",
+            source: "typealias Pair[T = int] = tuple[T, T]\n",
+            expected_fragments: &[
+                "TypeVar(\"T\", default=\"int\")",
+                "Pair: TypeAlias = tuple[T, T]",
+            ],
+            forbidden_fragments: &["type Pair[T = int] = tuple[T, T]"],
+        },
+        Case {
+            name: "default-312-compat",
+            config: "[project]\nsrc = [\"src\"]\ntarget_python = \"3.12\"\n",
+            source: "typealias Pair[T] = tuple[T, T]\n",
+            expected_fragments: &["TypeVar(\"T\")", "Pair: TypeAlias = tuple[T, T]"],
+            forbidden_fragments: &["type Pair[T] = tuple[T, T]"],
+        },
+        Case {
+            name: "forced-312-native",
+            config: "[project]\nsrc = [\"src\"]\ntarget_python = \"3.12\"\n\n[emit]\nemit_style = \"native\"\n",
+            source: "typealias Pair[T] = tuple[T, T]\n",
+            expected_fragments: &["type Pair[T] = tuple[T, T]"],
+            forbidden_fragments: &["TypeVar(\"T\")", "Pair: TypeAlias = tuple[T, T]"],
+        },
+    ];
+
+    for case in cases {
+        let runtime_source = {
+            let project_dir = temp_project_dir(case.name);
+            fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+            fs::write(project_dir.join("typepython.toml"), case.config)
+                .expect("test setup should succeed");
+            fs::write(project_dir.join("src/app.tpy"), case.source).expect("test setup should succeed");
+            let config = load(&project_dir).expect("test setup should succeed");
+            let snapshot = run_pipeline(&config).expect("test setup should succeed");
+            let runtime_source = snapshot
+                .lowered_modules
+                .iter()
+                .find(|module| module.source_path.ends_with("src/app.tpy"))
+                .map(|module| module.python_source.clone())
+                .expect("expected lowered runtime source");
+            remove_temp_project_dir(&project_dir);
+            runtime_source
+        };
+
+        for expected in case.expected_fragments {
+            assert!(
+                runtime_source.contains(expected),
+                "{}: missing expected fragment `{}` in\n{}",
+                case.name,
+                expected,
+                runtime_source
+            );
+        }
+        for forbidden in case.forbidden_fragments {
+            assert!(
+                !runtime_source.contains(forbidden),
+                "{}: found forbidden fragment `{}` in\n{}",
+                case.name,
+                forbidden,
+                runtime_source
+            );
+        }
+    }
+}
+
+#[test]
 fn run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_pipeline_blocks_emit_when_lowering_fails_even_if_emit_is_allowed");
@@ -622,6 +706,7 @@ fn write_incremental_snapshot_persists_fingerprint_json() {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     }],

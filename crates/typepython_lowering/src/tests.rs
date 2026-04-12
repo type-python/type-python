@@ -597,6 +597,7 @@ fn lower_rewrites_non_generic_overload_with_import() {
             has_sealed_classes: false,
             required_runtime_features: std::collections::BTreeSet::new(),
             required_backports: std::collections::BTreeSet::new(),
+            export_runtime_semantics: std::collections::BTreeMap::new(),
         }
     );
 }
@@ -847,6 +848,103 @@ fn lower_native_mode_falls_back_for_generic_defaults_before_313() {
     assert!(lowered.module.python_source.contains("Pair: TypeAlias = tuple[T, T]"));
     assert!(!lowered.module.python_source.contains("type Pair[T = int]"));
     assert!(!lowered.module.python_source.contains("def first[T = int]"));
+}
+
+#[test]
+fn lower_generic_emit_style_matrix_covers_target_and_default_combinations() {
+    struct Case<'a> {
+        name: &'a str,
+        options: LoweringOptions,
+        source: &'a str,
+        expected_fragments: &'a [&'a str],
+        forbidden_fragments: &'a [&'a str],
+    }
+
+    let cases = [
+        Case {
+            name: "compat-310-legacy",
+            options: compat_options("3.10"),
+            source: "typealias Pair[T] = tuple[T, T]\n\ndef first[T](value: T) -> T:\n    return value\n",
+            expected_fragments: &[
+                "TypeVar(\"T\")",
+                "Pair: TypeAlias = tuple[T, T]",
+                "def first(value: T) -> T:",
+            ],
+            forbidden_fragments: &["type Pair[T] =", "def first[T]("],
+        },
+        Case {
+            name: "native-312-no-defaults",
+            options: native_options("3.12"),
+            source: "typealias Pair[T] = tuple[T, T]\n\ndef first[T](value: T) -> T:\n    return value\n",
+            expected_fragments: &["type Pair[T] = tuple[T, T]", "def first[T](value: T) -> T:"],
+            forbidden_fragments: &["TypeVar(\"T\")", "Pair: TypeAlias = tuple[T, T]"],
+        },
+        Case {
+            name: "compat-313-forced-legacy",
+            options: compat_options("3.13"),
+            source: "typealias Pair[T = int] = tuple[T, T]\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+            expected_fragments: &[
+                "TypeVar(\"T\", default=\"int\")",
+                "Pair: TypeAlias = tuple[T, T]",
+                "def first(value: T = 1) -> T:",
+            ],
+            forbidden_fragments: &["type Pair[T = int] =", "def first[T = int]("],
+        },
+        Case {
+            name: "native-313-defaults",
+            options: native_options("3.13"),
+            source: "typealias Pair[T = int] = tuple[T, T]\n\ndef first[T = int](value: T = 1) -> T:\n    return value\n",
+            expected_fragments: &[
+                "type Pair[T = int] = tuple[T, T]",
+                "def first[T = int](value: T = 1) -> T:",
+            ],
+            forbidden_fragments: &["TypeVar(\"T\", default=\"int\")", "Pair: TypeAlias = tuple[T, T]"],
+        },
+        Case {
+            name: "compat-314-modern-owners-legacy-generics",
+            options: compat_options("3.14"),
+            source: "from typing_extensions import ReadOnly, TypeIs, NoDefault\nfrom typing_extensions import deprecated\n\ntypealias Pair[T] = tuple[T, T]\n\ndef accepts(value: object) -> TypeIs[int]:\n    return isinstance(value, int)\n",
+            expected_fragments: &[
+                "from typing import ReadOnly, TypeIs, NoDefault",
+                "from warnings import deprecated",
+                "TypeVar(\"T\")",
+                "Pair: TypeAlias = tuple[T, T]",
+            ],
+            forbidden_fragments: &["typing_extensions.ReadOnly", "typing_extensions.TypeIs", "type Pair[T] ="],
+        },
+    ];
+
+    for case in cases {
+        let lowered = lower_with_options(
+            &parse(SourceFile {
+                path: PathBuf::from(format!("{}.tpy", case.name)),
+                kind: SourceKind::TypePython,
+                logical_module: String::new(),
+                text: String::from(case.source),
+            }),
+            &case.options,
+        );
+
+        assert!(lowered.diagnostics.is_empty(), "{}: {}", case.name, lowered.diagnostics.as_text());
+        for expected in case.expected_fragments {
+            assert!(
+                lowered.module.python_source.contains(expected),
+                "{}: missing expected fragment `{}` in\n{}",
+                case.name,
+                expected,
+                lowered.module.python_source
+            );
+        }
+        for forbidden in case.forbidden_fragments {
+            assert!(
+                !lowered.module.python_source.contains(forbidden),
+                "{}: found forbidden fragment `{}` in\n{}",
+                case.name,
+                forbidden,
+                lowered.module.python_source
+            );
+        }
+    }
 }
 
 #[test]
