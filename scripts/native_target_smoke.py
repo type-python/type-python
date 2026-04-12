@@ -69,6 +69,13 @@ def write_native_source(source_path: pathlib.Path) -> None:
 from warnings import deprecated
 
 type Pair[T = int] = tuple[T, T]
+type Explosive = 1 / 0
+
+class Scope:
+    type Alias = Nested
+
+    class Nested:
+        pass
 
 class Box[T = int]:
     value: T
@@ -136,11 +143,16 @@ import importlib
 import json
 import pathlib
 import sys
-import typing
 
 build_root = pathlib.Path(sys.argv[1])
 sys.path.insert(0, str(build_root))
 module = importlib.import_module("app")
+
+explosive_error = None
+try:
+    module.Explosive.__value__
+except BaseException as error:
+    explosive_error = type(error).__name__
 
 payload = {
     "module_has_T": "T" in vars(module),
@@ -152,7 +164,21 @@ payload = {
     "pair_default_present": getattr(module.Pair.__type_params__[0], "__default__", None) is not None,
     "box_default_present": getattr(module.Box.__type_params__[0], "__default__", None) is not None,
     "function_default_present": getattr(module.first_pair.__type_params__[0], "__default__", None) is not None,
+    "scope_alias_type_name": type(module.Scope.Alias).__name__,
+    "scope_alias_resolves_nested": module.Scope.Alias.__value__ is module.Scope.Nested,
+    "explosive_error": explosive_error,
 }
+
+if sys.version_info >= (3, 14):
+    import annotationlib
+
+    payload["annotationlib_box_has_value"] = "value" in annotationlib.get_annotations(
+        module.Box, format=annotationlib.Format.VALUE
+    )
+    payload["annotationlib_module_has_pair"] = "PAIR" in annotationlib.get_annotations(
+        module, format=annotationlib.Format.VALUE
+    )
+
 print(json.dumps(payload))
 """
     rendered = capture([sys.executable, "-c", probe, str(build_root)])
@@ -164,6 +190,11 @@ print(json.dumps(payload))
         raise SystemExit(
             "native runtime did not materialize a TypeAliasType for `Pair` "
             f"(got {payload['pair_type_module']}.{payload['pair_type_name']})"
+        )
+    if payload["scope_alias_type_name"] != "TypeAliasType":
+        raise SystemExit(
+            "class-scope native alias did not materialize as TypeAliasType "
+            f"(got {payload['scope_alias_type_name']})"
         )
     if payload["pair_type_params"] != ["T"]:
         raise SystemExit(
@@ -186,6 +217,22 @@ print(json.dumps(payload))
         raise SystemExit(
             "native runtime did not preserve generic defaults on alias/class/function type parameters"
         )
+    if not payload["scope_alias_resolves_nested"]:
+        raise SystemExit(
+            "class-scope native alias did not resolve names using annotation scope semantics"
+        )
+    if payload["explosive_error"] != "ZeroDivisionError":
+        raise SystemExit(
+            "native alias value was not lazily evaluated as expected "
+            f"(got {payload['explosive_error']!r})"
+        )
+    if sys.version_info >= (3, 14):
+        if not payload.get("annotationlib_box_has_value"):
+            raise SystemExit("annotationlib.get_annotations(Box) did not expose the field annotations")
+        if not payload.get("annotationlib_module_has_pair"):
+            raise SystemExit(
+                "annotationlib.get_annotations(module) did not expose module-level annotations"
+            )
 
 
 def main() -> None:
