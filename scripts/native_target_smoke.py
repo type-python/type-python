@@ -82,9 +82,9 @@ class Box[T = int]:
 def first_pair[T = int](value: T = 1) -> T:
     return value
 
-PAIR: tuple[int, int] = (1, 2)
-BOX = Box()
-VALUE = first_pair()
+PAIR: int = 1
+_BOX = Box()
+_VALUE = first_pair()
 """
     )
 
@@ -155,7 +155,7 @@ payload = {
 }
 
 if sys.version_info >= (3, 14):
-    payload["annotationlib_box_has_value"] = "value" in get_annotations(
+    payload["annotationlib_box_has_value"] = "default_value" in get_annotations(
         module.Box, eval_str=True, format=AnnotationFormat.VALUE
     )
     payload["annotationlib_module_has_pair"] = "PAIR" in get_annotations(

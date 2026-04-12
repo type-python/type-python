@@ -555,6 +555,10 @@ pub fn semantic_incremental_state_with_binding_metadata(
 }
 
 #[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "incremental summary reuse threads build context and summary state together"
+)]
 pub fn semantic_incremental_state_with_reused_summaries(
     graph: &ModuleGraph,
     bindings: &[BindingTable],

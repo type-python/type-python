@@ -80,7 +80,7 @@ pub fn inferred_shadow_stub_syntax_trees(
                 },
                 ParseOptions {
                     enable_conditional_returns,
-                    target_python: ParsePythonVersion::parse(&target_python.to_string()),
+                    target_python: ParsePythonVersion::parse(target_python),
                     target_platform: Some(ParseTargetPlatform::current()),
                 },
             ))
@@ -589,10 +589,9 @@ pub fn support_source_snapshot_identity(
             hash ^= Wrapping(u64::from(*byte));
             hash *= prime;
         }
-        for byte in [u8::from(root.allow_untyped_runtime)] {
-            hash ^= Wrapping(u64::from(byte));
-            hash *= prime;
-        }
+        let byte = u8::from(root.allow_untyped_runtime);
+        hash ^= Wrapping(u64::from(byte));
+        hash *= prime;
         for byte in root.modified_unix_ms.unwrap_or_default().to_le_bytes() {
             hash ^= Wrapping(u64::from(byte));
             hash *= prime;
