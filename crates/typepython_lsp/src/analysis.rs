@@ -54,19 +54,25 @@ impl AnalysisHost {
     ) -> Result<(), LspError> {
         let path = uri_to_path(uri)?;
         let current = self.overlays.get(&path).ok_or_else(|| {
-            LspError::Other(format!("TPY6002: didChange received for unopened overlay `{}`", uri))
+            LspError::invalid_params(format!(
+                "TPY6002: didChange received for unopened overlay `{}`",
+                uri
+            ))
+            .with_tpy_code("TPY6002")
         })?;
         if version <= current.version {
-            return Err(LspError::Other(format!(
+            return Err(LspError::content_modified(format!(
                 "TPY6002: didChange version {} is out of sync with overlay version {} for `{}`",
                 version, current.version, uri
-            )));
+            ))
+            .with_tpy_code("TPY6002"));
         }
         if content_changes.is_empty() {
-            return Err(LspError::Other(format!(
+            return Err(LspError::invalid_params(format!(
                 "TPY6002: didChange received no content changes for `{}`",
                 uri
-            )));
+            ))
+            .with_tpy_code("TPY6002"));
         }
 
         let text = apply_content_changes(&current.text, content_changes, uri)?;
@@ -82,10 +88,11 @@ impl AnalysisHost {
     pub(super) fn close_document(&mut self, uri: &str) -> Result<String, LspError> {
         let path = uri_to_path(uri)?;
         if self.overlays.remove(&path).is_none() {
-            return Err(LspError::Other(format!(
+            return Err(LspError::invalid_params(format!(
                 "TPY6002: didClose received for unopened overlay `{}`",
                 uri
-            )));
+            ))
+            .with_tpy_code("TPY6002"));
         }
         if let Some(workspace) = self.cached_workspace.as_mut() {
             workspace.apply_project_path_update(&path, None)?;
@@ -207,11 +214,12 @@ impl AnalysisHost {
 
         let prepared =
             prepare_syntax_tree_for_external_formatter(&document.syntax).map_err(|report| {
-                LspError::Other(format!(
+                LspError::request_failed(format!(
                     "TPY6003: unable to prepare `{}` for formatting: {}",
                     document.path.display(),
                     report.as_text().trim()
                 ))
+                .with_tpy_code("TPY6003")
             })?;
         let formatter_output = run_formatter(
             &resolve_formatter_commands(&config, &document.path),

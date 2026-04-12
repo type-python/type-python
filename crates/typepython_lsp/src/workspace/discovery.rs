@@ -32,6 +32,8 @@ pub(super) fn path_to_uri(path: &Path) -> String {
 
 pub(super) fn uri_to_path(uri: &str) -> Result<PathBuf, LspError> {
     let parsed = Url::parse(uri)
-        .map_err(|error| LspError::Other(format!("unsupported URI `{uri}`: {error}")))?;
-    parsed.to_file_path().map_err(|()| LspError::Other(format!("unsupported URI `{uri}`")))
+        .map_err(|error| LspError::invalid_params(format!("unsupported `file://` URI `{uri}`: {error}")))?;
+    parsed
+        .to_file_path()
+        .map_err(|()| LspError::invalid_params(format!("unsupported `file://` URI `{uri}`")))
 }

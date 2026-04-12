@@ -7,6 +7,11 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+fn single_error_response(responses: &[Value]) -> &Value {
+    assert_eq!(responses.len(), 1, "expected exactly one JSON-RPC error response");
+    responses[0].get("error").expect("response should contain an error payload")
+}
+
 #[test]
 fn handle_initialize_returns_required_capabilities() {
     let config = temp_config("handle_initialize_returns_required_capabilities", "pass\n");
@@ -407,7 +412,7 @@ fn formatting_reports_missing_explicit_formatter() {
             }))
             .expect("didOpen should succeed");
 
-    let error = server
+    let responses = server
         .handle_message(json!({
             "jsonrpc":"2.0",
             "id": 1,
@@ -417,8 +422,13 @@ fn formatting_reports_missing_explicit_formatter() {
                 "options": {"tabSize": 4, "insertSpaces": true}
             }
         }))
-        .expect_err("missing formatter should surface an error");
-    assert!(error.to_string().contains("TPY6003"));
+        .expect("missing formatter should serialize as a request error");
+    let error = single_error_response(&responses);
+    assert_eq!(error["code"], json!(-32803));
+    assert_eq!(error["data"]["tpyCode"], json!("TPY6003"));
+    assert!(
+        error["message"].as_str().expect("error message should be a string").contains("TPY6003")
+    );
 }
 
 #[test]
@@ -914,7 +924,7 @@ fn did_change_reports_overlay_sync_failure_for_unopened_document() {
     let mut server = Server::new(config.clone());
     let uri = path_to_uri(&config.config_dir.join("src/app/__init__.tpy"));
 
-    let error = server
+    let responses = server
         .handle_message(json!({
             "jsonrpc":"2.0",
             "method":"textDocument/didChange",
@@ -923,10 +933,21 @@ fn did_change_reports_overlay_sync_failure_for_unopened_document() {
                 "contentChanges": [{"text": "def changed() -> int:\n    return 2\n"}]
             }
         }))
-        .expect_err("didChange without prior didOpen should fail");
+        .expect("didChange notification failures should not bubble out of handle_message");
+    assert!(responses.is_empty(), "didChange notifications must not receive error responses");
 
-    assert!(error.to_string().contains("TPY6002"));
-    assert!(error.to_string().contains("unopened overlay"));
+    let did_open = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "method":"textDocument/didOpen",
+            "params": {"textDocument": {"uri": uri, "text": "def changed() -> int:\n    return 2\n", "languageId": "typepython", "version": 2}}
+        }))
+        .expect("server should remain usable after a failed didChange notification");
+    assert!(
+        did_open
+            .iter()
+            .any(|response| response["method"] == json!("textDocument/publishDiagnostics"))
+    );
 }
 
 #[test]
@@ -945,7 +966,7 @@ fn did_change_reports_overlay_sync_failure_for_stale_version() {
             }))
             .expect("didOpen should succeed");
 
-    let error = server
+    let responses = server
         .handle_message(json!({
             "jsonrpc":"2.0",
             "method":"textDocument/didChange",
@@ -954,10 +975,16 @@ fn did_change_reports_overlay_sync_failure_for_stale_version() {
                 "contentChanges": [{"text": "def stale() -> int:\n    return 0\n"}]
             }
         }))
-        .expect_err("stale didChange version should fail");
+        .expect("stale didChange notifications should not bubble out of handle_message");
+    assert!(responses.is_empty(), "stale didChange notifications must not receive responses");
 
-    assert!(error.to_string().contains("TPY6002"));
-    assert!(error.to_string().contains("out of sync"));
+    let hover = server
+        .handle_hover(json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": 0, "character": 4}
+        }))
+        .expect("server should remain responsive after stale didChange");
+    assert!(hover.is_object() || hover.is_null());
 }
 
 #[test]
@@ -1079,7 +1106,7 @@ fn did_change_reports_overlay_sync_failure_for_out_of_bounds_range() {
             }))
             .expect("didOpen should succeed");
 
-    let error = server
+    let responses = server
         .handle_message(json!({
             "jsonrpc":"2.0",
             "method":"textDocument/didChange",
@@ -1096,10 +1123,37 @@ fn did_change_reports_overlay_sync_failure_for_out_of_bounds_range() {
                 ]
             }
         }))
-        .expect_err("out-of-bounds ranged didChange should fail");
+        .expect("invalid ranged didChange notifications should not bubble out of handle_message");
+    assert!(
+        responses.is_empty(),
+        "invalid ranged didChange notifications must not receive responses"
+    );
+}
 
-    assert!(error.to_string().contains("TPY6002"));
-    assert!(error.to_string().contains("references line 9 beyond the current document"));
+#[test]
+fn request_param_errors_are_serialized_as_json_rpc_errors() {
+    let config = temp_config(
+        "request_param_errors_are_serialized_as_json_rpc_errors",
+        "def ok() -> int:\n    return 1\n",
+    );
+    let mut server = Server::new(config);
+    let responses = server
+        .handle_message(json!({
+            "jsonrpc":"2.0",
+            "id": 7,
+            "method":"textDocument/hover",
+            "params": {"textDocument": {"uri": "file:///tmp/example.tpy"}}
+        }))
+        .expect("invalid hover params should serialize as JSON-RPC errors");
+
+    let error = single_error_response(&responses);
+    assert_eq!(error["code"], json!(-32602));
+    assert!(
+        error["message"]
+            .as_str()
+            .expect("error message should be a string")
+            .contains("params.position")
+    );
 }
 
 #[test]

@@ -14,7 +14,7 @@ pub(crate) fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, 
         if let Some((name, value)) = line.split_once(':') {
             if name.eq_ignore_ascii_case("Content-Length") {
                 content_length = Some(value.trim().parse::<usize>().map_err(|error| {
-                    LspError::Other(format!("invalid Content-Length: {error}"))
+                    LspError::invalid_request(format!("invalid `Content-Length` header: {error}"))
                 })?);
             }
         }
@@ -25,11 +25,15 @@ pub(crate) fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, 
     };
     let mut body = vec![0; content_length];
     reader.read_exact(&mut body)?;
-    Ok(Some(serde_json::from_slice(&body)?))
+    let message = serde_json::from_slice(&body)
+        .map_err(|error| LspError::parse_error(format!("invalid JSON-RPC payload: {error}")))?;
+    Ok(Some(message))
 }
 
 pub(crate) fn write_message<W: Write>(writer: &mut W, value: &Value) -> Result<(), LspError> {
-    let payload = serde_json::to_vec(value)?;
+    let payload = serde_json::to_vec(value).map_err(|error| {
+        LspError::internal(format!("unable to encode JSON-RPC payload: {error}"))
+    })?;
     write!(writer, "Content-Length: {}\r\n\r\n", payload.len())?;
     writer.write_all(&payload)?;
     Ok(())
@@ -55,12 +59,20 @@ pub(crate) fn text_document_position(params: &Value) -> Result<(String, LspPosit
         .and_then(|document| document.get("uri"))
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            LspError::Other(String::from("textDocument/position request missing uri"))
+            LspError::invalid_params(String::from(
+                "textDocument/position request missing `params.textDocument.uri`",
+            ))
         })?;
-    let position: LspPosition =
-        serde_json::from_value(params.get("position").cloned().ok_or_else(|| {
-            LspError::Other(String::from("textDocument/position request missing position"))
-        })?)?;
+    let raw_position = params.get("position").cloned().ok_or_else(|| {
+        LspError::invalid_params(String::from(
+            "textDocument/position request missing `params.position`",
+        ))
+    })?;
+    let position: LspPosition = serde_json::from_value(raw_position).map_err(|error| {
+        LspError::invalid_params(format!(
+            "textDocument/position request has invalid `params.position`: {error}"
+        ))
+    })?;
     Ok((uri.to_owned(), position))
 }
 
@@ -69,11 +81,19 @@ pub(crate) fn text_document_range(params: &Value) -> Result<(String, LspRange), 
         .get("textDocument")
         .and_then(|document| document.get("uri"))
         .and_then(Value::as_str)
-        .ok_or_else(|| LspError::Other(String::from("textDocument/range request missing uri")))?;
-    let range: LspRange =
-        serde_json::from_value(params.get("range").cloned().ok_or_else(|| {
-            LspError::Other(String::from("textDocument/range request missing range"))
-        })?)?;
+        .ok_or_else(|| {
+            LspError::invalid_params(String::from(
+                "textDocument/range request missing `params.textDocument.uri`",
+            ))
+        })?;
+    let raw_range = params.get("range").cloned().ok_or_else(|| {
+        LspError::invalid_params(String::from("textDocument/range request missing `params.range`"))
+    })?;
+    let range: LspRange = serde_json::from_value(raw_range).map_err(|error| {
+        LspError::invalid_params(format!(
+            "textDocument/range request has invalid `params.range`: {error}"
+        ))
+    })?;
     Ok((uri.to_owned(), range))
 }
 
@@ -88,10 +108,11 @@ pub(crate) fn apply_content_changes(
             Some(range) => apply_ranged_change(&mut text, range, &change.text, uri)?,
             None => {
                 if change.range_length.is_some() {
-                    return Err(LspError::Other(format!(
-                        "TPY6002: didChange for `{}` provided rangeLength without range",
+                    return Err(LspError::content_modified(format!(
+                        "TPY6002: didChange for `{}` provided `rangeLength` without `range`",
                         uri
-                    )));
+                    ))
+                    .with_tpy_code("TPY6002"));
                 }
                 text = change.text.clone();
             }
@@ -109,10 +130,11 @@ pub(crate) fn apply_ranged_change(
     let start = lsp_position_to_byte_offset(text, range.start, uri)?;
     let end = lsp_position_to_byte_offset(text, range.end, uri)?;
     if start > end {
-        return Err(LspError::Other(format!(
+        return Err(LspError::content_modified(format!(
             "TPY6002: didChange for `{}` uses an invalid range with start after end",
             uri
-        )));
+        ))
+        .with_tpy_code("TPY6002"));
     }
     text.replace_range(start..end, replacement);
     Ok(())
@@ -138,10 +160,11 @@ pub(crate) fn lsp_position_to_byte_offset(
         return utf16_column_to_byte_offset(&text[line_start..], line_start, position, uri);
     }
 
-    Err(LspError::Other(format!(
+    Err(LspError::content_modified(format!(
         "TPY6002: didChange for `{}` references line {} beyond the current document",
         uri, position.line
-    )))
+    ))
+    .with_tpy_code("TPY6002"))
 }
 
 pub(crate) fn utf16_column_to_byte_offset(
@@ -157,20 +180,22 @@ pub(crate) fn utf16_column_to_byte_offset(
         }
         utf16_offset += ch.len_utf16() as u32;
         if utf16_offset > position.character {
-            return Err(LspError::Other(format!(
+            return Err(LspError::content_modified(format!(
                 "TPY6002: didChange for `{}` splits a UTF-16 code point at line {}, character {}",
                 uri, position.line, position.character
-            )));
+            ))
+            .with_tpy_code("TPY6002"));
         }
     }
 
     if utf16_offset == position.character {
         Ok(line_start + line_text.len())
     } else {
-        Err(LspError::Other(format!(
+        Err(LspError::content_modified(format!(
             "TPY6002: didChange for `{}` references character {} beyond line {}",
             uri, position.character, position.line
-        )))
+        ))
+        .with_tpy_code("TPY6002"))
     }
 }
 

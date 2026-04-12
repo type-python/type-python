@@ -90,11 +90,28 @@ impl Server {
             return Ok(Vec::new());
         }
 
-        let mut responses = match method {
-            "initialize" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
+        let mut responses = match self.dispatch_message(method, id.clone(), params) {
+            Ok(responses) => responses,
+            Err(error) => match id {
+                Some(id) => vec![error.jsonrpc_response(id)],
+                None => Vec::new(),
+            },
+        };
+
+        responses.extend(self.scheduler.flush_due_after(method));
+        Ok(responses)
+    }
+
+    fn dispatch_message(
+        &mut self,
+        method: &str,
+        id: Option<Value>,
+        params: Value,
+    ) -> Result<Vec<Value>, LspError> {
+        match method {
+            "initialize" => Ok(request_ok_response(
+                id,
+                json!({
                     "capabilities": {
                         "textDocumentSync": {
                             "openClose": true,
@@ -120,95 +137,78 @@ impl Server {
                         "name": "typepython",
                         "version": env!("CARGO_PKG_VERSION")
                     }
-                }
-            })],
-            "initialized" => Vec::new(),
+                }),
+            )
+            .into_iter()
+            .collect()),
+            "initialized" => Ok(Vec::new()),
             "$/cancelRequest" => {
                 if let Some(request_id) = params.get("id") {
                     self.scheduler.cancel_request(request_id);
                 }
-                Vec::new()
+                Ok(Vec::new())
             }
             "shutdown" => {
                 self.shutdown_requested = true;
-                vec![json!({"jsonrpc": "2.0", "id": id, "result": Value::Null})]
+                Ok(request_ok_response(id, Value::Null).into_iter().collect())
             }
             "exit" => {
                 self.exited = true;
-                Vec::new()
+                Ok(Vec::new())
             }
             "textDocument/didOpen" => {
                 self.apply_did_open(params)?;
-                self.schedule_diagnostics_batch(Vec::new())?
+                self.schedule_diagnostics_batch(Vec::new())
             }
             "textDocument/didChange" => {
                 self.apply_did_change(params)?;
-                self.schedule_diagnostics_batch(Vec::new())?
+                self.schedule_diagnostics_batch(Vec::new())
             }
             "textDocument/didClose" => {
                 let cleared = self.apply_did_close(params)?;
-                self.schedule_diagnostics_batch(cleared)?
+                self.schedule_diagnostics_batch(cleared)
             }
-            "textDocument/hover" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_hover(params)?
-            })],
-            "textDocument/definition" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_definition(params)?
-            })],
-            "textDocument/references" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_references(params)?
-            })],
-            "textDocument/formatting" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_formatting(params)?
-            })],
-            "textDocument/signatureHelp" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_signature_help(params)?
-            })],
-            "textDocument/documentSymbol" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_document_symbol(params)?
-            })],
-            "workspace/symbol" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_workspace_symbol(params)?
-            })],
-            "textDocument/rename" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_rename(params)?
-            })],
-            "textDocument/codeAction" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_code_action(params)?
-            })],
-            "textDocument/completion" => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": self.handle_completion(params)?
-            })],
-            _ if id.is_some() => vec![json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": Value::Null
-            })],
-            _ => Vec::new(),
-        };
-
-        responses.extend(self.scheduler.flush_due_after(method));
-        Ok(responses)
+            "textDocument/hover" => {
+                Ok(request_ok_response(id, self.handle_hover(params)?).into_iter().collect())
+            }
+            "textDocument/definition" => {
+                Ok(request_ok_response(id, self.handle_definition(params)?).into_iter().collect())
+            }
+            "textDocument/references" => {
+                Ok(request_ok_response(id, self.handle_references(params)?).into_iter().collect())
+            }
+            "textDocument/formatting" => {
+                Ok(request_ok_response(id, self.handle_formatting(params)?).into_iter().collect())
+            }
+            "textDocument/signatureHelp" => {
+                Ok(request_ok_response(id, self.handle_signature_help(params)?)
+                    .into_iter()
+                    .collect())
+            }
+            "textDocument/documentSymbol" => {
+                Ok(request_ok_response(id, self.handle_document_symbol(params)?)
+                    .into_iter()
+                    .collect())
+            }
+            "workspace/symbol" => {
+                Ok(request_ok_response(id, self.handle_workspace_symbol(params)?)
+                    .into_iter()
+                    .collect())
+            }
+            "textDocument/rename" => {
+                Ok(request_ok_response(id, self.handle_rename(params)?).into_iter().collect())
+            }
+            "textDocument/codeAction" => {
+                Ok(request_ok_response(id, self.handle_code_action(params)?).into_iter().collect())
+            }
+            "textDocument/completion" => {
+                Ok(request_ok_response(id, self.handle_completion(params)?).into_iter().collect())
+            }
+            _ if id.is_some() => Err(LspError::method_not_found(format!(
+                "JSON-RPC method `{method}` is not supported by the TypePython language server"
+            ))),
+            _ => Ok(Vec::new()),
+        }
     }
 
     fn schedule_diagnostics_batch(
@@ -221,19 +221,20 @@ impl Server {
     }
 
     pub(super) fn apply_did_open(&mut self, params: Value) -> Result<(), LspError> {
-        let text_document = params
-            .get("textDocument")
-            .ok_or_else(|| LspError::Other(String::from("didOpen missing textDocument")))?;
-        let uri = text_document
-            .get("uri")
-            .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("didOpen missing uri")))?;
-        let text = text_document
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("didOpen missing text")))?;
+        let text_document = params.get("textDocument").ok_or_else(|| {
+            LspError::invalid_params(String::from("didOpen missing `params.textDocument`"))
+        })?;
+        let uri = text_document.get("uri").and_then(Value::as_str).ok_or_else(|| {
+            LspError::invalid_params(String::from("didOpen missing `params.textDocument.uri`"))
+        })?;
+        let text = text_document.get("text").and_then(Value::as_str).ok_or_else(|| {
+            LspError::invalid_params(String::from("didOpen missing `params.textDocument.text`"))
+        })?;
         let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
-            LspError::Other(String::from("TPY6002: didOpen missing document version"))
+            LspError::invalid_params(String::from(
+                "TPY6002: didOpen missing `params.textDocument.version`",
+            ))
+            .with_tpy_code("TPY6002")
         })?;
         self.analysis.open_document(uri, text, version)?;
         if self.scheduler.is_background_mode() {
@@ -243,20 +244,27 @@ impl Server {
     }
 
     pub(super) fn apply_did_change(&mut self, params: Value) -> Result<(), LspError> {
-        let text_document = params
-            .get("textDocument")
-            .ok_or_else(|| LspError::Other(String::from("didChange missing textDocument")))?;
-        let uri = text_document
-            .get("uri")
-            .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("didChange missing uri")))?;
+        let text_document = params.get("textDocument").ok_or_else(|| {
+            LspError::invalid_params(String::from("didChange missing `params.textDocument`"))
+        })?;
+        let uri = text_document.get("uri").and_then(Value::as_str).ok_or_else(|| {
+            LspError::invalid_params(String::from("didChange missing `params.textDocument.uri`"))
+        })?;
         let version = text_document.get("version").and_then(Value::as_i64).ok_or_else(|| {
-            LspError::Other(String::from("TPY6002: didChange missing document version"))
+            LspError::invalid_params(String::from(
+                "TPY6002: didChange missing `params.textDocument.version`",
+            ))
+            .with_tpy_code("TPY6002")
+        })?;
+        let raw_content_changes = params.get("contentChanges").cloned().ok_or_else(|| {
+            LspError::invalid_params(String::from("didChange missing `params.contentChanges`"))
         })?;
         let content_changes: Vec<LspContentChangeEvent> =
-            serde_json::from_value(params.get("contentChanges").cloned().ok_or_else(|| {
-                LspError::Other(String::from("didChange missing contentChanges"))
-            })?)?;
+            serde_json::from_value(raw_content_changes).map_err(|error| {
+                LspError::invalid_params(format!(
+                    "didChange has invalid `params.contentChanges`: {error}"
+                ))
+            })?;
         self.analysis.change_document(uri, version, &content_changes)?;
         if self.scheduler.is_background_mode() {
             self.analysis.spawn_support_index_prewarm();
@@ -269,7 +277,9 @@ impl Server {
             .get("textDocument")
             .and_then(|document| document.get("uri"))
             .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("didClose missing uri")))?;
+            .ok_or_else(|| {
+                LspError::invalid_params(String::from("didClose missing `params.textDocument.uri`"))
+            })?;
         let uri = self.analysis.close_document(uri)?;
         Ok(vec![publish_diagnostics_notification(&uri, Vec::new())])
     }
@@ -309,7 +319,9 @@ impl Server {
             .and_then(|document| document.get("uri"))
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                LspError::Other(String::from("textDocument/formatting request missing uri"))
+                LspError::invalid_params(String::from(
+                    "textDocument/formatting request missing `params.textDocument.uri`",
+                ))
             })?;
         self.analysis.formatting(uri)
     }
@@ -325,7 +337,9 @@ impl Server {
             .and_then(|document| document.get("uri"))
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                LspError::Other(String::from("textDocument/documentSymbol request missing uri"))
+                LspError::invalid_params(String::from(
+                    "textDocument/documentSymbol request missing `params.textDocument.uri`",
+                ))
             })?;
         self.analysis.document_symbol(uri)
     }
@@ -337,10 +351,9 @@ impl Server {
 
     pub(super) fn handle_rename(&mut self, params: Value) -> Result<Value, LspError> {
         let (uri, position) = text_document_position(&params)?;
-        let new_name = params
-            .get("newName")
-            .and_then(Value::as_str)
-            .ok_or_else(|| LspError::Other(String::from("rename missing newName")))?;
+        let new_name = params.get("newName").and_then(Value::as_str).ok_or_else(|| {
+            LspError::invalid_params(String::from("rename request missing `params.newName`"))
+        })?;
         self.analysis.rename(&uri, position, new_name)
     }
 
@@ -353,4 +366,13 @@ impl Server {
         let (uri, position) = text_document_position(&params)?;
         self.analysis.completion(&uri, position)
     }
+}
+
+fn request_ok_response(id: Option<Value>, result: Value) -> Option<Value> {
+    let id = id?;
+    Some(json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    }))
 }

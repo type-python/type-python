@@ -32,19 +32,102 @@ use typepython_syntax::{
 };
 use url::Url;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum LspErrorKind {
+    ParseError,
+    InvalidRequest,
+    MethodNotFound,
+    InvalidParams,
+    ContentModified,
+    RequestFailed,
+    Internal,
+}
+
+impl LspErrorKind {
+    fn jsonrpc_code(self) -> i32 {
+        match self {
+            Self::ParseError => -32700,
+            Self::InvalidRequest => -32600,
+            Self::MethodNotFound => -32601,
+            Self::InvalidParams => -32602,
+            Self::Internal => -32603,
+            Self::ContentModified => -32801,
+            Self::RequestFailed => -32803,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
-pub enum LspError {
-    #[error("{0}")]
-    Other(String),
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
+#[error("{message}")]
+pub struct LspError {
+    kind: LspErrorKind,
+    message: String,
+    data: Option<Value>,
+}
+
+impl LspError {
+    pub(crate) fn parse_error(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::ParseError, message: message.into(), data: None }
+    }
+
+    pub(crate) fn invalid_request(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::InvalidRequest, message: message.into(), data: None }
+    }
+
+    pub(crate) fn method_not_found(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::MethodNotFound, message: message.into(), data: None }
+    }
+
+    pub(crate) fn invalid_params(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::InvalidParams, message: message.into(), data: None }
+    }
+
+    pub(crate) fn content_modified(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::ContentModified, message: message.into(), data: None }
+    }
+
+    pub(crate) fn request_failed(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::RequestFailed, message: message.into(), data: None }
+    }
+
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self { kind: LspErrorKind::Internal, message: message.into(), data: None }
+    }
+
+    pub(crate) fn with_data(mut self, data: Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub(crate) fn with_tpy_code(self, code: &str) -> Self {
+        self.with_data(json!({ "tpyCode": code }))
+    }
+
+    pub(crate) fn jsonrpc_response(&self, id: Value) -> Value {
+        let mut error = json!({
+            "code": self.kind.jsonrpc_code(),
+            "message": self.message,
+        });
+        if let Some(data) = &self.data {
+            error["data"] = data.clone();
+        }
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": error,
+        })
+    }
 }
 
 impl From<anyhow::Error> for LspError {
     fn from(value: anyhow::Error) -> Self {
-        Self::Other(value.to_string())
+        Self::internal(value.to_string())
+    }
+}
+
+impl From<io::Error> for LspError {
+    fn from(value: io::Error) -> Self {
+        Self::internal(value.to_string())
     }
 }
 

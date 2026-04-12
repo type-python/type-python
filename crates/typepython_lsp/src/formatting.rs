@@ -125,10 +125,11 @@ pub(super) fn run_formatter(
         }
     }
 
-    Err(LspError::Other(format!(
+    Err(LspError::request_failed(format!(
         "TPY6003: no formatter backend is available; tried {}",
         attempted.join(", ")
-    )))
+    ))
+    .with_tpy_code("TPY6003"))
 }
 
 pub(super) fn run_formatter_command(
@@ -147,27 +148,30 @@ pub(super) fn run_formatter_command(
             return Ok(None);
         }
         Err(error) => {
-            return Err(LspError::Other(format!(
+            return Err(LspError::request_failed(format!(
                 "TPY6003: unable to start formatter `{}`: {}",
                 command.label, error
-            )));
+            ))
+            .with_tpy_code("TPY6003"));
         }
     };
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(input.as_bytes()).map_err(|error| {
-            LspError::Other(format!(
+            LspError::request_failed(format!(
                 "TPY6003: unable to write formatter input for `{}`: {}",
                 command.label, error
             ))
+            .with_tpy_code("TPY6003")
         })?;
     }
 
     let output = child.wait_with_output().map_err(|error| {
-        LspError::Other(format!(
+        LspError::request_failed(format!(
             "TPY6003: formatter `{}` did not complete successfully: {}",
             command.label, error
         ))
+        .with_tpy_code("TPY6003")
     })?;
     if output.status.success() {
         return Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()));
@@ -178,12 +182,13 @@ pub(super) fn run_formatter_command(
         return Ok(None);
     }
 
-    Err(LspError::Other(format!(
+    Err(LspError::request_failed(format!(
         "TPY6003: formatter `{}` exited with status {}{}",
         command.label,
         output.status,
         formatter_stderr_suffix(stderr.trim())
-    )))
+    ))
+    .with_tpy_code("TPY6003"))
 }
 
 pub(super) fn formatter_backend_unavailable(stderr: &str) -> bool {
