@@ -1814,6 +1814,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "typepython-binding",
@@ -1827,6 +1828,7 @@ dependencies = [
  "typepython-lsp",
  "typepython-project",
  "typepython-syntax",
+ "typepython-target",
  "zip",
 ]
 

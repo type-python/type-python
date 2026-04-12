@@ -1146,6 +1146,98 @@ fn verify_packaged_artifacts_accepts_matching_wheel_and_sdist() {
 }
 
 #[test]
+fn verify_publication_metadata_reports_requires_python_mismatch_for_native_output() {
+    let project_dir =
+        temp_project_dir("verify_publication_metadata_reports_requires_python_mismatch_for_native_output");
+    let rendered = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\ntarget_python = \"3.13\"\n",
+        )
+        .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\n",
+        )
+        .expect("pyproject.toml should be written");
+        fs::write(
+            project_dir.join("build/app/__init__.py"),
+            "type Pair[T = int] = tuple[T, T]\n",
+        )
+        .expect("runtime artifact should be written");
+        fs::write(
+            project_dir.join("build/app/__init__.pyi"),
+            "type Pair[T = int] = tuple[T, T]\n",
+        )
+        .expect("stub artifact should be written");
+
+        let config = load(&project_dir).expect("config should load");
+        verify_publication_metadata(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            &[],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("Requires-Python"));
+    assert!(rendered.contains("at least `3.13`"));
+}
+
+#[test]
+fn verify_publication_metadata_reports_missing_typing_extensions_baseline_in_wheel_metadata() {
+    let project_dir = temp_project_dir(
+        "verify_publication_metadata_reports_missing_typing_extensions_baseline_in_wheel_metadata",
+    );
+    let rendered = {
+        fs::create_dir_all(project_dir.join("build/app")).expect("build dir should be created");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("typepython.toml should be written");
+        fs::write(
+            project_dir.join("build/app/__init__.py"),
+            "from typing_extensions import ReadOnly\n",
+        )
+        .expect("runtime artifact should be written");
+        fs::write(
+            project_dir.join("build/app/__init__.pyi"),
+            "from typing_extensions import ReadOnly\n",
+        )
+        .expect("stub artifact should be written");
+        let wheel_path = project_dir.join("dist/demo-0.1.0-py3-none-any.whl");
+        write_zip_archive(
+            &wheel_path,
+            &[(
+                "demo-0.1.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nRequires-Python: >=3.10\n",
+            )],
+        );
+
+        let config = load(&project_dir).expect("config should load");
+        verify_publication_metadata(
+            &config,
+            &[EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join("build/app/__init__.py")),
+                stub_path: Some(project_dir.join("build/app/__init__.pyi")),
+            }],
+            &[SuppliedVerifyArtifact { kind: SuppliedArtifactKind::Wheel, path: wheel_path }],
+        )
+        .as_text()
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(rendered.contains("TPY5003"));
+    assert!(rendered.contains("typing_extensions>=4.12"));
+}
+
+#[test]
 fn verify_packaged_artifacts_reports_missing_stub_in_wheel() {
     let project_dir = temp_project_dir("verify_packaged_artifacts_reports_missing_stub_in_wheel");
     let rendered = {

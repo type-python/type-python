@@ -19,6 +19,7 @@ use typepython_emit::{EmitArtifact, TypePythonStubContext, generate_typepython_s
 use typepython_incremental::decode_snapshot;
 use typepython_lowering::LoweredModule;
 use typepython_syntax::{SourceFile, SourceKind};
+use typepython_target::PythonTarget;
 use zip::ZipArchive;
 
 use crate::cli::VerifyArgs;
@@ -37,6 +38,30 @@ struct RuntimeImportabilityResult {
     importable: bool,
     error: Option<String>,
     public_names: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+struct PublicationRequirements {
+    min_python: Option<PythonTarget>,
+    needs_typing_extensions: bool,
+}
+
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+struct PackageMetadata {
+    requires_python: Option<String>,
+    requires_dist: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PyProjectMetadata {
+    project: Option<PyProjectProjectMetadata>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PyProjectProjectMetadata {
+    #[serde(rename = "requires-python")]
+    requires_python: Option<String>,
+    dependencies: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +166,11 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
             )
             .diagnostics,
         );
+    }
+    if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
+        diagnostics
+            .diagnostics
+            .extend(verify_publication_metadata(&config, &snapshot.emit_plan, &supplied_verify_artifacts(&args)).diagnostics);
     }
     if !snapshot.diagnostics.has_errors() && !diagnostics.has_errors() {
         diagnostics
@@ -266,6 +296,42 @@ pub(crate) fn verify_packaged_artifacts(
     diagnostics
 }
 
+pub(crate) fn verify_publication_metadata(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+    supplied_artifacts: &[SuppliedVerifyArtifact],
+) -> DiagnosticReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let requirements = publication_requirements_from_artifacts(artifacts);
+
+    if let Some(metadata) = local_project_package_metadata(config) {
+        diagnostics
+            .diagnostics
+            .extend(publication_metadata_diagnostics("project metadata", &requirements, &metadata));
+    }
+
+    for artifact in supplied_artifacts {
+        match supplied_artifact_package_metadata(artifact) {
+            Ok(Some(metadata)) => diagnostics.diagnostics.extend(publication_metadata_diagnostics(
+                &format!("{} metadata `{}`", artifact.kind.label(), artifact.path.display()),
+                &requirements,
+                &metadata,
+            )),
+            Ok(None) => {}
+            Err(error) => diagnostics.push(Diagnostic::warning(
+                "TPY5003",
+                format!(
+                    "unable to inspect packaging metadata in {} artifact `{}`: {error}",
+                    artifact.kind.label(),
+                    artifact.path.display(),
+                ),
+            )),
+        }
+    }
+
+    diagnostics
+}
+
 pub(crate) fn verify_external_checkers(
     config: &ConfigHandle,
     checkers: &[String],
@@ -283,6 +349,244 @@ pub(crate) fn verify_external_checkers(
     diagnostics.diagnostics.extend(checker_diagnostics);
 
     diagnostics
+}
+
+fn publication_requirements_from_artifacts(artifacts: &[EmitArtifact]) -> PublicationRequirements {
+    let mut requirements = PublicationRequirements::default();
+
+    for artifact in artifacts {
+        for path in [artifact.runtime_path.as_ref(), artifact.stub_path.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            let Ok(source) = fs::read_to_string(path) else {
+                continue;
+            };
+            let file_requirements = publication_requirements_from_source(&source);
+            requirements.min_python =
+                max_python_target(requirements.min_python, file_requirements.min_python);
+            requirements.needs_typing_extensions |= file_requirements.needs_typing_extensions;
+        }
+    }
+
+    requirements
+}
+
+fn publication_requirements_from_source(source: &str) -> PublicationRequirements {
+    let mut requirements = PublicationRequirements::default();
+
+    if source.contains("typing_extensions.") || source.contains("from typing_extensions import ") {
+        requirements.needs_typing_extensions = true;
+    }
+    if source.contains("typing.ReadOnly")
+        || source.contains("from typing import ReadOnly")
+        || source.contains("typing.TypeIs")
+        || source.contains("from typing import TypeIs")
+        || source.contains("typing.NoDefault")
+        || source.contains("from typing import NoDefault")
+        || source.contains("warnings.deprecated")
+        || source.contains("from warnings import deprecated")
+    {
+        requirements.min_python =
+            max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
+    }
+
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("type ") {
+            requirements.min_python =
+                max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
+            if native_type_params_include_default(trimmed) {
+                requirements.min_python =
+                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
+            }
+        }
+        if trimmed.starts_with("def ")
+            || trimmed.starts_with("async def ")
+            || trimmed.starts_with("class ")
+        {
+            if native_header_uses_type_params(trimmed) {
+                requirements.min_python =
+                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
+                if native_type_params_include_default(trimmed) {
+                    requirements.min_python = max_python_target(
+                        requirements.min_python,
+                        Some(PythonTarget::PYTHON_3_13),
+                    );
+                }
+            }
+        }
+    }
+
+    requirements
+}
+
+fn native_header_uses_type_params(line: &str) -> bool {
+    let prefix_len = if line.starts_with("async def ") {
+        "async def ".len()
+    } else if line.starts_with("def ") {
+        "def ".len()
+    } else if line.starts_with("class ") {
+        "class ".len()
+    } else {
+        return false;
+    };
+    let name_len = line[prefix_len..]
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+        .map(char::len_utf8)
+        .sum::<usize>();
+    line.as_bytes().get(prefix_len + name_len) == Some(&b'[')
+}
+
+fn native_type_params_include_default(line: &str) -> bool {
+    let Some(start) = line.find('[') else {
+        return false;
+    };
+    let Some(end) = line[start..].find(']') else {
+        return false;
+    };
+    line[start + 1..start + end].contains('=')
+}
+
+fn max_python_target(
+    current: Option<PythonTarget>,
+    candidate: Option<PythonTarget>,
+) -> Option<PythonTarget> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.max(candidate)),
+        (Some(current), None) => Some(current),
+        (None, Some(candidate)) => Some(candidate),
+        (None, None) => None,
+    }
+}
+
+fn local_project_package_metadata(config: &ConfigHandle) -> Option<PackageMetadata> {
+    let pyproject_path = config.config_dir.join("pyproject.toml");
+    let rendered = fs::read_to_string(pyproject_path).ok()?;
+    let parsed = toml::from_str::<PyProjectMetadata>(&rendered).ok()?;
+    let project = parsed.project?;
+    Some(PackageMetadata {
+        requires_python: project.requires_python,
+        requires_dist: project.dependencies.unwrap_or_default(),
+    })
+}
+
+fn supplied_artifact_package_metadata(
+    artifact: &SuppliedVerifyArtifact,
+) -> std::result::Result<Option<PackageMetadata>, String> {
+    let entries = read_supplied_artifact_entries(artifact)?;
+    let metadata = match artifact.kind {
+        SuppliedArtifactKind::Wheel => entries
+            .iter()
+            .find(|(path, _)| path.ends_with(".dist-info/METADATA"))
+            .map(|(_, bytes)| bytes),
+        SuppliedArtifactKind::Sdist => entries.get("PKG-INFO"),
+    };
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    parse_package_metadata_text(metadata)
+}
+
+fn parse_package_metadata_text(bytes: &[u8]) -> std::result::Result<Option<PackageMetadata>, String> {
+    let rendered =
+        String::from_utf8(bytes.to_vec()).map_err(|error| format!("invalid UTF-8 metadata: {error}"))?;
+    let mut requires_python = None;
+    let mut requires_dist = Vec::new();
+    for line in rendered.lines() {
+        if let Some(value) = line.strip_prefix("Requires-Python:") {
+            requires_python = Some(value.trim().to_owned());
+        } else if let Some(value) = line.strip_prefix("Requires-Dist:") {
+            requires_dist.push(value.trim().to_owned());
+        }
+    }
+    Ok(Some(PackageMetadata { requires_python, requires_dist }))
+}
+
+fn publication_metadata_diagnostics(
+    label: &str,
+    requirements: &PublicationRequirements,
+    metadata: &PackageMetadata,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Some(required_python) = requirements.min_python {
+        match metadata
+            .requires_python
+            .as_deref()
+            .and_then(minimum_python_from_specifier)
+        {
+            Some(actual_min) if actual_min < required_python => diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "{label} declares Requires-Python `{}` but emitted artifacts require at least `{required_python}`",
+                    metadata.requires_python.as_deref().unwrap_or_default()
+                ),
+            )),
+            None => diagnostics.push(Diagnostic::warning(
+                "TPY5003",
+                format!(
+                    "{label} does not declare a parseable Requires-Python lower bound while emitted artifacts require at least `{required_python}`"
+                ),
+            )),
+            Some(_) => {}
+        }
+    }
+
+    if requirements.needs_typing_extensions {
+        match typing_extensions_lower_bound(&metadata.requires_dist) {
+            Some(version) if version < (4, 12) => diagnostics.push(Diagnostic::error(
+                "TPY5003",
+                format!(
+                    "{label} declares `typing_extensions` with lower bound `{}` but emitted artifacts require `typing_extensions>=4.12`",
+                    format_version_pair(version)
+                ),
+            )),
+            None => diagnostics.push(Diagnostic::warning(
+                "TPY5003",
+                format!(
+                    "{label} does not declare `typing_extensions>=4.12` even though emitted artifacts import `typing_extensions`"
+                ),
+            )),
+            Some(_) => {}
+        }
+    }
+
+    diagnostics
+}
+
+fn minimum_python_from_specifier(specifier: &str) -> Option<PythonTarget> {
+    specifier.split(',').find_map(|clause| {
+        let clause = clause.trim();
+        let version = clause.strip_prefix(">=")?;
+        PythonTarget::parse(version.trim())
+    })
+}
+
+fn typing_extensions_lower_bound(requirements: &[String]) -> Option<(u16, u16)> {
+    requirements.iter().find_map(|requirement| {
+        let normalized = requirement.replace(' ', "");
+        if !normalized.starts_with("typing_extensions") {
+            return None;
+        }
+        let lower = normalized.split(';').next()?.split(',').find_map(|clause| {
+            let version = clause.strip_prefix("typing_extensions>=")?;
+            parse_major_minor_version(version)
+        });
+        lower.or_else(|| normalized.starts_with("typing_extensions").then_some((0, 0)))
+    })
+}
+
+fn parse_major_minor_version(text: &str) -> Option<(u16, u16)> {
+    let mut parts = text.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor))
+}
+
+fn format_version_pair(version: (u16, u16)) -> String {
+    format!("{}.{}", version.0, version.1)
 }
 
 pub(crate) fn verify_runtime_public_name_parity(
