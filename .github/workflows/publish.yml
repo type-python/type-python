@@ -169,31 +169,31 @@ jobs:
 
     steps:
       - name: Download source distribution artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-distribution-sdist
           path: dist
 
       - name: Download Linux wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-distribution-linux-x86_64
           path: dist
 
       - name: Download Windows wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-distribution-windows-amd64
           path: dist
 
       - name: Download macOS x86_64 wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-distribution-macos-x86_64
           path: dist
 
       - name: Download macOS arm64 wheel artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-distribution-macos-arm64
           path: dist
