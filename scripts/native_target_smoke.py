@@ -156,10 +156,10 @@ payload = {
 
 if sys.version_info >= (3, 14):
     payload["annotationlib_box_has_value"] = "value" in get_annotations(
-        module.Box, format=AnnotationFormat.VALUE
+        module.Box, eval_str=True, format=AnnotationFormat.VALUE
     )
     payload["annotationlib_module_has_pair"] = "PAIR" in get_annotations(
-        module, format=AnnotationFormat.VALUE
+        module, eval_str=True, format=AnnotationFormat.VALUE
     )
     payload["annotationlib_supports_string"] = supported_formats().string
 

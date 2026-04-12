@@ -886,6 +886,10 @@ fn header_line_for_statement(source: &str, start_line: usize) -> usize {
     start_line
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "lowering collects multiple declaration categories in one pass"
+)]
 fn collect_runtime_type_params(
     type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
@@ -1031,6 +1035,10 @@ fn has_any_generic_type_params(
         || overloads.values().any(|statement| !statement.type_params.is_empty())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "runtime feature collection spans all lowerable declaration categories"
+)]
 fn collect_required_runtime_features(
     type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
@@ -1132,6 +1140,10 @@ fn collect_required_backports(lowered: &str) -> BTreeSet<BackportRequirement> {
     backports
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "export runtime semantics are derived across all declaration categories"
+)]
 fn collect_export_runtime_semantics(
     type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
     interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
@@ -1650,9 +1662,9 @@ fn append_optional_generic_base(
     options: &LoweringOptions,
 ) -> String {
     let header_suffix = runtime_header_suffix(statement);
-    if statement.type_params.is_empty() {
-        if header_suffix.is_empty() { String::new() } else { header_suffix }
-    } else if can_use_native_type_params(&statement.type_params, options) {
+    if statement.type_params.is_empty()
+        || can_use_native_type_params(&statement.type_params, options)
+    {
         if header_suffix.is_empty() { String::new() } else { header_suffix }
     } else {
         append_bases(&header_suffix, &[generic_base(statement)])
