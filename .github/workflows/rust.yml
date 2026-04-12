@@ -84,6 +84,37 @@ jobs:
       - name: Run installed wheel smoke test
         run: python scripts/quickstart_smoke.py
 
+  python-modern-host:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.94.0
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal \
+            --component rustfmt \
+            --component clippy
+          rustup default 1.94.0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install wheel build tools
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel with modern host Python
+        run: python -m build --wheel
+
+      - name: Install built wheel
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Run installed wheel smoke test
+        run: python scripts/quickstart_smoke.py
+
   platform-smoke:
     if: github.event_name == 'pull_request'
     strategy:

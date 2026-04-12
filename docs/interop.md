@@ -89,6 +89,7 @@ The `typepython verify` command performs structural consistency checks that help
 | Stub syntax validity  | `.pyi` contains runtime statements that stub consumers would reject |
 | Artifact completeness | Missing `.py`, `.pyi`, or `py.typed` in the build output            |
 | Package consistency   | Wheel/sdist contents diverge from the build tree                    |
+| Metadata consistency  | `Requires-Python` or `typing_extensions` metadata lags emitted requirements |
 | Snapshot integrity    | Incremental cache is corrupt or incompatible                        |
 
 These checks catch the class of bugs where `.pyi` declarations drift from the actual runtime code -- the same problem that plagues hand-maintained `.d.ts` files in the TypeScript ecosystem.
