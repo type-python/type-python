@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import re
@@ -14,6 +15,19 @@ def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
     location = f" (cwd={cwd})" if cwd is not None else ""
     print(f"+ {' '.join(command)}{location}")
     subprocess.run(command, cwd=cwd, check=True)
+
+
+def capture(command: list[str], cwd: pathlib.Path | None = None) -> str:
+    location = f" (cwd={cwd})" if cwd is not None else ""
+    print(f"+ {' '.join(command)}{location}")
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return completed.stdout
 
 
 def resolve_entrypoint() -> str:
@@ -115,6 +129,65 @@ def assert_native_outputs(project_dir: pathlib.Path) -> None:
             raise SystemExit(f"native stub output is missing expected syntax: {rendered}")
 
 
+def assert_runtime_semantics(project_dir: pathlib.Path) -> None:
+    build_root = project_dir / ".typepython" / "build"
+    probe = """
+import importlib
+import json
+import pathlib
+import sys
+import typing
+
+build_root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(build_root))
+module = importlib.import_module("app")
+
+payload = {
+    "module_has_T": "T" in vars(module),
+    "pair_type_name": type(module.Pair).__name__,
+    "pair_type_module": type(module.Pair).__module__,
+    "pair_type_params": [param.__name__ for param in module.Pair.__type_params__],
+    "box_type_params": [param.__name__ for param in module.Box.__type_params__],
+    "first_pair_type_params": [param.__name__ for param in module.first_pair.__type_params__],
+    "pair_default_present": getattr(module.Pair.__type_params__[0], "__default__", None) is not None,
+    "box_default_present": getattr(module.Box.__type_params__[0], "__default__", None) is not None,
+    "function_default_present": getattr(module.first_pair.__type_params__[0], "__default__", None) is not None,
+}
+print(json.dumps(payload))
+"""
+    rendered = capture([sys.executable, "-c", probe, str(build_root)])
+    payload = json.loads(rendered)
+
+    if payload["module_has_T"]:
+        raise SystemExit("native runtime unexpectedly leaked a module-level `T` binding")
+    if payload["pair_type_name"] != "TypeAliasType":
+        raise SystemExit(
+            "native runtime did not materialize a TypeAliasType for `Pair` "
+            f"(got {payload['pair_type_module']}.{payload['pair_type_name']})"
+        )
+    if payload["pair_type_params"] != ["T"]:
+        raise SystemExit(
+            f"native runtime alias type parameters were not preserved: {payload['pair_type_params']}"
+        )
+    if payload["box_type_params"] != ["T"]:
+        raise SystemExit(
+            f"native runtime class type parameters were not preserved: {payload['box_type_params']}"
+        )
+    if payload["first_pair_type_params"] != ["T"]:
+        raise SystemExit(
+            "native runtime function type parameters were not preserved: "
+            f"{payload['first_pair_type_params']}"
+        )
+    if not (
+        payload["pair_default_present"]
+        and payload["box_default_present"]
+        and payload["function_default_present"]
+    ):
+        raise SystemExit(
+            "native runtime did not preserve generic defaults on alias/class/function type parameters"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build and verify a native-target TypePython project",
@@ -141,6 +214,7 @@ def main() -> None:
         run([entrypoint, "check", "--project", "."], cwd=project_dir)
         run([entrypoint, "build", "--project", "."], cwd=project_dir)
         assert_native_outputs(project_dir)
+        assert_runtime_semantics(project_dir)
         run(
             [entrypoint, "verify", "--project", ".", "--unsafe-runtime-imports"],
             cwd=project_dir,
