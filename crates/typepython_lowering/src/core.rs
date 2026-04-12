@@ -74,6 +74,41 @@ pub struct LoweringMetadata {
     pub has_sealed_classes: bool,
 }
 
+struct InsertedLineTracker<'a> {
+    source_path: &'a Path,
+    emitted_path: &'a Path,
+    lowered_lines: &'a mut Vec<String>,
+    required_imports: &'a mut Vec<String>,
+    span_map: &'a mut Vec<SpanMapEntry>,
+    lowered_line_number: &'a mut usize,
+}
+
+impl<'a> InsertedLineTracker<'a> {
+    fn emit_required_import(&mut self, import_line: String) {
+        push_required_import(self.lowered_lines, self.required_imports, import_line);
+        self.record_last_line(LoweringSegmentKind::Inserted);
+    }
+
+    fn emit_synthetic_line(&mut self, line: String) {
+        self.lowered_lines.push(line);
+        self.record_last_line(LoweringSegmentKind::Synthetic);
+    }
+
+    fn record_last_line(&mut self, kind: LoweringSegmentKind) {
+        let Some(text) = self.lowered_lines.last() else {
+            return;
+        };
+        self.span_map.push(inserted_span_map_entry(
+            self.source_path,
+            self.emitted_path,
+            *self.lowered_line_number,
+            text,
+            kind,
+        ));
+        *self.lowered_line_number += 1;
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LoweringOptions {
     pub target_python: String,
@@ -265,174 +300,62 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let mut lowered_line_number = 1usize;
     let mut source_map = Vec::new();
     let mut span_map = Vec::new();
+    let mut inserted_lines = InsertedLineTracker {
+        source_path: &source_path,
+        emitted_path: &emitted_path,
+        lowered_lines: &mut lowered_lines,
+        required_imports: &mut required_imports,
+        span_map: &mut span_map,
+        lowered_line_number: &mut lowered_line_number,
+    };
     if has_runtime_typevars
         && !has_typevar_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
     {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            rewrite_typevar_import_line(needs_typing_extensions_runtime_type_params),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
+        inserted_lines.emit_required_import(rewrite_typevar_import_line(
+            needs_typing_extensions_runtime_type_params,
         ));
-        lowered_line_number += 1;
     }
     if has_runtime_paramspecs
         && !has_paramspec_import(&tree.source.text, needs_typing_extensions_runtime_type_params)
     {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            rewrite_paramspec_import_line(needs_typing_extensions_runtime_type_params),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
+        inserted_lines.emit_required_import(rewrite_paramspec_import_line(
+            needs_typing_extensions_runtime_type_params,
         ));
-        lowered_line_number += 1;
     }
     if has_runtime_typevartuples
         && !has_typevartuple_import(&tree.source.text, uses_typing_extensions_variadic_generics)
     {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            rewrite_typevartuple_import_line(uses_typing_extensions_variadic_generics),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
+        inserted_lines.emit_required_import(rewrite_typevartuple_import_line(
+            uses_typing_extensions_variadic_generics,
         ));
-        lowered_line_number += 1;
     }
     if needs_unpack_import
         && !has_unpack_import(&tree.source.text, uses_typing_extensions_variadic_generics)
     {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            rewrite_unpack_import_line(uses_typing_extensions_variadic_generics),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
+        inserted_lines.emit_required_import(rewrite_unpack_import_line(
+            uses_typing_extensions_variadic_generics,
         ));
-        lowered_line_number += 1;
     }
     if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing import Generic"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing import Generic"));
     }
     if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing import Any"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing import Any"));
     }
     for (name, type_param) in &runtime_type_params {
-        lowered_lines.push(rewrite_typevar_line(name, type_param));
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Synthetic,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_synthetic_line(rewrite_typevar_line(name, type_param));
     }
     if !type_aliases.is_empty() && !has_typealias_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing import TypeAlias"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing import TypeAlias"));
     }
     if !interfaces.is_empty() && !has_protocol_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing import Protocol"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing import Protocol"));
     }
     if !data_classes.is_empty() && !has_dataclass_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from dataclasses import dataclass"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from dataclasses import dataclass"));
     }
     if !overloads.is_empty() && !has_overload_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing import overload"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing import overload"));
     }
     // Check if any type alias uses a transform that generates NotRequired
     let needs_notrequired_import = type_aliases.values().any(|stmt| {
@@ -443,19 +366,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             || v.starts_with("Required_[")
     });
     if needs_notrequired_import && !has_notrequired_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            rewrite_notrequired_import_line(options),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(rewrite_notrequired_import_line(options));
     }
     // Check if any type alias uses a transform that generates ReadOnly
     let needs_readonly_import = type_aliases.values().any(|stmt| {
@@ -466,20 +377,9 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             || v.starts_with("Mutable[")
     });
     if needs_readonly_import && !has_readonly_import(&tree.source.text) {
-        push_required_import(
-            &mut lowered_lines,
-            &mut required_imports,
-            String::from("from typing_extensions import ReadOnly"),
-        );
-        span_map.push(inserted_span_map_entry(
-            &source_path,
-            &emitted_path,
-            lowered_line_number,
-            lowered_lines.last().expect("inserted line should exist"),
-            LoweringSegmentKind::Inserted,
-        ));
-        lowered_line_number += 1;
+        inserted_lines.emit_required_import(String::from("from typing_extensions import ReadOnly"));
     }
+    drop(inserted_lines);
 
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
