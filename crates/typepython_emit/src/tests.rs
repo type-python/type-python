@@ -811,6 +811,27 @@ fn generate_typepython_stub_source_preserves_native_type_alias_surface() {
 }
 
 #[test]
+fn generate_typepython_stub_source_preserves_native_class_and_function_headers() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/native_generics.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "class Box[T](Base):\n    pass\n\ndef first[T](value: T) -> T:\n    return value\n",
+        ),
+        source_map: Vec::new(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("native generic stub should generate");
+
+    assert!(stub.contains("class Box[T](Base): ...") || stub.contains("class Box[T](Base):"));
+    assert!(stub.contains("def first[T](value: T) -> T: ..."));
+}
+
+#[test]
 fn generate_inferred_shadow_stub_handles_empty_module() {
     let stub = generate_inferred_stub_source("", InferredStubMode::Shadow)
         .expect("empty shadow stub generation should succeed");

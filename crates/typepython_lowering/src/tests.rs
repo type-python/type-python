@@ -1331,6 +1331,28 @@ fn lower_rewrites_compat_import_sources_for_target_python_312() {
 }
 
 #[test]
+fn lower_native_import_sources_for_target_python_313() {
+    let lowered = lower_with_options(
+        &parse(SourceFile {
+            path: PathBuf::from("native-imports.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::from(
+                "from typing_extensions import Self, ReadOnly, TypeIs, NoDefault, override, Required, NotRequired, dataclass_transform\nfrom typing_extensions import deprecated\n\n@deprecated(\"use new_api\")\nclass Box[T]:\n    flag: ReadOnly[bool]\n\n    @override\n    def clone(self) -> Self:\n        ...\n\ndef accepts(value: object) -> TypeIs[int]:\n    ...\n\nmarker: NoDefault\n",
+            ),
+        }),
+        &native_options("3.13"),
+    );
+
+    assert!(lowered.diagnostics.is_empty());
+    assert!(lowered.module.python_source.contains("from typing import Self, ReadOnly, TypeIs, NoDefault, override, Required, NotRequired, dataclass_transform"));
+    assert!(lowered.module.python_source.contains("from warnings import deprecated"));
+    assert!(!lowered.module.python_source.contains("typing_extensions.ReadOnly"));
+    assert!(!lowered.module.python_source.contains("typing_extensions.TypeIs"));
+    assert!(!lowered.module.python_source.contains("typing_extensions.deprecated"));
+}
+
+#[test]
 fn lower_rewrites_variadic_generic_compat_import_sources_for_target_python_310() {
     let lowered = lower_with_options(
         &parse(SourceFile {
