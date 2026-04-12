@@ -5,7 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeFeature {
     TypeStmt,
     InlineTypeParams,
@@ -15,6 +16,29 @@ pub enum RuntimeFeature {
     TypingNoDefault,
     WarningsDeprecated,
     DeferredAnnotations,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeTypingForm {
+    TypeAliasType,
+    NativeGenericClass,
+    NativeGenericFunction,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeTypingSemantics {
+    pub form: RuntimeTypingForm,
+    #[serde(default)]
+    pub type_param_names: Vec<String>,
+    #[serde(default)]
+    pub annotation_scope_owner: Option<String>,
+    #[serde(default)]
+    pub lazy_alias_value: bool,
+    #[serde(default)]
+    pub local_type_params_hidden_from_globals: bool,
+    #[serde(default)]
+    pub required_features: Vec<RuntimeFeature>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]

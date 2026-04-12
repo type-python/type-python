@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use typepython_binding::{Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam};
 use typepython_graph::ModuleGraph;
 use typepython_syntax::{SourceKind, TypeExpr};
+use typepython_target::{RuntimeTypingForm, RuntimeTypingSemantics};
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 
@@ -90,8 +91,8 @@ pub struct SummaryExport {
     pub exported_type_expr: Option<TypeExpr>,
     #[serde(rename = "typeParams")]
     pub type_params: Vec<SummaryTypeParam>,
-    #[serde(rename = "runtimeForm", default)]
-    pub runtime_form: Option<String>,
+    #[serde(rename = "runtimeSemantics", default)]
+    pub runtime_semantics: Option<RuntimeTypingSemantics>,
     #[serde(rename = "requiredRuntimeFeatures", default)]
     pub required_runtime_features: Vec<String>,
     pub public: bool,
@@ -455,7 +456,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             exported_type: None,
             exported_type_expr: summary_type_expr(declaration),
             type_params: declaration.type_params.iter().map(summary_type_param).collect(),
-            runtime_form: summary_runtime_form(node.module_kind, declaration),
+            runtime_semantics: summary_runtime_semantics(node.module_kind, declaration),
             required_runtime_features: Vec::new(),
             public: !declaration.name.starts_with('_'),
         })
@@ -523,25 +524,63 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
     }
 }
 
-fn summary_runtime_form(
+fn summary_runtime_semantics(
     module_kind: SourceKind,
     declaration: &Declaration,
-) -> Option<String> {
+) -> Option<RuntimeTypingSemantics> {
     if module_kind != SourceKind::Python {
         return None;
     }
     match declaration.kind {
-        DeclarationKind::TypeAlias => Some(String::from("type_alias_type")),
+        DeclarationKind::TypeAlias => Some(RuntimeTypingSemantics {
+            form: RuntimeTypingForm::TypeAliasType,
+            type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+            annotation_scope_owner: Some(declaration.name.clone()),
+            lazy_alias_value: true,
+            local_type_params_hidden_from_globals: true,
+            required_features: native_runtime_features_from_declaration(declaration, true),
+        }),
         DeclarationKind::Class if !declaration.type_params.is_empty() => {
-            Some(String::from("native_generic_class"))
+            Some(RuntimeTypingSemantics {
+                form: RuntimeTypingForm::NativeGenericClass,
+                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                annotation_scope_owner: Some(declaration.name.clone()),
+                lazy_alias_value: false,
+                local_type_params_hidden_from_globals: true,
+                required_features: native_runtime_features_from_declaration(declaration, false),
+            })
         }
         DeclarationKind::Function | DeclarationKind::Overload
             if !declaration.type_params.is_empty() =>
         {
-            Some(String::from("native_generic_function"))
+            Some(RuntimeTypingSemantics {
+                form: RuntimeTypingForm::NativeGenericFunction,
+                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                annotation_scope_owner: Some(declaration.name.clone()),
+                lazy_alias_value: false,
+                local_type_params_hidden_from_globals: true,
+                required_features: native_runtime_features_from_declaration(declaration, false),
+            })
         }
         _ => None,
     }
+}
+
+fn native_runtime_features_from_declaration(
+    declaration: &Declaration,
+    is_alias: bool,
+) -> Vec<typepython_target::RuntimeFeature> {
+    let mut features = Vec::new();
+    if is_alias {
+        features.push(typepython_target::RuntimeFeature::TypeStmt);
+    }
+    if !declaration.type_params.is_empty() {
+        features.push(typepython_target::RuntimeFeature::InlineTypeParams);
+    }
+    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+        features.push(typepython_target::RuntimeFeature::GenericDefaults);
+    }
+    features
 }
 
 fn summary_kind(declaration: &Declaration) -> String {
@@ -764,7 +803,7 @@ mod tests {
                         default: None,
                         default_expr: None,
                     }],
-                    runtime_form: None,
+                    runtime_semantics: None,
                     required_runtime_features: Vec::new(),
                     public: true,
                 }],
@@ -933,7 +972,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -955,7 +994,7 @@ mod tests {
                             default: None,
                             default_expr: None,
                         }],
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -968,7 +1007,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -990,7 +1029,7 @@ mod tests {
                             default: Some(String::from("str")),
                             default_expr: None,
                         }],
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     },
@@ -1243,7 +1282,7 @@ mod tests {
                             default: Some(String::from("Comparable")),
                             default_expr: None,
                         }],
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     }],
@@ -1267,7 +1306,7 @@ mod tests {
                         exported_type: None,
                         exported_type_expr: None,
                         type_params: Vec::new(),
-                        runtime_form: None,
+                        runtime_semantics: None,
                         required_runtime_features: Vec::new(),
                         public: true,
                     }],

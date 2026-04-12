@@ -74,6 +74,7 @@ pub struct LoweringMetadata {
     pub has_sealed_classes: bool,
     pub required_runtime_features: BTreeSet<RuntimeFeature>,
     pub required_backports: BTreeSet<BackportRequirement>,
+    pub export_runtime_semantics: std::collections::BTreeMap<String, RuntimeTypingSemantics>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
@@ -540,6 +541,16 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         options,
     );
     let required_backports = collect_required_backports(&lowered);
+    let export_runtime_semantics = collect_export_runtime_semantics(
+        &type_aliases,
+        &interfaces,
+        &data_classes,
+        &sealed_classes,
+        &class_defs,
+        &function_defs,
+        &overloads,
+        options,
+    );
 
     LoweredText {
         python_source: lowered,
@@ -552,6 +563,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             has_sealed_classes,
             required_runtime_features,
             required_backports,
+            export_runtime_semantics,
         },
     }
 }
@@ -1115,6 +1127,146 @@ fn collect_required_backports(lowered: &str) -> BTreeSet<BackportRequirement> {
         backports.insert(BackportRequirement::TypingExtensionsAtLeast412);
     }
     backports
+}
+
+fn collect_export_runtime_semantics(
+    type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
+    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
+    function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
+    options: &LoweringOptions,
+) -> std::collections::BTreeMap<String, RuntimeTypingSemantics> {
+    let mut semantics = std::collections::BTreeMap::new();
+
+    for statement in type_aliases.values() {
+        if let Some(runtime) = native_alias_runtime_semantics(statement, options) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in interfaces.values() {
+        if let Some(runtime) = native_class_runtime_semantics(
+            &statement.name,
+            &statement.type_params,
+            RuntimeTypingForm::NativeGenericClass,
+            options,
+        ) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in data_classes.values() {
+        if let Some(runtime) = native_class_runtime_semantics(
+            &statement.name,
+            &statement.type_params,
+            RuntimeTypingForm::NativeGenericClass,
+            options,
+        ) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in sealed_classes.values() {
+        if let Some(runtime) = native_class_runtime_semantics(
+            &statement.name,
+            &statement.type_params,
+            RuntimeTypingForm::NativeGenericClass,
+            options,
+        ) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in class_defs.values() {
+        if let Some(runtime) = native_class_runtime_semantics(
+            &statement.name,
+            &statement.type_params,
+            RuntimeTypingForm::NativeGenericClass,
+            options,
+        ) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in function_defs.values() {
+        if let Some(runtime) = native_function_runtime_semantics(statement, options) {
+            semantics.insert(statement.name.clone(), runtime);
+        }
+    }
+    for statement in overloads.values() {
+        if let Some(runtime) = native_function_runtime_semantics(statement, options) {
+            semantics.entry(statement.name.clone()).or_insert(runtime);
+        }
+    }
+
+    semantics
+}
+
+fn native_alias_runtime_semantics(
+    statement: &typepython_syntax::TypeAliasStatement,
+    options: &LoweringOptions,
+) -> Option<RuntimeTypingSemantics> {
+    can_use_native_typealias(statement, options).then(|| RuntimeTypingSemantics {
+        form: RuntimeTypingForm::TypeAliasType,
+        type_param_names: statement
+            .type_params
+            .iter()
+            .map(|type_param| type_param.name.clone())
+            .collect(),
+        annotation_scope_owner: Some(statement.name.clone()),
+        lazy_alias_value: true,
+        local_type_params_hidden_from_globals: true,
+        required_features: native_required_features(&statement.type_params, true),
+    })
+}
+
+fn native_class_runtime_semantics(
+    name: &str,
+    type_params: &[typepython_syntax::TypeParam],
+    form: RuntimeTypingForm,
+    options: &LoweringOptions,
+) -> Option<RuntimeTypingSemantics> {
+    can_use_native_type_params(type_params, options).then(|| RuntimeTypingSemantics {
+        form,
+        type_param_names: type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+        annotation_scope_owner: Some(name.to_owned()),
+        lazy_alias_value: false,
+        local_type_params_hidden_from_globals: true,
+        required_features: native_required_features(type_params, false),
+    })
+}
+
+fn native_function_runtime_semantics(
+    statement: &typepython_syntax::FunctionStatement,
+    options: &LoweringOptions,
+) -> Option<RuntimeTypingSemantics> {
+    can_use_native_type_params(&statement.type_params, options).then(|| RuntimeTypingSemantics {
+        form: RuntimeTypingForm::NativeGenericFunction,
+        type_param_names: statement
+            .type_params
+            .iter()
+            .map(|type_param| type_param.name.clone())
+            .collect(),
+        annotation_scope_owner: Some(statement.name.clone()),
+        lazy_alias_value: false,
+        local_type_params_hidden_from_globals: true,
+        required_features: native_required_features(&statement.type_params, false),
+    })
+}
+
+fn native_required_features(
+    type_params: &[typepython_syntax::TypeParam],
+    is_alias: bool,
+) -> Vec<RuntimeFeature> {
+    let mut features = Vec::new();
+    if is_alias {
+        features.push(RuntimeFeature::TypeStmt);
+    }
+    if !type_params.is_empty() {
+        features.push(RuntimeFeature::InlineTypeParams);
+    }
+    if type_params_have_defaults(type_params) {
+        features.push(RuntimeFeature::GenericDefaults);
+    }
+    features
 }
 
 fn type_params_have_defaults(type_params: &[typepython_syntax::TypeParam]) -> bool {

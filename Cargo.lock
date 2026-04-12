@@ -1797,6 +1797,7 @@ dependencies = [
  "typepython-graph",
  "typepython-incremental",
  "typepython-syntax",
+ "typepython-target",
 ]
 
 [[package]]
@@ -1881,6 +1882,7 @@ dependencies = [
  "typepython-binding",
  "typepython-graph",
  "typepython-syntax",
+ "typepython-target",
 ]
 
 [[package]]

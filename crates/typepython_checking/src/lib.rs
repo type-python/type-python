@@ -32,6 +32,7 @@ use typepython_incremental::{
     snapshot_with_summaries,
 };
 use typepython_syntax::SourceKind;
+use typepython_target::{RuntimeFeature, RuntimeTypingForm, RuntimeTypingSemantics};
 mod assignments;
 mod calls;
 mod declaration_semantics;
@@ -864,31 +865,69 @@ fn semantic_summary_export(
         exported_type,
         exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
-        runtime_form: summary_runtime_form(node.module_kind, declaration),
+        runtime_semantics: summary_runtime_semantics(node.module_kind, declaration),
         required_runtime_features,
         public: !declaration.name.starts_with('_'),
     }
 }
 
-fn summary_runtime_form(
+fn summary_runtime_semantics(
     module_kind: SourceKind,
     declaration: &Declaration,
-) -> Option<String> {
+) -> Option<RuntimeTypingSemantics> {
     if module_kind != SourceKind::Python {
         return None;
     }
     match declaration.kind {
-        DeclarationKind::TypeAlias => Some(String::from("type_alias_type")),
+        DeclarationKind::TypeAlias => Some(RuntimeTypingSemantics {
+            form: RuntimeTypingForm::TypeAliasType,
+            type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+            annotation_scope_owner: Some(declaration.name.clone()),
+            lazy_alias_value: true,
+            local_type_params_hidden_from_globals: true,
+            required_features: runtime_semantic_features(declaration, true),
+        }),
         DeclarationKind::Class if !declaration.type_params.is_empty() => {
-            Some(String::from("native_generic_class"))
+            Some(RuntimeTypingSemantics {
+                form: RuntimeTypingForm::NativeGenericClass,
+                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                annotation_scope_owner: Some(declaration.name.clone()),
+                lazy_alias_value: false,
+                local_type_params_hidden_from_globals: true,
+                required_features: runtime_semantic_features(declaration, false),
+            })
         }
         DeclarationKind::Function | DeclarationKind::Overload
             if !declaration.type_params.is_empty() =>
         {
-            Some(String::from("native_generic_function"))
+            Some(RuntimeTypingSemantics {
+                form: RuntimeTypingForm::NativeGenericFunction,
+                type_param_names: declaration.type_params.iter().map(|type_param| type_param.name.clone()).collect(),
+                annotation_scope_owner: Some(declaration.name.clone()),
+                lazy_alias_value: false,
+                local_type_params_hidden_from_globals: true,
+                required_features: runtime_semantic_features(declaration, false),
+            })
         }
         _ => None,
     }
+}
+
+fn runtime_semantic_features(
+    declaration: &Declaration,
+    is_alias: bool,
+) -> Vec<RuntimeFeature> {
+    let mut features = Vec::new();
+    if is_alias {
+        features.push(RuntimeFeature::TypeStmt);
+    }
+    if !declaration.type_params.is_empty() {
+        features.push(RuntimeFeature::InlineTypeParams);
+    }
+    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+        features.push(RuntimeFeature::GenericDefaults);
+    }
+    features
 }
 
 fn required_runtime_features_for_export(

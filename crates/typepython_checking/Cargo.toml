@@ -15,6 +15,7 @@ typepython-diagnostics = { path = "../typepython_diagnostics" }
 typepython-graph = { path = "../typepython_graph" }
 typepython-incremental = { path = "../typepython_incremental" }
 typepython-syntax = { path = "../typepython_syntax" }
+typepython-target = { path = "../typepython_target" }
 
 [dev-dependencies]
 criterion.workspace = true
