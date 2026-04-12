@@ -3,13 +3,15 @@ use std::{
     env, fs,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, ExitCode},
+    process::{Command as ProcessCommand, ExitCode, Output},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use rayon::prelude::*;
+use ruff_python_ast::{Expr, Stmt};
+use ruff_python_parser::parse_module;
 use tar::Archive as TarArchive;
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
@@ -26,9 +28,8 @@ use crate::pipeline::{
     run_pipeline, should_emit_build_outputs,
 };
 use crate::{
-    CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, STATIC_ALL_NAMES_SCRIPT, bytecode_path_for,
-    exit_code, load_project, load_project_without_python_executable_validation, print_summary,
-    resolve_python_executable,
+    CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for, exit_code, load_project,
+    load_project_without_python_executable_validation, print_summary, resolve_python_executable,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -303,7 +304,6 @@ pub(crate) fn verify_runtime_public_name_parity(
 
 fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
 
     if let Some(runtime_path) = &artifact.runtime_path {
         if !runtime_path.exists() {
@@ -352,9 +352,7 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
 
     if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
         if runtime_path.exists() && stub_path.exists() {
-            if let Some(diagnostic) =
-                verify_emitted_declaration_surface(config, &out_root, runtime_path, stub_path)
-            {
+            if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
                 diagnostics.push(diagnostic);
             }
         }
@@ -433,36 +431,11 @@ fn verify_external_checker(
     out_root: &Path,
     checker: &str,
 ) -> Option<Diagnostic> {
-    let output =
-        match ProcessCommand::new(checker).arg(out_root).current_dir(&config.config_dir).output() {
-            Ok(output) => output,
-            Err(error) => {
-                return Some(Diagnostic::error(
-                    "TPY5003",
-                    format!("unable to run external checker `{checker}`: {error}"),
-                ));
-            }
-        };
-    if output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    let details = [stdout, stderr]
-        .into_iter()
-        .filter(|stream| !stream.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
-
-    Some(Diagnostic::error(
-        "TPY5003",
-        format!(
-            "external checker `{checker}` rejected emitted build output under `{}`{}",
-            out_root.display(),
-            suffix
-        ),
-    ))
+    checker_diagnostic_from_output(
+        checker,
+        out_root,
+        ProcessCommand::new(checker).arg(out_root).current_dir(&config.config_dir).output(),
+    )
 }
 
 fn verify_runtime_public_name_parity_for_artifact(
@@ -507,7 +480,7 @@ fn verify_runtime_public_name_parity_for_artifact(
             return diagnostics;
         }
     };
-    let authoritative_names = match authoritative_public_names(config, stub_path) {
+    let authoritative_names = match authoritative_public_names(stub_path) {
         Ok(names) => names,
         Err(error) => {
             diagnostics.push(Diagnostic::error(
@@ -522,32 +495,11 @@ fn verify_runtime_public_name_parity_for_artifact(
         }
     };
 
-    let missing_from_runtime =
-        authoritative_names.difference(&runtime_names).cloned().collect::<Vec<_>>();
-    let missing_from_type_surface =
-        runtime_names.difference(&authoritative_names).cloned().collect::<Vec<_>>();
-
-    if !missing_from_runtime.is_empty() {
-        diagnostics.push(Diagnostic::error(
-            "TPY5003",
-            format!(
-                "runtime module `{}` is missing public names declared by the authoritative type surface: {}",
-                module_name,
-                missing_from_runtime.join(", "),
-            ),
-        ));
-    }
-    if !missing_from_type_surface.is_empty() {
-        diagnostics.push(Diagnostic::error(
-            "TPY5003",
-            format!(
-                "authoritative type surface for `{}` is missing runtime public names: {}",
-                module_name,
-                missing_from_type_surface.join(", "),
-            ),
-        ));
-    }
-
+    diagnostics.extend(surface_parity_diagnostics(
+        &module_name,
+        &runtime_names,
+        &authoritative_names,
+    ));
     diagnostics
 }
 
@@ -569,11 +521,8 @@ fn logical_module_name_from_runtime_path(out_root: &Path, runtime_path: &Path) -
     Some(components.join("."))
 }
 
-fn runtime_public_names(
-    config: &ConfigHandle,
-    runtime_path: &Path,
-) -> std::result::Result<BTreeSet<String>, String> {
-    public_names_from_module_file(config, runtime_path)
+fn runtime_public_names(runtime_path: &Path) -> std::result::Result<BTreeSet<String>, String> {
+    public_names_from_module_file(runtime_path)
 }
 
 fn verify_runtime_module_importability(
@@ -674,50 +623,68 @@ fn runtime_import_probe_dir(module_name: &str) -> std::result::Result<PathBuf, S
     Ok(directory)
 }
 
-fn authoritative_public_names(
-    config: &ConfigHandle,
-    path: &Path,
-) -> std::result::Result<BTreeSet<String>, String> {
-    public_names_from_module_file(config, path)
+fn authoritative_public_names(path: &Path) -> std::result::Result<BTreeSet<String>, String> {
+    public_names_from_module_file(path)
 }
 
-fn public_names_from_module_file(
-    config: &ConfigHandle,
-    path: &Path,
-) -> std::result::Result<BTreeSet<String>, String> {
-    if let Some(names) = static_all_names(config, path)? {
+fn public_names_from_module_file(path: &Path) -> std::result::Result<BTreeSet<String>, String> {
+    let source = SourceFile::from_path(path).map_err(|error| {
+        format!("unable to read emitted artifact `{}`: {error}", path.display())
+    })?;
+
+    if let Some(names) = static_all_names_from_source(path, &source.text)? {
         return Ok(names);
     }
 
-    let syntax = emitted_syntax(path)
-        .ok_or_else(|| format!("`{}` could not be parsed as a Python module", path.display()))?;
+    let syntax = {
+        let syntax = typepython_syntax::parse(source);
+        if syntax.diagnostics.has_errors() { None } else { Some(syntax) }
+    }
+    .ok_or_else(|| format!("`{}` could not be parsed as a Python module", path.display()))?;
     Ok(module_level_surface_names(&syntax)
         .into_iter()
         .filter(|name| !name.starts_with('_'))
         .collect())
 }
 
-fn static_all_names(
-    config: &ConfigHandle,
+fn static_all_names_from_source(
     path: &Path,
+    source: &str,
 ) -> std::result::Result<Option<BTreeSet<String>>, String> {
-    let interpreter = resolve_python_executable(config);
-    let output = ProcessCommand::new(&interpreter)
-        .args(["-c", STATIC_ALL_NAMES_SCRIPT])
-        .arg(path)
-        .output()
-        .map_err(|error| {
-            format!("unable to run Python parser `{}`: {error}", interpreter.display())
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr_suffix =
-            if stderr.trim().is_empty() { String::new() } else { format!(": {}", stderr.trim()) };
-        return Err(format!("Python parser exited with status {}{}", output.status, stderr_suffix));
+    let parsed = parse_module(source).map_err(|error| {
+        format!("unable to parse `{}` while collecting `__all__`: {error}", path.display())
+    })?;
+    let suite = parsed.suite();
+    let functions = suite
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::FunctionDef(function) => Some((function.name.as_str(), function)),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for stmt in suite {
+        let value = match stmt {
+            Stmt::Assign(assign)
+                if assign.targets.iter().any(|target| is_name_target(target, "__all__")) =>
+            {
+                Some(assign.value.as_ref())
+            }
+            Stmt::AnnAssign(assign) if is_name_target(assign.target.as_ref(), "__all__") => {
+                assign.value.as_deref()
+            }
+            _ => None,
+        };
+
+        if let Some(names) = resolve_static_all_names(value, &functions) {
+            return Ok(Some(names.into_iter().collect()));
+        }
+        if value.is_some() {
+            return Ok(None);
+        }
     }
-    let names = serde_json::from_slice::<Option<Vec<String>>>(&output.stdout)
-        .map_err(|error| format!("unable to parse `__all__` output: {error}"))?;
-    Ok(names.map(|names| names.into_iter().collect()))
+
+    Ok(None)
 }
 
 fn expected_published_files(
@@ -982,16 +949,11 @@ fn verify_emitted_text_artifact(path: &Path) -> Option<Diagnostic> {
     }
 }
 
-fn verify_emitted_declaration_surface(
-    config: &ConfigHandle,
-    _out_root: &Path,
-    runtime_path: &Path,
-    stub_path: &Path,
-) -> Option<Diagnostic> {
+fn verify_emitted_declaration_surface(runtime_path: &Path, stub_path: &Path) -> Option<Diagnostic> {
     let runtime_syntax = emitted_syntax(runtime_path)?;
     let stub_syntax = emitted_syntax(stub_path)?;
-    let runtime_names = runtime_public_names(config, runtime_path).ok()?;
-    let authoritative_names = authoritative_public_names(config, stub_path).ok()?;
+    let runtime_names = runtime_public_names(runtime_path).ok()?;
+    let authoritative_names = authoritative_public_names(stub_path).ok()?;
 
     let runtime_surface = declaration_surface(&runtime_syntax)
         .into_iter()
@@ -1270,6 +1232,138 @@ fn module_level_surface_names(syntax: &typepython_syntax::SyntaxTree) -> BTreeSe
         .collect()
 }
 
+fn checker_diagnostic_from_output(
+    checker: &str,
+    out_root: &Path,
+    output: std::io::Result<Output>,
+) -> Option<Diagnostic> {
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(Diagnostic::error(
+                "TPY5003",
+                format!("unable to run external checker `{checker}`: {error}"),
+            ));
+        }
+    };
+    if output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let details = [stdout, stderr]
+        .into_iter()
+        .filter(|stream| !stream.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let suffix = if details.is_empty() { String::new() } else { format!(":\n{details}") };
+
+    Some(Diagnostic::error(
+        "TPY5003",
+        format!(
+            "external checker `{checker}` rejected emitted build output under `{}`{}",
+            out_root.display(),
+            suffix
+        ),
+    ))
+}
+
+fn surface_parity_diagnostics(
+    module_name: &str,
+    runtime_names: &BTreeSet<String>,
+    authoritative_names: &BTreeSet<String>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let missing_from_runtime =
+        authoritative_names.difference(runtime_names).cloned().collect::<Vec<_>>();
+    let missing_from_type_surface =
+        runtime_names.difference(authoritative_names).cloned().collect::<Vec<_>>();
+
+    if !missing_from_runtime.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "runtime module `{}` is missing public names declared by the authoritative type surface: {}",
+                module_name,
+                missing_from_runtime.join(", "),
+            ),
+        ));
+    }
+    if !missing_from_type_surface.is_empty() {
+        diagnostics.push(Diagnostic::error(
+            "TPY5003",
+            format!(
+                "authoritative type surface for `{}` is missing runtime public names: {}",
+                module_name,
+                missing_from_type_surface.join(", "),
+            ),
+        ));
+    }
+
+    diagnostics
+}
+
+fn resolve_static_all_names(
+    value: Option<&Expr>,
+    functions: &BTreeMap<&str, &ruff_python_ast::StmtFunctionDef>,
+) -> Option<Vec<String>> {
+    let value = value?;
+    let names = literal_string_sequence(value);
+    if names.is_some() {
+        return names;
+    }
+
+    let Expr::Call(call) = value else {
+        return None;
+    };
+    let Expr::Name(name) = call.func.as_ref() else {
+        return None;
+    };
+    if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
+        return None;
+    }
+
+    resolve_function_return(functions.get(name.id.as_str())?)
+}
+
+fn resolve_function_return(function: &ruff_python_ast::StmtFunctionDef) -> Option<Vec<String>> {
+    if !function.decorator_list.is_empty() {
+        return None;
+    }
+    let parameters = &function.parameters;
+    if !parameters.posonlyargs.is_empty()
+        || !parameters.args.is_empty()
+        || !parameters.kwonlyargs.is_empty()
+        || parameters.vararg.is_some()
+        || parameters.kwarg.is_some()
+    {
+        return None;
+    }
+    let [Stmt::Return(return_stmt)] = function.body.as_slice() else {
+        return None;
+    };
+    literal_string_sequence(return_stmt.value.as_deref()?)
+}
+
+fn literal_string_sequence(expr: &Expr) -> Option<Vec<String>> {
+    let elements = match expr {
+        Expr::List(list) => &list.elts,
+        Expr::Tuple(tuple) => &tuple.elts,
+        _ => return None,
+    };
+    elements
+        .iter()
+        .map(|element| match element {
+            Expr::StringLiteral(string) => Some(string.value.to_str().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn is_name_target(expr: &Expr, expected: &str) -> bool {
+    matches!(expr, Expr::Name(name) if name.id.as_str() == expected)
+}
+
 pub(crate) fn public_surface_completeness_diagnostics(
     config: &ConfigHandle,
     syntax_trees: &[typepython_syntax::SyntaxTree],
@@ -1396,4 +1490,94 @@ fn format_signature(params: &[typepython_syntax::FunctionParam], returns: Option
             .join(","),
         returns.unwrap_or("")
     )
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use std::process::ExitStatus;
+
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+
+    fn exit_status(code: i32) -> ExitStatus {
+        #[cfg(unix)]
+        {
+            ExitStatus::from_raw(code << 8)
+        }
+        #[cfg(windows)]
+        {
+            ExitStatus::from_raw(code as u32)
+        }
+    }
+
+    #[test]
+    fn static_all_names_collects_literal_assignment() {
+        let names = static_all_names_from_source(
+            Path::new("module.py"),
+            "__all__ = [\"build\", \"parse\"]\n\ndef build() -> int:\n    return 1\n",
+        )
+        .expect("literal __all__ should parse");
+
+        assert_eq!(names, Some(BTreeSet::from([String::from("build"), String::from("parse"),])));
+    }
+
+    #[test]
+    fn static_all_names_collects_helper_function_tuple_return() {
+        let names = static_all_names_from_source(
+            Path::new("module.py"),
+            "def exports():\n    return (\"build\",)\n\n__all__ = exports()\n",
+        )
+        .expect("helper __all__ should parse");
+
+        assert_eq!(names, Some(BTreeSet::from([String::from("build")])));
+    }
+
+    #[test]
+    fn static_all_names_rejects_decorated_helper_function() {
+        let names = static_all_names_from_source(
+            Path::new("module.py"),
+            "@cache\ndef exports():\n    return [\"build\"]\n\n__all__ = exports()\n",
+        )
+        .expect("decorated helper should still parse");
+
+        assert_eq!(names, None);
+    }
+
+    #[test]
+    fn checker_diagnostic_from_output_includes_streams() {
+        let diagnostic = checker_diagnostic_from_output(
+            "pyright",
+            Path::new("/tmp/build"),
+            Ok(Output {
+                status: exit_status(1),
+                stdout: b"stdout details\n".to_vec(),
+                stderr: b"stderr details\n".to_vec(),
+            }),
+        )
+        .expect("failing checker should produce a diagnostic");
+
+        assert!(diagnostic.message.contains("external checker `pyright` rejected"));
+        assert!(diagnostic.message.contains("stdout details"));
+        assert!(diagnostic.message.contains("stderr details"));
+    }
+
+    #[test]
+    fn surface_parity_diagnostics_report_both_directions() {
+        let diagnostics = surface_parity_diagnostics(
+            "app",
+            &BTreeSet::from([String::from("runtime_only"), String::from("shared")]),
+            &BTreeSet::from([String::from("shared"), String::from("stub_only")]),
+        );
+
+        let rendered = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered.contains("stub_only"));
+        assert!(rendered.contains("runtime_only"));
+    }
 }
