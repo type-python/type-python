@@ -13,7 +13,7 @@ data class Widget(BaseWidget):
 
     @typing.override
     def clone(self) -> typing.Self:
-        return Widget(widget_id=self.widget_id, name=self.name)
+        return self
 
 
 class WidgetRecord(TypedDict):

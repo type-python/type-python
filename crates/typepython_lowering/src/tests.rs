@@ -1238,6 +1238,7 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
     assert!(
         lowered.module.python_source.contains("@typing_extensions.deprecated(\"use new_api\")")
     );
+    assert!(lowered.module.python_source.contains("import typing_extensions"));
     assert!(lowered.module.python_source.contains("@typing_extensions.override"));
     assert!(lowered.module.python_source.contains("-> typing_extensions.Self"));
     assert!(lowered.module.python_source.contains("typing_extensions.ReadOnly[bool]"));

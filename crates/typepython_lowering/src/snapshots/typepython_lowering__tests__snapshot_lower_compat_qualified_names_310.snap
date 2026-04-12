@@ -2,6 +2,7 @@
 source: crates/typepython_lowering/src/lib.rs
 expression: lowered.module.python_source
 ---
+import typing_extensions
 import typing
 import warnings
 

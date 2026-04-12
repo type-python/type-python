@@ -178,6 +178,10 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let emitted_path = tree.source.path.with_extension("py");
     let normalized_source =
         typepython_syntax::normalize_annotated_lambda_source_for_emission(&tree.source.text);
+    let compatibility_normalized_lines = normalized_source
+        .lines()
+        .flat_map(|line| normalize_target_compatibility_line(line, options))
+        .collect::<Vec<_>>();
     let unsafe_lines: BTreeSet<_> = tree
         .statements
         .iter()
@@ -294,6 +298,12 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         has_unqualified_symbol_usage(&tree.source.text, "Unpack") || has_runtime_typevartuples;
     let uses_typing_extensions_variadic_generics =
         !prefers_typing_variadic_generics(&options.target_python);
+    let needs_typing_module_import =
+        compatibility_normalized_lines.iter().any(|line| line.contains("typing."))
+            && !has_module_import(&tree.source.text, "typing");
+    let needs_typing_extensions_module_import =
+        compatibility_normalized_lines.iter().any(|line| line.contains("typing_extensions."))
+            && !has_module_import(&tree.source.text, "typing_extensions");
 
     let mut lowered_lines = Vec::new();
     let mut required_imports = Vec::new();
@@ -339,6 +349,12 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         }
         if generic_class_like_declarations && !has_generic_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Generic"));
+        }
+        if needs_typing_module_import {
+            inserted_lines.emit_required_import(String::from("import typing"));
+        }
+        if needs_typing_extensions_module_import {
+            inserted_lines.emit_required_import(String::from("import typing_extensions"));
         }
         if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Any"));
@@ -1076,6 +1092,19 @@ fn has_generic_import(source: &str) -> bool {
         let trimmed = line.trim();
         trimmed == "from typing import Generic"
             || (trimmed.starts_with("from typing import ") && trimmed.contains("Generic"))
+    })
+}
+
+fn has_module_import(source: &str, module: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == format!("import {module}")
+            || trimmed.starts_with(&format!("import {module},"))
+            || (trimmed.starts_with("import ")
+                && trimmed
+                    .trim_start_matches("import ")
+                    .split(',')
+                    .any(|entry| entry.trim() == module))
     })
 }
 
