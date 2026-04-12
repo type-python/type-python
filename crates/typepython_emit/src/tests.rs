@@ -1,8 +1,8 @@
 use super::{
-    EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteSummary, StubCallableOverride,
-    StubSealedClass, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
-    generate_inferred_stub_source, generate_typepython_stub_source, plan_emits_for_sources,
-    write_runtime_outputs,
+    EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteError, RuntimeWriteSummary,
+    StubCallableOverride, StubSealedClass, StubSyntheticMethod, StubValueOverride,
+    TypePythonStubContext, generate_inferred_stub_source, generate_typepython_stub_source,
+    plan_emits_for_sources, write_runtime_outputs,
 };
 use std::{
     collections::BTreeSet,
@@ -297,8 +297,12 @@ fn write_runtime_outputs_reports_pyi_generation_failure() {
     remove_temp_dir(&temp_dir);
 
     let error = result.expect_err("invalid lowered python should fail stub generation");
+    assert!(matches!(
+        error,
+        RuntimeWriteError::StubGeneration { ref source_path, .. }
+            if source_path == &PathBuf::from("src/app/__init__.tpy")
+    ));
     assert!(error.to_string().contains("TPY5001"));
-    assert!(error.to_string().contains("unable to generate `.pyi`"));
 }
 
 #[test]

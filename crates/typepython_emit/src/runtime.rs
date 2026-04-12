@@ -1,5 +1,40 @@
 use super::*;
 
+#[derive(Debug)]
+pub enum RuntimeWriteError {
+    Io(io::Error),
+    StubGeneration { source_path: PathBuf, detail: String },
+}
+
+impl std::fmt::Display for RuntimeWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::StubGeneration { source_path, detail } => write!(
+                f,
+                "TPY5001: unable to generate `.pyi` for `{}`: {}",
+                source_path.display(),
+                detail
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::StubGeneration { .. } => None,
+        }
+    }
+}
+
+impl From<io::Error> for RuntimeWriteError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
 /// Materializes planned runtime and stub artifacts to disk and optionally writes `py.typed`.
 pub fn write_runtime_outputs(
     artifacts: &[EmitArtifact],
@@ -7,7 +42,7 @@ pub fn write_runtime_outputs(
     write_py_typed: bool,
     runtime_validators: bool,
     stub_contexts: Option<&BTreeMap<PathBuf, TypePythonStubContext>>,
-) -> Result<RuntimeWriteSummary, io::Error> {
+) -> Result<RuntimeWriteSummary, RuntimeWriteError> {
     let modules_by_source: BTreeMap<_, _> =
         modules.iter().map(|module| (module.source_path.as_path(), module)).collect();
     let mut runtime_files_written = 0usize;
@@ -48,14 +83,10 @@ pub fn write_runtime_outputs(
                     .cloned()
                     .unwrap_or_default();
                 generate_typepython_stub_source(module, &context).map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "TPY5001: unable to generate `.pyi` for `{}`: {}",
-                            module.source_path.display(),
-                            error
-                        ),
-                    )
+                    RuntimeWriteError::StubGeneration {
+                        source_path: module.source_path.clone(),
+                        detail: error.to_string(),
+                    }
                 })?
             } else if module.source_kind == SourceKind::Python {
                 let companion_stub = artifact.source_path.with_extension("pyi");
@@ -92,7 +123,7 @@ fn is_package_init_path(path: &Path) -> bool {
     path.file_name().is_some_and(|name| name == "__init__.py" || name == "__init__.pyi")
 }
 
-fn inject_runtime_validators(python: &str) -> Result<String, io::Error> {
+fn inject_runtime_validators(python: &str) -> Result<String, RuntimeWriteError> {
     let typed_dicts = collect_typed_dict_fields(python);
     let edits = collect_runtime_validator_edits(python, &typed_dicts);
     if edits.is_empty() {

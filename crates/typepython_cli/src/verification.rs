@@ -25,7 +25,7 @@ use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
     build_diagnostics, ensure_output_dirs, materialize_build_outputs, py_typed_package_roots,
-    run_pipeline, should_emit_build_outputs,
+    run_pipeline, runtime_write_diagnostic, should_emit_build_outputs,
 };
 use crate::{
     CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for, exit_code, load_project,
@@ -96,16 +96,17 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     if should_emit_build_outputs(&config, &snapshot) {
         match materialize_build_outputs(&config, &snapshot) {
             Ok(materialize_notes) => notes.extend(materialize_notes),
-            Err(error) if error.to_string().contains("TPY5001") => {
-                diagnostics.push(Diagnostic::error("TPY5001", error.to_string()));
-            }
             Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "unable to write runtime artifacts under {}",
-                        config.resolve_relative_path(&config.config.project.out_dir).display()
-                    )
-                });
+                if let Some(diagnostic) = runtime_write_diagnostic(&error) {
+                    diagnostics.push(diagnostic);
+                } else {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "unable to write runtime artifacts under {}",
+                            config.resolve_relative_path(&config.config.project.out_dir).display()
+                        )
+                    });
+                }
             }
         }
     }

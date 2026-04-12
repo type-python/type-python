@@ -17,9 +17,9 @@ use typepython_checking::{
 use typepython_config::ConfigHandle;
 use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{
-    EmitArtifact, InferredStubMode, PlannedModuleSource, StubCallableOverride, StubSealedClass,
-    StubSyntheticMethod, StubValueOverride, TypePythonStubContext, generate_inferred_stub_source,
-    plan_emits, plan_emits_for_sources, write_runtime_outputs,
+    EmitArtifact, InferredStubMode, PlannedModuleSource, RuntimeWriteError, StubCallableOverride,
+    StubSealedClass, StubSyntheticMethod, StubValueOverride, TypePythonStubContext,
+    generate_inferred_stub_source, plan_emits, plan_emits_for_sources, write_runtime_outputs,
 };
 use typepython_graph::build;
 use typepython_incremental::{
@@ -97,6 +97,15 @@ pub(crate) fn build_diagnostics(
     build_diagnostics
 }
 
+pub(crate) fn runtime_write_diagnostic(error: &anyhow::Error) -> Option<Diagnostic> {
+    match error.downcast_ref::<RuntimeWriteError>() {
+        Some(RuntimeWriteError::StubGeneration { .. }) => {
+            Some(Diagnostic::error("TPY5001", error.to_string()))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn clean_project(args: CleanArgs) -> Result<ExitCode> {
     let config = load_project(args.project.as_ref())?;
     let out_dir = config.resolve_relative_path(&config.config.project.out_dir);
@@ -136,22 +145,22 @@ pub(crate) fn run_build_like_command(
     if should_emit_build_outputs(config, &snapshot) {
         let materialize_notes = match materialize_build_outputs(config, &snapshot) {
             Ok(runtime_summary) => runtime_summary,
-            Err(error) if error.to_string().contains("TPY5001") => {
-                diagnostics.push(Diagnostic::error("TPY5001", error.to_string()));
-                let summary = CommandSummary {
-                    command: String::from(command),
-                    config_path: config.config_path.display().to_string(),
-                    config_source: config.source,
-                    discovered_sources: snapshot.discovered_sources,
-                    lowered_modules: snapshot.lowered_modules.len(),
-                    planned_artifacts: snapshot.emit_plan.len(),
-                    tracked_modules: snapshot.tracked_modules,
-                    notes,
-                };
-                print_summary(format, &summary, &diagnostics)?;
-                return Ok(exit_code(&diagnostics));
-            }
             Err(error) => {
+                if let Some(diagnostic) = runtime_write_diagnostic(&error) {
+                    diagnostics.push(diagnostic);
+                    let summary = CommandSummary {
+                        command: String::from(command),
+                        config_path: config.config_path.display().to_string(),
+                        config_source: config.source,
+                        discovered_sources: snapshot.discovered_sources,
+                        lowered_modules: snapshot.lowered_modules.len(),
+                        planned_artifacts: snapshot.emit_plan.len(),
+                        tracked_modules: snapshot.tracked_modules,
+                        notes,
+                    };
+                    print_summary(format, &summary, &diagnostics)?;
+                    return Ok(exit_code(&diagnostics));
+                }
                 return Err(error).with_context(|| {
                     format!(
                         "unable to write runtime artifacts under {}",
