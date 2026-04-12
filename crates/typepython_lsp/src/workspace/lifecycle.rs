@@ -13,7 +13,11 @@ impl SupportSourceCatalog {
                 &config.config.project.target_python,
             )?);
         }
-        Ok(self.index.as_ref().expect("support source index should be loaded"))
+        self.index.as_ref().ok_or_else(|| {
+            LspError::internal(String::from(
+                "support source index was not populated after loading support sources",
+            ))
+        })
     }
 }
 
@@ -194,10 +198,12 @@ impl IncrementalWorkspace {
             for source in module_sources {
                 self.ensure_support_document(&source)?;
                 active_support_paths.insert(source.path.clone());
-                let document = self
-                    .support_documents
-                    .get(&source.path)
-                    .expect("support document should be loaded");
+                let document = self.support_documents.get(&source.path).ok_or_else(|| {
+                    LspError::internal(format!(
+                        "support document cache is missing `{}` after load",
+                        source.path.display()
+                    ))
+                })?;
                 for import_path in
                     collect_import_source_paths(std::slice::from_ref(&document.document.syntax))
                 {

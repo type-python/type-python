@@ -516,7 +516,7 @@ pub(super) fn inferred_return_type_for_owner(
     Some(if trace_types.len() > 1 {
         diagnostic_type_text(&join_semantic_type_candidates(trace_types))
     } else {
-        diagnostic_type_text(trace_types.first().expect("single return type should exist"))
+        diagnostic_type_text(&trace_types.into_iter().next()?)
     })
 }
 

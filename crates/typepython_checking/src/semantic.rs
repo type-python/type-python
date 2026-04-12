@@ -236,9 +236,7 @@ pub(super) fn resolve_overload_selection_from_attempts<'a>(
 
     match applicable.len() {
         0 => ResolvedOverloadSelection::NotApplicable { runtime_generic_failures },
-        1 => ResolvedOverloadSelection::Selected(
-            applicable.pop().expect("single applicable overload"),
-        ),
+        1 => ResolvedOverloadSelection::Selected(applicable.swap_remove(0)),
         applicable_count => match select_most_specific_overload_index(node, nodes, &applicable) {
             Some(index) => ResolvedOverloadSelection::Selected(applicable.swap_remove(index)),
             None => ResolvedOverloadSelection::Ambiguous { applicable_count },

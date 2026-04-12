@@ -39,8 +39,12 @@ impl AnalysisHost {
             OverlayDocument { uri: uri.to_owned(), text: text.to_owned(), version },
         );
         if let Some(workspace) = self.cached_workspace.as_mut() {
-            let overlay =
-                self.overlays.get(&path).expect("opened overlay should be available in cache");
+            let overlay = self.overlays.get(&path).ok_or_else(|| {
+                LspError::internal(format!(
+                    "overlay cache lost newly opened document `{}` before workspace update",
+                    uri
+                ))
+            })?;
             workspace.apply_project_path_update(&path, Some(overlay))?;
         }
         Ok(())
@@ -78,8 +82,12 @@ impl AnalysisHost {
         let text = apply_content_changes(&current.text, content_changes, uri)?;
         self.overlays.insert(path.clone(), OverlayDocument { uri: uri.to_owned(), text, version });
         if let Some(workspace) = self.cached_workspace.as_mut() {
-            let overlay =
-                self.overlays.get(&path).expect("changed overlay should be available in cache");
+            let overlay = self.overlays.get(&path).ok_or_else(|| {
+                LspError::internal(format!(
+                    "overlay cache lost changed document `{}` before workspace update",
+                    uri
+                ))
+            })?;
             workspace.apply_project_path_update(&path, Some(overlay))?;
         }
         Ok(())
@@ -465,6 +473,11 @@ impl AnalysisHost {
             self.cached_workspace =
                 Some(IncrementalWorkspace::new(self.config.clone(), &self.overlays)?);
         }
-        Ok(self.cached_workspace.as_ref().expect("workspace cache should be populated").workspace())
+        let workspace = self.cached_workspace.as_ref().ok_or_else(|| {
+            LspError::internal(String::from(
+                "workspace cache was not populated after incremental workspace construction",
+            ))
+        })?;
+        Ok(workspace.workspace())
     }
 }

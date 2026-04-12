@@ -58,7 +58,7 @@ pub(in super::super) fn normalize_annotated_lambda_source(
         search_from = candidate.close_paren + 1;
     }
 
-    (String::from_utf8(normalized).expect("lambda normalization must preserve utf-8"), sites)
+    (String::from_utf8_lossy(&normalized).into_owned(), sites)
 }
 
 pub(in super::super) fn normalize_annotated_lambda_source_lossy(source: &str) -> String {

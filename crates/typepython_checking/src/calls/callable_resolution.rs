@@ -1040,7 +1040,9 @@ fn substitute_single_paramspec_from_semantic_callable(
         return ty.clone();
     };
     let mut substitutions = GenericTypeParamSubstitutions::default();
-    let param_name = param_spec_names.into_iter().next().expect("single paramspec name");
+    let Some(param_name) = param_spec_names.into_iter().next() else {
+        return ty.clone();
+    };
     if insert_param_spec_binding(
         &mut substitutions,
         &param_name,
