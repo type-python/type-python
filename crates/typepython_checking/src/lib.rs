@@ -850,33 +850,68 @@ fn semantic_summary_export(
             declaration.callable_signature().map(summary_callable_signature_from_bound)
         });
     let exported_type = semantic_exported_type(node, declaration, &semantics);
+    let required_runtime_features = required_runtime_features_for_export(
+        declaration,
+        declaration_signature.as_ref(),
+        exported_type.as_deref(),
+    );
     SummaryExport {
         name: declaration.name.clone(),
         kind: summary_kind_string(declaration),
         type_repr: exported_type.clone().unwrap_or_else(|| declaration.name.clone()),
         type_expr: exported_type.as_deref().and_then(TypeExpr::parse),
-        declaration_signature,
+        declaration_signature: declaration_signature.clone(),
         exported_type,
         exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
-        required_runtime_features: required_runtime_features_for_export(declaration),
+        required_runtime_features,
         public: !declaration.name.starts_with('_'),
     }
 }
 
-fn required_runtime_features_for_export(declaration: &Declaration) -> Vec<String> {
-    if declaration.type_params.is_empty() {
-        return Vec::new();
+fn required_runtime_features_for_export(
+    declaration: &Declaration,
+    declaration_signature: Option<&SummaryCallableSignature>,
+    exported_type: Option<&str>,
+) -> Vec<String> {
+    let mut features = BTreeSet::<String>::new();
+    if !declaration.type_params.is_empty() {
+        features.insert(String::from("inline_type_params"));
+        if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+            features.insert(String::from("generic_defaults"));
+        }
+        if declaration.kind == DeclarationKind::TypeAlias {
+            features.insert(String::from("type_stmt"));
+        }
     }
 
-    let mut features = vec![String::from("inline_type_params")];
-    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
-        features.push(String::from("generic_defaults"));
+    if let Some(exported_type) = exported_type {
+        extend_runtime_features_from_type_text(&mut features, exported_type);
     }
-    if declaration.kind == DeclarationKind::TypeAlias {
-        features.insert(0, String::from("type_stmt"));
+    if let Some(signature) = declaration_signature {
+        if let Some(returns) = &signature.returns {
+            extend_runtime_features_from_type_text(&mut features, returns);
+        }
+        for param in &signature.params {
+            if let Some(annotation) = &param.annotation {
+                extend_runtime_features_from_type_text(&mut features, annotation);
+            }
+        }
     }
-    features
+
+    features.into_iter().collect()
+}
+
+fn extend_runtime_features_from_type_text(features: &mut BTreeSet<String>, text: &str) {
+    if text.contains("TypeIs[") {
+        features.insert(String::from("typing_type_is"));
+    }
+    if text.contains("ReadOnly[") {
+        features.insert(String::from("typing_readonly"));
+    }
+    if text == "NoDefault" || text.contains("NoDefault[") {
+        features.insert(String::from("typing_no_default"));
+    }
 }
 
 fn semantic_declaration_fact(

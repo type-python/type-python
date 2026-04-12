@@ -222,22 +222,67 @@ fn semantic_incremental_summary_preserves_native_runtime_feature_markers() {
         .find(|export| export.name == "first")
         .expect("first export should exist");
 
-    assert_eq!(
-        pair.required_runtime_features,
-        vec![
-            String::from("type_stmt"),
-            String::from("inline_type_params"),
-            String::from("generic_defaults"),
-        ]
+    assert!(pair.required_runtime_features.contains(&String::from("type_stmt")));
+    assert!(pair.required_runtime_features.contains(&String::from("inline_type_params")));
+    assert!(pair.required_runtime_features.contains(&String::from("generic_defaults")));
+    assert!(box_export.required_runtime_features.contains(&String::from("inline_type_params")));
+    assert!(box_export.required_runtime_features.contains(&String::from("generic_defaults")));
+    assert!(first.required_runtime_features.contains(&String::from("inline_type_params")));
+    assert!(first.required_runtime_features.contains(&String::from("generic_defaults")));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn semantic_incremental_summary_marks_runtime_sensitive_typing_surface() {
+    let root = create_temp_typepython_root();
+    let path = root.join("app.py");
+    let source_text = "from typing import NoDefault, ReadOnly, TypeIs\n\ntype Wrapped[T = int] = ReadOnly[T]\nmarker: NoDefault\n\ndef accepts(value: object) -> TypeIs[int]:\n    return isinstance(value, int)\n";
+    fs::write(&path, source_text).expect("temp source should be written");
+
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::Python,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
     );
-    assert_eq!(
-        box_export.required_runtime_features,
-        vec![String::from("inline_type_params"), String::from("generic_defaults")]
-    );
-    assert_eq!(
-        first.required_runtime_features,
-        vec![String::from("inline_type_params"), String::from("generic_defaults")]
-    );
+    let bindings = vec![bind(&tree)];
+    let graph = build(&bindings);
+    let summary = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &bindings,
+        ImportFallback::Unknown,
+        None,
+        None,
+        typepython_incremental::SnapshotMetadata::default(),
+    )
+    .summaries
+    .into_iter()
+    .find(|summary| summary.module == "app")
+    .expect("summary should exist");
+
+    let wrapped = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "Wrapped")
+        .expect("Wrapped export should exist");
+    let marker = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "marker")
+        .expect("marker export should exist");
+    let accepts = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "accepts")
+        .expect("accepts export should exist");
+
+    assert!(wrapped.required_runtime_features.contains(&String::from("typing_readonly")));
+    assert!(marker.required_runtime_features.contains(&String::from("typing_no_default")));
+    assert!(accepts.required_runtime_features.contains(&String::from("typing_type_is")));
 
     let _ = fs::remove_dir_all(&root);
 }
