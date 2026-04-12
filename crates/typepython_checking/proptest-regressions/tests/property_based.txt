@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 63f05c53e76f9d5ed8741ad0fae450971405542b1d44f8db482495e77fb3d217 # shrinks to value = Array([Array([Set([Int(1)]), Value(Bool(true))])])
+cc c738f0bc3ddd45e512f67449dd110d139d7e9db80de0ced95078fe9e09c59f4a # shrinks to value = Object([("a", Set([Bool(false)]))])
+cc c9862c46d0d8a51f9976bca7b6d6c8fd11f3c2eb3ee20f8f1dd0f47b978fc223 # shrinks to value = Set([Bool(false)])

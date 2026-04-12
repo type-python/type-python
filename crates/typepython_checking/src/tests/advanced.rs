@@ -8675,6 +8675,18 @@ fn check_reports_dict_keyword_expansion_without_kwargs() {
 }
 
 #[test]
+fn check_reports_dict_literal_expansion_assignment_type_mismatch() {
+    let result = check_temp_typepython_source(
+        "extra: dict[str, str] = {\"name\": \"Ada\"}\npayload: dict[str, int] = {**extra}\n",
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"));
+    assert!(rendered.contains("dict[str, int]"));
+    assert!(rendered.contains("dict[str, str]"));
+}
+
+#[test]
 fn check_accepts_closed_typed_dict_keyword_expansion_callsite() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass UserKw(TypedDict, closed=True):\n    name: str\n\ndef build(*, name: str) -> None:\n    return None\n\ndef payload() -> UserKw:\n    return {\"name\": \"Ada\"}\n\nbuild(**payload())\n",

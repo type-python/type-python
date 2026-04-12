@@ -771,36 +771,14 @@ pub(super) fn resolve_assignment_site_semantic_type(
     }
 
     assignment.value_metadata().as_ref().and_then(|metadata| {
-        let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
-        resolve_direct_expression_semantic_type(
+        resolve_direct_expression_semantic_type_from_metadata(
             node,
             nodes,
             signature,
-            Some(assignment.name.as_str()),
             assignment.owner_name.as_deref(),
             assignment.owner_type_name.as_deref(),
             assignment.line,
-            metadata.rendered_value_type().as_deref(),
-            metadata.is_awaited,
-            metadata.value_callee.as_deref(),
-            metadata.value_name.as_deref(),
-            metadata.value_member_owner_name.as_deref(),
-            metadata.value_member_name.as_deref(),
-            metadata.value_member_through_instance,
-            metadata.value_method_owner_name.as_deref(),
-            metadata.value_method_name.as_deref(),
-            metadata.value_method_through_instance,
-            metadata.value_subscript_target.as_deref(),
-            metadata.value_subscript_string_key.as_deref(),
-            metadata.value_subscript_index.as_deref(),
-            metadata.value_if_true.as_deref(),
-            metadata.value_if_false.as_deref(),
-            value_if_guard.as_ref(),
-            metadata.value_bool_left.as_deref(),
-            metadata.value_bool_right.as_deref(),
-            metadata.value_binop_left.as_deref(),
-            metadata.value_binop_right.as_deref(),
-            metadata.value_binop_operator.as_deref(),
+            metadata,
         )
     })
 }

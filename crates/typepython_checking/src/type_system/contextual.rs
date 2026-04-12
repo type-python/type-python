@@ -19,6 +19,17 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
             None,
         );
     }
+    if let Some(collection_type) = resolve_direct_collection_literal_semantic_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+    ) {
+        return Some(collection_type);
+    }
     let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
     resolve_direct_expression_semantic_type(
         node,
@@ -50,6 +61,123 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
         metadata.value_binop_right.as_deref(),
         metadata.value_binop_operator.as_deref(),
     )
+}
+
+fn resolve_direct_collection_literal_semantic_type_from_metadata(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+) -> Option<SemanticType> {
+    let resolve_nested = |metadata: &typepython_syntax::DirectExprMetadata| {
+        resolve_direct_expression_semantic_type_from_metadata(
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            metadata,
+        )
+        .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
+    };
+
+    if let Some(elements) = metadata.value_list_elements.as_ref() {
+        let element_type = if elements.is_empty() {
+            SemanticType::Name(String::from("Any"))
+        } else {
+            join_semantic_type_candidates(elements.iter().map(resolve_nested).collect())
+        };
+        return Some(SemanticType::Generic {
+            head: String::from("list"),
+            args: vec![element_type],
+        });
+    }
+
+    if let Some(elements) = metadata.value_set_elements.as_ref() {
+        let element_type = if elements.is_empty() {
+            SemanticType::Name(String::from("Any"))
+        } else {
+            join_semantic_type_candidates(elements.iter().map(resolve_nested).collect())
+        };
+        return Some(SemanticType::Generic {
+            head: String::from("set"),
+            args: vec![element_type],
+        });
+    }
+
+    if let Some(entries) = metadata.value_dict_entries.as_ref() {
+        let key_types = if entries.is_empty() {
+            vec![SemanticType::Name(String::from("Any"))]
+        } else {
+            entries
+                .iter()
+                .map(|entry| {
+                    if entry.is_expansion {
+                        return direct_dict_expansion_entry_types(&resolve_nested(&entry.value))
+                            .map(|(key, _)| key)
+                            .unwrap_or_else(|| SemanticType::Name(String::from("Any")));
+                    }
+                    entry
+                        .key_value
+                        .as_deref()
+                        .map(resolve_nested)
+                        .unwrap_or_else(|| SemanticType::Name(String::from("Any")))
+                })
+                .collect::<Vec<_>>()
+        };
+        let value_types = if entries.is_empty() {
+            vec![SemanticType::Name(String::from("Any"))]
+        } else {
+            entries
+                .iter()
+                .map(|entry| {
+                    if entry.is_expansion {
+                        return direct_dict_expansion_entry_types(&resolve_nested(&entry.value))
+                            .map(|(_, value)| value)
+                            .unwrap_or_else(|| SemanticType::Name(String::from("Any")));
+                    }
+                    resolve_nested(&entry.value)
+                })
+                .collect::<Vec<_>>()
+        };
+        return Some(SemanticType::Generic {
+            head: String::from("dict"),
+            args: vec![
+                join_semantic_type_candidates(key_types),
+                join_semantic_type_candidates(value_types),
+            ],
+        });
+    }
+
+    None
+}
+
+fn direct_dict_expansion_entry_types(ty: &SemanticType) -> Option<(SemanticType, SemanticType)> {
+    let ty = ty.strip_annotated();
+
+    if let Some(branches) = semantic_union_branches(ty) {
+        let mut key_types = Vec::with_capacity(branches.len());
+        let mut value_types = Vec::with_capacity(branches.len());
+        for branch in branches {
+            let (key_type, value_type) = direct_dict_expansion_entry_types(&branch)?;
+            key_types.push(key_type);
+            value_types.push(value_type);
+        }
+        return Some((
+            join_semantic_type_candidates(key_types),
+            join_semantic_type_candidates(value_types),
+        ));
+    }
+
+    let (head, args) = ty.generic_parts()?;
+    match head {
+        "dict" | "Mapping" if args.len() == 2 => Some((args[0].clone(), args[1].clone())),
+        _ => None,
+    }
 }
 
 pub(super) fn resolve_known_typed_dict_shape_from_type_with_context(
@@ -693,6 +821,37 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_in_scope_with_
     metadata: &typepython_syntax::DirectExprMetadata,
     expected: Option<&str>,
 ) -> Option<ContextualCallArgSemanticResult> {
+    let expected = lower_type_text_or_name(expected?);
+    resolve_contextual_collection_literal_semantic_type_for_expected(
+        context,
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+        &expected,
+        &mut BTreeSet::new(),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "collection literal contextual typing needs optional scope context"
+)]
+fn resolve_contextual_collection_literal_semantic_type_for_expected(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    signature: Option<&str>,
+    current_owner_name: Option<&str>,
+    current_owner_type_name: Option<&str>,
+    current_line: usize,
+    metadata: &typepython_syntax::DirectExprMetadata,
+    expected: &SemanticType,
+    visiting: &mut BTreeSet<String>,
+) -> Option<ContextualCallArgSemanticResult> {
     let resolve_fallback = |metadata: &typepython_syntax::DirectExprMetadata| {
         resolve_direct_expression_semantic_type_from_metadata(
             node,
@@ -705,9 +864,52 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_in_scope_with_
         )
     };
 
-    let expected = lower_type_text_or_name(expected?);
+    let expected = expected.strip_annotated().clone();
+    let key = render_semantic_type(&expected);
+    if !visiting.insert(key.clone()) {
+        return None;
+    }
+
+    if let Some(expanded) = expand_semantic_type_alias_once(node, nodes, &expected)
+        && let Some(result) = resolve_contextual_collection_literal_semantic_type_for_expected(
+            context,
+            node,
+            nodes,
+            signature,
+            current_owner_name,
+            current_owner_type_name,
+            current_line,
+            metadata,
+            &expanded,
+            visiting,
+        )
+    {
+        visiting.remove(&key);
+        return Some(result);
+    }
+
+    if let Some(branches) = semantic_union_branches(&expected) {
+        for branch in branches {
+            if let Some(result) = resolve_contextual_collection_literal_semantic_type_for_expected(
+                context,
+                node,
+                nodes,
+                signature,
+                current_owner_name,
+                current_owner_type_name,
+                current_line,
+                metadata,
+                &branch,
+                visiting,
+            ) {
+                visiting.remove(&key);
+                return Some(result);
+            }
+        }
+    }
+
     let (head, args) = expected.generic_parts()?;
-    match head {
+    let result = match head {
         "list" if args.len() == 1 => {
             let elements = metadata.value_list_elements.as_ref()?;
             let diagnostics = elements
@@ -891,7 +1093,10 @@ pub(super) fn resolve_contextual_collection_literal_semantic_type_in_scope_with_
             })
         }
         _ => None,
-    }
+    };
+
+    visiting.remove(&key);
+    result
 }
 
 pub(super) fn resolve_contextual_call_arg_semantic_type_with_context(
