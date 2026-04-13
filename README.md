@@ -1,14 +1,26 @@
-# TypePython
+<p align="center">
+  <img src="logo.png" alt="TypePython" width="128" />
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/type-python)](https://pypi.org/project/type-python/)
-[![CI](https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg)](https://github.com/type-python/type-python/actions/workflows/rust.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
-[![Rust](https://img.shields.io/badge/rust-msrv%201.85-orange.svg)](https://www.rust-lang.org/)
+<h1 align="center">TypePython</h1>
 
-**A statically-typed authoring language that compiles to standard Python.**
+<p align="center">
+  <strong>Write richer types. Emit standard Python.</strong>
+</p>
 
-Write `.tpy` files with `interface`, `data class`, `sealed class`, inline generics, and strict null safety. The compiler emits standard `.py` + `.pyi` artifacts for Python 3.10-3.14. Targets 3.10-3.12 default to a compatibility-oriented lowering path; targets 3.13+ default to native typing syntax when the runtime supports it. No custom runtime, no proprietary type forms.
+<p align="center">
+  <a href="https://pypi.org/project/type-python/"><img src="https://img.shields.io/pypi/v/type-python" alt="PyPI" /></a>
+  <a href="https://github.com/type-python/type-python/actions/workflows/rust.yml"><img src="https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-msrv%201.85-orange.svg" alt="Rust" /></a>
+</p>
+
+<p align="center">
+  A statically-typed authoring language that compiles to standard Python.<br/>
+  <code>interface</code>, <code>data class</code>, <code>sealed class</code>, inline generics, strict null safety — then pure <code>.py</code>&nbsp;+&nbsp;<code>.pyi</code> out.<br/>
+  No custom runtime. No vendor lock-in.
+</p>
 
 ---
 
@@ -19,8 +31,10 @@ pip install type-python
 typepython --help
 ```
 
-The Python package bridge supports Python 3.9+. Generated TypePython projects can currently target Python 3.10 through 3.14.
-Published wheels are platform-specific because they bundle the Rust CLI binary. Supported releases publish prebuilt wheels for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64, so those platforms can install and run TypePython without Rust. Other platforms fall back to the source distribution and require Rust + `cargo`.
+The Python package bridge supports **Python 3.9+**. Generated TypePython projects can target **Python 3.10 through 3.14**.
+
+Published wheels are platform-specific because they bundle the Rust CLI binary. Prebuilt wheels are available for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to the source distribution and require Rust + `cargo`.
+
 The workspace MSRV is Rust 1.85. `./scripts/bootstrap-rust.sh` installs the pinned Rust 1.94.0 development toolchain used by CI.
 
 Or build from source:
