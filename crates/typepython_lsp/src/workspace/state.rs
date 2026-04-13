@@ -33,7 +33,7 @@ pub(super) fn parse_discovered_source(
         source_file,
         ParseOptions {
             enable_conditional_returns,
-            target_python: ParsePythonVersion::parse(&target_python.to_string()),
+            target_python: ParsePythonVersion::parse(target_python),
             target_platform: Some(ParseTargetPlatform::current()),
         },
     ))

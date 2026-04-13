@@ -443,17 +443,16 @@ fn publication_requirements_from_source(source: &str) -> PublicationRequirements
                     max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
             }
         }
-        if trimmed.starts_with("def ")
+        if (trimmed.starts_with("def ")
             || trimmed.starts_with("async def ")
-            || trimmed.starts_with("class ")
+            || trimmed.starts_with("class "))
+            && native_header_uses_type_params(trimmed)
         {
-            if native_header_uses_type_params(trimmed) {
+            requirements.min_python =
+                max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
+            if native_type_params_include_default(trimmed) {
                 requirements.min_python =
-                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_12));
-                if native_type_params_include_default(trimmed) {
-                    requirements.min_python =
-                        max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
-                }
+                    max_python_target(requirements.min_python, Some(PythonTarget::PYTHON_3_13));
             }
         }
     }
@@ -785,7 +784,7 @@ fn verify_external_checker(
     )
 }
 
-fn verify_runtime_public_name_parity_for_artifact(
+pub(crate) fn verify_runtime_public_name_parity_for_artifact(
     config: &ConfigHandle,
     out_root: &Path,
     artifact: &EmitArtifact,
@@ -878,11 +877,12 @@ fn verify_runtime_module_importability(
     module_name: &str,
 ) -> std::result::Result<(), String> {
     let probe_dir = runtime_import_probe_dir(module_name)?;
+    let import_root = runtime_import_root(config, out_root)?;
     let interpreter = resolve_python_executable(config);
     let output = ProcessCommand::new(&interpreter)
         .current_dir(&probe_dir)
         .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
-        .arg(out_root)
+        .arg(&import_root)
         .arg(module_name)
         .output()
         .map_err(|error| {
@@ -917,11 +917,12 @@ fn runtime_public_names_from_import(
     module_name: &str,
 ) -> std::result::Result<BTreeSet<String>, String> {
     let probe_dir = runtime_import_probe_dir(module_name)?;
+    let import_root = runtime_import_root(config, out_root)?;
     let interpreter = resolve_python_executable(config);
     let output = ProcessCommand::new(&interpreter)
         .current_dir(&probe_dir)
         .args(["-B", "-c", RUNTIME_IMPORTABILITY_SCRIPT])
-        .arg(out_root)
+        .arg(&import_root)
         .arg(module_name)
         .output()
         .map_err(|error| {
@@ -952,6 +953,20 @@ fn runtime_public_names_from_import(
         .public_names
         .map(|names| names.into_iter().collect())
         .ok_or_else(|| format!("runtime module `{module_name}` did not report public names"))
+}
+
+fn runtime_import_root(
+    config: &ConfigHandle,
+    out_root: &Path,
+) -> std::result::Result<PathBuf, String> {
+    let resolved = if out_root.is_absolute() {
+        out_root.to_path_buf()
+    } else {
+        config.config_dir.join(out_root)
+    };
+    resolved.canonicalize().map_err(|error| {
+        format!("unable to resolve runtime import root `{}`: {error}", resolved.display())
+    })
 }
 
 fn runtime_import_probe_dir(module_name: &str) -> std::result::Result<PathBuf, String> {

@@ -3054,6 +3054,42 @@ fn verify_runtime_public_name_parity_reports_runtime_import_failure() {
 }
 
 #[test]
+fn verify_runtime_module_importability_accepts_relative_output_root() {
+    let project_dir =
+        temp_project_dir("verify_runtime_module_importability_accepts_relative_output_root");
+    let diagnostics = {
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::create_dir_all(project_dir.join(".typepython/build/app"))
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.py"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int:\n    return 1\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join(".typepython/build/app/__init__.pyi"),
+            "__all__ = [\"build_user\"]\n\ndef build_user() -> int: ...\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        verify_runtime_public_name_parity_for_artifact(
+            &config,
+            Path::new(".typepython/build"),
+            &EmitArtifact {
+                source_path: project_dir.join("src/app/__init__.tpy"),
+                runtime_path: Some(project_dir.join(".typepython/build/app/__init__.py")),
+                stub_path: Some(project_dir.join(".typepython/build/app/__init__.pyi")),
+            },
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
 fn verify_runtime_public_name_parity_uses_configured_interpreter_environment() {
     let project_dir = temp_project_dir(
         "verify_runtime_public_name_parity_uses_configured_interpreter_environment",

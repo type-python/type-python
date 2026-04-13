@@ -12,7 +12,7 @@ pub(super) use super::pipeline::{
 pub(super) use super::verification::{
     SuppliedArtifactKind, SuppliedVerifyArtifact, run_verify, supplied_verify_artifacts,
     verify_build_artifacts, verify_packaged_artifacts, verify_publication_metadata,
-    verify_runtime_public_name_parity,
+    verify_runtime_public_name_parity, verify_runtime_public_name_parity_for_artifact,
 };
 pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
