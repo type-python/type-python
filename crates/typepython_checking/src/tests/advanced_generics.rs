@@ -114,6 +114,124 @@ fn check_infers_generic_function_call_through_union_actual() {
 }
 
 #[test]
+fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
+    let node = ModuleNode {
+        module_path: PathBuf::from("<generic-inference>"),
+        module_key: String::new(),
+        module_kind: SourceKind::TypePython,
+        declarations: Vec::new(),
+        member_accesses: Vec::new(),
+        returns: Vec::new(),
+        yields: Vec::new(),
+        if_guards: Vec::new(),
+        asserts: Vec::new(),
+        invalidations: Vec::new(),
+        matches: Vec::new(),
+        for_loops: Vec::new(),
+        with_statements: Vec::new(),
+        except_handlers: Vec::new(),
+        assignments: Vec::new(),
+        summary_fingerprint: 0,
+        calls: Vec::new(),
+        method_calls: Vec::new(),
+    };
+    let function = Declaration {
+        metadata: Default::default(),
+        name: String::from("wrap"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:T)->T"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: vec![typepython_binding::GenericTypeParam {
+            kind: typepython_binding::GenericTypeParamKind::TypeVar,
+            name: String::from("T"),
+            bound: None,
+            constraints: Vec::new(),
+            default: None,
+            bound_expr: None,
+            constraint_exprs: Vec::new(),
+            default_expr: None,
+        }],
+    };
+    let signature = vec![typepython_syntax::DirectFunctionParamSite {
+        name: String::from("value"),
+        annotation: Some(String::from("T")),
+        annotation_expr: None,
+        has_default: false,
+        positional_only: false,
+        keyword_only: false,
+        variadic: false,
+        keyword_variadic: false,
+    }];
+    let call = typepython_binding::CallSite {
+        callee: String::from("wrap"),
+        arg_count: 1,
+        arg_types: vec![String::from("str")],
+        arg_values: vec![typepython_syntax::DirectExprMetadata {
+            value_type: Some(String::from("str")),
+            value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
+                head: String::from("list"),
+                args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+            }),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        }],
+        starred_arg_types: Vec::new(),
+        starred_arg_values: Vec::new(),
+        keyword_names: Vec::new(),
+        keyword_arg_types: Vec::new(),
+        keyword_arg_values: Vec::new(),
+        keyword_expansion_types: Vec::new(),
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    let substitutions =
+        crate::infer_generic_type_param_substitutions(&node, &[], &function, &signature, &call)
+            .expect("generic inference should use structured arg metadata");
+
+    assert_eq!(
+        substitutions.types.get("T").map(crate::render_semantic_type).as_deref(),
+        Some("list[int]")
+    );
+}
+
+#[test]
 fn check_infers_typevartuple_from_variadic_call_arguments() {
     let node = ModuleNode {
         module_path: PathBuf::from("<generic-inference>"),

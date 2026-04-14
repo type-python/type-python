@@ -1259,29 +1259,6 @@ pub(super) fn resolve_contextual_named_callable_semantic_type_with_expected_sema
     })
 }
 
-pub(super) fn expected_positional_arg_types_from_semantic_params(
-    params: &[SemanticCallableParam],
-    arg_count: usize,
-) -> Vec<Option<String>> {
-    let positional_params = params
-        .iter()
-        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
-        .collect::<Vec<_>>();
-    let variadic_type = params
-        .iter()
-        .find(|param| param.variadic)
-        .and_then(|param| param.annotation_text.clone());
-
-    (0..arg_count)
-        .map(|index| {
-            positional_params
-                .get(index)
-                .and_then(|param| param.annotation_text.clone())
-                .or_else(|| variadic_type.clone())
-        })
-        .collect()
-}
-
 pub(super) fn expected_positional_arg_types_from_signature_sites(
     signature: &[typepython_syntax::DirectFunctionParamSite],
     arg_count: usize,

@@ -753,6 +753,34 @@ pub(super) fn expanded_positional_arg_semantic_types(
     (positional_types, variadic_starred_types)
 }
 
+pub(super) fn expanded_positional_arg_semantic_types_with_expected_semantic(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    call: &typepython_binding::CallSite,
+    expected_types: &[Option<SemanticType>],
+) -> (Vec<SemanticType>, Vec<SemanticType>) {
+    let mut positional_types =
+        resolved_call_arg_semantic_types_with_expected_semantic(node, nodes, call, expected_types);
+    if positional_types.len() < call.arg_count {
+        positional_types.extend(std::iter::repeat_n(
+            SemanticType::Name(String::new()),
+            call.arg_count - positional_types.len(),
+        ));
+    }
+    let mut variadic_starred_types = Vec::new();
+    for expansion in resolved_starred_positional_expansions(node, nodes, call) {
+        match expansion {
+            PositionalExpansion::Fixed(types) => positional_types.extend(
+                types
+                    .into_iter()
+                    .map(|ty| ty.unwrap_or_else(|| SemanticType::Name(String::new()))),
+            ),
+            PositionalExpansion::Variadic(element_type) => variadic_starred_types.push(element_type),
+        }
+    }
+    (positional_types, variadic_starred_types)
+}
+
 pub(super) fn resolved_call_arg_semantic_types(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

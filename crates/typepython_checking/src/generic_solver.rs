@@ -258,9 +258,9 @@ fn infer_variadic_annotation_bindings_detailed(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     annotation: &SemanticType,
-    positional_types: &[String],
+    positional_types: &[SemanticType],
     positional_index: usize,
-    variadic_starred_types: &[String],
+    variadic_starred_types: &[SemanticType],
 ) -> Result<(), GenericSolveFailure> {
     if extract_param_spec_args_name_from_semantic(annotation).is_some() {
         return Ok(());
@@ -268,16 +268,11 @@ fn infer_variadic_annotation_bindings_detailed(
     if let Some(type_pack_name) =
         type_pack_name_from_unpack_semantic_annotation(annotation, &solver.metadata.type_pack_names)
     {
-        let fixed_types = positional_types[positional_index..]
-            .iter()
-            .map(|ty| lower_type_text_or_name(ty))
-            .collect::<Vec<_>>();
+        let fixed_types = positional_types[positional_index..].to_vec();
         let variadic_tail = if variadic_starred_types.is_empty() {
             None
         } else {
-            Some(join_semantic_type_candidates(
-                variadic_starred_types.iter().map(|ty| lower_type_text_or_name(ty)).collect(),
-            ))
+            Some(join_semantic_type_candidates(variadic_starred_types.to_vec()))
         };
         solver.record_type_pack_binding(
             &type_pack_name,
@@ -288,7 +283,7 @@ fn infer_variadic_annotation_bindings_detailed(
 
     let existing = solver.current_bindings_detailed(node, nodes)?;
     for actual in positional_types.iter().skip(positional_index) {
-        let actual_type = lower_type_text_or_name(actual);
+        let actual_type = actual.clone();
         let bindings = infer_generic_type_param_bindings(
             node,
             nodes,
@@ -306,6 +301,100 @@ fn infer_variadic_annotation_bindings_detailed(
     }
 
     Ok(())
+}
+
+fn direct_param_annotation_semantic(
+    param: &typepython_syntax::DirectFunctionParamSite,
+) -> Option<SemanticType> {
+    param.annotation_expr.clone().map(lower_type_expr).or_else(|| {
+        param.annotation.as_deref().map(|annotation| {
+            lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
+        })
+    })
+}
+
+fn expected_positional_arg_semantic_types_from_signature_sites(
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    arg_count: usize,
+) -> Vec<Option<SemanticType>> {
+    let positional_params = signature
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let variadic_type =
+        signature.iter().find(|param| param.variadic).and_then(direct_param_annotation_semantic);
+
+    (0..arg_count)
+        .map(|index| {
+            positional_params
+                .get(index)
+                .and_then(|param| direct_param_annotation_semantic(param))
+                .or_else(|| variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_keyword_arg_semantic_types_from_signature_sites(
+    signature: &[typepython_syntax::DirectFunctionParamSite],
+    keyword_names: &[String],
+) -> Vec<Option<SemanticType>> {
+    let keyword_variadic_type = signature
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(direct_param_annotation_semantic);
+
+    keyword_names
+        .iter()
+        .map(|keyword| {
+            signature
+                .iter()
+                .find(|param| param.name == *keyword && !param.positional_only)
+                .and_then(direct_param_annotation_semantic)
+                .or_else(|| keyword_variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_positional_arg_semantic_types_from_semantic_params(
+    params: &[SemanticCallableParam],
+    arg_count: usize,
+) -> Vec<Option<SemanticType>> {
+    let positional_params = params
+        .iter()
+        .filter(|param| !param.keyword_only && !param.variadic && !param.keyword_variadic)
+        .collect::<Vec<_>>();
+    let variadic_type =
+        params.iter().find(|param| param.variadic).and_then(|param| param.annotation.clone());
+
+    (0..arg_count)
+        .map(|index| {
+            positional_params
+                .get(index)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| variadic_type.clone())
+        })
+        .collect()
+}
+
+fn expected_keyword_arg_semantic_types_from_semantic_params(
+    params: &[SemanticCallableParam],
+    keyword_names: &[String],
+) -> Vec<Option<SemanticType>> {
+    let keyword_variadic_type = params
+        .iter()
+        .find(|param| param.keyword_variadic)
+        .and_then(|param| param.annotation.clone());
+
+    keyword_names
+        .iter()
+        .map(|keyword| {
+            params
+                .iter()
+                .find(|param| param.name == *keyword && !param.positional_only)
+                .and_then(|param| param.annotation.clone())
+                .or_else(|| keyword_variadic_type.clone())
+        })
+        .collect()
 }
 
 fn infer_single_argument_bindings_detailed(
@@ -682,13 +771,26 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
     let mut solver = GenericSolverState::new(function);
     let expected_positional_arg_types =
-        expected_positional_arg_types_from_signature_sites(signature, call.arg_count);
+        expected_positional_arg_semantic_types_from_signature_sites(signature, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+        expanded_positional_arg_semantic_types_with_expected_semantic(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+        );
+    let expected_keyword_arg_types =
+        expected_keyword_arg_semantic_types_from_signature_sites(signature, &call.keyword_names);
+    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
+        node,
+        nodes,
+        call,
+        &expected_keyword_arg_types,
+    );
     let mut positional_index = 0;
 
     for param in signature.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
-        let Some(annotation_text) = param.rendered_annotation() else {
+        let Some(annotation) = direct_param_annotation_semantic(param) else {
             if param.variadic {
                 positional_index = positional_types.len();
             } else if positional_index < positional_types.len() {
@@ -696,7 +798,6 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
             }
             continue;
         };
-        let annotation = lower_type_text_or_name(&annotation_text);
         if param.variadic {
             infer_variadic_annotation_bindings_detailed(
                 &mut solver,
@@ -713,29 +814,26 @@ pub(crate) fn infer_generic_type_param_substitutions_detailed(
         let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
-        let actual_type = lower_type_text_or_name(actual);
         infer_single_argument_bindings_detailed(
             &mut solver,
             node,
             nodes,
             &annotation,
-            actual_type,
+            actual.clone(),
             call.arg_values.get(positional_index),
         )?;
         positional_index += 1;
     }
 
-    for (index, (keyword, actual)) in
-        call.keyword_names.iter().zip(&call.keyword_arg_types).enumerate()
+    for (index, (keyword, actual_type)) in
+        call.keyword_names.iter().zip(keyword_arg_types.into_iter()).enumerate()
     {
         let Some(param) = signature.iter().find(|param| param.name == *keyword) else {
             continue;
         };
-        let Some(annotation_text) = param.rendered_annotation() else {
+        let Some(annotation) = direct_param_annotation_semantic(param) else {
             continue;
         };
-        let annotation = lower_type_text_or_name(&annotation_text);
-        let actual_type = lower_type_text_or_name(actual);
         infer_single_argument_bindings_detailed(
             &mut solver,
             node,
@@ -758,9 +856,22 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
 ) -> Result<GenericTypeParamSubstitutions, GenericSolveFailure> {
     let mut solver = GenericSolverState::new(function);
     let expected_positional_arg_types =
-        expected_positional_arg_types_from_semantic_params(params, call.arg_count);
+        expected_positional_arg_semantic_types_from_semantic_params(params, call.arg_count);
     let (positional_types, variadic_starred_types) =
-        expanded_positional_arg_types(node, nodes, call, &expected_positional_arg_types);
+        expanded_positional_arg_semantic_types_with_expected_semantic(
+            node,
+            nodes,
+            call,
+            &expected_positional_arg_types,
+        );
+    let expected_keyword_arg_types =
+        expected_keyword_arg_semantic_types_from_semantic_params(params, &call.keyword_names);
+    let keyword_arg_types = resolved_keyword_arg_semantic_types_with_expected_semantic(
+        node,
+        nodes,
+        call,
+        &expected_keyword_arg_types,
+    );
     let mut positional_index = 0;
 
     for param in params.iter().filter(|param| !param.keyword_only && !param.keyword_variadic) {
@@ -788,20 +899,19 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         let Some(actual) = positional_types.get(positional_index) else {
             continue;
         };
-        let actual_type = lower_type_text_or_name(actual);
         infer_single_argument_bindings_detailed(
             &mut solver,
             node,
             nodes,
             &annotation,
-            actual_type,
+            actual.clone(),
             call.arg_values.get(positional_index),
         )?;
         positional_index += 1;
     }
 
-    for (index, (keyword, actual)) in
-        call.keyword_names.iter().zip(&call.keyword_arg_types).enumerate()
+    for (index, (keyword, actual_type)) in
+        call.keyword_names.iter().zip(keyword_arg_types.into_iter()).enumerate()
     {
         let Some(param) = params.iter().find(|param| param.name == *keyword) else {
             continue;
@@ -809,7 +919,6 @@ pub(crate) fn infer_generic_type_param_substitutions_from_semantic_params_detail
         let Some(annotation) = param.annotation.clone() else {
             continue;
         };
-        let actual_type = lower_type_text_or_name(actual);
         infer_single_argument_bindings_detailed(
             &mut solver,
             node,
