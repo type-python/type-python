@@ -13,7 +13,7 @@
   <a href="https://github.com/type-python/type-python/actions/workflows/rust.yml"><img src="https://github.com/type-python/type-python/actions/workflows/rust.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" /></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-msrv%201.85-orange.svg" alt="Rust" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-msrv%201.94.0-orange.svg" alt="Rust" /></a>
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@ The Python package bridge supports **Python 3.9+**. Generated TypePython project
 
 Published wheels are platform-specific because they bundle the Rust CLI binary. Prebuilt wheels are available for Windows AMD64, macOS x86_64, macOS arm64, and Linux x86_64. Other platforms fall back to the source distribution and require Rust + `cargo`.
 
-The workspace MSRV is Rust 1.85. `./scripts/bootstrap-rust.sh` installs the pinned Rust 1.94.0 development toolchain used by CI.
+The workspace MSRV is Rust 1.94.0. `./scripts/bootstrap-rust.sh` installs the same Rust 1.94.0 toolchain used by CI.
 
 Or build from source:
 

@@ -4,7 +4,7 @@ This guide walks you through installing TypePython, creating your first project,
 
 ## Prerequisites
 
-- **Rust 1.94.0** -- required when building TypePython from source or installing from a local checkout/source distribution (workspace MSRV: 1.85)
+- **Rust 1.94.0** -- required when building TypePython from source or installing from a local checkout/source distribution (workspace MSRV: 1.94.0)
 - **Python 3.9+** -- required for the Python package interface and packaging checks (optional if you only use a prebuilt Rust binary directly)
 - **Git** -- to clone the repository
 

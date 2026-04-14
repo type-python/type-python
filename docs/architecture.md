@@ -1,6 +1,6 @@
 # Architecture
 
-TypePython is implemented as a virtual Cargo workspace containing 12 Rust crates. Most crates align to a specific compilation phase; `typepython_project` provides shared project-discovery and support-source utilities used around the core pipeline by the CLI and LSP layers.
+TypePython is implemented as a virtual Cargo workspace of focused Rust crates. Most crates align to a specific compilation phase; `typepython_project` provides shared project-discovery and support-source utilities used around the core pipeline by the CLI and LSP layers, while `typepython_target` centralizes target-version capability rules.
 
 ## Compilation Pipeline
 
@@ -67,9 +67,11 @@ TypePython is implemented as a virtual Cargo workspace containing 12 Rust crates
 
 ```
 typepython_diagnostics          (no internal deps -- foundation crate)
+typepython_target               (no internal deps -- target capability model)
        ^
        |
-       +--- typepython_config   (diagnostics)
+       +--- typepython_config   (diagnostics, target)
+       |
        |
        +--- typepython_syntax   (diagnostics)
        |         ^
@@ -80,15 +82,15 @@ typepython_diagnostics          (no internal deps -- foundation crate)
        |    typepython_graph    (binding, syntax)
        |         ^
        |         |
-       |    typepython_checking (binding, config, diagnostics, graph, incremental, syntax)
+       |    typepython_checking (binding, config, diagnostics, graph, incremental, syntax, target)
        |
-       +--- typepython_lowering (diagnostics, syntax)
+       +--- typepython_lowering (diagnostics, syntax, target)
        |
        +--- typepython_emit     (config, lowering, syntax)
        |
        +--- typepython_project  (config, diagnostics, emit, syntax)
        |
-       +--- typepython_incremental (binding, graph, syntax)
+       +--- typepython_incremental (binding, graph, syntax, target)
        |
        +--- typepython_cli      (all other internal crates)
        |
@@ -138,6 +140,19 @@ Project discovery and configuration loading.
 | `library`     | Strict + `require_known_public_types` for published packages |
 | `application` | Strict, relaxed public API requirements                      |
 | `migration`   | Lenient, `imports = "dynamic"`, no implicit dynamic warnings |
+
+### typepython_target
+
+Shared target-version and emit-style capability model.
+
+**Key types:**
+
+| Type                     | Description                                                            |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `PythonTarget`           | Normalized supported target runtime (`3.10` through `3.14`)            |
+| `EmitStyle`              | `compat` vs `native` lowering mode                                     |
+| `RuntimeFeature`         | Capability flags keyed to minimum runtime versions                     |
+| `RuntimeTypingSemantics` | Target-aware typing behavior metadata used by config/checking/lowering |
 
 ### typepython_syntax
 
@@ -385,7 +400,7 @@ Language Server Protocol implementation using stdio-based JSON-RPC.
 
 **Rust edition:** 2024
 **Pinned development toolchain:** 1.94.0
-**Minimum supported Rust version:** 1.85
+**Minimum supported Rust version:** 1.94.0
 **Resolver:** v3
 
 **Lint policy:**

@@ -1,8 +1,9 @@
 CARGO ?= cargo
+MSRV ?= 1.94.0
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
 
-.PHONY: bootstrap fmt fmt-check check lint test test-fast test-cli-verification test-downstream-checkers bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -15,6 +16,10 @@ fmt-check:
 
 check:
 	$(CARGO) check --workspace
+
+msrv-check:
+	rustup toolchain install $(MSRV) --profile minimal
+	$(CARGO) +$(MSRV) check --workspace
 
 lint:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
@@ -30,6 +35,9 @@ test-cli-verification:
 
 test-downstream-checkers:
 	$(PYTHON) scripts/downstream_checker_smoke.py
+
+repo-contracts:
+	$(PYTHON) -m unittest scripts/test_repo_contracts.py
 
 bench:
 	$(CARGO) bench --workspace --bench parse --bench lower --bench graph --bench checker
@@ -58,4 +66,4 @@ snapshot-review:
 docs:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" $(CARGO) doc --workspace --no-deps
 
-ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers bench-check package-check
+ci: fmt-check lint test-fast test-cli-verification test-downstream-checkers repo-contracts bench-check package-check

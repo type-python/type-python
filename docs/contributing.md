@@ -6,7 +6,7 @@ Thank you for your interest in contributing to TypePython! This guide covers the
 
 ### Prerequisites
 
-- **Rust 1.94.0** (pinned in `rust-toolchain.toml`; workspace MSRV is 1.85)
+- **Rust 1.94.0** (pinned in `rust-toolchain.toml`; workspace MSRV is 1.94.0)
 - **Git**
 - **Python 3.9+** (optional, for testing the Python package bridge)
 
@@ -21,9 +21,12 @@ cd type-python
 
 # Verify everything builds and passes
 make ci
+
+# Verify the declared Rust toolchain contract
+make msrv-check
 ```
 
-The `make ci` target runs: format check -> clippy lint -> fast workspace tests -> CLI verification tests -> downstream checker smoke -> bench compile check -> Python packaging validation.
+The `make ci` target runs: format check -> clippy lint -> fast workspace tests -> CLI verification tests -> downstream checker smoke -> repository contract tests -> bench compile check -> Python packaging validation.
 
 ### Building
 
@@ -65,6 +68,7 @@ type-python/
   crates/
     typepython_diagnostics/  # Foundation: diagnostic model (no internal deps)
     typepython_config/       # Configuration loading
+    typepython_target/       # Target-version capability model
     typepython_syntax/       # Parser boundary (ruff-python)
     typepython_binding/      # Symbol extraction
     typepython_graph/        # Module graph
@@ -85,12 +89,13 @@ type-python/
 
 ## Crate Dependency Graph
 
-The 12 crates form a layered architecture. Most crates own a single compilation phase; `typepython_project` is shared support code used by the CLI and LSP layers:
+The workspace crates form a layered architecture. Most crates own a single compilation phase; `typepython_project` is shared support code used by the CLI and LSP layers, and `typepython_target` centralizes target-version capability rules:
 
 ```
 typepython_diagnostics          <-- Foundation (no internal deps)
+typepython_target               <-- Target capability model (no internal deps)
   |
-  +-- typepython_config         <-- Config loading (+ serde, toml, thiserror)
+  +-- typepython_config         <-- Config loading (+ serde, toml, thiserror, target)
   |
   +-- typepython_syntax         <-- Parser (+ ruff-python-parser)
   |     |
@@ -98,15 +103,15 @@ typepython_diagnostics          <-- Foundation (no internal deps)
   |     |     |
   |     |     +-- typepython_graph       <-- Module graph
   |     |     |
-  |     |     +-- typepython_checking    <-- Type checker (+ config, graph, incremental)
+  |     |     +-- typepython_checking    <-- Type checker (+ config, graph, incremental, target)
   |     |
-  |     +-- typepython_lowering <-- Python lowering
+  |     +-- typepython_lowering <-- Python lowering (+ target)
   |           |
   |           +-- typepython_emit        <-- Output generation (+ config, syntax)
   |
   +-- typepython_project        <-- Discovery/support helpers (+ config, emit, syntax)
   |
-  +-- typepython_incremental    <-- Fingerprinting (+ graph, binding, syntax)
+  +-- typepython_incremental    <-- Fingerprinting (+ graph, binding, syntax, target)
   |
   +-- typepython_lsp            <-- Language server (depends on most crates)
   |
@@ -292,12 +297,13 @@ The CLI crate (`typepython_cli`) contains end-to-end tests that exercise the ful
 | `make fmt`                        | `cargo fmt --all`                                                                              | Format all code                       |
 | `make fmt-check`                  | `cargo fmt --all --check`                                                                      | Check formatting (CI)                 |
 | `make check`                      | `cargo check --workspace`                                                                      | Check compilation                     |
+| `make msrv-check`                 | `rustup toolchain install 1.94.0 --profile minimal` + `cargo +1.94.0 check --workspace`      | Verify the declared workspace MSRV    |
 | `make lint`                       | `cargo clippy --workspace --all-targets -- -D warnings`                                        | Lint with clippy                      |
 | `make test`                       | `cargo test --workspace`                                                                       | Run all tests                         |
 | `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
 | `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
 | `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
-| `make ci`                         | `fmt-check` + `lint` + `test-fast` + `test-cli-verification` + `bench-check` + `package-check` | Repository validation target          |
+| `make ci`                         | `fmt-check` + `lint` + `test-fast` + `test-cli-verification` + `repo-contracts` + `bench-check` + `package-check` | Repository validation target          |
 
 ## Python Packaging
 

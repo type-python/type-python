@@ -20,7 +20,7 @@ resolver = "3"
 authors = ["unadlib"]
 edition = "2024"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.94.0"
 version = "0.2.0"
 
 [workspace.dependencies]
