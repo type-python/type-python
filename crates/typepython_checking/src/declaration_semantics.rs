@@ -416,6 +416,20 @@ fn load_interned_semantic_type(store: &TypeStore, type_id: Option<TypeId>) -> Op
     type_id.and_then(|type_id| store.get(type_id).cloned())
 }
 
+fn semantic_type_from_bound_type_expr(expr: &typepython_binding::BoundTypeExpr) -> SemanticType {
+    lower_type_expr(expr.expr.clone())
+}
+
+fn semantic_type_from_direct_param_site(
+    param: &typepython_syntax::DirectFunctionParamSite,
+) -> Option<SemanticType> {
+    param.annotation_expr.clone().map(lower_type_expr).or_else(|| {
+        param.annotation.as_deref().map(|annotation| {
+            lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
+        })
+    })
+}
+
 fn build_cached_semantic_declaration_facts(
     declaration: &Declaration,
     type_store: &mut TypeStore,
@@ -426,7 +440,7 @@ fn build_cached_semantic_declaration_facts(
                 declaration
                     .callable_signature()
                     .map(semantic_callable_from_bound_signature)
-                    .or_else(|| parse_direct_callable_declaration(&declaration.rendered_detail()))
+                    .or_else(|| parse_direct_callable_declaration(&declaration.detail))
             })
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
@@ -453,14 +467,16 @@ fn build_cached_semantic_declaration_facts(
                 .value_annotation()
                 .map(typepython_binding::BoundTypeExpr::render)
                 .or_else(|| {
-                    (!declaration.rendered_detail().trim().is_empty())
-                        .then(|| declaration.rendered_detail())
+                    (!declaration.detail.trim().is_empty()).then(|| declaration.detail.clone())
                 });
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
                     type_store,
-                    annotation_text.as_deref().map(lower_type_text_or_name),
+                    declaration
+                        .value_annotation()
+                        .map(semantic_type_from_bound_type_expr)
+                        .or_else(|| annotation_text.as_deref().map(lower_type_text_or_name)),
                 ),
             }
         }),
@@ -468,12 +484,17 @@ fn build_cached_semantic_declaration_facts(
             let body_text = declaration
                 .type_alias_value()
                 .map(typepython_binding::BoundTypeExpr::render)
-                .unwrap_or_else(|| declaration.rendered_detail());
+                .unwrap_or_else(|| declaration.detail.clone());
             CachedSemanticTypeAliasDeclaration {
                 head: declaration.name.clone(),
                 type_params: declaration.type_params.clone(),
                 body_text: body_text.clone(),
-                body_id: type_store.intern(lower_type_text_or_name(&body_text)),
+                body_id: type_store.intern(
+                    declaration
+                        .type_alias_value()
+                        .map(semantic_type_from_bound_type_expr)
+                        .unwrap_or_else(|| lower_type_text_or_name(&body_text)),
+                ),
             }
         }),
         import_target: (declaration.kind == DeclarationKind::Import)
@@ -481,7 +502,7 @@ fn build_cached_semantic_declaration_facts(
                 declaration
                     .import_target()
                     .map(semantic_import_target_from_bound_target)
-                    .or_else(|| parse_import_target_ref(&declaration.rendered_detail()))
+                    .or_else(|| parse_import_target_ref(&declaration.detail))
             })
             .flatten(),
     }
@@ -496,9 +517,7 @@ fn semantic_callable_from_bound_signature(
         .map(|param| SemanticCallableParam {
             name: param.name.clone(),
             annotation_text: param.rendered_annotation(),
-            annotation: param.rendered_annotation().as_deref().map(|annotation| {
-                lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
-            }),
+            annotation: semantic_type_from_direct_param_site(param),
             has_default: param.has_default,
             positional_only: param.positional_only,
             keyword_only: param.keyword_only,
@@ -508,7 +527,7 @@ fn semantic_callable_from_bound_signature(
         .collect::<Vec<_>>();
     let return_annotation_text =
         signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render);
-    let return_type = return_annotation_text.as_deref().map(lower_type_text_or_name);
+    let return_type = signature.returns.as_ref().map(semantic_type_from_bound_type_expr);
     SemanticCallableDeclaration { params, semantic_params, return_annotation_text, return_type }
 }
 
@@ -648,32 +667,24 @@ pub(crate) fn parse_direct_signature_params(signature: &str) -> Option<Vec<Direc
 pub(crate) fn parse_direct_callable_declaration(
     detail: &str,
 ) -> Option<SemanticCallableDeclaration> {
-    let parsed_params = parse_direct_signature_params(detail)?;
-    let params = parsed_params
-        .into_iter()
-        .map(|param| typepython_syntax::DirectFunctionParamSite {
+    let signature_param_site = |param: DirectSignatureParam| {
+        let annotation = (!param.annotation.is_empty()).then_some(param.annotation);
+        typepython_syntax::DirectFunctionParamSite {
             name: param.name,
-            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
-            annotation_expr: None,
+            annotation_expr: annotation.as_deref().and_then(typepython_syntax::TypeExpr::parse),
+            annotation,
             has_default: param.has_default,
             positional_only: param.positional_only,
             keyword_only: param.keyword_only,
             variadic: param.variadic,
             keyword_variadic: param.keyword_variadic,
-        })
-        .collect::<Vec<_>>();
+        }
+    };
+    let parsed_params = parse_direct_signature_params(detail)?;
+    let params = parsed_params.into_iter().map(signature_param_site).collect::<Vec<_>>();
     let semantic_params = parse_direct_signature_params(detail)?
         .into_iter()
-        .map(|param| typepython_syntax::DirectFunctionParamSite {
-            name: param.name,
-            annotation: (!param.annotation.is_empty()).then_some(param.annotation),
-            annotation_expr: None,
-            has_default: param.has_default,
-            positional_only: param.positional_only,
-            keyword_only: param.keyword_only,
-            variadic: param.variadic,
-            keyword_variadic: param.keyword_variadic,
-        })
+        .map(signature_param_site)
         .map(|param| SemanticCallableParam {
             name: param.name,
             annotation_text: param.annotation.clone(),

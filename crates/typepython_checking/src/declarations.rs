@@ -108,8 +108,16 @@ pub(super) fn method_override_incompatibility(
     member: &Declaration,
     base_member: &Declaration,
 ) -> Option<OverrideCompatibilityFailure> {
-    if base_member.detail == member.detail && base_member.method_kind == member.method_kind {
-        return None;
+    if member.method_kind == base_member.method_kind {
+        match (member.callable_signature(), base_member.callable_signature()) {
+            (Some(member_signature), Some(base_signature))
+                if member_signature == base_signature =>
+            {
+                return None;
+            }
+            (None, None) if member.detail == base_member.detail => return None,
+            _ => {}
+        }
     }
 
     if matches!(member.name.as_str(), "__enter__" | "__exit__")

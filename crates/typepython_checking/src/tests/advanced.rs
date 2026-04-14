@@ -1447,6 +1447,126 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
 }
 
 #[test]
+fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
+    let list_of_int = typepython_syntax::TypeExpr::Generic {
+        head: String::from("list"),
+        args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+    };
+    let tuple_of_int = typepython_syntax::TypeExpr::Generic {
+        head: String::from("tuple"),
+        args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+    };
+
+    let value = Declaration {
+        metadata: typepython_binding::DeclarationMetadata::Value {
+            annotation: Some(typepython_binding::BoundTypeExpr::from_expr(list_of_int.clone())),
+        },
+        name: String::from("items"),
+        kind: DeclarationKind::Value,
+        detail: String::from("str"),
+        value_type: Some(String::from("str")),
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(
+        crate::declaration_value_annotation_semantic_type(&value)
+            .map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("list[int]")),
+    );
+
+    let alias = Declaration {
+        metadata: typepython_binding::DeclarationMetadata::TypeAlias {
+            value: typepython_binding::BoundTypeExpr::from_expr(
+                typepython_syntax::TypeExpr::Union {
+                    branches: vec![
+                        typepython_syntax::TypeExpr::Name(String::from("int")),
+                        typepython_syntax::TypeExpr::Name(String::from("None")),
+                    ],
+                    style: typepython_syntax::UnionStyle::Shorthand,
+                },
+            ),
+        },
+        name: String::from("MaybeInt"),
+        kind: DeclarationKind::TypeAlias,
+        detail: String::from("str"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(
+        crate::declaration_type_alias_semantics(&alias)
+            .map(|facts| crate::render_semantic_type(&facts.body)),
+        Some(String::from("Union[int, None]")),
+    );
+
+    let function = Declaration {
+        metadata: typepython_binding::DeclarationMetadata::Callable {
+            signature: typepython_binding::BoundCallableSignature {
+                params: vec![typepython_syntax::DirectFunctionParamSite {
+                    name: String::from("value"),
+                    annotation: Some(String::from("list[int]")),
+                    annotation_expr: Some(list_of_int),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }],
+                returns: Some(typepython_binding::BoundTypeExpr::from_expr(tuple_of_int)),
+            },
+        },
+        name: String::from("build"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:str)->str"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(
+        crate::declaration_signature_param_types(&function),
+        Some(vec![String::from("list[int]")]),
+    );
+    assert_eq!(
+        crate::declaration_signature_return_semantic_type(&function)
+            .map(|ty| crate::render_semantic_type(&ty)),
+        Some(String::from("tuple[int]")),
+    );
+}
+
+#[test]
 fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
     let node = ModuleNode {
         module_path: PathBuf::from("<resolved-call>"),
