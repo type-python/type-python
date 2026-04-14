@@ -125,7 +125,7 @@ TypePython is an authoring layer, not a replacement for external checkers. One i
 - **Rich type system** -- `unknown`, `dynamic`, `Never`, strict nulls, sealed exhaustiveness, generic defaults, TypeVarTuple ([type system](docs/type-system.md))
 - **Syntax extensions** -- `interface`, `data class`, `sealed class`, `overload def`, `typealias`, `unsafe:`, inline type parameters ([syntax guide](docs/syntax-guide.md))
 - **TypedDict utilities** -- `Partial`, `Required_`, `Readonly`, `Mutable`, `Pick`, `Omit` ([type system](docs/type-system.md))
-- **Incremental state and caching** -- fingerprint snapshots, cached artifacts, and LSP rechecks for changed modules plus affected dependents ([architecture](docs/architecture.md))
+- **Incremental state and caching** -- fingerprint snapshots, materialized-build manifests, and dependency-driven CLI/LSP rechecks for changed modules plus affected dependents ([architecture](docs/architecture.md))
 - **Full toolchain** -- `init`, `check`, `build`, `watch`, `clean`, `verify`, `migrate` ([CLI reference](docs/cli-reference.md))
 - **LSP server** -- hover, go-to-definition, references, rename, completions, signature help, document symbols, workspace symbols, formatting, code actions, real-time diagnostics ([LSP](docs/lsp.md))
 - **Publication-ready** -- `typepython verify` performs structural publication checks by default, validates packaged wheel/sdist contents, and can opt into runtime import parity checks for trusted builds ([interop](docs/interop.md))

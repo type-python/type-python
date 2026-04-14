@@ -64,7 +64,7 @@ typepython check [OPTIONS]
 | `--project PATH`  | Project directory               |
 | `--format FORMAT` | Output format: `text` or `json` |
 
-**Pipeline steps:** discover sources -> parse -> bind -> build graph -> type check
+**Pipeline steps:** discover sources -> parse -> bind -> build graph -> dependency-driven selective type check -> update semantic cache
 
 **Text output:**
 
@@ -108,6 +108,8 @@ typepython check --project . --format json
 
 ---
 
+`typepython check` persists the current semantic snapshot and module-diagnostic cache under `cache_dir`, but it does not materialize runtime artifacts.
+
 ### `typepython build`
 
 Full compilation: type-check, lower to Python, emit `.py` and `.pyi` files, update incremental cache.
@@ -121,16 +123,18 @@ typepython build [OPTIONS]
 | `--project PATH`  | Project directory               |
 | `--format FORMAT` | Output format: `text` or `json` |
 
-**Pipeline steps:** discover -> parse -> bind -> graph -> check -> lower -> plan emits -> snapshot -> write outputs
+**Pipeline steps:** discover -> parse -> bind -> graph -> selective check -> selective lower -> selective emit planning -> snapshot/cache update -> write affected outputs
 
-When a previous snapshot is available, the CLI reuses unchanged semantic summaries based on persisted source hashes before deciding whether full output reuse is safe.
+When previous cache state is available, the CLI reuses unchanged semantic summaries and unaffected module diagnostics, rechecks only changed modules plus dependents whose public summaries changed, and lowers/rematerializes only the project modules that need refreshed outputs. A materialized-build manifest keeps output reuse and stale-artifact cleanup tied to the last emitted build tree instead of only the semantic snapshot.
 
 **Output artifacts:**
 
 - `.py` files -- lowered Python in `out_dir`
 - `.pyi` files -- generated type stubs (if `emit.emit_pyi = true`)
 - `py.typed` -- PEP 561 marker files (if `emit.write_py_typed = true`)
-- `snapshot.json` -- incremental state in `cache_dir`
+- `snapshot.json` -- semantic incremental state in `cache_dir`
+- `analysis-cache.json` -- cached per-module CLI diagnostics in `cache_dir`
+- `build-manifest.json` -- last materialized build-output manifest in `cache_dir`
 - `.pyc` files -- compiled bytecode (if `emit.emit_pyc = true`)
 
 **Text output:**

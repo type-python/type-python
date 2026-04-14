@@ -327,24 +327,26 @@ Fingerprint-based incremental build tracking.
 - Implementation-only change (public summary fingerprint same): dependents NOT rechecked
 - Public summary change (fingerprint differs): direct and transitive dependents rechecked
 
-**Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`.
+**Persistence:** JSON-encoded with schema versioning, stored in `.typepython/cache/snapshot.json`. CLI frontends also persist module-diagnostic reuse state and, when outputs are materialized, a build-manifest describing the emitted artifact set.
 
 ### typepython_cli
 
 User-facing binary implementing all commands.
 
-**Full pipeline steps:**
+**One-shot pipeline steps:**
 
 1. `collect_source_paths()` -- glob-based source discovery
 2. `load_syntax_trees()` -- parse all files
 3. `apply_type_ignore_directives()` -- process `# type: ignore`
 4. `bind()` -- extract symbols
 5. `build()` -- assemble module graph
-6. `check_with_options()` -- run type checker
-7. `lower_with_options()` -- convert to Python
-8. `plan_emits()` -- plan output paths
-9. `write_runtime_outputs()` -- materialize runtime and stub outputs
-10. `write_incremental_snapshot()` -- persist module fingerprints and summaries
+6. `check_modules_with_binding_metadata()` -- rerun the checker only for affected modules while reusing cached module diagnostics for unaffected project modules
+7. `lower_with_options()` -- lower only the project modules whose diagnostics or materialized outputs need refresh
+8. `plan_emits_for_sources()` -- plan output paths for the full project source set
+9. `write_runtime_outputs()` -- materialize only the affected runtime and stub outputs, then clean stale outputs that disappeared from the plan
+10. `write_incremental_snapshot()` / `analysis-cache.json` / `build-manifest.json` -- persist semantic summaries, module diagnostics, and the last materialized artifact set
+
+**Incremental note:** one-shot CLI commands still rediscover, parse, and bind the current workspace each invocation. The selective behavior starts at dependency-driven recheck/lower/emit, while `typepython watch` and `typepython lsp` keep additional in-memory state across edits.
 
 **Embedded resources:** Project init templates from `templates/`.
 

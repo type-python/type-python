@@ -60,6 +60,11 @@ stdio JSON-RPC server path.
 | `lsp_incremental_impl_edit_session_48_modules`   | An implementation-only edit followed by a hover request |
 | `lsp_incremental_public_edit_session_48_modules` | A public-signature edit followed by a hover request     |
 
+The checked-in end-to-end incremental benchmark currently targets the longest-lived
+incremental session path (`typepython_lsp`). One-shot CLI commands now use the same
+affected-module invalidation rules for selective check/lower/emit, and that behavior
+is covered by the CLI pipeline test suite rather than a separate Criterion target.
+
 ## Running benchmarks
 
 Run the core benchmark suites tracked by the Makefile:

@@ -133,7 +133,9 @@ TypePython computes a fingerprint (FNV-1a hash) for each module's public API. On
 - If a module's source changed but its public API fingerprint is the same: dependents are NOT rechecked
 - If the public API changed: direct and transitive dependents are rechecked
 
-State is persisted in `.typepython/cache/snapshot.json`.
+The CLI still reparses and rebinds the current workspace on each invocation, but it now rechecks, relowers, and rematerializes only the affected project modules. `typepython check` updates the semantic cache, while `typepython build` / `verify` also track which build outputs were actually materialized so stale artifacts can be cleaned deterministically.
+
+State is persisted under `.typepython/cache/`, including `snapshot.json`, `analysis-cache.json`, and `build-manifest.json` when outputs are materialized.
 
 ### How do I set up editor support?
 
