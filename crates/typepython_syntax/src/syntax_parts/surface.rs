@@ -131,6 +131,8 @@ pub struct FunctionStatement {
     pub name: String,
     pub type_params: Vec<TypeParam>,
     pub params: Vec<FunctionParam>,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `returns_expr` or `rendered_*` accessors.
     pub returns: Option<String>,
     pub returns_expr: Option<TypeExpr>,
     pub is_async: bool,
@@ -144,6 +146,8 @@ pub struct FunctionStatement {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FunctionParam {
     pub name: String,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `annotation_expr` or `rendered_annotation()`.
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
     pub has_default: bool,
@@ -179,6 +183,8 @@ pub struct ImportBinding {
 pub struct ValueStatement {
     pub names: Vec<String>,
     pub destructuring_target_names: Option<Vec<String>>,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `annotation_expr` or `rendered_*` accessors.
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
     pub value_type_expr: Option<TypeExpr>,
@@ -473,10 +479,14 @@ pub struct ClassMember {
     pub name: String,
     pub kind: ClassMemberKind,
     pub method_kind: Option<MethodKind>,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `annotation_expr` or `rendered_*` accessors.
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
     pub value_type_expr: Option<TypeExpr>,
     pub params: Vec<FunctionParam>,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `returns_expr` or `rendered_*` accessors.
     pub returns: Option<String>,
     pub returns_expr: Option<TypeExpr>,
     pub is_async: bool,
@@ -946,6 +956,8 @@ pub struct DecoratorTransformModuleInfo {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectFunctionParamSite {
     pub name: String,
+    /// Source-authored text mirror retained for emit/display compatibility.
+    /// Semantic consumers should prefer `annotation_expr` or `rendered_annotation()`.
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
     pub has_default: bool,

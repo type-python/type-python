@@ -986,6 +986,57 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
     }
 }
 
+fn collect_rs_files(root: &PathBuf, files: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(root).expect("source directory should be readable");
+    for entry in entries {
+        let entry = entry.expect("directory entry should be readable");
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Some("tests") {
+                continue;
+            }
+            collect_rs_files(&path, files);
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+}
+
+#[test]
+fn production_semantic_paths_do_not_read_legacy_detail_directly() {
+    let checking_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let incremental_root = checking_root
+        .parent()
+        .expect("checking crate should live under crates")
+        .join("typepython_incremental");
+    let mut files = Vec::new();
+    collect_rs_files(&checking_root.join("src"), &mut files);
+    collect_rs_files(&incremental_root.join("src"), &mut files);
+
+    let offenders = files
+        .into_iter()
+        .filter_map(|path| {
+            let contents = fs::read_to_string(&path).expect("source file should be readable");
+            let matches = contents
+                .lines()
+                .enumerate()
+                .filter_map(|(index, line)| {
+                    line.contains(".legacy_detail")
+                        .then(|| format!("{}:{}", path.display(), index + 1))
+                })
+                .collect::<Vec<_>>();
+            (!matches.is_empty()).then_some(matches)
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+
+    assert!(
+        offenders.is_empty(),
+        "checking/incremental production code should use structured accessors instead of \
+         `.legacy_detail`: {offenders:?}"
+    );
+}
+
 mod advanced;
 mod advanced_generics;
 mod calls;

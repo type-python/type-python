@@ -746,6 +746,8 @@ impl AssignmentSite {
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
+    /// Legacy display/debug text retained for compatibility surfaces.
+    /// Semantic consumers should prefer structured metadata and `rendered_detail()`.
     pub legacy_detail: String,
     pub metadata: DeclarationMetadata,
     pub value_type_expr: Option<BoundTypeExpr>,
