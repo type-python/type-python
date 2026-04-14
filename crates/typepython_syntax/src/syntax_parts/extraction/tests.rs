@@ -74,25 +74,12 @@ fn normalize_statement(statement: SyntaxStatement) -> SyntaxStatement {
         SyntaxStatement::If(statement) => SyntaxStatement::If(statement),
         SyntaxStatement::Assert(statement) => SyntaxStatement::Assert(statement),
         SyntaxStatement::Invalidate(statement) => SyntaxStatement::Invalidate(statement),
-        SyntaxStatement::Match(mut statement) => {
-            statement.subject_type = normalize_empty_option_string(statement.subject_type);
-            SyntaxStatement::Match(statement)
-        }
-        SyntaxStatement::For(mut statement) => {
-            statement.iter_type = normalize_empty_option_string(statement.iter_type);
-            SyntaxStatement::For(statement)
-        }
-        SyntaxStatement::With(mut statement) => {
-            statement.context_type = normalize_empty_option_string(statement.context_type);
-            SyntaxStatement::With(statement)
-        }
+        SyntaxStatement::Match(statement) => SyntaxStatement::Match(statement),
+        SyntaxStatement::For(statement) => SyntaxStatement::For(statement),
+        SyntaxStatement::With(statement) => SyntaxStatement::With(statement),
         SyntaxStatement::ExceptHandler(statement) => SyntaxStatement::ExceptHandler(statement),
         SyntaxStatement::Unsafe(statement) => SyntaxStatement::Unsafe(statement),
     }
-}
-
-fn normalize_empty_option_string(value: Option<String>) -> Option<String> {
-    value.filter(|value| !value.is_empty())
 }
 
 fn normalize_named_block(mut statement: NamedBlockStatement) -> NamedBlockStatement {
@@ -189,7 +176,6 @@ fn normalize_method_call_statement(mut statement: MethodCallStatement) -> Method
 }
 
 fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement {
-    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -207,7 +193,6 @@ fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement
 }
 
 fn normalize_yield_statement(mut statement: YieldStatement) -> YieldStatement {
-    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -839,7 +824,7 @@ fn parse_leaves_python_files_without_extension_analysis() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("unsafe"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("value")),
@@ -1058,7 +1043,7 @@ fn parse_accepts_generic_python_headers_in_typepython_source() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("first"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("value")),
@@ -1158,7 +1143,7 @@ fn parse_accepts_generic_python_headers_with_constraints_and_defaults() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("first"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("value")),
@@ -2629,7 +2614,7 @@ fn parse_extracts_direct_return_literals() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::from("str")),
+                value_type_expr: TypeExpr::parse("str"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -2690,7 +2675,7 @@ fn parse_extracts_direct_bool_and_none_return_literals() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("truthy"),
                 owner_type_name: None,
-                value_type: Some(String::from("bool")),
+                value_type_expr: TypeExpr::parse("bool"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -2732,7 +2717,7 @@ fn parse_extracts_direct_bool_and_none_return_literals() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("missing"),
                 owner_type_name: None,
-                value_type: Some(String::from("None")),
+                value_type_expr: TypeExpr::parse("None"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -2791,7 +2776,7 @@ fn parse_extracts_direct_return_call_callee() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
                 value_name: None,
@@ -2859,7 +2844,7 @@ fn parse_extracts_direct_return_member_access() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -3265,7 +3250,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("parse"),
                 owner_type_name: Some(String::from("Parser")),
-                value_type: Some(String::from("int")),
+                value_type_expr: TypeExpr::parse("int"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -3861,7 +3846,7 @@ fn parse_allows_async_constructs_in_python_passthrough_source() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("fetch"),
                 owner_type_name: None,
-                value_type: Some(String::from("int")),
+                value_type_expr: TypeExpr::parse("int"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -3922,7 +3907,7 @@ fn parse_retains_direct_await_in_python_passthrough_source() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("fetch"),
                 owner_type_name: None,
-                value_type: Some(String::from("int")),
+                value_type_expr: TypeExpr::parse("int"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -3964,7 +3949,7 @@ fn parse_retains_direct_await_in_python_passthrough_source() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: true,
                 value_callee: Some(String::from("fetch")),
                 value_name: None,
@@ -4025,7 +4010,7 @@ fn parse_retains_direct_yield_in_python_passthrough_source() {
             SyntaxStatement::Yield(YieldStatement {
                 owner_name: String::from("produce"),
                 owner_type_name: None,
-                value_type: Some(String::from("int")),
+                value_type_expr: TypeExpr::parse("int"),
                 value_callee: None,
                 value_name: None,
                 value_member_owner_name: None,
@@ -4067,7 +4052,7 @@ fn parse_retains_direct_yield_in_python_passthrough_source() {
             SyntaxStatement::Yield(YieldStatement {
                 owner_name: String::from("relay"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 value_callee: None,
                 value_name: Some(String::from("values")),
                 value_member_owner_name: None,
@@ -4241,7 +4226,7 @@ fn parse_retains_simple_for_loop_metadata() {
                 target_names: Vec::new(),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                iter_type: Some(String::new()),
+                iter_type_expr: None,
                 iter_is_awaited: false,
                 iter_callee: None,
                 iter_name: Some(String::from("values")),
@@ -4256,7 +4241,7 @@ fn parse_retains_simple_for_loop_metadata() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("item")),
@@ -4328,7 +4313,7 @@ fn parse_retains_tuple_for_loop_metadata() {
                 target_names: vec![String::from("a"), String::from("b")],
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                iter_type: Some(String::new()),
+                iter_type_expr: None,
                 iter_is_awaited: false,
                 iter_callee: None,
                 iter_name: Some(String::from("pairs")),
@@ -4343,7 +4328,7 @@ fn parse_retains_tuple_for_loop_metadata() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("b")),
@@ -4414,7 +4399,7 @@ fn parse_retains_simple_with_metadata() {
                 target_name: Some(String::from("value")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                context_type: Some(String::new()),
+                context_type_expr: None,
                 context_is_awaited: false,
                 context_callee: None,
                 context_name: Some(String::from("manager")),
@@ -4429,7 +4414,7 @@ fn parse_retains_simple_with_metadata() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("value")),
@@ -4500,7 +4485,7 @@ fn parse_retains_with_item_without_target() {
                 target_name: None,
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                context_type: Some(String::new()),
+                context_type_expr: None,
                 context_is_awaited: false,
                 context_callee: None,
                 context_name: Some(String::from("manager")),
@@ -4568,7 +4553,7 @@ fn parse_retains_multiple_with_items() {
                 target_name: Some(String::from("x")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                context_type: Some(String::new()),
+                context_type_expr: None,
                 context_is_awaited: false,
                 context_callee: None,
                 context_name: Some(String::from("a")),
@@ -4584,7 +4569,7 @@ fn parse_retains_multiple_with_items() {
                 target_name: Some(String::from("y")),
                 owner_name: Some(String::from("build")),
                 owner_type_name: None,
-                context_type: Some(String::new()),
+                context_type_expr: None,
                 context_is_awaited: false,
                 context_callee: None,
                 context_name: Some(String::from("b")),
@@ -4599,7 +4584,7 @@ fn parse_retains_multiple_with_items() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("y")),
@@ -4678,7 +4663,7 @@ fn parse_retains_except_handler_binding() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::new()),
+                value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("e")),
@@ -4777,7 +4762,7 @@ fn parse_retains_function_signature_shapes() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("build"),
                 owner_type_name: None,
-                value_type: Some(String::from("str")),
+                value_type_expr: TypeExpr::parse("str"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -5102,7 +5087,7 @@ fn parse_marks_method_kinds_from_decorators() {
             SyntaxStatement::Return(ReturnStatement {
                 owner_name: String::from("name"),
                 owner_type_name: Some(String::from("Box")),
-                value_type: Some(String::from("str")),
+                value_type_expr: TypeExpr::parse("str"),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -5150,7 +5135,7 @@ fn parse_retains_match_statement_metadata() {
         vec![SyntaxStatement::Match(MatchStatement {
             owner_name: None,
             owner_type_name: None,
-            subject_type: Some(String::new()),
+            subject_type_expr: None,
             subject_is_awaited: false,
             subject_callee: None,
             subject_name: Some(String::from("value")),

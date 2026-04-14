@@ -261,7 +261,7 @@ pub struct MethodCallStatement {
 pub struct ReturnStatement {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
-    pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
     pub value_name: Option<String>,
@@ -294,7 +294,7 @@ pub struct ReturnStatement {
 pub struct YieldStatement {
     pub owner_name: String,
     pub owner_type_name: Option<String>,
-    pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub value_callee: Option<String>,
     pub value_name: Option<String>,
     pub value_member_owner_name: Option<String>,
@@ -379,7 +379,7 @@ pub enum GuardCondition {
 pub struct MatchStatement {
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
-    pub subject_type: Option<String>,
+    pub subject_type_expr: Option<TypeExpr>,
     pub subject_is_awaited: bool,
     pub subject_callee: Option<String>,
     pub subject_name: Option<String>,
@@ -417,7 +417,7 @@ pub struct ForStatement {
     pub target_names: Vec<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
-    pub iter_type: Option<String>,
+    pub iter_type_expr: Option<TypeExpr>,
     pub iter_is_awaited: bool,
     pub iter_callee: Option<String>,
     pub iter_name: Option<String>,
@@ -436,7 +436,7 @@ pub struct WithStatement {
     pub target_name: Option<String>,
     pub owner_name: Option<String>,
     pub owner_type_name: Option<String>,
-    pub context_type: Option<String>,
+    pub context_type_expr: Option<TypeExpr>,
     pub context_is_awaited: bool,
     pub context_callee: Option<String>,
     pub context_name: Option<String>,
@@ -481,6 +481,41 @@ pub struct ClassMember {
     pub is_final: bool,
     pub is_class_var: bool,
     pub line: usize,
+}
+
+impl ReturnStatement {
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
+    }
+}
+
+impl YieldStatement {
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
+    }
+}
+
+impl MatchStatement {
+    #[must_use]
+    pub fn rendered_subject_type(&self) -> Option<String> {
+        self.subject_type_expr.as_ref().map(TypeExpr::render)
+    }
+}
+
+impl ForStatement {
+    #[must_use]
+    pub fn rendered_iter_type(&self) -> Option<String> {
+        self.iter_type_expr.as_ref().map(TypeExpr::render)
+    }
+}
+
+impl WithStatement {
+    #[must_use]
+    pub fn rendered_context_type(&self) -> Option<String> {
+        self.context_type_expr.as_ref().map(TypeExpr::render)
+    }
 }
 
 impl ClassMember {

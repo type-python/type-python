@@ -1270,7 +1270,7 @@ fn bind_collects_yield_sites_from_syntax_tree() {
         statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
             owner_name: String::from("produce"),
             owner_type_name: None,
-            value_type: Some(String::from("int")),
+            value_type_expr: typepython_syntax::TypeExpr::parse("int"),
             value_callee: None,
             value_name: None,
             value_member_owner_name: None,
@@ -1378,7 +1378,7 @@ fn bind_collects_for_sites_from_syntax_tree() {
             target_names: Vec::new(),
             owner_name: Some(String::from("build")),
             owner_type_name: None,
-            iter_type: Some(String::new()),
+            iter_type_expr: None,
             iter_is_awaited: false,
             iter_callee: None,
             iter_name: Some(String::from("values")),
@@ -1456,7 +1456,7 @@ fn bind_collects_match_sites_from_syntax_tree() {
         statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
             owner_name: Some(String::from("build")),
             owner_type_name: None,
-            subject_type: Some(String::new()),
+            subject_type_expr: None,
             subject_is_awaited: false,
             subject_callee: None,
             subject_name: Some(String::from("expr")),
@@ -1635,7 +1635,7 @@ fn bind_collects_with_sites_from_syntax_tree() {
             target_name: Some(String::from("value")),
             owner_name: Some(String::from("build")),
             owner_type_name: None,
-            context_type: Some(String::new()),
+            context_type_expr: None,
             context_is_awaited: false,
             context_callee: None,
             context_name: Some(String::from("manager")),
@@ -3377,7 +3377,7 @@ fn bind_collects_match_literal_and_unsupported_patterns() {
         statements: vec![SyntaxStatement::Match(typepython_syntax::MatchStatement {
             owner_name: Some(String::from("route")),
             owner_type_name: None,
-            subject_type: None,
+            subject_type_expr: None,
             subject_is_awaited: false,
             subject_callee: None,
             subject_name: Some(String::from("code")),
@@ -3468,7 +3468,7 @@ fn bind_collects_yield_from_sites() {
         statements: vec![SyntaxStatement::Yield(typepython_syntax::YieldStatement {
             owner_name: String::from("delegate"),
             owner_type_name: None,
-            value_type: Some(String::from("list[int]")),
+            value_type_expr: typepython_syntax::TypeExpr::parse("list[int]"),
             value_callee: None,
             value_name: Some(String::from("items")),
             value_member_owner_name: None,
