@@ -1,5 +1,74 @@
 use super::*;
 
+struct DirectCallArgumentSurface {
+    arg_count: usize,
+    arg_types: Vec<String>,
+    arg_values: Vec<DirectExprMetadata>,
+    starred_arg_types: Vec<String>,
+    starred_arg_values: Vec<DirectExprMetadata>,
+    keyword_names: Vec<String>,
+    keyword_arg_types: Vec<String>,
+    keyword_arg_values: Vec<DirectExprMetadata>,
+    keyword_expansion_types: Vec<String>,
+    keyword_expansion_values: Vec<DirectExprMetadata>,
+}
+
+fn rendered_value_type_or_empty(metadata: &DirectExprMetadata) -> String {
+    metadata.rendered_value_type().unwrap_or_default()
+}
+
+fn collect_direct_call_argument_surface(
+    source: &str,
+    arguments: &ruff_python_ast::Arguments,
+) -> DirectCallArgumentSurface {
+    let arg_values = arguments
+        .args
+        .iter()
+        .filter(|expr| !matches!(expr, Expr::Starred(_)))
+        .map(|expr| extract_direct_expr_metadata(source, expr))
+        .collect::<Vec<_>>();
+    let starred_arg_values = arguments
+        .args
+        .iter()
+        .filter_map(|expr| match expr {
+            Expr::Starred(starred) => Some(extract_direct_expr_metadata(source, &starred.value)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let keyword_arg_values = arguments
+        .keywords
+        .iter()
+        .filter(|keyword| keyword.arg.is_some())
+        .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
+        .collect::<Vec<_>>();
+    let keyword_expansion_values = arguments
+        .keywords
+        .iter()
+        .filter(|keyword| keyword.arg.is_none())
+        .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
+        .collect::<Vec<_>>();
+
+    DirectCallArgumentSurface {
+        arg_count: arg_values.len(),
+        arg_types: arg_values.iter().map(rendered_value_type_or_empty).collect(),
+        arg_values,
+        starred_arg_types: starred_arg_values.iter().map(rendered_value_type_or_empty).collect(),
+        starred_arg_values,
+        keyword_names: arguments
+            .keywords
+            .iter()
+            .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
+            .collect(),
+        keyword_arg_types: keyword_arg_values.iter().map(rendered_value_type_or_empty).collect(),
+        keyword_arg_values,
+        keyword_expansion_types: keyword_expansion_values
+            .iter()
+            .map(rendered_value_type_or_empty)
+            .collect(),
+        keyword_expansion_values,
+    }
+}
+
 pub(in super::super) fn extract_call_statement(
     source: &str,
     expr: &Expr,
@@ -11,83 +80,20 @@ pub(in super::super) fn extract_call_statement(
     let Expr::Name(name) = call.func.as_ref() else {
         return None;
     };
+    let args = collect_direct_call_argument_surface(source, &call.arguments);
 
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
-        arg_count: call
-            .arguments
-            .args
-            .iter()
-            .filter(|expr| !matches!(expr, Expr::Starred(_)))
-            .count(),
-        arg_types: call
-            .arguments
-            .args
-            .iter()
-            .filter(|expr| !matches!(expr, Expr::Starred(_)))
-            .map(infer_literal_arg_type)
-            .collect(),
-        arg_values: call
-            .arguments
-            .args
-            .iter()
-            .filter(|expr| !matches!(expr, Expr::Starred(_)))
-            .map(|expr| extract_direct_expr_metadata(source, expr))
-            .collect(),
-        starred_arg_types: call
-            .arguments
-            .args
-            .iter()
-            .filter_map(|expr| match expr {
-                Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
-                _ => None,
-            })
-            .collect(),
-        starred_arg_values: call
-            .arguments
-            .args
-            .iter()
-            .filter_map(|expr| match expr {
-                Expr::Starred(starred) => {
-                    Some(extract_direct_expr_metadata(source, &starred.value))
-                }
-                _ => None,
-            })
-            .collect(),
-        keyword_names: call
-            .arguments
-            .keywords
-            .iter()
-            .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
-            .collect(),
-        keyword_arg_types: call
-            .arguments
-            .keywords
-            .iter()
-            .filter(|keyword| keyword.arg.is_some())
-            .map(|keyword| infer_literal_arg_type(&keyword.value))
-            .collect(),
-        keyword_arg_values: call
-            .arguments
-            .keywords
-            .iter()
-            .filter(|keyword| keyword.arg.is_some())
-            .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-            .collect(),
-        keyword_expansion_types: call
-            .arguments
-            .keywords
-            .iter()
-            .filter(|keyword| keyword.arg.is_none())
-            .map(|keyword| infer_literal_arg_type(&keyword.value))
-            .collect(),
-        keyword_expansion_values: call
-            .arguments
-            .keywords
-            .iter()
-            .filter(|keyword| keyword.arg.is_none())
-            .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-            .collect(),
+        arg_count: args.arg_count,
+        arg_types: args.arg_types,
+        arg_values: args.arg_values,
+        starred_arg_types: args.starred_arg_types,
+        starred_arg_values: args.starred_arg_values,
+        keyword_names: args.keyword_names,
+        keyword_arg_types: args.keyword_arg_types,
+        keyword_arg_values: args.keyword_arg_values,
+        keyword_expansion_types: args.keyword_expansion_types,
+        keyword_expansion_values: args.keyword_expansion_values,
         line,
     }))
 }
@@ -115,172 +121,48 @@ pub(in super::super) fn extract_method_call_statement(
     };
 
     match attribute.value.as_ref() {
-        Expr::Name(name) => Some(SyntaxStatement::MethodCall(MethodCallStatement {
-            current_owner_name: current_owner_name.map(str::to_owned),
-            current_owner_type_name: current_owner_type_name.map(str::to_owned),
-            owner_name: name.id.as_str().to_owned(),
-            method: attribute.attr.as_str().to_owned(),
-            through_instance: false,
-            arg_count: call
-                .arguments
-                .args
-                .iter()
-                .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                .count(),
-            arg_types: call
-                .arguments
-                .args
-                .iter()
-                .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                .map(infer_literal_arg_type)
-                .collect(),
-            arg_values: call
-                .arguments
-                .args
-                .iter()
-                .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                .map(|expr| extract_direct_expr_metadata(source, expr))
-                .collect(),
-            starred_arg_types: call
-                .arguments
-                .args
-                .iter()
-                .filter_map(|expr| match expr {
-                    Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
-                    _ => None,
-                })
-                .collect(),
-            starred_arg_values: call
-                .arguments
-                .args
-                .iter()
-                .filter_map(|expr| match expr {
-                    Expr::Starred(starred) => {
-                        Some(extract_direct_expr_metadata(source, &starred.value))
-                    }
-                    _ => None,
-                })
-                .collect(),
-            keyword_names: call
-                .arguments
-                .keywords
-                .iter()
-                .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
-                .collect(),
-            keyword_arg_types: call
-                .arguments
-                .keywords
-                .iter()
-                .filter(|keyword| keyword.arg.is_some())
-                .map(|keyword| infer_literal_arg_type(&keyword.value))
-                .collect(),
-            keyword_arg_values: call
-                .arguments
-                .keywords
-                .iter()
-                .filter(|keyword| keyword.arg.is_some())
-                .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-                .collect(),
-            keyword_expansion_types: call
-                .arguments
-                .keywords
-                .iter()
-                .filter(|keyword| keyword.arg.is_none())
-                .map(|keyword| infer_literal_arg_type(&keyword.value))
-                .collect(),
-            keyword_expansion_values: call
-                .arguments
-                .keywords
-                .iter()
-                .filter(|keyword| keyword.arg.is_none())
-                .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-                .collect(),
-            line,
-        })),
+        Expr::Name(name) => {
+            let args = collect_direct_call_argument_surface(source, &call.arguments);
+            Some(SyntaxStatement::MethodCall(MethodCallStatement {
+                current_owner_name: current_owner_name.map(str::to_owned),
+                current_owner_type_name: current_owner_type_name.map(str::to_owned),
+                owner_name: name.id.as_str().to_owned(),
+                method: attribute.attr.as_str().to_owned(),
+                through_instance: false,
+                arg_count: args.arg_count,
+                arg_types: args.arg_types,
+                arg_values: args.arg_values,
+                starred_arg_types: args.starred_arg_types,
+                starred_arg_values: args.starred_arg_values,
+                keyword_names: args.keyword_names,
+                keyword_arg_types: args.keyword_arg_types,
+                keyword_arg_values: args.keyword_arg_values,
+                keyword_expansion_types: args.keyword_expansion_types,
+                keyword_expansion_values: args.keyword_expansion_values,
+                line,
+            }))
+        }
         Expr::Call(inner_call) => {
             let Expr::Name(name) = inner_call.func.as_ref() else {
                 return None;
             };
+            let args = collect_direct_call_argument_surface(source, &call.arguments);
             Some(SyntaxStatement::MethodCall(MethodCallStatement {
                 current_owner_name: current_owner_name.map(str::to_owned),
                 current_owner_type_name: current_owner_type_name.map(str::to_owned),
                 owner_name: name.id.as_str().to_owned(),
                 method: attribute.attr.as_str().to_owned(),
                 through_instance: true,
-                arg_count: call
-                    .arguments
-                    .args
-                    .iter()
-                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                    .count(),
-                arg_types: call
-                    .arguments
-                    .args
-                    .iter()
-                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                    .map(infer_literal_arg_type)
-                    .collect(),
-                arg_values: call
-                    .arguments
-                    .args
-                    .iter()
-                    .filter(|expr| !matches!(expr, Expr::Starred(_)))
-                    .map(|expr| extract_direct_expr_metadata(source, expr))
-                    .collect(),
-                starred_arg_types: call
-                    .arguments
-                    .args
-                    .iter()
-                    .filter_map(|expr| match expr {
-                        Expr::Starred(starred) => Some(infer_literal_arg_type(&starred.value)),
-                        _ => None,
-                    })
-                    .collect(),
-                starred_arg_values: call
-                    .arguments
-                    .args
-                    .iter()
-                    .filter_map(|expr| match expr {
-                        Expr::Starred(starred) => {
-                            Some(extract_direct_expr_metadata(source, &starred.value))
-                        }
-                        _ => None,
-                    })
-                    .collect(),
-                keyword_names: call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
-                    .collect(),
-                keyword_arg_types: call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .filter(|keyword| keyword.arg.is_some())
-                    .map(|keyword| infer_literal_arg_type(&keyword.value))
-                    .collect(),
-                keyword_arg_values: call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .filter(|keyword| keyword.arg.is_some())
-                    .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-                    .collect(),
-                keyword_expansion_types: call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .filter(|keyword| keyword.arg.is_none())
-                    .map(|keyword| infer_literal_arg_type(&keyword.value))
-                    .collect(),
-                keyword_expansion_values: call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .filter(|keyword| keyword.arg.is_none())
-                    .map(|keyword| extract_direct_expr_metadata(source, &keyword.value))
-                    .collect(),
+                arg_count: args.arg_count,
+                arg_types: args.arg_types,
+                arg_values: args.arg_values,
+                starred_arg_types: args.starred_arg_types,
+                starred_arg_values: args.starred_arg_values,
+                keyword_names: args.keyword_names,
+                keyword_arg_types: args.keyword_arg_types,
+                keyword_arg_values: args.keyword_arg_values,
+                keyword_expansion_types: args.keyword_expansion_types,
+                keyword_expansion_values: args.keyword_expansion_values,
                 line,
             }))
         }

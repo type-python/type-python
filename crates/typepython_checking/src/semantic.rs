@@ -482,9 +482,7 @@ pub(super) fn call_signature_params_are_applicable(
                         return false;
                     }
                     let param_ty = param_types[index].as_ref();
-                    let rendered_field_type = field.rendered_value_type();
-                    let field_ty = (!rendered_field_type.is_empty())
-                        .then(|| lower_type_text_or_name(&rendered_field_type));
+                    let field_ty = field.semantic_value_type();
                     return match (param_ty, field_ty.as_ref()) {
                         (Some(param_ty), Some(field_ty)) => {
                             semantic_type_matches(node, nodes, param_ty, field_ty)
@@ -495,9 +493,7 @@ pub(super) fn call_signature_params_are_applicable(
                 let Some(param_ty) = keyword_variadic_type.as_ref() else {
                     return false;
                 };
-                let rendered_field_type = field.rendered_value_type();
-                let field_ty = (!rendered_field_type.is_empty())
-                    .then(|| lower_type_text_or_name(&rendered_field_type));
+                let field_ty = field.semantic_value_type();
                 field_ty
                     .as_ref()
                     .is_none_or(|field_ty| semantic_type_matches(node, nodes, param_ty, field_ty))

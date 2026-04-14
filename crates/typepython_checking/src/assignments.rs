@@ -452,6 +452,13 @@ impl TypedDictFieldShape {
             .map(typepython_syntax::TypeExpr::render)
             .unwrap_or_else(|| self.value_type.clone())
     }
+
+    #[must_use]
+    pub(super) fn semantic_value_type(&self) -> Option<SemanticType> {
+        self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
+            (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
+        })
+    }
 }
 
 impl TypedDictExtraItemsShape {
@@ -461,6 +468,13 @@ impl TypedDictExtraItemsShape {
             .as_ref()
             .map(typepython_syntax::TypeExpr::render)
             .unwrap_or_else(|| self.value_type.clone())
+    }
+
+    #[must_use]
+    pub(super) fn semantic_value_type(&self) -> Option<SemanticType> {
+        self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
+            (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
+        })
     }
 }
 
@@ -516,6 +530,13 @@ impl<'a> TypedDictFieldShapeRef<'a> {
         match self {
             Self::Known(field) => field.rendered_value_type(),
             Self::Extra(field) => field.rendered_value_type(),
+        }
+    }
+
+    pub(super) fn semantic_value_type(&self) -> Option<SemanticType> {
+        match self {
+            Self::Known(field) => field.semantic_value_type(),
+            Self::Extra(field) => field.semantic_value_type(),
         }
     }
 
@@ -654,7 +675,9 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
                 };
 
                 let expected_type = lower_type_text_or_name(target_field.value_type());
-                let actual_type = lower_type_text_or_name(&field.rendered_value_type());
+                let Some(actual_type) = field.semantic_value_type() else {
+                    continue;
+                };
                 if !semantic_type_matches(node, nodes, &expected_type, &actual_type) {
                     diagnostics.push(typed_dict_literal_diagnostic(
                         node,
@@ -677,12 +700,13 @@ pub(super) fn typed_dict_literal_entry_diagnostics(
 
             if let Some(extra_items) = &expansion_shape.extra_items
                 && target_shape.extra_items.as_ref().is_none_or(|target_extra| {
-                    !semantic_type_matches(
-                        node,
-                        nodes,
-                        &lower_type_text_or_name(&target_extra.rendered_value_type()),
-                        &lower_type_text_or_name(&extra_items.rendered_value_type()),
-                    )
+                    let Some(target_extra_type) = target_extra.semantic_value_type() else {
+                        return true;
+                    };
+                    let Some(extra_items_type) = extra_items.semantic_value_type() else {
+                        return true;
+                    };
+                    !semantic_type_matches(node, nodes, &target_extra_type, &extra_items_type)
                 })
             {
                 diagnostics.push(typed_dict_literal_diagnostic(
@@ -961,19 +985,20 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
             match site.kind {
                 typepython_syntax::TypedDictMutationKind::Assignment => {
                     let value = site.value.as_ref()?;
+                    let rendered_expected = field.rendered_value_type();
+                    let expected = field.semantic_value_type()?;
                     let contextual = resolve_contextual_call_arg_semantic_type_with_context(
                         context,
                         node,
                         nodes,
                         site.line,
                         value,
-                        Some(&field.rendered_value_type()),
+                        Some(&rendered_expected),
                     );
                     if let Some(mut result) = contextual {
                         if let Some(diagnostic) = result.diagnostics.pop() {
                             return Some(diagnostic);
                         }
-                        let expected = lower_type_text_or_name(&field.rendered_value_type());
                         let actual = result.actual_type;
                         if !semantic_type_matches(node, nodes, &expected, &actual) {
                             return Some(
@@ -1010,7 +1035,6 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.line,
                         value,
                     )?;
-                    let expected = lower_type_text_or_name(&field.rendered_value_type());
                     if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(
@@ -1037,6 +1061,7 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                 }
                 typepython_syntax::TypedDictMutationKind::AugmentedAssignment => {
                     let value = site.value.as_ref()?;
+                    let rendered_expected = field.rendered_value_type();
                     let actual = resolve_augmented_assignment_result_semantic_type(
                         node,
                         nodes,
@@ -1045,10 +1070,10 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
                         site.owner_type_name.as_deref(),
                         site.line,
                         site.operator.as_deref(),
-                        &field.rendered_value_type(),
+                        &rendered_expected,
                         value,
                     )?;
-                    let expected = lower_type_text_or_name(&field.rendered_value_type());
+                    let expected = field.semantic_value_type()?;
                     if !semantic_type_matches(node, nodes, &expected, &actual) {
                         return Some(
                             Diagnostic::error(

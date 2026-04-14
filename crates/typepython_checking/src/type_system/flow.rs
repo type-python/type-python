@@ -679,35 +679,14 @@ pub(super) fn resolve_assignment_site_semantic_type(
     if let Some(index) = assignment.destructuring_index {
         let metadata = assignment.value_metadata()?;
         let tuple_elements = unpacked_fixed_tuple_semantic_elements(
-            &resolve_direct_expression_semantic_type(
+            &resolve_direct_expression_semantic_type_from_metadata(
                 node,
                 nodes,
                 signature,
-                Some(assignment.name.as_str()),
                 assignment.owner_name.as_deref(),
                 assignment.owner_type_name.as_deref(),
                 assignment.line,
-                metadata.rendered_value_type().as_deref(),
-                metadata.is_awaited,
-                metadata.value_callee.as_deref(),
-                metadata.value_name.as_deref(),
-                metadata.value_member_owner_name.as_deref(),
-                metadata.value_member_name.as_deref(),
-                metadata.value_member_through_instance,
-                metadata.value_method_owner_name.as_deref(),
-                metadata.value_method_name.as_deref(),
-                metadata.value_method_through_instance,
-                metadata.value_subscript_target.as_deref(),
-                metadata.value_subscript_string_key.as_deref(),
-                metadata.value_subscript_index.as_deref(),
-                metadata.value_if_true.as_deref(),
-                metadata.value_if_false.as_deref(),
-                metadata.value_if_guard.as_ref().map(guard_to_site).as_ref(),
-                metadata.value_bool_left.as_deref(),
-                metadata.value_bool_right.as_deref(),
-                metadata.value_binop_left.as_deref(),
-                metadata.value_binop_right.as_deref(),
-                metadata.value_binop_operator.as_deref(),
+                &metadata,
             )?,
         )?;
         let target_names = assignment.destructuring_target_names.as_ref()?;
@@ -1073,6 +1052,24 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
             Some(local_bindings),
         );
     }
+    if let Some(collection_type) = resolve_direct_collection_literal_semantic_type_from_metadata(
+        node,
+        nodes,
+        signature,
+        current_owner_name,
+        current_owner_type_name,
+        current_line,
+        metadata,
+    ) {
+        return Some(collection_type);
+    }
+    if let Some(value_type) = direct_metadata_value_semantic_type(metadata) {
+        return if metadata.is_awaited {
+            unwrap_awaitable_semantic_type(&value_type)
+        } else {
+            Some(value_type)
+        };
+    }
     if let Some(value_name) = metadata.value_name.as_deref()
         && let Some(bound_type) = local_bindings.get(value_name)
     {
@@ -1237,7 +1234,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata_with_binding
         current_owner_name,
         current_owner_type_name,
         current_line,
-            metadata.rendered_value_type().as_deref(),
+        None,
         metadata.is_awaited,
         metadata.value_callee.as_deref(),
         metadata.value_name.as_deref(),

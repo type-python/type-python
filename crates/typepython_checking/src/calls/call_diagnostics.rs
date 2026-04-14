@@ -1051,12 +1051,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
             if let Some(shape) = unpack_shape
                 && let Some(field) = shape.fields.get(keyword.as_str())
             {
+                let field_type = field.semantic_value_type();
                 if !semantic_type_missing(arg_ty)
-                    && !field.rendered_value_type().is_empty()
+                    && field_type.is_some()
                     && !semantic_type_matches(
                         node,
                         nodes,
-                        &lower_type_text_or_name(&field.rendered_value_type()),
+                        field_type.as_ref().expect("checked some above"),
                         arg_ty,
                     )
                 {
@@ -1143,13 +1144,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 for (key, field) in &shape.fields {
                     if let Some(index) = param_names.iter().position(|param| param == key) {
                         let param_ty = &param_types[index];
-                        if !field.rendered_value_type().is_empty()
+                        if let Some(field_type) = field.semantic_value_type()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&field.rendered_value_type()),
+                                &field_type,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1169,13 +1170,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                     } else if let Some(param_ty) =
                         unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                     {
-                        if !field.rendered_value_type().is_empty()
+                        if let Some(field_type) = field.semantic_value_type()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&field.rendered_value_type()),
+                                &field_type,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);
@@ -1197,13 +1198,13 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                 if let Some(extra_items) = &shape.extra_items {
                     if let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
                     {
-                        if !extra_items.rendered_value_type().is_empty()
+                        if let Some(extra_items_type) = extra_items.semantic_value_type()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
                                 nodes,
                                 param_ty,
-                                &lower_type_text_or_name(&extra_items.rendered_value_type()),
+                                &extra_items_type,
                             )
                         {
                             let param_text = diagnostic_type_text(param_ty);

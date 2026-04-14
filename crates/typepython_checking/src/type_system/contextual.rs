@@ -30,6 +30,13 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     ) {
         return Some(collection_type);
     }
+    if let Some(value_type) = direct_metadata_value_semantic_type(metadata) {
+        return if metadata.is_awaited {
+            unwrap_awaitable_semantic_type(&value_type)
+        } else {
+            Some(value_type)
+        };
+    }
     let value_if_guard = metadata.value_if_guard.as_ref().map(guard_to_site);
     resolve_direct_expression_semantic_type(
         node,
@@ -39,7 +46,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
         current_owner_name,
         current_owner_type_name,
         current_line,
-        metadata.rendered_value_type().as_deref(),
+        None,
         metadata.is_awaited,
         metadata.value_callee.as_deref(),
         metadata.value_name.as_deref(),
@@ -63,7 +70,17 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
     )
 }
 
-fn resolve_direct_collection_literal_semantic_type_from_metadata(
+pub(super) fn direct_metadata_value_semantic_type(
+    metadata: &typepython_syntax::DirectExprMetadata,
+) -> Option<SemanticType> {
+    metadata
+        .value_type_expr
+        .clone()
+        .map(lower_type_expr)
+        .or_else(|| metadata.value_type.as_deref().filter(|value| !value.is_empty()).map(lower_type_text_or_name))
+}
+
+pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
     signature: Option<&str>,
