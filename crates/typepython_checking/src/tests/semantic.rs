@@ -622,7 +622,6 @@ fn semantic_metadata_resolution_reuses_expression_semantic_path() {
     let node = &graph.nodes[0];
     let metadata = typepython_syntax::DirectExprMetadata {
         value_type_expr: None,
-        value_type: None,
         is_awaited: true,
         value_callee: Some(String::from("fetch")),
         value_name: None,
@@ -697,8 +696,7 @@ fn semantic_contextual_lambda_resolution_builds_callable_types() {
             keyword_variadic: false,
         }],
         body: Box::new(typepython_syntax::DirectExprMetadata {
-            value_type_expr: None,
-            value_type: Some(String::from("str")),
+            value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("str"))),
             is_awaited: false,
             value_callee: None,
             value_name: None,
@@ -769,7 +767,6 @@ fn call_diagnostics_resolve_argument_types_through_semantic_path() {
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
             value_type_expr: None,
-            value_type: None,
             is_awaited: true,
             value_callee: Some(String::from("fetch")),
             value_name: None,

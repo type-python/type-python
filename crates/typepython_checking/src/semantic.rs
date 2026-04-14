@@ -1108,7 +1108,6 @@ pub(super) fn direct_expr_metadata_from_return_site(
     return_site: &typepython_binding::ReturnSite,
 ) -> typepython_syntax::DirectExprMetadata {
     return_site.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
-        value_type: None,
         value_type_expr: None,
         is_awaited: false,
         value_callee: None,
@@ -1143,7 +1142,6 @@ pub(super) fn direct_expr_metadata_from_yield_site(
     yield_site: &typepython_binding::YieldSite,
 ) -> typepython_syntax::DirectExprMetadata {
     yield_site.value_metadata().unwrap_or(typepython_syntax::DirectExprMetadata {
-        value_type: None,
         value_type_expr: None,
         is_awaited: false,
         value_callee: None,

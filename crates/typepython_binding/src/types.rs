@@ -525,8 +525,10 @@ impl ReturnSite {
     pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.value_type.clone(),
+                value_type_expr: self
+                    .value_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: self.is_awaited,
                 value_callee: self.value_callee.clone(),
                 value_name: self.value_name.clone(),
@@ -563,8 +565,10 @@ impl YieldSite {
     pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.value_type.clone(),
+                value_type_expr: self
+                    .value_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: false,
                 value_callee: self.value_callee.clone(),
                 value_name: self.value_name.clone(),
@@ -601,8 +605,10 @@ impl MatchSite {
     pub fn subject_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.subject.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.subject_type.clone(),
+                value_type_expr: self
+                    .subject_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: self.subject_is_awaited,
                 value_callee: self.subject_callee.clone(),
                 value_name: self.subject_name.clone(),
@@ -639,8 +645,10 @@ impl ForSite {
     pub fn iter_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.iter.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.iter_type.clone(),
+                value_type_expr: self
+                    .iter_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: self.iter_is_awaited,
                 value_callee: self.iter_callee.clone(),
                 value_name: self.iter_name.clone(),
@@ -677,8 +685,10 @@ impl WithSite {
     pub fn context_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.context.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.context_type.clone(),
+                value_type_expr: self
+                    .context_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: self.context_is_awaited,
                 value_callee: self.context_callee.clone(),
                 value_name: self.context_name.clone(),
@@ -720,8 +730,10 @@ impl AssignmentSite {
     pub fn value_metadata(&self) -> Option<typepython_syntax::DirectExprMetadata> {
         self.value.clone().or_else(|| {
             direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-                value_type_expr: None,
-                value_type: self.value_type.clone(),
+                value_type_expr: self
+                    .value_type
+                    .as_deref()
+                    .and_then(typepython_syntax::TypeExpr::parse),
                 is_awaited: self.is_awaited,
                 value_callee: self.value_callee.clone(),
                 value_name: self.value_name.clone(),

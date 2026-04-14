@@ -178,7 +178,6 @@ fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
         callee: String::from("wrap"),
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
-            value_type: Some(String::from("str")),
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
                 head: String::from("list"),
                 args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],

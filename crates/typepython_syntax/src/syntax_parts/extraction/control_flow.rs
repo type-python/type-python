@@ -887,7 +887,7 @@ impl<'a> NamedExprAssignmentCollector<'a> {
             destructuring_target_names: None,
             annotation: None,
             annotation_expr: None,
-            value_type: value.value_type,
+            value_type: value.rendered_value_type(),
             value_type_expr: value.value_type_expr,
             is_awaited: value.is_awaited,
             value_callee: value.value_callee,
@@ -967,7 +967,6 @@ pub(in super::super) fn extract_function_body_assignment_statement(
     let value =
         assign.value.as_deref().map(|expr| extract_direct_expr_metadata(source, expr)).unwrap_or(
             DirectExprMetadata {
-                value_type: None,
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1002,7 +1001,7 @@ pub(in super::super) fn extract_function_body_assignment_statement(
         destructuring_target_names: None,
         annotation: slice_range(source, assign.annotation.range()).map(str::to_owned),
         annotation_expr: slice_range(source, assign.annotation.range()).and_then(TypeExpr::parse),
-        value_type: value.value_type,
+        value_type: value.rendered_value_type(),
         value_type_expr: value.value_type_expr,
         is_awaited: value.is_awaited,
         value_callee: value.value_callee,
@@ -1062,7 +1061,7 @@ pub(in super::super) fn extract_function_body_bare_assignment_statement(
                 destructuring_target_names,
                 annotation: None,
                 annotation_expr: None,
-                value_type: value.value_type,
+                value_type: value.rendered_value_type(),
                 value_type_expr: value.value_type_expr,
                 is_awaited: value.is_awaited,
                 value_callee: value.value_callee,
@@ -1183,7 +1182,6 @@ pub(in super::super) fn extract_yield_statement(
                 .as_deref()
                 .map(|expr| extract_direct_expr_metadata(source, expr))
                 .unwrap_or(DirectExprMetadata {
-                    value_type: None,
                     value_type_expr: None,
                     is_awaited: false,
                     value_callee: None,
@@ -1223,7 +1221,7 @@ pub(in super::super) fn extract_yield_statement(
     Some(SyntaxStatement::Yield(YieldStatement {
         owner_name: owner_name.to_owned(),
         owner_type_name: owner_type_name.map(str::to_owned),
-        value_type: value.value_type,
+        value_type: value.rendered_value_type(),
         value_callee: value.value_callee,
         value_name: value.value_name,
         value_member_owner_name: value.value_member_owner_name,
@@ -1266,7 +1264,7 @@ pub(in super::super) fn extract_match_statement(
     Some(SyntaxStatement::Match(MatchStatement {
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
-        subject_type: subject.value_type,
+        subject_type: subject.rendered_value_type(),
         subject_is_awaited: subject.is_awaited,
         subject_callee: subject.value_callee,
         subject_name: subject.value_name,
@@ -1354,7 +1352,7 @@ pub(in super::super) fn extract_for_statement(
         target_names,
         owner_name: owner_name.map(str::to_owned),
         owner_type_name: owner_type_name.map(str::to_owned),
-        iter_type: iter.value_type,
+        iter_type: iter.rendered_value_type(),
         iter_is_awaited: iter.is_awaited,
         iter_callee: iter.value_callee,
         iter_name: iter.value_name,
@@ -1395,7 +1393,7 @@ pub(in super::super) fn extract_with_statements(
                 target_name,
                 owner_name: owner_name.map(str::to_owned),
                 owner_type_name: owner_type_name.map(str::to_owned),
-                context_type: context.value_type,
+                context_type: context.rendered_value_type(),
                 context_is_awaited: context.is_awaited,
                 context_callee: context.value_callee,
                 context_name: context.value_name,
@@ -1468,7 +1466,6 @@ pub(in super::super) fn extract_return_statement(
         .as_deref()
         .map(|expr| extract_direct_expr_metadata(source, expr))
         .unwrap_or(DirectExprMetadata {
-            value_type: None,
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -1501,7 +1498,7 @@ pub(in super::super) fn extract_return_statement(
     Some(SyntaxStatement::Return(ReturnStatement {
         owner_name: owner_name.to_owned(),
         owner_type_name: owner_type_name.map(str::to_owned),
-        value_type: value.value_type,
+        value_type: value.rendered_value_type(),
         is_awaited: value.is_awaited,
         value_callee: value.value_callee,
         value_name: value.value_name,

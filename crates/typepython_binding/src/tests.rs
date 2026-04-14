@@ -153,7 +153,6 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
         callee: String::from("build"),
         arg_count: 1,
         arg_values: vec![DirectExprMetadata {
-            value_type: Some(String::from("str")),
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
                 head: String::from("list"),
                 args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
@@ -190,7 +189,6 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
         ]),
         keyword_names: vec![String::from("count")],
         keyword_arg_values: vec![DirectExprMetadata {
-            value_type: Some(String::from("str")),
             value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
             is_awaited: false,
             value_callee: None,
@@ -788,7 +786,6 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
                 annotation_expr: Some(BoundTypeExpr::new("int")),
                 value: Some(DirectExprMetadata {
                     value_type_expr: None,
-                    value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: Some(String::from("helper")),
                     value_name: None,
@@ -855,7 +852,6 @@ fn bind_collects_assignment_sites_from_syntax_tree() {
                 annotation_expr: Some(BoundTypeExpr::new("str")),
                 value: Some(DirectExprMetadata {
                     value_type_expr: None,
-                    value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
                     value_name: Some(String::from("source")),
@@ -1005,7 +1001,6 @@ fn bind_keeps_local_assignments_out_of_declarations() {
             annotation_expr: Some(BoundTypeExpr::new("int")),
             value: Some(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("value")),
@@ -1145,7 +1140,6 @@ fn bind_collects_local_bare_assignments() {
             annotation_expr: None,
             value: Some(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
                 value_name: None,
@@ -1322,7 +1316,6 @@ fn bind_collects_yield_sites_from_syntax_tree() {
         vec![YieldSite {
             value: Some(DirectExprMetadata {
                 value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
-                value_type: Some(String::from("int")),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -1417,7 +1410,6 @@ fn bind_collects_for_sites_from_syntax_tree() {
         vec![ForSite {
             iter: Some(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("values")),
@@ -1502,7 +1494,6 @@ fn bind_collects_match_sites_from_syntax_tree() {
         vec![MatchSite {
             subject: Some(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("expr")),
@@ -1678,7 +1669,6 @@ fn bind_collects_with_sites_from_syntax_tree() {
         vec![WithSite {
             context: Some(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("manager")),
@@ -3341,7 +3331,6 @@ fn bind_excludes_rebind_like_value_from_declarations() {
             value_bool_right: None,
             value_binop_left: Some(Box::new(DirectExprMetadata {
                 value_type_expr: None,
-                value_type: None,
                 is_awaited: false,
                 value_callee: None,
                 value_name: Some(String::from("count")),

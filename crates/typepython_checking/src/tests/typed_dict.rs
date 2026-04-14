@@ -348,44 +348,20 @@ fn check_accepts_contextual_typed_dict_literal_method_keyword_argument() {
 #[test]
 fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
-        typepython_syntax::DirectExprMetadata {
-            value_type_expr: None,
-            value_type: Some(String::from(value_type)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        }
+        typepython_syntax::DirectExprMetadata::from_type_text(value_type)
     }
 
     let call = typepython_binding::CallSite {
         callee: String::from("choose"),
         arg_count: 1,
         arg_values: vec![typepython_syntax::DirectExprMetadata {
-            value_type_expr: None,
-            value_type: Some(String::from("dict[str, object]")),
+            value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
+                head: String::from("dict"),
+                args: vec![
+                    typepython_syntax::TypeExpr::Name(String::from("str")),
+                    typepython_syntax::TypeExpr::Name(String::from("object")),
+                ],
+            }),
             is_awaited: false,
             value_callee: None,
             value_name: None,

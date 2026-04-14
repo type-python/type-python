@@ -73,11 +73,7 @@ pub(super) fn resolve_direct_expression_semantic_type_from_metadata(
 pub(super) fn direct_metadata_value_semantic_type(
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> Option<SemanticType> {
-    metadata
-        .value_type_expr
-        .clone()
-        .map(lower_type_expr)
-        .or_else(|| metadata.value_type.as_deref().filter(|value| !value.is_empty()).map(lower_type_text_or_name))
+    metadata.value_type_expr.clone().map(lower_type_expr)
 }
 
 pub(super) fn resolve_direct_collection_literal_semantic_type_from_metadata(

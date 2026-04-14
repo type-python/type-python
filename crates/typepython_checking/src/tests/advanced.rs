@@ -1153,41 +1153,11 @@ fn overload_applicability_accepts_list_for_sequence_parameter() {
 #[test]
 fn overload_applicability_uses_contextual_lambda_callable_types() {
     fn direct_expr(value_type: &str) -> typepython_syntax::DirectExprMetadata {
-        typepython_syntax::DirectExprMetadata {
-            value_type_expr: None,
-            value_type: Some(String::from(value_type)),
-            is_awaited: false,
-            value_callee: None,
-            value_name: None,
-            value_member_owner_name: None,
-            value_member_name: None,
-            value_member_through_instance: false,
-            value_method_owner_name: None,
-            value_method_name: None,
-            value_method_through_instance: false,
-            value_subscript_target: None,
-            value_subscript_string_key: None,
-            value_subscript_index: None,
-            value_if_true: None,
-            value_if_false: None,
-            value_if_guard: None,
-            value_bool_left: None,
-            value_bool_right: None,
-            value_binop_left: None,
-            value_binop_right: None,
-            value_binop_operator: None,
-            value_lambda: None,
-            value_list_comprehension: None,
-            value_generator_comprehension: None,
-            value_list_elements: None,
-            value_set_elements: None,
-            value_dict_entries: None,
-        }
+        typepython_syntax::DirectExprMetadata::from_type_text(value_type)
     }
 
     let lambda_arg = typepython_syntax::DirectExprMetadata {
         value_type_expr: None,
-        value_type: Some(String::new()),
         is_awaited: false,
         value_callee: None,
         value_name: None,
@@ -21800,7 +21770,6 @@ fn check_accepts_mapping_subscript_read_type() {
                 value_method_through_instance: false,
                 value_subscript_target: Some(Box::new(typepython_syntax::DirectExprMetadata {
                     value_type_expr: None,
-                    value_type: Some(String::new()),
                     is_awaited: false,
                     value_callee: None,
                     value_name: Some(String::from("values")),
@@ -22933,7 +22902,6 @@ fn inferred_return_trace_prefers_structured_return_metadata() {
             owner_name: String::from("build"),
             owner_type_name: None,
             value: Some(typepython_syntax::DirectExprMetadata {
-                value_type: Some(String::from("str")),
                 value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,

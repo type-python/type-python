@@ -769,7 +769,6 @@ fn direct_expr_metadata_from_value_statement(
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
         value_type_expr: statement.value_type_expr.clone(),
-        value_type: statement.value_type.clone(),
         is_awaited: statement.is_awaited,
         value_callee: statement.value_callee.clone(),
         value_name: statement.value_name.clone(),
@@ -803,8 +802,10 @@ fn direct_expr_metadata_from_return_statement(
     statement: &typepython_syntax::ReturnStatement,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-        value_type_expr: None,
-        value_type: statement.value_type.clone(),
+        value_type_expr: statement
+            .value_type
+            .as_deref()
+            .and_then(typepython_syntax::TypeExpr::parse),
         is_awaited: statement.is_awaited,
         value_callee: statement.value_callee.clone(),
         value_name: statement.value_name.clone(),
@@ -838,8 +839,10 @@ fn direct_expr_metadata_from_yield_statement(
     statement: &typepython_syntax::YieldStatement,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-        value_type_expr: None,
-        value_type: statement.value_type.clone(),
+        value_type_expr: statement
+            .value_type
+            .as_deref()
+            .and_then(typepython_syntax::TypeExpr::parse),
         is_awaited: false,
         value_callee: statement.value_callee.clone(),
         value_name: statement.value_name.clone(),
@@ -873,8 +876,10 @@ fn direct_expr_metadata_from_match_statement(
     statement: &typepython_syntax::MatchStatement,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-        value_type_expr: None,
-        value_type: statement.subject_type.clone(),
+        value_type_expr: statement
+            .subject_type
+            .as_deref()
+            .and_then(typepython_syntax::TypeExpr::parse),
         is_awaited: statement.subject_is_awaited,
         value_callee: statement.subject_callee.clone(),
         value_name: statement.subject_name.clone(),
@@ -908,8 +913,10 @@ fn direct_expr_metadata_from_for_statement(
     statement: &typepython_syntax::ForStatement,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-        value_type_expr: None,
-        value_type: statement.iter_type.clone(),
+        value_type_expr: statement
+            .iter_type
+            .as_deref()
+            .and_then(typepython_syntax::TypeExpr::parse),
         is_awaited: statement.iter_is_awaited,
         value_callee: statement.iter_callee.clone(),
         value_name: statement.iter_name.clone(),
@@ -943,8 +950,10 @@ fn direct_expr_metadata_from_with_statement(
     statement: &typepython_syntax::WithStatement,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
     direct_expr_metadata_from_parts(typepython_syntax::DirectExprMetadata {
-        value_type_expr: None,
-        value_type: statement.context_type.clone(),
+        value_type_expr: statement
+            .context_type
+            .as_deref()
+            .and_then(typepython_syntax::TypeExpr::parse),
         is_awaited: statement.context_is_awaited,
         value_callee: statement.context_callee.clone(),
         value_name: statement.context_name.clone(),
@@ -975,19 +984,15 @@ fn direct_expr_metadata_from_with_statement(
 }
 
 pub(super) fn direct_expr_metadata_from_parts(
-    mut metadata: typepython_syntax::DirectExprMetadata,
+    metadata: typepython_syntax::DirectExprMetadata,
 ) -> Option<typepython_syntax::DirectExprMetadata> {
-    if metadata.value_type_expr.is_none() {
-        metadata.value_type_expr =
-            metadata.value_type.as_deref().and_then(typepython_syntax::TypeExpr::parse);
-    }
     direct_expr_metadata_present(&metadata).then_some(metadata)
 }
 
 pub(super) fn direct_expr_metadata_present(
     metadata: &typepython_syntax::DirectExprMetadata,
 ) -> bool {
-    metadata.value_type.as_deref().is_some_and(|value| !value.is_empty())
+    metadata.value_type_expr.is_some()
         || metadata.is_awaited
         || metadata.value_callee.is_some()
         || metadata.value_name.is_some()

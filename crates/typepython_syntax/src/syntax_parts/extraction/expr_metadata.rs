@@ -16,7 +16,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::Dict(dict) = expr {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -49,7 +48,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::List(list) = expr {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -84,7 +82,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::Set(set) = expr {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -133,7 +130,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
             }
         }
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -169,7 +165,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::ListComp(comp) = expr {
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -207,7 +202,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::SetComp(comp) = expr {
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -245,7 +239,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::DictComp(comp) = expr {
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -283,7 +276,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::Generator(comp) = expr {
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -321,7 +313,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Some((owner_name, method_name, through_instance)) = extract_direct_method_call(expr) {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -359,7 +350,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
         let left = left_expr.map(|expr| extract_direct_expr_metadata(source, expr));
         let right = values.next().map(|expr| extract_direct_expr_metadata(source, expr));
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -395,7 +385,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::BinOp(bin_op) = expr {
         return DirectExprMetadata {
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -428,7 +417,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::If(if_expr) = expr {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -461,7 +449,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     if let Expr::Subscript(subscript) = expr {
         return DirectExprMetadata {
-            value_type: Some(infer_literal_arg_type(expr)),
             value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
             is_awaited: false,
             value_callee: None,
@@ -500,7 +487,6 @@ pub(in super::super) fn extract_direct_expr_metadata(
 
     let member = extract_direct_member_access(expr);
     DirectExprMetadata {
-        value_type: Some(infer_literal_arg_type(expr)),
         value_type_expr: TypeExpr::parse(&infer_literal_arg_type(expr)),
         is_awaited: false,
         value_callee: extract_direct_callee(expr),

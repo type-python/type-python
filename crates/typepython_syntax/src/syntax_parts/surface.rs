@@ -617,7 +617,6 @@ pub enum ComprehensionKind {
 /// Expression metadata retained for direct checks and contextual re-typing.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectExprMetadata {
-    pub value_type: Option<String>,
     pub value_type_expr: Option<TypeExpr>,
     pub is_awaited: bool,
     pub value_callee: Option<String>,
@@ -650,7 +649,7 @@ pub struct DirectExprMetadata {
 impl DirectExprMetadata {
     #[must_use]
     pub fn rendered_value_type(&self) -> Option<String> {
-        self.value_type_expr.as_ref().map(TypeExpr::render).or_else(|| self.value_type.clone())
+        self.value_type_expr.as_ref().map(TypeExpr::render)
     }
 
     #[must_use]
@@ -658,7 +657,6 @@ impl DirectExprMetadata {
         let value_type = text.into();
         Self {
             value_type_expr: TypeExpr::parse(&value_type),
-            value_type: Some(value_type),
             is_awaited: false,
             value_callee: None,
             value_name: None,

@@ -594,7 +594,7 @@ pub(in super::super) fn extract_ast_backed_statement(
                     destructuring_target_names,
                     annotation: None,
                     annotation_expr: None,
-                    value_type: value.value_type,
+                    value_type: value.rendered_value_type(),
                     value_type_expr: value.value_type_expr,
                     is_awaited: value.is_awaited,
                     value_callee: value.value_callee,
@@ -640,7 +640,6 @@ pub(in super::super) fn extract_ast_backed_statement(
                     .as_deref()
                     .map(|expr| extract_direct_expr_metadata(source, expr))
                     .unwrap_or(DirectExprMetadata {
-                        value_type: None,
                         value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
@@ -675,7 +674,7 @@ pub(in super::super) fn extract_ast_backed_statement(
                     annotation: slice_range(source, stmt.annotation.range()).map(str::to_owned),
                     annotation_expr: slice_range(source, stmt.annotation.range())
                         .and_then(TypeExpr::parse),
-                    value_type: value.value_type,
+                    value_type: value.rendered_value_type(),
                     value_type_expr: value.value_type_expr,
                     is_awaited: value.is_awaited,
                     value_callee: value.value_callee,

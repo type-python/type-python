@@ -74,12 +74,25 @@ fn normalize_statement(statement: SyntaxStatement) -> SyntaxStatement {
         SyntaxStatement::If(statement) => SyntaxStatement::If(statement),
         SyntaxStatement::Assert(statement) => SyntaxStatement::Assert(statement),
         SyntaxStatement::Invalidate(statement) => SyntaxStatement::Invalidate(statement),
-        SyntaxStatement::Match(statement) => SyntaxStatement::Match(statement),
-        SyntaxStatement::For(statement) => SyntaxStatement::For(statement),
-        SyntaxStatement::With(statement) => SyntaxStatement::With(statement),
+        SyntaxStatement::Match(mut statement) => {
+            statement.subject_type = normalize_empty_option_string(statement.subject_type);
+            SyntaxStatement::Match(statement)
+        }
+        SyntaxStatement::For(mut statement) => {
+            statement.iter_type = normalize_empty_option_string(statement.iter_type);
+            SyntaxStatement::For(statement)
+        }
+        SyntaxStatement::With(mut statement) => {
+            statement.context_type = normalize_empty_option_string(statement.context_type);
+            SyntaxStatement::With(statement)
+        }
         SyntaxStatement::ExceptHandler(statement) => SyntaxStatement::ExceptHandler(statement),
         SyntaxStatement::Unsafe(statement) => SyntaxStatement::Unsafe(statement),
     }
+}
+
+fn normalize_empty_option_string(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty())
 }
 
 fn normalize_named_block(mut statement: NamedBlockStatement) -> NamedBlockStatement {
@@ -136,6 +149,7 @@ fn normalize_value_statement(mut statement: ValueStatement) -> ValueStatement {
     if statement.value_type_expr.is_none() {
         statement.value_type_expr = statement.value_type.as_deref().and_then(TypeExpr::parse);
     }
+    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -179,6 +193,7 @@ fn normalize_method_call_statement(mut statement: MethodCallStatement) -> Method
 }
 
 fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement {
+    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -196,6 +211,7 @@ fn normalize_return_statement(mut statement: ReturnStatement) -> ReturnStatement
 }
 
 fn normalize_yield_statement(mut statement: YieldStatement) -> YieldStatement {
+    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -271,9 +287,6 @@ fn normalize_typed_dict_literal_entries(
 }
 
 fn normalize_direct_expr(mut metadata: DirectExprMetadata) -> DirectExprMetadata {
-    if metadata.value_type_expr.is_none() {
-        metadata.value_type_expr = metadata.value_type.as_deref().and_then(TypeExpr::parse);
-    }
     metadata.value_subscript_target = normalize_direct_expr_option(metadata.value_subscript_target);
     metadata.value_if_true = normalize_direct_expr_option(metadata.value_if_true);
     metadata.value_if_false = normalize_direct_expr_option(metadata.value_if_false);
@@ -1901,8 +1914,7 @@ fn parse_retains_direct_call_keyword_names() {
             keyword_names: vec![String::from("x"), String::from("y")],
             keyword_arg_values: vec![
                 DirectExprMetadata {
-                    value_type: Some(String::from("int")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -1931,8 +1943,7 @@ fn parse_retains_direct_call_keyword_names() {
                     value_dict_entries: None,
                 },
                 DirectExprMetadata {
-                    value_type: Some(String::from("int")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -2032,8 +2043,7 @@ fn parse_retains_direct_call_literal_arg_types() {
             arg_count: 2,
             arg_values: vec![
                 DirectExprMetadata {
-                    value_type: Some(String::from("int")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -2062,8 +2072,7 @@ fn parse_retains_direct_call_literal_arg_types() {
                     value_dict_entries: None,
                 },
                 DirectExprMetadata {
-                    value_type: Some(String::from("str")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("str"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -2131,14 +2140,14 @@ fn parse_retains_direct_call_container_literal_arg_types() {
     let list_elements =
         statement.arg_values[0].value_list_elements.as_ref().expect("list elements");
     assert_eq!(list_elements.len(), 2);
-    assert_eq!(list_elements[0].value_type.as_deref(), Some("int"));
+    assert_eq!(list_elements[0].rendered_value_type().as_deref(), Some("int"));
     let dict_entries = statement.arg_values[2].value_dict_entries.as_ref().expect("dict entries");
     assert_eq!(dict_entries.len(), 1);
     assert_eq!(dict_entries[0].key.as_deref(), Some("x"));
     assert!(!dict_entries[0].is_expansion);
     let set_elements = statement.arg_values[3].value_set_elements.as_ref().expect("set elements");
     assert_eq!(set_elements.len(), 2);
-    assert_eq!(set_elements[0].value_type.as_deref(), Some("int"));
+    assert_eq!(set_elements[0].rendered_value_type().as_deref(), Some("int"));
 }
 
 #[test]
@@ -2218,7 +2227,6 @@ fn parse_retains_lambda_metadata_in_call_args() {
             callee: String::from("build"),
             arg_count: 1,
             arg_values: vec![DirectExprMetadata {
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -2252,7 +2260,6 @@ fn parse_retains_lambda_metadata_in_call_args() {
                         keyword_variadic: false,
                     }],
                     body: Box::new(DirectExprMetadata {
-                        value_type: Some(String::new()),
                         value_type_expr: None,
                         is_awaited: false,
                         value_callee: None,
@@ -2359,7 +2366,7 @@ fn parse_retains_list_comprehension_metadata_in_assignment() {
     let iter_elements =
         comprehension.clauses[0].iter.value_list_elements.as_ref().expect("iter list elements");
     assert_eq!(iter_elements.len(), 2);
-    assert_eq!(iter_elements[0].value_type.as_deref(), Some("int"));
+    assert_eq!(iter_elements[0].rendered_value_type().as_deref(), Some("int"));
     assert_eq!(
         comprehension.clauses[0].filters,
         vec![GuardCondition::IsNone { name: String::from("x"), negated: true }]
@@ -2389,7 +2396,7 @@ fn parse_retains_generator_comprehension_metadata_in_assignment() {
     let iter_elements =
         comprehension.clauses[0].iter.value_list_elements.as_ref().expect("iter list elements");
     assert_eq!(iter_elements.len(), 2);
-    assert_eq!(iter_elements[0].value_type.as_deref(), Some("int"));
+    assert_eq!(iter_elements[0].rendered_value_type().as_deref(), Some("int"));
     assert_eq!(
         comprehension.clauses[0].filters,
         vec![GuardCondition::IsNone { name: String::from("x"), negated: true }]
@@ -2469,8 +2476,7 @@ fn parse_retains_ifexp_metadata() {
             value_subscript_string_key: None,
             value_subscript_index: None,
             value_if_true: Some(Box::new(DirectExprMetadata {
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -2499,8 +2505,7 @@ fn parse_retains_ifexp_metadata() {
                 value_dict_entries: None,
             })),
             value_if_false: Some(Box::new(DirectExprMetadata {
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -2950,8 +2955,7 @@ fn parse_extracts_direct_method_calls() {
                 through_instance: false,
                 arg_count: 1,
                 arg_values: vec![DirectExprMetadata {
-                    value_type: Some(String::from("int")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
@@ -2996,8 +3000,7 @@ fn parse_extracts_direct_method_calls() {
                 starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: vec![String::from("x")],
                 keyword_arg_values: vec![DirectExprMetadata {
-                    value_type: Some(String::from("int")),
-                    value_type_expr: None,
+                    value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                     is_awaited: false,
                     value_callee: None,
                     value_name: None,
