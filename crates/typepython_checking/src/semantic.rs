@@ -1338,35 +1338,14 @@ pub(super) fn for_loop_target_diagnostics(
         .iter()
         .filter(|for_loop| !for_loop.target_names.is_empty())
         .filter_map(|for_loop| {
-            let iter_type = resolve_direct_expression_semantic_type(
+            let iter_type = resolve_direct_expression_semantic_type_from_metadata(
                 node,
                 nodes,
-                None,
                 None,
                 for_loop.owner_name.as_deref(),
                 for_loop.owner_type_name.as_deref(),
                 for_loop.line,
-                for_loop.iter_type.as_deref(),
-                for_loop.iter_is_awaited,
-                for_loop.iter_callee.as_deref(),
-                for_loop.iter_name.as_deref(),
-                for_loop.iter_member_owner_name.as_deref(),
-                for_loop.iter_member_name.as_deref(),
-                for_loop.iter_member_through_instance,
-                for_loop.iter_method_owner_name.as_deref(),
-                for_loop.iter_method_name.as_deref(),
-                for_loop.iter_method_through_instance,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                for_loop.iter_metadata().as_ref()?,
             )?;
             let element_type = unwrap_for_iterable_semantic_type(&iter_type)?;
             let tuple_elements = unpacked_fixed_tuple_semantic_elements(&element_type)?;

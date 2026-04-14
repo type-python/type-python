@@ -682,7 +682,6 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                 owner_name: String::from("run"),
                 owner_type_name: None,
                 value: None,
-                value_type: Some(String::new()),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,

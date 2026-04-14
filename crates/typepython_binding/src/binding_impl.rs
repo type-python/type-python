@@ -70,7 +70,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     value: direct_expr_metadata_from_return_statement(statement),
-                    value_type: statement.value_type.clone(),
                     is_awaited: statement.is_awaited,
                     value_callee: statement.value_callee.clone(),
                     value_name: statement.value_name.clone(),
@@ -108,7 +107,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     value: direct_expr_metadata_from_yield_statement(statement),
-                    value_type: statement.value_type.clone(),
                     value_callee: statement.value_callee.clone(),
                     value_name: statement.value_name.clone(),
                     value_member_owner_name: statement.value_member_owner_name.clone(),
@@ -198,7 +196,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     subject: direct_expr_metadata_from_match_statement(statement),
-                    subject_type: statement.subject_type.clone(),
                     subject_is_awaited: statement.subject_is_awaited,
                     subject_callee: statement.subject_callee.clone(),
                     subject_name: statement.subject_name.clone(),
@@ -249,7 +246,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     iter: direct_expr_metadata_from_for_statement(statement),
-                    iter_type: statement.iter_type.clone(),
                     iter_is_awaited: statement.iter_is_awaited,
                     iter_callee: statement.iter_callee.clone(),
                     iter_name: statement.iter_name.clone(),
@@ -273,7 +269,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                     owner_name: statement.owner_name.clone(),
                     owner_type_name: statement.owner_type_name.clone(),
                     context: direct_expr_metadata_from_with_statement(statement),
-                    context_type: statement.context_type.clone(),
                     context_is_awaited: statement.context_is_awaited,
                     context_callee: statement.context_callee.clone(),
                     context_name: statement.context_name.clone(),
@@ -325,10 +320,6 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                             .map(BoundTypeExpr::from_expr)
                             .or_else(|| statement.annotation.clone().map(BoundTypeExpr::new)),
                         value: direct_expr_metadata_from_value_statement(statement),
-                        value_type: statement
-                            .value_type_expr
-                            .as_ref()
-                            .map(typepython_syntax::TypeExpr::render),
                         is_awaited: statement.is_awaited,
                         value_callee: statement.value_callee.clone(),
                         value_name: statement.value_name.clone(),
