@@ -1472,7 +1472,7 @@ struct SurfaceEntry {
     owner: Option<String>,
     kind: &'static str,
     name: String,
-    detail: String,
+    legacy_detail: String,
 }
 
 fn declaration_surface(
@@ -1487,7 +1487,7 @@ fn declaration_surface(
                     owner: None,
                     kind: "typealias",
                     name: statement.name.clone(),
-                    detail: statement.value.clone(),
+                    legacy_detail: statement.value.clone(),
                 });
             }
             typepython_syntax::SyntaxStatement::Interface(statement)
@@ -1498,7 +1498,7 @@ fn declaration_surface(
                     owner: None,
                     kind: "class",
                     name: statement.name.clone(),
-                    detail: format!(
+                    legacy_detail: format!(
                         "bases=[{}];final={}",
                         statement.bases.join(","),
                         statement.is_final_decorator
@@ -1513,7 +1513,7 @@ fn declaration_surface(
                             typepython_syntax::ClassMemberKind::Overload => "overload",
                         },
                         name: member.name.clone(),
-                        detail: match member.kind {
+                        legacy_detail: match member.kind {
                             typepython_syntax::ClassMemberKind::Field => format!(
                                 "annotation={};final={};classvar={}",
                                 member.annotation.clone().unwrap_or_default(),
@@ -1538,7 +1538,7 @@ fn declaration_surface(
                     owner: None,
                     kind: "overload",
                     name: statement.name.clone(),
-                    detail: format_signature(&statement.params, statement.returns.as_deref()),
+                    legacy_detail: format_signature(&statement.params, statement.returns.as_deref()),
                 });
             }
             typepython_syntax::SyntaxStatement::FunctionDef(statement) => {
@@ -1546,7 +1546,7 @@ fn declaration_surface(
                     owner: None,
                     kind: "function",
                     name: statement.name.clone(),
-                    detail: format_signature(&statement.params, statement.returns.as_deref()),
+                    legacy_detail: format_signature(&statement.params, statement.returns.as_deref()),
                 });
             }
             typepython_syntax::SyntaxStatement::Import(statement) => {
@@ -1555,7 +1555,7 @@ fn declaration_surface(
                         owner: None,
                         kind: "import",
                         name: binding.local_name.clone(),
-                        detail: binding.source_path.clone(),
+                        legacy_detail: binding.source_path.clone(),
                     });
                 }
             }
@@ -1565,7 +1565,7 @@ fn declaration_surface(
                         owner: None,
                         kind: "value",
                         name: name.clone(),
-                        detail: statement.annotation.clone().unwrap_or_default(),
+                        legacy_detail: statement.annotation.clone().unwrap_or_default(),
                     });
                 }
             }
@@ -1750,7 +1750,7 @@ pub(crate) fn public_surface_completeness_diagnostics(
             .into_iter()
             .filter(is_public_surface_entry)
             .filter(|entry| entry.kind != "import")
-            .filter(|entry| surface_detail_is_incomplete(&entry.detail))
+            .filter(|entry| surface_detail_is_incomplete(&entry.legacy_detail))
             .map(|entry| display_surface_entry(&entry))
             .collect::<BTreeSet<_>>();
         let surface_syntax = if syntax.source.kind == SourceKind::TypePython {
@@ -1778,7 +1778,7 @@ pub(crate) fn public_surface_completeness_diagnostics(
             .filter(|entry| entry.kind != "import")
         {
             let display = display_surface_entry(&entry);
-            if !surface_detail_is_incomplete(&entry.detail)
+            if !surface_detail_is_incomplete(&entry.legacy_detail)
                 && !source_incomplete_entries.contains(&display)
             {
                 continue;

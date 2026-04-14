@@ -35,7 +35,7 @@ pub(crate) fn resolve_owner_canonical(
 
     let callable_canonical = document.local_symbols.get(owner_name)?.clone();
     let callable = declarations_by_canonical.get(&callable_canonical)?;
-    let return_type = callable.detail.split_once("->")?.1.trim();
+    let return_type = callable.legacy_detail.split_once("->")?.1.trim();
     document.local_symbols.get(return_type).cloned().or_else(|| Some(return_type.to_owned()))
 }
 
@@ -88,7 +88,7 @@ pub(crate) fn collect_local_value_types(
             })
             .or_else(|| {
                 statement
-                    .value_type
+                    .rendered_value_type()
                     .as_ref()
                     .and_then(|value_type| local_symbols.get(value_type))
                     .cloned()

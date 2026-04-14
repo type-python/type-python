@@ -399,7 +399,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::TypeAlias(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
-            detail: statement.value.clone(),
+            legacy_detail: statement.value.clone(),
             metadata: DeclarationMetadata::TypeAlias {
                 value: statement
                     .value_expr
@@ -437,7 +437,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
-            detail: BoundCallableSignature::from_function_parts_with_expr(
+            legacy_detail: BoundCallableSignature::from_function_parts_with_expr(
                 &statement.params,
                 statement.returns.as_deref(),
                 statement.returns_expr.as_ref(),
@@ -468,7 +468,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
-            detail: BoundCallableSignature::from_function_parts_with_expr(
+            legacy_detail: BoundCallableSignature::from_function_parts_with_expr(
                 &statement.params,
                 statement.returns.as_deref(),
                 statement.returns_expr.as_ref(),
@@ -502,7 +502,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|binding| Declaration {
                 name: binding.local_name.clone(),
                 kind: DeclarationKind::Import,
-                detail: binding.source_path.clone(),
+                legacy_detail: binding.source_path.clone(),
                 metadata: DeclarationMetadata::Import {
                     target: BoundImportTarget::new(binding.source_path.clone()),
                 },
@@ -534,7 +534,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 .map(|name| Declaration {
                     name,
                     kind: DeclarationKind::Value,
-                    detail: statement.annotation.clone().unwrap_or_default(),
+                    legacy_detail: statement.annotation.clone().unwrap_or_default(),
                     metadata: DeclarationMetadata::Value {
                         annotation: statement
                             .annotation_expr
@@ -621,7 +621,7 @@ fn bind_named_block(
     let mut declarations = vec![Declaration {
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
-        detail: statement.bases.join(","),
+        legacy_detail: statement.bases.join(","),
         metadata: DeclarationMetadata::Class { bases: statement.bases.clone() },
         value_type_expr: None,
         method_kind: None,
@@ -646,7 +646,7 @@ fn bind_named_block(
                 typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
                 typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
             },
-            detail: match member.kind {
+            legacy_detail: match member.kind {
                 typepython_syntax::ClassMemberKind::Field => {
                     member.annotation.clone().unwrap_or_default()
                 }

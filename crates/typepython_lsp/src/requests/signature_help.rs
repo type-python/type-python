@@ -20,6 +20,10 @@ pub(crate) struct ActiveCallSite {
     pub(crate) keyword_arg_types: Vec<String>,
 }
 
+fn rendered_arg_types(values: &[typepython_syntax::DirectExprMetadata]) -> Vec<String> {
+    values.iter().map(|value| value.rendered_value_type().unwrap_or_default()).collect()
+}
+
 pub(crate) fn active_call(
     document: &DocumentState,
     position: LspPosition,
@@ -301,7 +305,7 @@ pub(crate) fn class_constructor_signature_candidate(
         })
         .map(|member| typepython_syntax::FunctionParam {
             name: member.name.clone(),
-            annotation: member.annotation.clone().or_else(|| member.value_type.clone()),
+            annotation: member.rendered_annotation().or_else(|| member.rendered_value_type()),
             annotation_expr: member.annotation_expr.clone().or_else(|| {
                 member.rendered_annotation().as_deref().and_then(typepython_syntax::TypeExpr::parse)
             }),
@@ -382,9 +386,9 @@ pub(crate) fn active_call_site(
             _ => None,
         })?;
         return Some(ActiveCallSite {
-            arg_types: call.arg_types.clone(),
+            arg_types: rendered_arg_types(&call.arg_values),
             keyword_names: call.keyword_names.clone(),
-            keyword_arg_types: call.keyword_arg_types.clone(),
+            keyword_arg_types: rendered_arg_types(&call.keyword_arg_values),
         });
     }
 
@@ -393,9 +397,9 @@ pub(crate) fn active_call_site(
         _ => None,
     })?;
     Some(ActiveCallSite {
-        arg_types: call.arg_types.clone(),
+        arg_types: rendered_arg_types(&call.arg_values),
         keyword_names: call.keyword_names.clone(),
-        keyword_arg_types: call.keyword_arg_types.clone(),
+        keyword_arg_types: rendered_arg_types(&call.keyword_arg_values),
     })
 }
 

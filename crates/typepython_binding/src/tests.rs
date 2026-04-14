@@ -41,7 +41,7 @@ fn declaration_text_accessors_prefer_structured_metadata() {
         metadata: DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new("list[int]")) },
         name: String::from("items"),
         kind: DeclarationKind::Value,
-        detail: String::from("str"),
+        legacy_detail: String::from("str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -63,7 +63,7 @@ fn declaration_text_accessors_prefer_structured_metadata() {
         metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new("int | None") },
         name: String::from("MaybeInt"),
         kind: DeclarationKind::TypeAlias,
-        detail: String::from("str"),
+        legacy_detail: String::from("str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -102,7 +102,7 @@ fn declaration_text_accessors_prefer_structured_metadata() {
         },
         name: String::from("build"),
         kind: DeclarationKind::Function,
-        detail: String::from("(value:str)->str"),
+        legacy_detail: String::from("(value:str)->str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -127,7 +127,7 @@ fn declaration_text_accessors_prefer_structured_metadata() {
         metadata: DeclarationMetadata::Import { target: BoundImportTarget::new("pkg.sub.Symbol") },
         name: String::from("Symbol"),
         kind: DeclarationKind::Import,
-        detail: String::from("wrong.target"),
+        legacy_detail: String::from("wrong.target"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -311,7 +311,7 @@ fn bind_collects_top_level_aliases_classes_and_functions() {
                 metadata: metadata_type_alias("Box[T]"),
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
-                detail: String::from("Box[T]"),
+                legacy_detail: String::from("Box[T]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -340,7 +340,7 @@ fn bind_collects_top_level_aliases_classes_and_functions() {
                 metadata: metadata_class(&[]),
                 name: String::from("User"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -369,7 +369,7 @@ fn bind_collects_top_level_aliases_classes_and_functions() {
                 metadata: metadata_empty_callable(),
                 name: String::from("helper"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -425,7 +425,7 @@ fn bind_marks_async_functions() {
 
     assert_eq!(table.declarations.len(), 1);
     assert!(table.declarations[0].is_async);
-    assert_eq!(table.declarations[0].detail, String::from("()->int"));
+    assert_eq!(table.declarations[0].legacy_detail, String::from("()->int"));
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn bind_marks_overload_definitions_separately() {
                 metadata: metadata_empty_callable(),
                 name: String::from("parse"),
                 kind: DeclarationKind::Overload,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -512,7 +512,7 @@ fn bind_marks_overload_definitions_separately() {
                 metadata: metadata_empty_callable(),
                 name: String::from("parse"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -605,7 +605,7 @@ fn bind_collects_imports_and_values_from_syntax_tree() {
                 metadata: metadata_import("pkg.foo"),
                 name: String::from("local_foo"),
                 kind: DeclarationKind::Import,
-                detail: String::from("pkg.foo"),
+                legacy_detail: String::from("pkg.foo"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -625,7 +625,7 @@ fn bind_collects_imports_and_values_from_syntax_tree() {
                 metadata: metadata_import("pkg.bar"),
                 name: String::from("bar"),
                 kind: DeclarationKind::Import,
-                detail: String::from("pkg.bar"),
+                legacy_detail: String::from("pkg.bar"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -645,7 +645,7 @@ fn bind_collects_imports_and_values_from_syntax_tree() {
                 metadata: metadata_value(None),
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -665,7 +665,7 @@ fn bind_collects_imports_and_values_from_syntax_tree() {
                 metadata: metadata_value(None),
                 name: String::from("count"),
                 kind: DeclarationKind::Value,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1829,7 +1829,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 metadata: metadata_class(&[]),
                 name: String::from("SupportsClose"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Interface),
@@ -1849,7 +1849,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 metadata: metadata_value(None),
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1872,7 +1872,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 metadata: metadata_empty_callable(),
                 name: String::from("close"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: Some(MethodKind::Instance),
                 class_kind: None,
@@ -1895,7 +1895,7 @@ fn bind_collects_class_like_member_declarations_with_owner() {
                 metadata: metadata_empty_callable(),
                 name: String::from("close"),
                 kind: DeclarationKind::Overload,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: Some(MethodKind::Instance),
                 class_kind: None,
@@ -2009,7 +2009,7 @@ fn bind_marks_final_values_and_fields() {
                 metadata: metadata_value(Some("Final")),
                 name: String::from("MAX_SIZE"),
                 kind: DeclarationKind::Value,
-                detail: String::from("Final"),
+                legacy_detail: String::from("Final"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -2029,7 +2029,7 @@ fn bind_marks_final_values_and_fields() {
                 metadata: metadata_class(&[]),
                 name: String::from("Box"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -2049,7 +2049,7 @@ fn bind_marks_final_values_and_fields() {
                 metadata: metadata_value(None),
                 name: String::from("limit"),
                 kind: DeclarationKind::Value,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: Some(BoundTypeExpr::new("int")),
                 method_kind: None,
                 class_kind: None,
@@ -2163,7 +2163,7 @@ fn bind_marks_classvar_values_and_fields() {
                 metadata: metadata_value(Some("ClassVar[int]")),
                 name: String::from("VALUE"),
                 kind: DeclarationKind::Value,
-                detail: String::from("ClassVar[int]"),
+                legacy_detail: String::from("ClassVar[int]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -2183,7 +2183,7 @@ fn bind_marks_classvar_values_and_fields() {
                 metadata: metadata_class(&[]),
                 name: String::from("Box"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -2203,7 +2203,7 @@ fn bind_marks_classvar_values_and_fields() {
                 metadata: metadata_value(None),
                 name: String::from("cache"),
                 kind: DeclarationKind::Value,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: Some(BoundTypeExpr::new("int")),
                 method_kind: None,
                 class_kind: None,
@@ -2291,7 +2291,7 @@ fn bind_marks_override_functions_and_members() {
                 metadata: metadata_empty_callable(),
                 name: String::from("top_level"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -2311,7 +2311,7 @@ fn bind_marks_override_functions_and_members() {
                 metadata: metadata_class(&["Base"]),
                 name: String::from("Child"),
                 kind: DeclarationKind::Class,
-                detail: String::from("Base"),
+                legacy_detail: String::from("Base"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -2331,7 +2331,7 @@ fn bind_marks_override_functions_and_members() {
                 metadata: metadata_empty_callable(),
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->"),
+                legacy_detail: String::from("()->"),
                 value_type_expr: None,
                 method_kind: Some(MethodKind::Instance),
                 class_kind: None,
@@ -2905,7 +2905,7 @@ fn bind_formats_signature_with_positional_only_params() {
     });
 
     assert_eq!(table.declarations.len(), 1);
-    assert_eq!(table.declarations[0].detail, "(x:int,/,y:int)->int");
+    assert_eq!(table.declarations[0].legacy_detail, "(x:int,/,y:int)->int");
 }
 
 #[test]
@@ -2955,7 +2955,7 @@ fn bind_formats_signature_with_keyword_only_params() {
     });
 
     assert_eq!(table.declarations.len(), 1);
-    assert_eq!(table.declarations[0].detail, "(x:int,*,y:str=)->");
+    assert_eq!(table.declarations[0].legacy_detail, "(x:int,*,y:str=)->");
 }
 
 #[test]
@@ -3005,7 +3005,7 @@ fn bind_formats_signature_with_variadic_and_keyword_variadic() {
     });
 
     assert_eq!(table.declarations.len(), 1);
-    assert_eq!(table.declarations[0].detail, "(*args:int,**kwargs:str)->None");
+    assert_eq!(table.declarations[0].legacy_detail, "(*args:int,**kwargs:str)->None");
 }
 
 #[test]
@@ -3453,7 +3453,7 @@ fn bind_collects_class_with_multiple_bases() {
         table.declarations[0].bases,
         vec![String::from("Base1"), String::from("Base2"), String::from("Mixin"),]
     );
-    assert_eq!(table.declarations[0].detail, "Base1,Base2,Mixin");
+    assert_eq!(table.declarations[0].legacy_detail, "Base1,Base2,Mixin");
 }
 
 #[test]

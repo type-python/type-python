@@ -320,7 +320,7 @@ fn accumulate_statement_coverage(
         }
         typepython_syntax::SyntaxStatement::Value(statement) => {
             let (annotation_known, dynamic_count, unknown_count) = known_type_slot(
-                statement.annotation.as_deref().or(statement.value_type.as_deref()),
+                statement.annotation.as_deref().or(statement.rendered_value_type().as_deref()),
             );
             tally.dynamic_boundaries += dynamic_count;
             tally.unknown_boundaries += unknown_count;
@@ -351,7 +351,7 @@ fn accumulate_statement_coverage(
 fn class_member_coverage(member: &typepython_syntax::ClassMember) -> (bool, usize, usize) {
     match member.kind {
         typepython_syntax::ClassMemberKind::Field => {
-            known_type_slot(member.annotation.as_deref().or(member.value_type.as_deref()))
+            known_type_slot(member.annotation.as_deref().or(member.rendered_value_type().as_deref()))
         }
         typepython_syntax::ClassMemberKind::Method
         | typepython_syntax::ClassMemberKind::Overload => function_signature_coverage(

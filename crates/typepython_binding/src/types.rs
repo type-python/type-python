@@ -746,7 +746,7 @@ impl AssignmentSite {
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
-    pub detail: String,
+    pub legacy_detail: String,
     pub metadata: DeclarationMetadata,
     pub value_type_expr: Option<BoundTypeExpr>,
     pub method_kind: Option<MethodKind>,
@@ -768,14 +768,14 @@ impl Declaration {
     #[must_use]
     pub fn rendered_detail(&self) -> String {
         match &self.metadata {
-            DeclarationMetadata::None => self.detail.clone(),
+            DeclarationMetadata::None => self.legacy_detail.clone(),
             DeclarationMetadata::TypeAlias { value } => value.render(),
             DeclarationMetadata::Callable { signature } => signature.rendered(),
             DeclarationMetadata::Import { target } => target.raw_target.clone(),
             DeclarationMetadata::Value { annotation } => annotation
                 .as_ref()
                 .map(BoundTypeExpr::render)
-                .unwrap_or_else(|| self.detail.clone()),
+                .unwrap_or_else(|| self.legacy_detail.clone()),
             DeclarationMetadata::Class { bases } => bases.join(","),
         }
     }
@@ -839,7 +839,7 @@ impl Declaration {
     pub fn callable_signature_text(&self) -> Option<String> {
         self.callable_signature().map(BoundCallableSignature::rendered).or_else(|| {
             matches!(self.kind, DeclarationKind::Function | DeclarationKind::Overload)
-                .then(|| self.detail.clone())
+                .then(|| self.legacy_detail.clone())
                 .filter(|detail| !detail.is_empty())
         })
     }
@@ -848,7 +848,7 @@ impl Declaration {
     pub fn type_alias_body_text(&self) -> Option<String> {
         self.type_alias_value().map(BoundTypeExpr::render).or_else(|| {
             (self.kind == DeclarationKind::TypeAlias)
-                .then(|| self.detail.clone())
+                .then(|| self.legacy_detail.clone())
                 .filter(|detail| !detail.is_empty())
         })
     }
@@ -857,7 +857,7 @@ impl Declaration {
     pub fn value_annotation_text(&self) -> Option<String> {
         self.value_annotation().map(BoundTypeExpr::render).or_else(|| {
             (self.kind == DeclarationKind::Value)
-                .then(|| self.detail.clone())
+                .then(|| self.legacy_detail.clone())
                 .filter(|detail| !detail.is_empty())
         })
     }
@@ -866,7 +866,7 @@ impl Declaration {
     pub fn import_raw_target_text(&self) -> Option<String> {
         self.import_target().map(|target| target.raw_target.clone()).or_else(|| {
             (self.kind == DeclarationKind::Import)
-                .then(|| self.detail.clone())
+                .then(|| self.legacy_detail.clone())
                 .filter(|detail| !detail.is_empty())
         })
     }

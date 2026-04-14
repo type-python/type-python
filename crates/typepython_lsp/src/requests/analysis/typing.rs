@@ -122,7 +122,7 @@ pub(crate) fn resolve_value_statement_type_text(
         .annotation
         .clone()
         .filter(|annotation| !annotation.trim().is_empty())
-        .or_else(|| value.value_type.clone().filter(|value_type| !value_type.trim().is_empty()))
+        .or_else(|| value.rendered_value_type().filter(|value_type| !value_type.trim().is_empty()))
         .or_else(|| {
             value.value_callee.as_deref().and_then(|callee| {
                 resolve_callable_return_type_text(

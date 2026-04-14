@@ -504,7 +504,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
             declaration
                 .import_target()
                 .map(|target| target.raw_target.clone())
-                .unwrap_or_else(|| declaration.detail.clone())
+                .unwrap_or_else(|| declaration.rendered_detail())
         })
         .collect::<Vec<_>>();
     imports.sort();
@@ -647,15 +647,15 @@ fn summary_type_repr(declaration: &Declaration) -> String {
             .map(|expr| expr.render())
             .or_else(|| declaration.inferred_value_type_semantic_text())
             .or_else(|| declaration.value_annotation_text())
-            .unwrap_or_else(|| declaration.detail.clone()),
+            .unwrap_or_else(|| declaration.rendered_detail()),
         DeclarationKind::TypeAlias => {
-            declaration.type_alias_body_text().unwrap_or_else(|| declaration.detail.clone())
+            declaration.type_alias_body_text().unwrap_or_else(|| declaration.rendered_detail())
         }
         DeclarationKind::Function | DeclarationKind::Overload => {
-            declaration.callable_signature_text().unwrap_or_else(|| declaration.detail.clone())
+            declaration.callable_signature_text().unwrap_or_else(|| declaration.rendered_detail())
         }
         DeclarationKind::Import => {
-            declaration.import_raw_target_text().unwrap_or_else(|| declaration.detail.clone())
+            declaration.import_raw_target_text().unwrap_or_else(|| declaration.rendered_detail())
         }
     };
     if detail.is_empty() { declaration.name.clone() } else { detail }
@@ -882,7 +882,7 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("Expr"),
                         kind: DeclarationKind::Class,
-                        detail: String::new(),
+                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::SealedClass),
@@ -911,7 +911,7 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("Add"),
                         kind: DeclarationKind::Class,
-                        detail: String::new(),
+                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -931,7 +931,7 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("helper"),
                         kind: DeclarationKind::Function,
-                        detail: String::from("()->int"),
+                        legacy_detail: String::from("()->int"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -960,7 +960,7 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("base"),
                         kind: DeclarationKind::Import,
-                        detail: String::from("pkg.base"),
+                        legacy_detail: String::from("pkg.base"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -1096,7 +1096,7 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("build"),
                         kind: DeclarationKind::Function,
-                        detail: String::from("()->int"),
+                        legacy_detail: String::from("()->int"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -1436,7 +1436,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("VERSION"),
                     kind: DeclarationKind::Value,
-                    detail: String::from("1.0"),
+                    legacy_detail: String::from("1.0"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1484,7 +1484,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("compute"),
                     kind: DeclarationKind::Function,
-                    detail: String::from(detail),
+                    legacy_detail: String::from(detail),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1775,12 +1775,12 @@ mod tests {
         }
     }
 
-    fn import_declaration(name: &str, detail: &str) -> Declaration {
+    fn import_declaration(name: &str, legacy_detail: &str) -> Declaration {
         Declaration {
             metadata: Default::default(),
             name: String::from(name),
             kind: DeclarationKind::Import,
-            detail: String::from(detail),
+            legacy_detail: String::from(legacy_detail),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -1803,7 +1803,7 @@ mod tests {
             metadata: Default::default(),
             name: String::from(name),
             kind: DeclarationKind::Value,
-            detail: String::from(value_type),
+            legacy_detail: String::from(value_type),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,

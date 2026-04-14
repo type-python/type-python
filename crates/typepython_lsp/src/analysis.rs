@@ -165,8 +165,8 @@ impl AnalysisHost {
         let detail = workspace
             .declarations_by_canonical
             .get(&symbol.canonical)
-            .map(|declaration| declaration.detail.clone())
-            .unwrap_or_else(|| symbol.detail.clone());
+            .map(|declaration| declaration.legacy_detail.clone())
+            .unwrap_or_else(|| symbol.legacy_detail.clone());
         Ok(json!({
             "contents": {
                 "kind": "markdown",

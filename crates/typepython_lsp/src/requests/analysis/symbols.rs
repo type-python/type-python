@@ -18,7 +18,7 @@ pub(crate) fn collect_declarations(
                         name: statement.name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        detail: format!("typealias {} = {}", statement.name, statement.value),
+                        legacy_detail: format!("typealias {} = {}", statement.name, statement.value),
                         declaration: true,
                     });
                 }
@@ -37,7 +37,7 @@ pub(crate) fn collect_declarations(
                         name: statement.name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        detail: format!("class {}({})", statement.name, statement.bases.join(", ")),
+                        legacy_detail: format!("class {}({})", statement.name, statement.bases.join(", ")),
                         declaration: true,
                     });
                 }
@@ -50,7 +50,7 @@ pub(crate) fn collect_declarations(
                             name: member.name.clone(),
                             uri: document.uri.clone(),
                             range,
-                            detail: match member.kind {
+                            legacy_detail: match member.kind {
                                 typepython_syntax::ClassMemberKind::Field => format!(
                                     "field {}: {}",
                                     member.name,
@@ -82,7 +82,7 @@ pub(crate) fn collect_declarations(
                         name: name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        detail: format!("function {}{}", name, format_signature(params, returns)),
+                        legacy_detail: format!("function {}{}", name, format_signature(params, returns)),
                         declaration: true,
                     });
                 }
@@ -102,7 +102,7 @@ pub(crate) fn collect_declarations(
                             name: name.clone(),
                             uri: document.uri.clone(),
                             range,
-                            detail: format!(
+                            legacy_detail: format!(
                                 "value {}: {}",
                                 name,
                                 statement.annotation.clone().unwrap_or_default()
@@ -139,7 +139,7 @@ pub(crate) fn collect_reference_occurrences(
                 name: token.name,
                 uri: document.uri.clone(),
                 range: token.range,
-                detail: canonical,
+                legacy_detail: canonical,
                 declaration: false,
             })
         })
@@ -298,8 +298,8 @@ pub(crate) fn collect_member_completion_items(
 pub(crate) fn completion_item_from_occurrence(occurrence: &SymbolOccurrence) -> LspCompletionItem {
     completion_item(
         occurrence.name.clone(),
-        Some(occurrence.detail.clone()),
-        completion_item_kind_from_detail(&occurrence.detail),
+        Some(occurrence.legacy_detail.clone()),
+        completion_item_kind_from_detail(&occurrence.legacy_detail),
     )
 }
 
@@ -311,7 +311,7 @@ pub(crate) fn completion_item_from_canonical(
     let detail = workspace
         .declarations_by_canonical
         .get(canonical)
-        .map(|occurrence| occurrence.detail.clone())
+        .map(|occurrence| occurrence.legacy_detail.clone())
         .unwrap_or_else(|| canonical.to_owned());
     let kind = binding_declaration_for_canonical(workspace, canonical)
         .map(|(_, declaration)| completion_item_kind_for_declaration(declaration))
@@ -319,21 +319,21 @@ pub(crate) fn completion_item_from_canonical(
     completion_item(label, Some(detail), kind)
 }
 
-pub(crate) fn completion_item_from_detail(label: String, detail: String) -> LspCompletionItem {
+pub(crate) fn completion_item_from_detail(label: String, legacy_detail: String) -> LspCompletionItem {
     completion_item(
         label,
-        Some(detail.clone()),
-        completion_item_kind_from_detail(&detail),
+        Some(legacy_detail.clone()),
+        completion_item_kind_from_detail(&legacy_detail),
     )
 }
 
-fn completion_item(label: String, detail: Option<String>, kind: u32) -> LspCompletionItem {
+fn completion_item(label: String, legacy_detail: Option<String>, kind: u32) -> LspCompletionItem {
     let normalized = label.to_lowercase();
     LspCompletionItem {
         filter_text: label.clone(),
         sort_text: format!("{normalized}:{kind:02}"),
         label,
-        detail,
+        detail: legacy_detail,
         kind,
         insert_text: None,
         insert_text_format: None,
@@ -465,7 +465,7 @@ pub(crate) fn collect_visible_member_details_recursive(
             workspace
                 .declarations_by_canonical
                 .get(&member_canonical)
-                .map(|occurrence| occurrence.detail.clone())
+                .map(|occurrence| occurrence.legacy_detail.clone())
                 .unwrap_or_else(|| render_member_detail(member))
         });
     }
@@ -503,8 +503,11 @@ pub(crate) fn document_for_module_key<'a>(
 pub(crate) fn render_member_detail(member: &typepython_binding::Declaration) -> String {
     match member.kind {
         typepython_binding::DeclarationKind::Value => {
-            let rendered = member.rendered_detail();
-            let annotation = member.value_type.as_deref().unwrap_or(rendered.as_str());
+            let rendered = member
+                .value_annotation_text()
+                .or_else(|| member.rendered_value_type())
+                .unwrap_or_else(|| member.rendered_detail());
+            let annotation = rendered.as_str();
             format!("field {}: {}", member.name, annotation)
         }
         typepython_binding::DeclarationKind::Function

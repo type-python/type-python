@@ -225,7 +225,7 @@ fn package_child_import_declaration(name: &str, module_key: &str) -> Declaration
         },
         name: name.to_owned(),
         kind: DeclarationKind::Import,
-        detail: module_key.to_owned(),
+        legacy_detail: module_key.to_owned(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -545,12 +545,12 @@ fn collections_abc_prelude_node() -> ModuleNode {
     }
 }
 
-fn prelude_type_alias(name: &str, detail: &str) -> Declaration {
+fn prelude_type_alias(name: &str, legacy_detail: &str) -> Declaration {
     Declaration {
-        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(detail) },
+        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(legacy_detail) },
         name: String::from(name),
         kind: DeclarationKind::TypeAlias,
-        detail: String::from(detail),
+        legacy_detail: String::from(legacy_detail),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -578,7 +578,7 @@ fn prelude_function(
         metadata: DeclarationMetadata::Callable { signature: signature.clone() },
         name: String::from(name),
         kind: DeclarationKind::Function,
-        detail: signature.rendered(),
+        legacy_detail: signature.rendered(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -601,7 +601,7 @@ fn prelude_value(name: &str, annotation: &str) -> Declaration {
         metadata: DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new(annotation)) },
         name: String::from(name),
         kind: DeclarationKind::Value,
-        detail: String::from(annotation),
+        legacy_detail: String::from(annotation),
         value_type_expr: Some(BoundTypeExpr::new(annotation)),
         method_kind: None,
         class_kind: None,
@@ -624,7 +624,7 @@ fn prelude_protocol_class(name: &str) -> Declaration {
         metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        detail: String::new(),
+        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -647,7 +647,7 @@ fn prelude_class(name: &str) -> Declaration {
         metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        detail: String::new(),
+        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Class),
@@ -676,7 +676,7 @@ fn prelude_protocol_class_with_methods(
         },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        detail: bases.join(","),
+        legacy_detail: bases.join(","),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -699,7 +699,7 @@ fn prelude_protocol_class_with_methods(
             metadata: DeclarationMetadata::Callable { signature: signature.clone() },
             name: String::from(*method_name),
             kind: DeclarationKind::Function,
-            detail: signature.rendered(),
+            legacy_detail: signature.rendered(),
             value_type_expr: None,
             method_kind: Some(MethodKind::Instance),
             class_kind: None,
@@ -771,7 +771,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -791,7 +791,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -830,7 +830,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -850,7 +850,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -881,7 +881,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -921,7 +921,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -941,7 +941,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -1093,7 +1093,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
-                detail: String::from("(name:str)->str"),
+                legacy_detail: String::from("(name:str)->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1139,12 +1139,12 @@ mod tests {
         assert!(
             pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.detail == "pkg.sub")
+                && declaration.legacy_detail == "pkg.sub")
         );
         assert!(
             sub.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "module"
-                && declaration.detail == "pkg.sub.module")
+                && declaration.legacy_detail == "pkg.sub.module")
         );
     }
 
@@ -1159,7 +1159,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("greet"),
                 kind: DeclarationKind::Function,
-                detail: String::from("(name:str)->str"),
+                legacy_detail: String::from("(name:str)->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1199,7 +1199,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("greet"),
                     kind: DeclarationKind::Function,
-                    detail: String::from("(name:str)->str"),
+                    legacy_detail: String::from("(name:str)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1219,7 +1219,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("version"),
                     kind: DeclarationKind::Value,
-                    detail: String::from("str"),
+                    legacy_detail: String::from("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1290,7 +1290,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("List"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1336,7 +1336,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("Protocol"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1383,7 +1383,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("Iterable"),
                 kind: DeclarationKind::Class,
-                detail: String::new(),
+                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1430,7 +1430,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("alpha"),
                     kind: DeclarationKind::Function,
-                    detail: String::from("()->None"),
+                    legacy_detail: String::from("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1469,7 +1469,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("beta"),
                     kind: DeclarationKind::Function,
-                    detail: String::from("()->None"),
+                    legacy_detail: String::from("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1510,12 +1510,12 @@ mod tests {
         assert!(
             pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "a"
-                && declaration.detail == "pkg.a")
+                && declaration.legacy_detail == "pkg.a")
         );
         assert!(
             pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.detail == "pkg.b")
+                && declaration.legacy_detail == "pkg.b")
         );
     }
 
@@ -1530,7 +1530,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("deep"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->None"),
+                legacy_detail: String::from("()->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1584,17 +1584,17 @@ mod tests {
         assert!(
             a.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.detail == "a.b")
+                && declaration.legacy_detail == "a.b")
         );
         assert!(
             ab.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "c"
-                && declaration.detail == "a.b.c")
+                && declaration.legacy_detail == "a.b.c")
         );
         assert!(
             abc.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "d"
-                && declaration.detail == "a.b.c.d")
+                && declaration.legacy_detail == "a.b.c.d")
         );
     }
 
@@ -1610,7 +1610,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("init_app"),
                     kind: DeclarationKind::Function,
-                    detail: String::from("()->None"),
+                    legacy_detail: String::from("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1649,7 +1649,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    detail: String::from("()->None"),
+                    legacy_detail: String::from("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1691,7 +1691,7 @@ mod tests {
         assert!(
             app.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.detail == "app.sub"),
+                && declaration.legacy_detail == "app.sub"),
             "child import for sub should be added"
         );
     }
@@ -1707,7 +1707,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
-                detail: String::from("()->None"),
+                legacy_detail: String::from("()->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1760,7 +1760,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
-                detail: String::from("int"),
+                legacy_detail: String::from("int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1799,7 +1799,7 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("x"),
                 kind: DeclarationKind::Value,
-                detail: String::from("int"),
+                legacy_detail: String::from("int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -1856,7 +1856,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -1876,7 +1876,7 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("name"),
                     kind: DeclarationKind::Value,
-                    detail: String::from("str"),
+                    legacy_detail: String::from("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,

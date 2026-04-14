@@ -58,7 +58,7 @@ pub(crate) fn collect_document_symbols(document: &DocumentState) -> Vec<LspDocum
                             detail: statement
                                 .annotation
                                 .clone()
-                                .or_else(|| statement.value_type.clone()),
+                                .or_else(|| statement.rendered_value_type()),
                             children: Vec::new(),
                         }
                     })
@@ -110,7 +110,7 @@ pub(crate) fn collect_class_member_symbols(
                 };
                 let detail = match member.kind {
                     typepython_syntax::ClassMemberKind::Field => {
-                        member.annotation.clone().or_else(|| member.value_type.clone())
+                        member.rendered_annotation().or_else(|| member.rendered_value_type())
                     }
                     typepython_syntax::ClassMemberKind::Method
                     | typepython_syntax::ClassMemberKind::Overload => {

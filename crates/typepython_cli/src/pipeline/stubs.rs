@@ -65,11 +65,14 @@ fn collect_value_stub_overrides(
             typepython_syntax::SyntaxStatement::Value(statement)
                 if statement.annotation.is_none()
                     && statement.owner_name.is_none()
-                    && statement.value_type.as_deref().is_some_and(|value| !value.is_empty()) =>
+                    && statement
+                        .rendered_value_type()
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty()) =>
             {
                 overrides.push(StubValueOverride {
                     line: statement.line,
-                    annotation: statement.value_type.clone().unwrap_or_default(),
+                    annotation: statement.rendered_value_type().unwrap_or_default(),
                 });
             }
             typepython_syntax::SyntaxStatement::Interface(statement)
@@ -90,11 +93,11 @@ fn collect_class_member_value_stub_overrides(
     for member in members {
         if member.kind == typepython_syntax::ClassMemberKind::Field
             && member.annotation.is_none()
-            && member.value_type.as_deref().is_some_and(|value| !value.is_empty())
+            && member.rendered_value_type().as_deref().is_some_and(|value| !value.is_empty())
         {
             overrides.push(StubValueOverride {
                 line: member.line,
-                annotation: member.value_type.clone().unwrap_or_default(),
+                annotation: member.rendered_value_type().unwrap_or_default(),
             });
         }
     }

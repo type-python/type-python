@@ -12,7 +12,7 @@ fn check_reports_duplicate_module_symbols() {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -32,7 +32,7 @@ fn check_reports_duplicate_module_symbols() {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    detail: String::new(),
+                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -412,7 +412,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         metadata: Default::default(),
         name: String::from("choose"),
         kind: DeclarationKind::Overload,
-        detail: String::from("(user:User)->int"),
+        legacy_detail: String::from("(user:User)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -430,14 +430,14 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     };
     let string_overload = Declaration {
         metadata: Default::default(),
-        detail: String::from("(user:str)->str"),
+        legacy_detail: String::from("(user:str)->str"),
         ..typed_dict_overload.clone()
     };
     let typed_dict_class = Declaration {
         metadata: Default::default(),
         name: String::from("User"),
         kind: DeclarationKind::Class,
-        detail: String::new(),
+        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -457,7 +457,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         metadata: Default::default(),
         name: String::from("id"),
         kind: DeclarationKind::Value,
-        detail: String::from("int"),
+        legacy_detail: String::from("int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -479,7 +479,7 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     let name_field = Declaration {
         metadata: Default::default(),
         name: String::from("name"),
-        detail: String::from("str"),
+        legacy_detail: String::from("str"),
         ..id_field.clone()
     };
     let node = typepython_graph::ModuleNode {

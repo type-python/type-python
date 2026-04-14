@@ -215,6 +215,13 @@ pub struct ValueStatement {
     pub line: usize,
 }
 
+impl ValueStatement {
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
+    }
+}
+
 /// Direct function call that appears as a top-level parser statement.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CallStatement {

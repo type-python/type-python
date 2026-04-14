@@ -3,18 +3,18 @@ use super::*;
 #[derive(Debug)]
 pub enum RuntimeWriteError {
     Io(io::Error),
-    StubGeneration { source_path: PathBuf, detail: String },
+    StubGeneration { source_path: PathBuf, legacy_detail: String },
 }
 
 impl std::fmt::Display for RuntimeWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(f, "{error}"),
-            Self::StubGeneration { source_path, detail } => write!(
+            Self::StubGeneration { source_path, legacy_detail } => write!(
                 f,
                 "TPY5001: unable to generate `.pyi` for `{}`: {}",
                 source_path.display(),
-                detail
+                legacy_detail
             ),
         }
     }
@@ -85,7 +85,7 @@ pub fn write_runtime_outputs(
                 generate_typepython_stub_source(module, &context).map_err(|error| {
                     RuntimeWriteError::StubGeneration {
                         source_path: module.source_path.clone(),
-                        detail: error.to_string(),
+                        legacy_detail: error.to_string(),
                     }
                 })?
             } else if module.source_kind == SourceKind::Python {

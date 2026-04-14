@@ -170,7 +170,7 @@ struct SymbolOccurrence {
     name: String,
     uri: String,
     range: LspRange,
-    detail: String,
+    legacy_detail: String,
     declaration: bool,
 }
 
