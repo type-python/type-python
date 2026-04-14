@@ -783,10 +783,7 @@ fn semantic_public_summary(
                 .import_target
                 .map(|target| target.raw_target)
                 .or_else(|| declaration.import_target().map(|target| target.raw_target.clone()))
-                .or_else(|| {
-                    let detail = declaration.rendered_detail();
-                    (!detail.is_empty()).then_some(detail)
-                })
+                .or_else(|| (!declaration.detail.is_empty()).then(|| declaration.detail.clone()))
         })
         .collect::<Vec<_>>();
     imports.sort();
@@ -853,7 +850,13 @@ fn semantic_summary_export(
         semantics.callable.as_ref().map(summary_callable_signature_from_semantics).or_else(|| {
             declaration.callable_signature().map(summary_callable_signature_from_bound)
         });
-    let exported_type = semantic_exported_type(node, declaration, &semantics);
+    let type_expr =
+        summary_export_type_expr(declaration, &semantics, declaration_signature.as_ref());
+    let exported_type = type_expr
+        .as_ref()
+        .map(TypeExpr::render)
+        .or_else(|| semantic_exported_type(node, declaration, &semantics));
+    let exported_type_expr = declaration_exported_type_expr(declaration, &semantics);
     let required_runtime_features = required_runtime_features_for_export(
         declaration,
         declaration_signature.as_ref(),
@@ -863,10 +866,10 @@ fn semantic_summary_export(
         name: declaration.name.clone(),
         kind: summary_kind_string(declaration),
         type_repr: exported_type.clone().unwrap_or_else(|| declaration.name.clone()),
-        type_expr: exported_type.as_deref().and_then(TypeExpr::parse),
+        type_expr,
         declaration_signature: declaration_signature.clone(),
         exported_type,
-        exported_type_expr: declaration_exported_type_expr(declaration, &semantics),
+        exported_type_expr,
         type_params: declaration.type_params.iter().map(summary_type_param).collect(),
         runtime_semantics: summary_runtime_semantics(node.module_kind, declaration),
         required_runtime_features,
@@ -992,6 +995,7 @@ fn semantic_declaration_fact(
     declaration: &Declaration,
 ) -> SummaryDeclarationFact {
     let semantics = context.load_declaration_semantics(declaration);
+    let type_expr_structured = declaration_fact_type_expr(declaration, &semantics);
     SummaryDeclarationFact {
         name: declaration.name.clone(),
         kind: summary_kind_string(declaration),
@@ -1002,10 +1006,12 @@ fn semantic_declaration_fact(
             .or_else(|| {
                 declaration.callable_signature().map(summary_callable_signature_from_bound)
             }),
-        type_expr: semantics
-            .type_alias
+        type_expr: type_expr_structured
             .as_ref()
-            .map(|type_alias| type_alias.body_text.clone())
+            .map(TypeExpr::render)
+            .or_else(|| {
+                semantics.type_alias.as_ref().map(|type_alias| type_alias.body_text.clone())
+            })
             .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation_text.clone()))
             .or_else(|| declaration.value_type.clone())
             .or_else(|| {
@@ -1014,7 +1020,7 @@ fn semantic_declaration_fact(
             .or_else(|| {
                 declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render)
             }),
-        type_expr_structured: declaration_fact_type_expr(declaration, &semantics),
+        type_expr_structured,
         import_target: semantics
             .import_target
             .as_ref()
@@ -1132,6 +1138,45 @@ fn summary_signature_param(
         keyword_only: param.keyword_only,
         variadic: param.variadic,
         keyword_variadic: param.keyword_variadic,
+    }
+}
+
+fn summary_signature_param_type_expr(param: &SummarySignatureParam) -> typepython_syntax::TypeExpr {
+    param
+        .annotation_expr
+        .clone()
+        .or_else(|| param.annotation.as_deref().and_then(TypeExpr::parse))
+        .unwrap_or_else(|| typepython_syntax::TypeExpr::Name(String::from("dynamic")))
+}
+
+fn summary_callable_type_expr(signature: &SummaryCallableSignature) -> typepython_syntax::TypeExpr {
+    typepython_syntax::TypeExpr::Callable {
+        params: Box::new(typepython_syntax::CallableParamExpr::ParamList(
+            signature.params.iter().map(summary_signature_param_type_expr).collect(),
+        )),
+        return_type: Box::new(
+            signature
+                .returns_expr
+                .clone()
+                .or_else(|| signature.returns.as_deref().and_then(TypeExpr::parse))
+                .unwrap_or_else(|| typepython_syntax::TypeExpr::Name(String::from("dynamic"))),
+        ),
+    }
+}
+
+fn summary_export_type_expr(
+    declaration: &Declaration,
+    semantics: &SemanticDeclarationFacts,
+    declaration_signature: Option<&SummaryCallableSignature>,
+) -> Option<TypeExpr> {
+    match declaration.kind {
+        DeclarationKind::Function | DeclarationKind::Overload => {
+            declaration_signature.map(summary_callable_type_expr)
+        }
+        DeclarationKind::Value | DeclarationKind::TypeAlias => {
+            declaration_exported_type_expr(declaration, semantics)
+        }
+        DeclarationKind::Class | DeclarationKind::Import => None,
     }
 }
 

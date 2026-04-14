@@ -300,6 +300,202 @@ fn semantic_incremental_summary_marks_runtime_sensitive_typing_surface() {
 }
 
 #[test]
+fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
+    let list_of_int = typepython_syntax::TypeExpr::Generic {
+        head: String::from("list"),
+        args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+    };
+    let tuple_of_int = typepython_syntax::TypeExpr::Generic {
+        head: String::from("tuple"),
+        args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+    };
+    let maybe_int = typepython_syntax::TypeExpr::Union {
+        branches: vec![
+            typepython_syntax::TypeExpr::Name(String::from("int")),
+            typepython_syntax::TypeExpr::Name(String::from("None")),
+        ],
+        style: typepython_syntax::UnionStyle::Shorthand,
+    };
+    let graph = ModuleGraph {
+        nodes: vec![ModuleNode {
+            module_path: PathBuf::from("<summary-app>"),
+            module_key: String::from("app"),
+            module_kind: SourceKind::TypePython,
+            declarations: vec![
+                Declaration {
+                    metadata: typepython_binding::DeclarationMetadata::Value {
+                        annotation: Some(typepython_binding::BoundTypeExpr::from_expr(
+                            list_of_int.clone(),
+                        )),
+                    },
+                    name: String::from("items"),
+                    kind: DeclarationKind::Value,
+                    detail: String::from("str"),
+                    value_type: Some(String::from("str")),
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    metadata: typepython_binding::DeclarationMetadata::TypeAlias {
+                        value: typepython_binding::BoundTypeExpr::from_expr(maybe_int.clone()),
+                    },
+                    name: String::from("MaybeInt"),
+                    kind: DeclarationKind::TypeAlias,
+                    detail: String::from("str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+                Declaration {
+                    metadata: typepython_binding::DeclarationMetadata::Callable {
+                        signature: typepython_binding::BoundCallableSignature {
+                            params: vec![typepython_syntax::DirectFunctionParamSite {
+                                name: String::from("value"),
+                                annotation: Some(String::from("list[int]")),
+                                annotation_expr: Some(list_of_int),
+                                has_default: false,
+                                positional_only: false,
+                                keyword_only: false,
+                                variadic: false,
+                                keyword_variadic: false,
+                            }],
+                            returns: Some(typepython_binding::BoundTypeExpr::from_expr(
+                                tuple_of_int,
+                            )),
+                        },
+                    },
+                    name: String::from("build"),
+                    kind: DeclarationKind::Function,
+                    detail: String::from("(value:str)->str"),
+                    value_type: None,
+                    method_kind: None,
+                    class_kind: None,
+                    owner: None,
+                    is_async: false,
+                    is_override: false,
+                    is_abstract_method: false,
+                    is_final_decorator: false,
+                    is_deprecated: false,
+                    deprecation_message: None,
+                    is_final: false,
+                    is_class_var: false,
+                    bases: Vec::new(),
+                    type_params: Vec::new(),
+                },
+            ],
+            calls: Vec::new(),
+            method_calls: Vec::new(),
+            member_accesses: Vec::new(),
+            returns: Vec::new(),
+            yields: Vec::new(),
+            if_guards: Vec::new(),
+            asserts: Vec::new(),
+            invalidations: Vec::new(),
+            matches: Vec::new(),
+            for_loops: Vec::new(),
+            with_statements: Vec::new(),
+            except_handlers: Vec::new(),
+            assignments: Vec::new(),
+            summary_fingerprint: 0,
+        }],
+    };
+
+    let summary = semantic_incremental_state_with_binding_metadata(
+        &graph,
+        &[],
+        ImportFallback::Unknown,
+        None,
+        None,
+        typepython_incremental::SnapshotMetadata::default(),
+    )
+    .summaries
+    .into_iter()
+    .find(|summary| summary.module == "app")
+    .expect("summary should exist");
+
+    let items = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "items")
+        .expect("items export should exist");
+    let maybe_int_export = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "MaybeInt")
+        .expect("MaybeInt export should exist");
+    let build = summary
+        .exports
+        .iter()
+        .find(|export| export.name == "build")
+        .expect("build export should exist");
+
+    assert_eq!(
+        items.type_expr.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("list[int]")),
+    );
+    assert_eq!(items.exported_type.as_deref(), Some("list[int]"));
+    assert_eq!(
+        maybe_int_export.type_expr.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("Union[int, None]")),
+    );
+    assert_eq!(
+        build.type_expr.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("Callable[[list[int]], tuple[int]]")),
+    );
+    assert_eq!(build.exported_type.as_deref(), Some("Callable[[list[int]], tuple[int]]"));
+    assert_eq!(
+        build.exported_type_expr.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("tuple[int]")),
+    );
+
+    let item_fact = summary
+        .solver_facts
+        .declaration_facts
+        .iter()
+        .find(|fact| fact.name == "items")
+        .expect("items declaration fact should exist");
+    let alias_fact = summary
+        .solver_facts
+        .declaration_facts
+        .iter()
+        .find(|fact| fact.name == "MaybeInt")
+        .expect("MaybeInt declaration fact should exist");
+
+    assert_eq!(item_fact.type_expr.as_deref(), Some("list[int]"));
+    assert_eq!(
+        item_fact.type_expr_structured.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("list[int]")),
+    );
+    assert_eq!(alias_fact.type_expr.as_deref(), Some("Union[int, None]"));
+    assert_eq!(
+        alias_fact.type_expr_structured.as_ref().map(typepython_syntax::TypeExpr::render),
+        Some(String::from("Union[int, None]")),
+    );
+}
+
+#[test]
 fn check_propagates_generic_owner_arguments_into_member_reads() {
     let diagnostics = check_temp_typepython_source(
         "class Box[T]:\n    value: T\n\ndef read(box: Box[int]) -> int:\n    return box.value\n",

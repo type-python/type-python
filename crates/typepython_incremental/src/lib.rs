@@ -642,31 +642,26 @@ fn summary_kind(declaration: &Declaration) -> String {
 }
 
 fn summary_type_repr(declaration: &Declaration) -> String {
-    match declaration.kind {
+    let detail = match declaration.kind {
         DeclarationKind::Class => declaration.name.clone(),
-        DeclarationKind::Value => declaration
-            .value_type
-            .clone()
-            .filter(|value| !value.is_empty())
-            .or_else(|| declaration.value_annotation().map(|annotation| annotation.render()))
+        DeclarationKind::Value => summary_type_expr(declaration)
+            .map(|expr| expr.render())
+            .or_else(|| declaration.value_type.clone().filter(|value| !value.is_empty()))
             .unwrap_or_else(|| declaration.detail.clone()),
-        _ => {
-            let structured = match declaration.kind {
-                DeclarationKind::TypeAlias => {
-                    declaration.type_alias_value().map(|value| value.render())
-                }
-                DeclarationKind::Function | DeclarationKind::Overload => {
-                    declaration.callable_signature().map(|signature| signature.rendered())
-                }
-                DeclarationKind::Import => {
-                    declaration.import_target().map(|target| target.raw_target.clone())
-                }
-                DeclarationKind::Class | DeclarationKind::Value => None,
-            };
-            let detail = structured.unwrap_or_else(|| declaration.detail.clone());
-            if detail.is_empty() { declaration.name.clone() } else { detail }
-        }
-    }
+        DeclarationKind::TypeAlias => declaration
+            .type_alias_value()
+            .map(|value| value.render())
+            .unwrap_or_else(|| declaration.detail.clone()),
+        DeclarationKind::Function | DeclarationKind::Overload => declaration
+            .callable_signature()
+            .map(|signature| signature.rendered())
+            .unwrap_or_else(|| declaration.detail.clone()),
+        DeclarationKind::Import => declaration
+            .import_target()
+            .map(|target| target.raw_target.clone())
+            .unwrap_or_else(|| declaration.detail.clone()),
+    };
+    if detail.is_empty() { declaration.name.clone() } else { detail }
 }
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
