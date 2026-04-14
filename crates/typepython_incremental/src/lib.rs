@@ -343,6 +343,41 @@ pub fn dependency_index(graph: &ModuleGraph) -> ModuleDependencyIndex {
     ModuleDependencyIndex { imports_by_module, reverse_imports }
 }
 
+/// Rebuilds a dependency index from persisted public summaries.
+#[must_use]
+pub fn dependency_index_from_summaries(summaries: &[PublicSummary]) -> ModuleDependencyIndex {
+    let module_keys =
+        summaries.iter().map(|summary| summary.module.clone()).collect::<BTreeSet<_>>();
+    let mut imports_by_module = module_keys
+        .iter()
+        .cloned()
+        .map(|module_key| (module_key, BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    let mut reverse_imports = imports_by_module.clone();
+
+    for summary in summaries {
+        let imports = if summary.import_targets.is_empty() {
+            summary
+                .imports
+                .iter()
+                .filter_map(|target| resolve_import_module_key(target, &module_keys))
+                .collect::<BTreeSet<_>>()
+        } else {
+            summary
+                .import_targets
+                .iter()
+                .filter_map(|target| resolve_import_module_key(&target.module_target, &module_keys))
+                .collect::<BTreeSet<_>>()
+        };
+        for imported in &imports {
+            reverse_imports.entry(imported.clone()).or_default().insert(summary.module.clone());
+        }
+        imports_by_module.insert(summary.module.clone(), imports);
+    }
+
+    ModuleDependencyIndex { imports_by_module, reverse_imports }
+}
+
 /// Collects the set of modules whose public summaries changed in a snapshot diff.
 #[must_use]
 pub fn snapshot_diff_modules(snapshot_diff: &SnapshotDiff) -> BTreeSet<String> {
@@ -723,8 +758,9 @@ mod tests {
     use super::{
         Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
         SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SnapshotMetadata, SummaryExport,
-        SummaryTypeParam, affected_modules, decode_snapshot, dependency_index, diff,
-        encode_snapshot, snapshot, snapshot_diff_modules, source_change_modules,
+        SummaryTypeParam, affected_modules, decode_snapshot, dependency_index,
+        dependency_index_from_summaries, diff, encode_snapshot, snapshot, snapshot_diff_modules,
+        source_change_modules,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -1650,6 +1686,31 @@ mod tests {
             affected,
             BTreeSet::from([String::from("pkg.a"), String::from("pkg.b"), String::from("pkg.c"),])
         );
+    }
+
+    #[test]
+    fn dependency_index_from_summaries_matches_graph_dependency_index() {
+        let graph = ModuleGraph {
+            nodes: vec![
+                module_node("pkg.a", "src/pkg/a.tpy", vec![value_declaration("A", "int")]),
+                module_node(
+                    "pkg.b",
+                    "src/pkg/b.tpy",
+                    vec![import_declaration("a", "pkg.a"), value_declaration("B", "int")],
+                ),
+                module_node(
+                    "pkg.c",
+                    "src/pkg/c.tpy",
+                    vec![import_declaration("b", "pkg.b"), value_declaration("C", "int")],
+                ),
+            ],
+        };
+
+        let graph_index = dependency_index(&graph);
+        let summary_index = dependency_index_from_summaries(&snapshot(&graph).summaries);
+
+        assert_eq!(summary_index.imports_by_module, graph_index.imports_by_module);
+        assert_eq!(summary_index.reverse_imports, graph_index.reverse_imports);
     }
 
     #[test]

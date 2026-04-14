@@ -5,8 +5,9 @@ pub(super) use super::discovery::{
 };
 pub(super) use super::migration::{build_migration_report, emit_migration_stubs};
 pub(super) use super::pipeline::{
-    build_diagnostics, clean_project, compile_runtime_bytecode, format_watch_rebuild_note,
-    load_syntax_trees, materialize_build_outputs, run_build_like_command, run_pipeline,
+    PipelineSnapshot, build_diagnostics, clean_project, compile_runtime_bytecode,
+    format_watch_rebuild_note, load_syntax_trees, materialize_build_outputs,
+    persist_pipeline_analysis_state, run_build_like_command, run_pipeline, run_with_pipeline,
     should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
 pub(super) use super::verification::{

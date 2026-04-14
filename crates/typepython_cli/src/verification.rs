@@ -25,8 +25,9 @@ use zip::ZipArchive;
 use crate::cli::VerifyArgs;
 use crate::discovery::normalize_glob_path;
 use crate::pipeline::{
-    build_diagnostics, ensure_output_dirs, materialize_build_outputs, py_typed_package_roots,
-    run_pipeline, runtime_write_diagnostic, should_emit_build_outputs,
+    build_diagnostics, ensure_output_dirs, materialize_build_outputs,
+    persist_pipeline_analysis_state, py_typed_package_roots, run_pipeline,
+    runtime_write_diagnostic, should_emit_build_outputs,
 };
 use crate::{
     CommandSummary, RUNTIME_IMPORTABILITY_SCRIPT, bytecode_path_for, exit_code, load_project,
@@ -114,6 +115,7 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
     }
     ensure_output_dirs(&config)?;
     let snapshot = run_pipeline(&config)?;
+    let _ = persist_pipeline_analysis_state(&config, &snapshot)?;
     let mut notes = vec![String::from(
         "verifies current runtime artifacts, emitted stubs, and `py.typed` in the build tree",
     )];
@@ -172,7 +174,7 @@ pub(crate) fn run_verify(args: VerifyArgs) -> Result<ExitCode> {
             verify_publication_metadata(
                 &config,
                 &snapshot.emit_plan,
-                Some(&snapshot.lowered_modules),
+                None,
                 &supplied_verify_artifacts(&args),
             )
             .diagnostics,

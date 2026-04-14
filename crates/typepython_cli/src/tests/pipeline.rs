@@ -286,6 +286,161 @@ fn run_build_like_command_skips_py_typed_when_disabled() {
 }
 
 #[test]
+fn run_with_pipeline_check_persists_analysis_cache_without_materializing_outputs() {
+    let project_dir = temp_project_dir(
+        "run_with_pipeline_check_persists_analysis_cache_without_materializing_outputs",
+    );
+    let result = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+
+        let exit_code = run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("check should run to completion");
+
+        (
+            exit_code,
+            project_dir.join(".typepython/cache/snapshot.json").exists(),
+            project_dir.join(".typepython/cache/analysis-cache.json").exists(),
+            project_dir.join(".typepython/cache/build-manifest.json").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (exit_code, snapshot_exists, analysis_exists, manifest_exists) = result;
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert!(snapshot_exists);
+    assert!(analysis_exists);
+    assert!(!manifest_exists);
+}
+
+#[test]
+fn run_build_like_command_rebuilds_outputs_after_check_updates_semantic_cache() {
+    let project_dir = temp_project_dir(
+        "run_build_like_command_rebuilds_outputs_after_check_updates_semantic_cache",
+    );
+    let runtime_source = {
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app.py");
+
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("initial build should succeed");
+        fs::write(project_dir.join("src/app.tpy"), "def build() -> int:\n    return 2\n")
+            .expect("test setup should succeed");
+        run_with_pipeline(
+            "check",
+            RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
+            false,
+            Vec::new(),
+        )
+        .expect("check should update semantic cache");
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("follow-up build should succeed");
+
+        let runtime = fs::read_to_string(runtime_path).expect("runtime output should exist");
+        remove_temp_project_dir(&project_dir);
+        runtime
+    };
+
+    assert!(runtime_source.contains("return 2"));
+    assert!(!runtime_source.contains("return 1"));
+}
+
+#[test]
+fn run_build_like_command_removes_stale_outputs_for_deleted_modules() {
+    let project_dir =
+        temp_project_dir("run_build_like_command_removes_stale_outputs_for_deleted_modules");
+    let result = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/__init__.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("initial build should succeed");
+        fs::remove_file(project_dir.join("src/app/__init__.tpy"))
+            .expect("source should be removed");
+        fs::write(project_dir.join("src/other.tpy"), "def build() -> int:\n    return 2\n")
+            .expect("replacement source should be written");
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("follow-up build should succeed");
+
+        (
+            project_dir.join(".typepython/build/app/__init__.py").exists(),
+            project_dir.join(".typepython/build/app/__init__.pyi").exists(),
+            project_dir.join(".typepython/build/app/py.typed").exists(),
+            project_dir.join(".typepython/build/other.py").exists(),
+            project_dir.join(".typepython/build/other.pyi").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (
+        old_runtime_exists,
+        old_stub_exists,
+        old_marker_exists,
+        new_runtime_exists,
+        new_stub_exists,
+    ) = result;
+    assert!(!old_runtime_exists);
+    assert!(!old_stub_exists);
+    assert!(!old_marker_exists);
+    assert!(new_runtime_exists);
+    assert!(new_stub_exists);
+}
+
+#[test]
+fn run_build_like_command_removes_stale_py_typed_when_disabled() {
+    let project_dir =
+        temp_project_dir("run_build_like_command_removes_stale_py_typed_when_disabled");
+    let result = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(project_dir.join("src/app/__init__.tpy"), "def build() -> int:\n    return 1\n")
+            .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+
+        run_build_like_command(&config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("initial build should succeed");
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nwrite_py_typed = false\n",
+        )
+        .expect("updated config should be written");
+        let updated_config = load(&project_dir).expect("updated config should load");
+        run_build_like_command(&updated_config, super::OutputFormat::Json, "build", Vec::new())
+            .expect("follow-up build should succeed");
+
+        (
+            project_dir.join(".typepython/build/app/__init__.py").exists(),
+            project_dir.join(".typepython/build/app/__init__.pyi").exists(),
+            project_dir.join(".typepython/build/app/py.typed").exists(),
+        )
+    };
+    remove_temp_project_dir(&project_dir);
+
+    let (runtime_exists, stub_exists, marker_exists) = result;
+    assert!(runtime_exists);
+    assert!(stub_exists);
+    assert!(!marker_exists);
+}
+
+#[test]
 fn run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed() {
     let project_dir =
         temp_project_dir("run_verify_emits_outputs_when_checker_fails_and_emit_is_allowed");
@@ -408,6 +563,101 @@ fn run_pipeline_uses_shadow_stubs_for_local_python_when_infer_passthrough_is_ena
     assert!(!with_inference.has_errors(), "{}", with_inference.as_text());
     assert!(shadow_stub.contains("def build() -> User: ..."));
     assert!(shadow_stub.contains("age: int"));
+}
+
+fn write_chain_workspace(project_dir: &Path, module_count: usize) {
+    fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+    fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+        .expect("test setup should succeed");
+    fs::write(project_dir.join("src/app/__init__.tpy"), "pass\n")
+        .expect("test setup should succeed");
+
+    for index in 0..module_count {
+        let module_name = format!("mod_{index:02}");
+        let contents = if index == 0 {
+            String::from("def produce() -> int:\n    return 1\n")
+        } else {
+            let previous = format!("mod_{:02}", index - 1);
+            format!(
+                "from app.{previous} import produce\n\n\
+                 def run_{index:02}() -> int:\n    return produce()\n"
+            )
+        };
+        fs::write(project_dir.join(format!("src/app/{module_name}.tpy")), contents)
+            .expect("test setup should succeed");
+    }
+}
+
+fn persist_pipeline_caches(config: &typepython_config::ConfigHandle, snapshot: &PipelineSnapshot) {
+    persist_pipeline_analysis_state(config, snapshot).expect("analysis cache should be written");
+    materialize_build_outputs(config, snapshot).expect("materialized outputs should be written");
+}
+
+#[test]
+fn run_pipeline_selectively_lowers_only_changed_module_for_implementation_edits() {
+    let project_dir = temp_project_dir(
+        "run_pipeline_selectively_lowers_only_changed_module_for_implementation_edits",
+    );
+    let lowered_modules = {
+        write_chain_workspace(&project_dir, 4);
+        let config = load(&project_dir).expect("test setup should succeed");
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        persist_pipeline_caches(&config, &first);
+
+        fs::write(
+            project_dir.join("src/app/mod_00.tpy"),
+            "def produce() -> int:\n    value = 1\n    return value\n",
+        )
+        .expect("test setup should succeed");
+        let second = run_pipeline(&config).expect("test setup should succeed");
+        let lowered = second
+            .lowered_modules
+            .iter()
+            .map(|module| module.source_path.strip_prefix(&project_dir).unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+        remove_temp_project_dir(&project_dir);
+        lowered
+    };
+
+    assert_eq!(lowered_modules, vec![PathBuf::from("src/app/mod_00.tpy")]);
+}
+
+#[test]
+fn run_pipeline_selectively_lowers_transitive_dependents_for_public_edits() {
+    let project_dir =
+        temp_project_dir("run_pipeline_selectively_lowers_transitive_dependents_for_public_edits");
+    let lowered_modules = {
+        write_chain_workspace(&project_dir, 4);
+        let config = load(&project_dir).expect("test setup should succeed");
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        persist_pipeline_caches(&config, &first);
+
+        fs::write(
+            project_dir.join("src/app/mod_00.tpy"),
+            "def produce() -> str:\n    return \"value\"\n",
+        )
+        .expect("test setup should succeed");
+        let second = run_pipeline(&config).expect("test setup should succeed");
+        let mut lowered = second
+            .lowered_modules
+            .iter()
+            .map(|module| module.source_path.strip_prefix(&project_dir).unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+        lowered.sort();
+        remove_temp_project_dir(&project_dir);
+        lowered
+    };
+
+    assert_eq!(
+        lowered_modules,
+        vec![
+            PathBuf::from("src/app/__init__.tpy"),
+            PathBuf::from("src/app/mod_00.tpy"),
+            PathBuf::from("src/app/mod_01.tpy"),
+            PathBuf::from("src/app/mod_02.tpy"),
+            PathBuf::from("src/app/mod_03.tpy"),
+        ]
+    );
 }
 
 #[test]
