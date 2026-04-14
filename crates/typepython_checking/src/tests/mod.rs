@@ -986,6 +986,80 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
     }
 }
 
+#[test]
+fn surface_direct_method_signatures_trim_implicit_parameters() {
+    let metadata = typepython_syntax::ModuleSurfaceMetadata {
+        direct_method_signatures: vec![
+            typepython_syntax::DirectMethodSignatureSite {
+                owner_type_name: String::from("Widget"),
+                name: String::from("instance_method"),
+                method_kind: typepython_syntax::MethodKind::Instance,
+                params: vec![
+                    typepython_syntax::DirectFunctionParamSite {
+                        name: String::from("self"),
+                        annotation: None,
+                        annotation_expr: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                    typepython_syntax::DirectFunctionParamSite {
+                        name: String::from("value"),
+                        annotation: Some(String::from("int")),
+                        annotation_expr: None,
+                        has_default: false,
+                        positional_only: false,
+                        keyword_only: false,
+                        variadic: false,
+                        keyword_variadic: false,
+                    },
+                ],
+                line: 1,
+            },
+            typepython_syntax::DirectMethodSignatureSite {
+                owner_type_name: String::from("Widget"),
+                name: String::from("factory"),
+                method_kind: typepython_syntax::MethodKind::Static,
+                params: vec![typepython_syntax::DirectFunctionParamSite {
+                    name: String::from("value"),
+                    annotation: Some(String::from("int")),
+                    annotation_expr: None,
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }],
+                line: 2,
+            },
+        ],
+        ..Default::default()
+    };
+
+    let signatures = super::surface_direct_method_signatures(&metadata);
+
+    assert_eq!(
+        signatures
+            .get(&(String::from("Widget"), String::from("instance_method")))
+            .expect("instance method signature should be collected")
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["value"]
+    );
+    assert_eq!(
+        signatures
+            .get(&(String::from("Widget"), String::from("factory")))
+            .expect("static method signature should be collected")
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["value"]
+    );
+}
+
 fn collect_rs_files(root: &PathBuf, files: &mut Vec<PathBuf>) {
     let entries = fs::read_dir(root).expect("source directory should be readable");
     for entry in entries {

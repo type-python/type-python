@@ -148,15 +148,8 @@ type DirectMethodSignaturesByName =
 struct FallbackModuleSourceFacts {
     source_loaded: bool,
     source_text: Option<String>,
-    typed_dict_class_metadata: Option<BTreeMap<String, typepython_syntax::TypedDictClassMetadata>>,
-    direct_function_signatures:
-        Option<BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>>,
-    direct_method_signatures:
-        Option<BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>>,
-    decorator_transform_module_info:
-        Option<Option<typepython_syntax::DecoratorTransformModuleInfo>>,
-    dataclass_transform_module_info:
-        Option<Option<typepython_syntax::DataclassTransformModuleInfo>>,
+    surface_metadata_loaded: bool,
+    surface_metadata: Option<typepython_syntax::ModuleSurfaceMetadata>,
 }
 
 impl FallbackModuleSourceFacts {
@@ -176,6 +169,66 @@ impl FallbackModuleSourceFacts {
 
         self.source_text.as_deref()
     }
+
+    fn module_surface_metadata<'a>(
+        &'a mut self,
+        node: &typepython_graph::ModuleNode,
+        source_overrides: Option<&BTreeMap<String, String>>,
+    ) -> Option<&'a typepython_syntax::ModuleSurfaceMetadata> {
+        if !self.surface_metadata_loaded {
+            self.surface_metadata = self
+                .source_text(node, source_overrides)
+                .map(typepython_syntax::collect_module_surface_metadata);
+            self.surface_metadata_loaded = true;
+        }
+
+        self.surface_metadata.as_ref()
+    }
+}
+
+fn surface_typed_dict_class_metadata(
+    metadata: &typepython_syntax::ModuleSurfaceMetadata,
+) -> TypedDictClassMetadataByName {
+    metadata
+        .typed_dict_classes
+        .iter()
+        .cloned()
+        .map(|typed_dict| (typed_dict.name.clone(), typed_dict))
+        .collect()
+}
+
+fn surface_direct_function_signatures(
+    metadata: &typepython_syntax::ModuleSurfaceMetadata,
+) -> DirectFunctionSignaturesByName {
+    metadata
+        .direct_function_signatures
+        .iter()
+        .cloned()
+        .map(|signature| (signature.name, signature.params))
+        .collect()
+}
+
+fn surface_direct_method_signatures(
+    metadata: &typepython_syntax::ModuleSurfaceMetadata,
+) -> DirectMethodSignaturesByName {
+    metadata
+        .direct_method_signatures
+        .iter()
+        .cloned()
+        .map(|signature| {
+            let params = match signature.method_kind {
+                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
+                    signature.params
+                }
+                typepython_syntax::MethodKind::Instance
+                | typepython_syntax::MethodKind::Class
+                | typepython_syntax::MethodKind::PropertySetter => {
+                    signature.params.into_iter().skip(1).collect()
+                }
+            };
+            ((signature.owner_type_name, signature.name), params)
+        })
+        .collect()
 }
 
 #[derive(Debug, Default)]
@@ -227,19 +280,10 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         }
 
         self.with_module_facts(node, |facts| {
-            if let Some(metadata) = facts.typed_dict_class_metadata.clone() {
-                return metadata;
-            }
-
-            let metadata = match facts.source_text(node, self.source_overrides) {
-                Some(source) => typepython_syntax::collect_typed_dict_class_metadata(source)
-                    .into_iter()
-                    .map(|metadata| (metadata.name.clone(), metadata))
-                    .collect(),
-                None => BTreeMap::new(),
-            };
-            facts.typed_dict_class_metadata = Some(metadata.clone());
-            metadata
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(surface_typed_dict_class_metadata)
+                .unwrap_or_default()
         })
     }
 
@@ -255,19 +299,10 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         }
 
         self.with_module_facts(node, |facts| {
-            if let Some(signatures) = facts.direct_function_signatures.clone() {
-                return signatures;
-            }
-
-            let signatures = match facts.source_text(node, self.source_overrides) {
-                Some(source) => typepython_syntax::collect_direct_function_signature_sites(source)
-                    .into_iter()
-                    .map(|signature| (signature.name, signature.params))
-                    .collect(),
-                None => BTreeMap::new(),
-            };
-            facts.direct_function_signatures = Some(signatures.clone());
-            signatures
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(surface_direct_function_signatures)
+                .unwrap_or_default()
         })
     }
 
@@ -283,30 +318,10 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         }
 
         self.with_module_facts(node, |facts| {
-            if let Some(signatures) = facts.direct_method_signatures.clone() {
-                return signatures;
-            }
-
-            let signatures = match facts.source_text(node, self.source_overrides) {
-                Some(source) => typepython_syntax::collect_direct_method_signature_sites(source)
-                    .into_iter()
-                    .map(|signature| {
-                        let params = match signature.method_kind {
-                            typepython_syntax::MethodKind::Static
-                            | typepython_syntax::MethodKind::Property => signature.params,
-                            typepython_syntax::MethodKind::Instance
-                            | typepython_syntax::MethodKind::Class
-                            | typepython_syntax::MethodKind::PropertySetter => {
-                                signature.params.into_iter().skip(1).collect()
-                            }
-                        };
-                        ((signature.owner_type_name, signature.name), params)
-                    })
-                    .collect(),
-                None => BTreeMap::new(),
-            };
-            facts.direct_method_signatures = Some(signatures.clone());
-            signatures
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(surface_direct_method_signatures)
+                .unwrap_or_default()
         })
     }
 
@@ -322,15 +337,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         }
 
         self.with_module_facts(node, |facts| {
-            if let Some(info) = &facts.decorator_transform_module_info {
-                return info.clone();
-            }
-
-            let info = facts
-                .source_text(node, self.source_overrides)
-                .map(typepython_syntax::collect_decorator_transform_module_info);
-            facts.decorator_transform_module_info = Some(info.clone());
-            info
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(|metadata| metadata.decorator_transform.clone())
         })
     }
 
@@ -346,15 +355,9 @@ impl<'a> CheckerSourceFactsProvider<'a> {
         }
 
         self.with_module_facts(node, |facts| {
-            if let Some(info) = &facts.dataclass_transform_module_info {
-                return info.clone();
-            }
-
-            let info = facts
-                .source_text(node, self.source_overrides)
-                .map(typepython_syntax::collect_dataclass_transform_module_info);
-            facts.dataclass_transform_module_info = Some(info.clone());
-            info
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(|metadata| metadata.dataclass_transform.clone())
         })
     }
 }
