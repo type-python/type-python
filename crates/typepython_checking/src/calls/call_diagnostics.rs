@@ -36,7 +36,7 @@ pub(super) fn direct_call_arity_diagnostics(
                     &failure,
                 ));
             }
-            if !call.starred_arg_types.is_empty()
+            if !call.starred_arg_values.is_empty()
                 && resolve_function_provider_with_node(nodes, node, &call.callee).is_some()
             {
                 return None;

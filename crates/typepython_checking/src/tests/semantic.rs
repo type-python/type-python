@@ -770,7 +770,6 @@ fn call_diagnostics_resolve_argument_types_through_semantic_path() {
     let call = typepython_binding::CallSite {
         callee: String::from("consume"),
         arg_count: 1,
-        arg_types: vec![String::new()],
         arg_values: vec![typepython_syntax::DirectExprMetadata {
             value_type_expr: None,
             value_type: None,
@@ -801,12 +800,9 @@ fn call_diagnostics_resolve_argument_types_through_semantic_path() {
             value_set_elements: None,
             value_dict_entries: None,
         }],
-        starred_arg_types: Vec::new(),
         starred_arg_values: Vec::new(),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
         keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
         keyword_expansion_values: Vec::new(),
         line: 1,
     };

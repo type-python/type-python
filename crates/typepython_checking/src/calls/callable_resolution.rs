@@ -681,14 +681,10 @@ pub(super) fn synthetic_decorator_application_call(
     typepython_binding::CallSite {
         callee: decorator_name.to_owned(),
         arg_count: 1,
-        arg_types: vec![callable_annotation.to_owned()],
         arg_values: vec![synthetic_direct_expr_metadata(callable_annotation)],
-        starred_arg_types: Vec::new(),
         starred_arg_values: Vec::new(),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
         keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
         keyword_expansion_values: Vec::new(),
         line: 1,
     }
@@ -698,14 +694,10 @@ fn synthetic_single_positional_call(callee: &str) -> typepython_binding::CallSit
     typepython_binding::CallSite {
         callee: callee.to_owned(),
         arg_count: 1,
-        arg_types: vec![String::new()],
-        arg_values: Vec::new(),
-        starred_arg_types: Vec::new(),
+        arg_values: vec![typepython_syntax::DirectExprMetadata::from_type_text("")],
         starred_arg_values: Vec::new(),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
         keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
         keyword_expansion_values: Vec::new(),
         line: 1,
     }

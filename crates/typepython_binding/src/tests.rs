@@ -156,7 +156,6 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
     let call = CallSite {
         callee: String::from("build"),
         arg_count: 1,
-        arg_types: vec![String::from("str")],
         arg_values: vec![DirectExprMetadata {
             value_type: Some(String::from("str")),
             value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
@@ -190,10 +189,10 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
             value_set_elements: None,
             value_dict_entries: None,
         }],
-        starred_arg_types: vec![String::from("tuple[str, ...]")],
-        starred_arg_values: Vec::new(),
+        starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("tuple[str, ...]"),
+        ]),
         keyword_names: vec![String::from("count")],
-        keyword_arg_types: vec![String::from("str")],
         keyword_arg_values: vec![DirectExprMetadata {
             value_type: Some(String::from("str")),
             value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
@@ -224,8 +223,9 @@ fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
             value_set_elements: None,
             value_dict_entries: None,
         }],
-        keyword_expansion_types: vec![String::from("dict[str, str]")],
-        keyword_expansion_values: Vec::new(),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            vec![String::from("dict[str, str]")],
+        ),
         line: 1,
     };
 

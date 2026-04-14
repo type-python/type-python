@@ -201,14 +201,10 @@ pub(super) fn imported_module_method_call_site(
     typepython_binding::CallSite {
         callee: format!("{}.{}", module_node.module_key, call.method),
         arg_count: call.arg_count,
-        arg_types: call.arg_types.clone(),
         arg_values: call.arg_values.clone(),
-        starred_arg_types: call.starred_arg_types.clone(),
         starred_arg_values: call.starred_arg_values.clone(),
         keyword_names: call.keyword_names.clone(),
-        keyword_arg_types: call.keyword_arg_types.clone(),
         keyword_arg_values: call.keyword_arg_values.clone(),
-        keyword_expansion_types: call.keyword_expansion_types.clone(),
         keyword_expansion_values: call.keyword_expansion_values.clone(),
         line: 1,
     }

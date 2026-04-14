@@ -584,15 +584,11 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
     let direct_call = typepython_binding::CallSite {
         callee: String::from("Box.get"),
         arg_count: 0,
-        arg_types: Vec::new(),
-        arg_values: Vec::new(),
-        starred_arg_types: Vec::new(),
-        starred_arg_values: Vec::new(),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
-        keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
-        keyword_expansion_values: Vec::new(),
+        keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         line: 1,
     };
 
@@ -647,15 +643,11 @@ fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
     let call = typepython_binding::CallSite {
         callee: String::from("choose"),
         arg_count: 2,
-        arg_types: vec![String::from("Animal"), String::from("Cat")],
-        arg_values: Vec::new(),
-        starred_arg_types: Vec::new(),
-        starred_arg_values: Vec::new(),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("Animal"), String::from("Cat")]),
+        starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
-        keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
-        keyword_expansion_values: Vec::new(),
+        keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         line: 1,
     };
 

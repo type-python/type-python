@@ -385,7 +385,6 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
     let call = typepython_binding::CallSite {
         callee: String::from("choose"),
         arg_count: 1,
-        arg_types: vec![String::from("dict[str, object]")],
         arg_values: vec![typepython_syntax::DirectExprMetadata {
             value_type_expr: None,
             value_type: Some(String::from("dict[str, object]")),
@@ -429,12 +428,9 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
                 },
             ]),
         }],
-        starred_arg_types: Vec::new(),
         starred_arg_values: Vec::new(),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
         keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
         keyword_expansion_values: Vec::new(),
         line: 1,
     };

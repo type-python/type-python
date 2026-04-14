@@ -184,14 +184,10 @@ pub enum DeclarationMetadata {
 pub struct CallSite {
     pub callee: String,
     pub arg_count: usize,
-    pub arg_types: Vec<String>,
     pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
-    pub starred_arg_types: Vec<String>,
     pub starred_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub keyword_names: Vec<String>,
-    pub keyword_arg_types: Vec<String>,
     pub keyword_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
-    pub keyword_expansion_types: Vec<String>,
     pub keyword_expansion_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub line: usize,
 }
@@ -199,25 +195,22 @@ pub struct CallSite {
 impl CallSite {
     #[must_use]
     pub fn positional_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.arg_values, &self.arg_types)
+        rendered_direct_expr_type_texts(&self.arg_values)
     }
 
     #[must_use]
     pub fn starred_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.starred_arg_values, &self.starred_arg_types)
+        rendered_direct_expr_type_texts(&self.starred_arg_values)
     }
 
     #[must_use]
     pub fn keyword_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.keyword_arg_values, &self.keyword_arg_types)
+        rendered_direct_expr_type_texts(&self.keyword_arg_values)
     }
 
     #[must_use]
     pub fn keyword_expansion_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(
-            &self.keyword_expansion_values,
-            &self.keyword_expansion_types,
-        )
+        rendered_direct_expr_type_texts(&self.keyword_expansion_values)
     }
 }
 
@@ -241,14 +234,10 @@ pub struct MethodCallSite {
     pub method: String,
     pub through_instance: bool,
     pub arg_count: usize,
-    pub arg_types: Vec<String>,
     pub arg_values: Vec<typepython_syntax::DirectExprMetadata>,
-    pub starred_arg_types: Vec<String>,
     pub starred_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub keyword_names: Vec<String>,
-    pub keyword_arg_types: Vec<String>,
     pub keyword_arg_values: Vec<typepython_syntax::DirectExprMetadata>,
-    pub keyword_expansion_types: Vec<String>,
     pub keyword_expansion_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub line: usize,
 }
@@ -256,44 +245,29 @@ pub struct MethodCallSite {
 impl MethodCallSite {
     #[must_use]
     pub fn positional_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.arg_values, &self.arg_types)
+        rendered_direct_expr_type_texts(&self.arg_values)
     }
 
     #[must_use]
     pub fn starred_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.starred_arg_values, &self.starred_arg_types)
+        rendered_direct_expr_type_texts(&self.starred_arg_values)
     }
 
     #[must_use]
     pub fn keyword_arg_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(&self.keyword_arg_values, &self.keyword_arg_types)
+        rendered_direct_expr_type_texts(&self.keyword_arg_values)
     }
 
     #[must_use]
     pub fn keyword_expansion_type_texts(&self) -> Vec<String> {
-        rendered_direct_expr_type_texts(
-            &self.keyword_expansion_values,
-            &self.keyword_expansion_types,
-        )
+        rendered_direct_expr_type_texts(&self.keyword_expansion_values)
     }
 }
 
-fn rendered_direct_expr_type_texts(
-    metadata: &[typepython_syntax::DirectExprMetadata],
-    fallback: &[String],
-) -> Vec<String> {
-    if metadata.is_empty() {
-        return fallback.to_vec();
-    }
+fn rendered_direct_expr_type_texts(metadata: &[typepython_syntax::DirectExprMetadata]) -> Vec<String> {
     metadata
         .iter()
-        .enumerate()
-        .map(|(index, metadata)| {
-            metadata
-                .rendered_value_type()
-                .or_else(|| fallback.get(index).cloned())
-                .unwrap_or_default()
-        })
+        .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
         .collect()
 }
 

@@ -114,14 +114,10 @@ fn call_site(callee: &str, arg_types: Vec<String>, line: usize) -> CallSite {
     CallSite {
         callee: callee.to_owned(),
         arg_count: arg_types.len(),
-        arg_types,
-        arg_values: Vec::new(),
-        starred_arg_types: Vec::new(),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(arg_types),
         starred_arg_values: Vec::new(),
         keyword_names: Vec::new(),
-        keyword_arg_types: Vec::new(),
         keyword_arg_values: Vec::new(),
-        keyword_expansion_types: Vec::new(),
         keyword_expansion_values: Vec::new(),
         line,
     }
