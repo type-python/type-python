@@ -422,6 +422,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     .unwrap_or_else(|| BoundTypeExpr::new(statement.value.clone())),
             },
             value_type: None,
+            value_type_expr: None,
             method_kind: None,
             class_kind: None,
             owner: None,
@@ -465,6 +466,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 ),
             },
             value_type: None,
+            value_type_expr: None,
             method_kind: None,
             class_kind: None,
             owner: None,
@@ -496,6 +498,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 ),
             },
             value_type: None,
+            value_type_expr: None,
             method_kind: None,
             class_kind: None,
             owner: None,
@@ -521,6 +524,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     target: BoundImportTarget::new(binding.source_path.clone()),
                 },
                 value_type: None,
+                value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
                 owner: None,
@@ -557,6 +561,17 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                             .or_else(|| statement.annotation.clone().map(BoundTypeExpr::new)),
                     },
                     value_type: statement.value_type.clone(),
+                    value_type_expr: statement
+                        .value_type_expr
+                        .clone()
+                        .map(BoundTypeExpr::from_expr)
+                        .or_else(|| {
+                            statement
+                                .value_type
+                                .clone()
+                                .filter(|value| !value.is_empty())
+                                .map(BoundTypeExpr::new)
+                        }),
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -635,6 +650,7 @@ fn bind_named_block(
         detail: statement.bases.join(","),
         metadata: DeclarationMetadata::Class { bases: statement.bases.clone() },
         value_type: None,
+        value_type_expr: None,
         method_kind: None,
         class_kind: Some(owner_kind),
         owner: None,
@@ -689,6 +705,11 @@ fn bind_named_block(
                 },
             },
             value_type: member.value_type.clone(),
+            value_type_expr: member
+                .value_type
+                .clone()
+                .filter(|value| !value.is_empty())
+                .map(BoundTypeExpr::new),
             method_kind: member.method_kind,
             class_kind: None,
             owner: Some(owner.clone()),

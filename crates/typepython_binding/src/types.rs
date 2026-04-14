@@ -788,6 +788,7 @@ pub struct Declaration {
     pub detail: String,
     pub metadata: DeclarationMetadata,
     pub value_type: Option<String>,
+    pub value_type_expr: Option<BoundTypeExpr>,
     pub method_kind: Option<MethodKind>,
     pub class_kind: Option<DeclarationOwnerKind>,
     pub owner: Option<DeclarationOwner>,
@@ -849,6 +850,21 @@ impl Declaration {
             DeclarationMetadata::Value { annotation } => annotation.as_ref(),
             _ => None,
         }
+    }
+
+    #[must_use]
+    pub fn inferred_value_type(&self) -> Option<&BoundTypeExpr> {
+        self.value_type_expr.as_ref()
+    }
+
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.inferred_value_type().map(BoundTypeExpr::render).or_else(|| self.value_type.clone())
+    }
+
+    #[must_use]
+    pub fn inferred_value_type_semantic_text(&self) -> Option<String> {
+        self.rendered_value_type().filter(|value| !value.is_empty())
     }
 
     #[must_use]

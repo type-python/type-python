@@ -645,7 +645,7 @@ fn summary_type_repr(declaration: &Declaration) -> String {
         DeclarationKind::Class => declaration.name.clone(),
         DeclarationKind::Value => summary_type_expr(declaration)
             .map(|expr| expr.render())
-            .or_else(|| declaration.value_type.clone().filter(|value| !value.is_empty()))
+            .or_else(|| declaration.inferred_value_type_semantic_text())
             .or_else(|| declaration.value_annotation_text())
             .unwrap_or_else(|| declaration.detail.clone()),
         DeclarationKind::TypeAlias => {
@@ -690,7 +690,7 @@ fn summary_type_expr(declaration: &Declaration) -> Option<TypeExpr> {
         DeclarationKind::Value => declaration
             .value_annotation()
             .map(|annotation| annotation.expr.clone())
-            .or_else(|| declaration.value_type.as_deref().and_then(TypeExpr::parse)),
+            .or_else(|| declaration.inferred_value_type().map(|expr| expr.expr.clone())),
         DeclarationKind::Function | DeclarationKind::Overload => declaration
             .callable_signature()
             .and_then(|signature| signature.returns.as_ref().map(|returns| returns.expr.clone())),
@@ -884,6 +884,7 @@ mod tests {
                         kind: DeclarationKind::Class,
                         detail: String::new(),
                         value_type: None,
+                        value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::SealedClass),
                         owner: None,
@@ -913,6 +914,7 @@ mod tests {
                         kind: DeclarationKind::Class,
                         detail: String::new(),
                         value_type: None,
+                        value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
                         owner: None,
@@ -933,6 +935,7 @@ mod tests {
                         kind: DeclarationKind::Function,
                         detail: String::from("()->int"),
                         value_type: None,
+                        value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
                         owner: None,
@@ -962,6 +965,7 @@ mod tests {
                         kind: DeclarationKind::Import,
                         detail: String::from("pkg.base"),
                         value_type: None,
+                        value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
                         owner: None,
@@ -1097,6 +1101,7 @@ mod tests {
                     kind: DeclarationKind::Function,
                     detail: String::from("()->int"),
                     value_type: None,
+                    value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1436,6 +1441,7 @@ mod tests {
                     kind: DeclarationKind::Value,
                     detail: String::from("1.0"),
                     value_type: Some(String::from("str")),
+                    value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1484,6 +1490,7 @@ mod tests {
                     kind: DeclarationKind::Function,
                     detail: String::from(detail),
                     value_type: None,
+                    value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
                     owner: None,
@@ -1780,6 +1787,7 @@ mod tests {
             kind: DeclarationKind::Import,
             detail: String::from(detail),
             value_type: None,
+            value_type_expr: None,
             method_kind: None,
             class_kind: None,
             owner: None,
@@ -1803,6 +1811,7 @@ mod tests {
             kind: DeclarationKind::Value,
             detail: String::from(value_type),
             value_type: Some(String::from(value_type)),
+            value_type_expr: None,
             method_kind: None,
             class_kind: None,
             owner: None,

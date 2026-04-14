@@ -1012,7 +1012,7 @@ fn semantic_declaration_fact(
                 semantics.type_alias.as_ref().map(|type_alias| type_alias.body_text.clone())
             })
             .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation_text.clone()))
-            .or_else(|| declaration.value_type.clone())
+            .or_else(|| declaration.inferred_value_type_semantic_text())
             .or_else(|| declaration.type_alias_body_text())
             .or_else(|| declaration.value_annotation_text()),
         type_expr_structured,
@@ -1071,7 +1071,7 @@ fn semantic_exported_type(
                     .map(diagnostic_type_text)
                     .or_else(|| value.annotation_text.clone())
             })
-            .or_else(|| declaration.value_type.clone())
+            .or_else(|| declaration.inferred_value_type_semantic_text())
             .map(|text| rewrite_imported_typing_aliases(node, &text)),
         DeclarationKind::TypeAlias => semantics
             .type_alias
@@ -1221,7 +1221,7 @@ fn declaration_exported_type_expr(
             .value
             .as_ref()
             .and_then(|value| value.annotation.as_ref().map(semantic_type_to_type_expr))
-            .or_else(|| declaration.value_type.as_deref().and_then(TypeExpr::parse))
+            .or_else(|| declaration.inferred_value_type().map(|expr| expr.expr.clone()))
             .or_else(|| declaration.value_annotation().map(|annotation| annotation.expr.clone())),
         DeclarationKind::TypeAlias => semantics
             .type_alias

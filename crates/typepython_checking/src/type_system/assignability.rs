@@ -371,7 +371,7 @@ pub(super) fn actual_member_satisfies_requirement(
                         .map(|text| normalize_type_text(&text))
                         .unwrap_or_default();
                     let actual = declaration_value_annotation_text(member)
-                        .or_else(|| member.value_type.clone())
+                        .or_else(|| member.inferred_value_type_semantic_text())
                         .map(|text| normalize_type_text(&text))
                         .unwrap_or_default();
                     expected.is_empty()

@@ -770,7 +770,7 @@ pub(super) fn resolve_readable_member_semantic_type(
                 .and_then(normalized_direct_return_annotation)
                 .map(lower_type_text_or_name)
                 .or_else(|| {
-                    declaration.value_type.as_deref().map(|value| {
+                    declaration.inferred_value_type_semantic_text().as_deref().map(|value| {
                         lower_type_text_or_name(&rewrite_imported_typing_aliases(
                             node,
                             &substitute_self_annotation(value, Some(&owner_type_name)),
