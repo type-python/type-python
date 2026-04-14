@@ -30,8 +30,9 @@ use typepython_incremental::{
 };
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_project::{
-    inferred_shadow_stub_syntax_trees, replace_local_python_surfaces_with_shadow_stubs,
-    support_source_snapshot_identity, write_shadow_stub_cache,
+    collect_import_source_paths, import_resolves_within_modules, inferred_shadow_stub_syntax_trees,
+    replace_local_python_surfaces_with_shadow_stubs, support_source_snapshot_identity,
+    write_shadow_stub_cache,
 };
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 

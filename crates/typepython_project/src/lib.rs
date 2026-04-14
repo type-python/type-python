@@ -228,6 +228,28 @@ pub fn collect_project_sources(
     Ok(sources)
 }
 
+pub fn collect_import_source_paths(syntax_trees: &[SyntaxTree]) -> Vec<String> {
+    syntax_trees
+        .iter()
+        .flat_map(|tree| tree.statements.iter())
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::Import(statement) => Some(
+                statement
+                    .bindings
+                    .iter()
+                    .map(|binding| binding.source_path.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+pub fn import_resolves_within_modules(import_path: &str, module_keys: &BTreeSet<String>) -> bool {
+    module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
+}
+
 pub fn discover_project_source_for_path(
     config: &ConfigHandle,
     source_roots: &[PathBuf],
@@ -1019,6 +1041,7 @@ struct ExternalSupportRootProbe {
 mod tests {
     use super::*;
     use std::{env, fs, time::SystemTime};
+    use typepython_syntax::{ParseOptions, SourceFile, SyntaxTree, parse_with_options};
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -1187,6 +1210,37 @@ mod tests {
         let prefixes = module_path_prefixes("demo.api.handlers.*").collect::<Vec<_>>();
 
         assert_eq!(prefixes, vec!["demo.api.handlers", "demo.api", "demo"]);
+    }
+
+    fn parse_syntax_tree(source_text: &str) -> SyntaxTree {
+        parse_with_options(
+            SourceFile {
+                path: PathBuf::from("/project/src/app.tpy"),
+                kind: SourceKind::TypePython,
+                logical_module: String::from("app"),
+                text: source_text.to_owned(),
+            },
+            ParseOptions::default(),
+        )
+    }
+
+    #[test]
+    fn collect_import_source_paths_reads_import_bindings_from_syntax_trees() {
+        let tree = parse_syntax_tree("import demo.api\nimport typing_extensions\n");
+
+        assert_eq!(
+            collect_import_source_paths(&[tree]),
+            vec![String::from("demo.api"), String::from("typing_extensions")]
+        );
+    }
+
+    #[test]
+    fn import_resolves_within_modules_matches_parent_prefixes() {
+        let module_keys = BTreeSet::from([String::from("demo.api"), String::from("typing")]);
+
+        assert!(import_resolves_within_modules("demo.api.handlers", &module_keys));
+        assert!(import_resolves_within_modules("typing.Final", &module_keys));
+        assert!(!import_resolves_within_modules("collections.abc", &module_keys));
     }
 
     #[test]

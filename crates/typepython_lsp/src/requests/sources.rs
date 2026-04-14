@@ -1,5 +1,9 @@
 use super::*;
-use typepython_project::{collect_project_sources, discover_project_source_for_path, source_roots};
+use typepython_project::{
+    collect_import_source_paths as shared_collect_import_source_paths, collect_project_sources,
+    discover_project_source_for_path,
+    import_resolves_within_modules as shared_import_resolves_within_modules, source_roots,
+};
 
 pub(crate) fn collect_project_source_paths(
     config: &ConfigHandle,
@@ -35,41 +39,12 @@ pub(crate) fn collect_project_source_paths(
 }
 
 pub(crate) fn collect_import_source_paths(syntax_trees: &[SyntaxTree]) -> Vec<String> {
-    syntax_trees
-        .iter()
-        .flat_map(|tree| tree.statements.iter())
-        .filter_map(|statement| match statement {
-            SyntaxStatement::Import(statement) => Some(
-                statement
-                    .bindings
-                    .iter()
-                    .map(|binding| binding.source_path.clone())
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        })
-        .flatten()
-        .collect()
+    shared_collect_import_source_paths(syntax_trees)
 }
 
 pub(crate) fn import_resolves_within_modules(
     import_path: &str,
     module_keys: &BTreeSet<String>,
 ) -> bool {
-    module_path_prefixes(import_path).any(|module_key| module_keys.contains(module_key))
-}
-
-pub(crate) fn module_path_prefixes(import_path: &str) -> impl Iterator<Item = &str> {
-    let mut candidates = Vec::new();
-    let mut current = import_path.strip_suffix(".*").unwrap_or(import_path);
-    loop {
-        if !current.is_empty() {
-            candidates.push(current);
-        }
-        let Some((parent, _)) = current.rsplit_once('.') else {
-            break;
-        };
-        current = parent;
-    }
-    candidates.into_iter()
+    shared_import_resolves_within_modules(import_path, module_keys)
 }
