@@ -75,19 +75,13 @@ fn signature_site_from_semantic_param(
     typepython_syntax::DirectFunctionParamSite {
         name: param.name.clone(),
         annotation: param.annotation_text.clone(),
-        annotation_expr: param.annotation.clone().map(semantic_type_to_type_expr),
+        annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
         has_default: param.has_default,
         positional_only: param.positional_only,
         keyword_only: param.keyword_only,
         variadic: param.variadic,
         keyword_variadic: param.keyword_variadic,
     }
-}
-
-fn semantic_type_to_type_expr(ty: SemanticType) -> typepython_syntax::TypeExpr {
-    let rendered = diagnostic_type_text(&ty);
-    typepython_syntax::TypeExpr::parse(&rendered)
-        .unwrap_or(typepython_syntax::TypeExpr::Name(rendered))
 }
 
 pub(crate) fn callable_signature_sites_from_semantics(

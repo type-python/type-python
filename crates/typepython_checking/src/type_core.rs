@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::{CallableParamExpr, TypeExpr};
+use typepython_syntax::UnionStyle;
 
 pub(crate) type TypeId = usize;
 
@@ -114,6 +115,31 @@ pub(crate) fn lower_type_expr(expr: TypeExpr) -> SemanticType {
     }
 }
 
+pub(crate) fn semantic_type_to_type_expr(ty: &SemanticType) -> TypeExpr {
+    match ty {
+        SemanticType::Name(name) => TypeExpr::Name(name.clone()),
+        SemanticType::Generic { head, args } => TypeExpr::Generic {
+            head: head.clone(),
+            args: args.iter().map(semantic_type_to_type_expr).collect(),
+        },
+        SemanticType::Callable { params, return_type } => TypeExpr::Callable {
+            params: Box::new(semantic_callable_params_to_type_expr(params)),
+            return_type: Box::new(semantic_type_to_type_expr(return_type)),
+        },
+        SemanticType::Union(branches) => TypeExpr::Union {
+            branches: branches.iter().map(semantic_type_to_type_expr).collect(),
+            style: UnionStyle::Explicit,
+        },
+        SemanticType::Annotated { value, metadata } => TypeExpr::Annotated {
+            value: Box::new(semantic_type_to_type_expr(value)),
+            metadata: metadata.clone(),
+        },
+        SemanticType::Unpack(inner) => {
+            TypeExpr::Unpack(Box::new(semantic_type_to_type_expr(inner)))
+        }
+    }
+}
+
 pub(crate) fn render_semantic_type(ty: &SemanticType) -> String {
     match ty {
         SemanticType::Name(name) => name.clone(),
@@ -219,6 +245,23 @@ pub(crate) fn lower_callable_params(params: CallableParamExpr) -> SemanticCallab
     }
 }
 
+pub(crate) fn semantic_callable_params_to_type_expr(
+    params: &SemanticCallableParams,
+) -> CallableParamExpr {
+    match params {
+        SemanticCallableParams::Ellipsis => CallableParamExpr::Ellipsis,
+        SemanticCallableParams::ParamList(types) => {
+            CallableParamExpr::ParamList(types.iter().map(semantic_type_to_type_expr).collect())
+        }
+        SemanticCallableParams::Concatenate(types) => {
+            CallableParamExpr::Concatenate(types.iter().map(semantic_type_to_type_expr).collect())
+        }
+        SemanticCallableParams::Single(expr) => {
+            CallableParamExpr::Single(Box::new(semantic_type_to_type_expr(expr)))
+        }
+    }
+}
+
 pub(crate) fn render_semantic_callable_params(params: &SemanticCallableParams) -> String {
     match params {
         SemanticCallableParams::Ellipsis => String::from("..."),
@@ -231,5 +274,45 @@ pub(crate) fn render_semantic_callable_params(params: &SemanticCallableParams) -
             format!("Concatenate[{types}]")
         }
         SemanticCallableParams::Single(expr) => render_semantic_type(expr),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        SemanticCallableParams, SemanticType, lower_type_expr, semantic_type_to_type_expr,
+    };
+
+    #[test]
+    fn semantic_type_to_type_expr_round_trips_without_text_reparse() {
+        let ty = SemanticType::Callable {
+            params: SemanticCallableParams::Concatenate(vec![
+                SemanticType::Name(String::from("Self")),
+                SemanticType::Generic {
+                    head: String::from("tuple"),
+                    args: vec![
+                        SemanticType::Name(String::from("int")),
+                        SemanticType::Unpack(Box::new(SemanticType::Generic {
+                            head: String::from("tuple"),
+                            args: vec![
+                                SemanticType::Name(String::from("str")),
+                                SemanticType::Name(String::from("...")),
+                            ],
+                        })),
+                    ],
+                },
+            ]),
+            return_type: Box::new(SemanticType::Annotated {
+                value: Box::new(SemanticType::Union(vec![
+                    SemanticType::Name(String::from("int")),
+                    SemanticType::Name(String::from("None")),
+                ])),
+                metadata: vec![String::from("tag")],
+            }),
+        };
+
+        let expr = semantic_type_to_type_expr(&ty);
+
+        assert_eq!(lower_type_expr(expr), ty);
     }
 }

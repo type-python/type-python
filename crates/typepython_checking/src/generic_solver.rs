@@ -501,8 +501,8 @@ fn materialize_param_list_binding(
                 annotation_expr: param
                     .annotation_id
                     .and_then(|type_id| store.get(type_id).cloned())
-                    .map(|ty| render_semantic_type(&ty))
-                    .and_then(|annotation| typepython_syntax::TypeExpr::parse(&annotation)),
+                    .as_ref()
+                    .map(semantic_type_to_type_expr),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -863,12 +863,7 @@ pub(crate) fn instantiate_direct_function_signature(
                 typepython_syntax::DirectFunctionParamSite {
                     name: format!("{}{}", param.name, index),
                     annotation: Some(render_semantic_type(element_type)),
-                    annotation_expr: Some(
-                        typepython_syntax::TypeExpr::parse(&render_semantic_type(element_type))
-                            .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
-                                element_type,
-                            ))),
-                    ),
+                    annotation_expr: Some(semantic_type_to_type_expr(element_type)),
                     has_default: false,
                     positional_only: true,
                     keyword_only: false,
@@ -880,12 +875,7 @@ pub(crate) fn instantiate_direct_function_signature(
                 instantiated.push(typepython_syntax::DirectFunctionParamSite {
                     name: param.name.clone(),
                     annotation: Some(render_semantic_type(variadic_tail)),
-                    annotation_expr: Some(
-                        typepython_syntax::TypeExpr::parse(&render_semantic_type(variadic_tail))
-                            .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
-                                variadic_tail,
-                            ))),
-                    ),
+                    annotation_expr: Some(semantic_type_to_type_expr(variadic_tail)),
                     has_default: false,
                     positional_only: false,
                     keyword_only: false,
@@ -908,10 +898,7 @@ pub(crate) fn instantiate_direct_function_param(
     let instantiated_annotation =
         instantiate_direct_function_param_annotation(&param, substitutions);
     param.annotation = instantiated_annotation.as_ref().map(render_semantic_type);
-    param.annotation_expr = instantiated_annotation
-        .as_ref()
-        .map(render_semantic_type)
-        .and_then(|annotation| typepython_syntax::TypeExpr::parse(&annotation));
+    param.annotation_expr = instantiated_annotation.as_ref().map(semantic_type_to_type_expr);
     param
 }
 
@@ -1117,12 +1104,7 @@ pub(crate) fn resolve_callable_shape_from_metadata(
             .map(|(param, annotation)| typepython_syntax::DirectFunctionParamSite {
                 name: param.name.clone(),
                 annotation: Some(render_semantic_type(annotation)),
-                annotation_expr: Some(
-                    typepython_syntax::TypeExpr::parse(&render_semantic_type(annotation))
-                        .unwrap_or(typepython_syntax::TypeExpr::Name(render_semantic_type(
-                            annotation,
-                        ))),
-                ),
+                annotation_expr: Some(semantic_type_to_type_expr(annotation)),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -1180,11 +1162,7 @@ pub(crate) fn synthesize_semantic_param_list_binding(
         .map(|(index, annotation)| typepython_syntax::DirectFunctionParamSite {
             name: format!("arg{index}"),
             annotation: Some(render_semantic_type(&annotation)),
-            annotation_expr: Some(
-                typepython_syntax::TypeExpr::parse(&render_semantic_type(&annotation)).unwrap_or(
-                    typepython_syntax::TypeExpr::Name(render_semantic_type(&annotation)),
-                ),
-            ),
+            annotation_expr: Some(semantic_type_to_type_expr(&annotation)),
             has_default: false,
             positional_only: false,
             keyword_only: false,

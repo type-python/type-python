@@ -1107,11 +1107,7 @@ fn summary_callable_signature_from_semantics(
             .map(|param| SummarySignatureParam {
                 name: param.name.clone(),
                 annotation: param.annotation_text.clone(),
-                annotation_expr: param
-                    .annotation
-                    .as_ref()
-                    .map(diagnostic_type_text)
-                    .and_then(|annotation| TypeExpr::parse(&annotation)),
+                annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
@@ -1120,11 +1116,7 @@ fn summary_callable_signature_from_semantics(
             })
             .collect(),
         returns: callable.return_annotation_text.clone(),
-        returns_expr: callable
-            .return_type
-            .as_ref()
-            .map(diagnostic_type_text)
-            .and_then(|annotation| TypeExpr::parse(&annotation)),
+        returns_expr: callable.return_type.as_ref().map(semantic_type_to_type_expr),
     }
 }
 
@@ -1171,14 +1163,13 @@ fn declaration_fact_type_expr(
     semantics
         .type_alias
         .as_ref()
-        .map(|type_alias| diagnostic_type_text(&type_alias.body))
+        .map(|type_alias| semantic_type_to_type_expr(&type_alias.body))
         .or_else(|| {
             semantics
                 .value
                 .as_ref()
-                .and_then(|value| value.annotation.as_ref().map(diagnostic_type_text))
+                .and_then(|value| value.annotation.as_ref().map(semantic_type_to_type_expr))
         })
-        .and_then(|text| TypeExpr::parse(&text))
         .or_else(|| declaration.type_alias_value().map(|value| value.expr.clone()))
         .or_else(|| declaration.value_annotation().map(|annotation| annotation.expr.clone()))
 }
@@ -1191,32 +1182,18 @@ fn declaration_exported_type_expr(
         DeclarationKind::Value => semantics
             .value
             .as_ref()
-            .and_then(|value| {
-                value
-                    .annotation
-                    .as_ref()
-                    .map(diagnostic_type_text)
-                    .or_else(|| value.annotation_text.clone())
-            })
-            .or_else(|| declaration.value_type.clone())
-            .and_then(|text| TypeExpr::parse(&text))
+            .and_then(|value| value.annotation.as_ref().map(semantic_type_to_type_expr))
+            .or_else(|| declaration.value_type.as_deref().and_then(TypeExpr::parse))
             .or_else(|| declaration.value_annotation().map(|annotation| annotation.expr.clone())),
         DeclarationKind::TypeAlias => semantics
             .type_alias
             .as_ref()
-            .map(|type_alias| diagnostic_type_text(&type_alias.body))
-            .and_then(|text| TypeExpr::parse(&text))
+            .map(|type_alias| semantic_type_to_type_expr(&type_alias.body))
             .or_else(|| declaration.type_alias_value().map(|value| value.expr.clone())),
         DeclarationKind::Function | DeclarationKind::Overload => semantics
             .callable
             .as_ref()
-            .and_then(|callable| {
-                callable
-                    .return_type
-                    .as_ref()
-                    .map(diagnostic_type_text)
-                    .and_then(|text| TypeExpr::parse(&text))
-            })
+            .and_then(|callable| callable.return_type.as_ref().map(semantic_type_to_type_expr))
             .or_else(|| {
                 declaration.callable_signature().and_then(|signature| {
                     signature.returns.as_ref().map(|returns| returns.expr.clone())
