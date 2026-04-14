@@ -146,10 +146,6 @@ fn normalize_value_statement(mut statement: ValueStatement) -> ValueStatement {
     if statement.annotation_expr.is_none() {
         statement.annotation_expr = statement.annotation.as_deref().and_then(TypeExpr::parse);
     }
-    if statement.value_type_expr.is_none() {
-        statement.value_type_expr = statement.value_type.as_deref().and_then(TypeExpr::parse);
-    }
-    statement.value_type = normalize_empty_option_string(statement.value_type);
     statement.value_subscript_target =
         normalize_direct_expr_option(statement.value_subscript_target);
     statement.value_if_true = normalize_direct_expr_option(statement.value_if_true);
@@ -1288,7 +1284,6 @@ fn parse_extracts_imports_and_values_from_ast_body() {
     });
 
     assert!(tree.diagnostics.is_empty());
-    println!("{:?}", tree.statements);
     assert_eq!(
         tree.statements,
         vec![
@@ -1323,8 +1318,7 @@ fn parse_extracts_imports_and_values_from_ast_body() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
                 annotation_expr: None,
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -1362,8 +1356,7 @@ fn parse_extracts_imports_and_values_from_ast_body() {
                 destructuring_target_names: None,
                 annotation: None,
                 annotation_expr: None,
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -1418,7 +1411,6 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -1467,7 +1459,6 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1506,7 +1497,6 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1593,7 +1583,6 @@ fn parse_extracts_function_body_annotated_assignments() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("int")),
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: None,
@@ -1642,7 +1631,6 @@ fn parse_extracts_function_body_annotated_assignments() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("str")),
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: Some(String::from("helper")),
@@ -1777,7 +1765,10 @@ fn parse_extracts_function_body_namedexpr_assignments() {
     });
     let walrus_assignment = walrus_assignment.expect("named expression assignment statement");
     assert_eq!(walrus_assignment.annotation, None);
-    assert_eq!(walrus_assignment.value_type.as_deref(), Some("int"));
+    assert_eq!(
+        walrus_assignment.value_type_expr.as_ref().map(TypeExpr::render).as_deref(),
+        Some("int")
+    );
     assert_eq!(walrus_assignment.value_name, None);
     assert_eq!(walrus_assignment.line, 2);
 }
@@ -1846,7 +1837,6 @@ fn parse_extracts_top_level_direct_calls() {
                 destructuring_target_names: None,
                 annotation: None,
                 annotation_expr: None,
-                value_type: Some(String::new()),
                 value_type_expr: None,
                 is_awaited: false,
                 value_callee: Some(String::from("Factory")),
@@ -2461,7 +2451,6 @@ fn parse_retains_ifexp_metadata() {
             destructuring_target_names: None,
             annotation: Some(String::from("int")),
             annotation_expr: None,
-            value_type: Some(String::new()),
             value_type_expr: None,
             is_awaited: false,
             value_callee: None,
@@ -3334,8 +3323,7 @@ fn parse_marks_final_value_declarations() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("Final")),
                 annotation_expr: None,
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,
@@ -3710,8 +3698,7 @@ fn parse_marks_classvar_value_declarations() {
                 destructuring_target_names: None,
                 annotation: Some(String::from("ClassVar[int]")),
                 annotation_expr: None,
-                value_type: Some(String::from("int")),
-                value_type_expr: None,
+                value_type_expr: Some(TypeExpr::Name(String::from("int"))),
                 is_awaited: false,
                 value_callee: None,
                 value_name: None,

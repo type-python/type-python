@@ -325,7 +325,10 @@ pub fn bind(tree: &SyntaxTree) -> BindingTable {
                             .map(BoundTypeExpr::from_expr)
                             .or_else(|| statement.annotation.clone().map(BoundTypeExpr::new)),
                         value: direct_expr_metadata_from_value_statement(statement),
-                        value_type: statement.value_type.clone(),
+                        value_type: statement
+                            .value_type_expr
+                            .as_ref()
+                            .map(typepython_syntax::TypeExpr::render),
                         is_awaited: statement.is_awaited,
                         value_callee: statement.value_callee.clone(),
                         value_name: statement.value_name.clone(),
@@ -551,14 +554,7 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                     value_type_expr: statement
                         .value_type_expr
                         .clone()
-                        .map(BoundTypeExpr::from_expr)
-                        .or_else(|| {
-                            statement
-                                .value_type
-                                .clone()
-                                .filter(|value| !value.is_empty())
-                                .map(BoundTypeExpr::new)
-                        }),
+                        .map(BoundTypeExpr::from_expr),
                     method_kind: None,
                     class_kind: None,
                     owner: None,
