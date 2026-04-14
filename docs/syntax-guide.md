@@ -4,7 +4,7 @@ TypePython extends Python syntax with soft keywords and ergonomic type-level con
 
 ## File Extension
 
-TypePython source files use the `.tpy` extension. They support all standard Python 3.10+ syntax plus the extensions described below.
+TypePython source files use the `.tpy` extension. They support all standard Python 3.10+ syntax plus the extensions described below. All source inputs (`.tpy`, `.py`, and `.pyi`) must be UTF-8 encoded; Python encoding cookies are not currently supported.
 
 ## Soft Keywords
 

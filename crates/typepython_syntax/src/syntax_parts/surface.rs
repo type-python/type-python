@@ -41,7 +41,7 @@ impl SourceFile {
     /// Reads a source file from disk.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, io::Error> {
         let path = path.as_ref().to_path_buf();
-        let text = fs::read_to_string(&path)?;
+        let text = read_source_text(&path)?;
         let kind = SourceKind::from_path(&path).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -50,6 +50,68 @@ impl SourceFile {
         })?;
 
         Ok(Self { path, kind, logical_module: String::new(), text })
+    }
+}
+
+fn read_source_text(path: &Path) -> Result<String, io::Error> {
+    let bytes = fs::read(path)?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "TypePython source inputs must be UTF-8 encoded; Python encoding cookies are not supported: {}",
+                path.display()
+            ),
+        )
+    })?;
+    if let Some(stripped) = text.strip_prefix('\u{feff}') {
+        Ok(stripped.to_owned())
+    } else {
+        Ok(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        env,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    use super::*;
+
+    static TEMP_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_source_path(extension: &str) -> PathBuf {
+        let unique = TEMP_SOURCE_ID.fetch_add(1, Ordering::Relaxed);
+        env::temp_dir()
+            .join(format!("typepython-syntax-surface-{}-{unique}.{extension}", std::process::id()))
+    }
+
+    #[test]
+    fn source_file_from_path_reads_utf8_source() {
+        let path = temp_source_path("tpy");
+        fs::write(&path, "x: int = 1\n").expect("utf-8 source should be written");
+
+        let source = SourceFile::from_path(&path).expect("utf-8 source should load");
+
+        assert_eq!(source.kind, SourceKind::TypePython);
+        assert_eq!(source.text, "x: int = 1\n");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn source_file_from_path_reports_non_utf8_inputs_clearly() {
+        let path = temp_source_path("py");
+        fs::write(&path, b"# coding: latin-1\n\xff\n")
+            .expect("non-utf8 source bytes should be written");
+
+        let error = SourceFile::from_path(&path).expect_err("non-utf8 source should fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("UTF-8 encoded"));
+        assert!(error.to_string().contains("encoding cookies are not supported"));
+        let _ = fs::remove_file(path);
     }
 }
 
