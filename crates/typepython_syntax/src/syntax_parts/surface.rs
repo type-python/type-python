@@ -870,7 +870,7 @@ pub struct DataclassTransformFieldSite {
     pub name: String,
     pub annotation: String,
     pub annotation_expr: Option<TypeExpr>,
-    pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub value_metadata: Option<DirectExprMetadata>,
     pub has_default: bool,
     pub is_class_var: bool,
@@ -890,6 +890,11 @@ impl DataclassTransformFieldSite {
             .as_ref()
             .map(TypeExpr::render)
             .unwrap_or_else(|| self.annotation.clone())
+    }
+
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
     }
 }
 
