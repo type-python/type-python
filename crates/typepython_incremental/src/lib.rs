@@ -327,11 +327,10 @@ pub fn dependency_index(graph: &ModuleGraph) -> ModuleDependencyIndex {
             .filter(|declaration| declaration.owner.is_none())
             .filter(|declaration| declaration.kind == DeclarationKind::Import)
             .filter_map(|declaration| {
-                let target = declaration
-                    .import_target()
-                    .map(|target| target.module_target.as_str())
-                    .unwrap_or_else(|| declaration.detail.as_str());
-                resolve_import_module_key(target, &module_keys)
+                declaration
+                    .import_module_target_text()
+                    .as_deref()
+                    .and_then(|target| resolve_import_module_key(target, &module_keys))
             })
             .collect::<BTreeSet<_>>();
         for imported in &imports {
@@ -647,19 +646,17 @@ fn summary_type_repr(declaration: &Declaration) -> String {
         DeclarationKind::Value => summary_type_expr(declaration)
             .map(|expr| expr.render())
             .or_else(|| declaration.value_type.clone().filter(|value| !value.is_empty()))
+            .or_else(|| declaration.value_annotation_text())
             .unwrap_or_else(|| declaration.detail.clone()),
-        DeclarationKind::TypeAlias => declaration
-            .type_alias_value()
-            .map(|value| value.render())
-            .unwrap_or_else(|| declaration.detail.clone()),
-        DeclarationKind::Function | DeclarationKind::Overload => declaration
-            .callable_signature()
-            .map(|signature| signature.rendered())
-            .unwrap_or_else(|| declaration.detail.clone()),
-        DeclarationKind::Import => declaration
-            .import_target()
-            .map(|target| target.raw_target.clone())
-            .unwrap_or_else(|| declaration.detail.clone()),
+        DeclarationKind::TypeAlias => {
+            declaration.type_alias_body_text().unwrap_or_else(|| declaration.detail.clone())
+        }
+        DeclarationKind::Function | DeclarationKind::Overload => {
+            declaration.callable_signature_text().unwrap_or_else(|| declaration.detail.clone())
+        }
+        DeclarationKind::Import => {
+            declaration.import_raw_target_text().unwrap_or_else(|| declaration.detail.clone())
+        }
     };
     if detail.is_empty() { declaration.name.clone() } else { detail }
 }

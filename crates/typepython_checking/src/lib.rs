@@ -782,8 +782,7 @@ fn semantic_public_summary(
                 .load_declaration_semantics(declaration)
                 .import_target
                 .map(|target| target.raw_target)
-                .or_else(|| declaration.import_target().map(|target| target.raw_target.clone()))
-                .or_else(|| (!declaration.detail.is_empty()).then(|| declaration.detail.clone()))
+                .or_else(|| declaration.import_raw_target_text())
         })
         .collect::<Vec<_>>();
     imports.sort();
@@ -1014,12 +1013,8 @@ fn semantic_declaration_fact(
             })
             .or_else(|| semantics.value.as_ref().and_then(|value| value.annotation_text.clone()))
             .or_else(|| declaration.value_type.clone())
-            .or_else(|| {
-                declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render)
-            })
-            .or_else(|| {
-                declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render)
-            }),
+            .or_else(|| declaration.type_alias_body_text())
+            .or_else(|| declaration.value_annotation_text()),
         type_expr_structured,
         import_target: semantics
             .import_target
@@ -1082,14 +1077,12 @@ fn semantic_exported_type(
             .type_alias
             .as_ref()
             .map(|type_alias| diagnostic_type_text(&type_alias.body))
-            .or_else(|| {
-                declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render)
-            }),
+            .or_else(|| declaration.type_alias_body_text()),
         DeclarationKind::Import => semantics
             .import_target
             .as_ref()
             .map(|target| target.raw_target.clone())
-            .or_else(|| declaration.import_target().map(|target| target.raw_target.clone())),
+            .or_else(|| declaration.import_raw_target_text()),
     }
 }
 

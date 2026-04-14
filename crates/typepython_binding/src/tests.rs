@@ -36,6 +36,118 @@ fn metadata_empty_callable() -> DeclarationMetadata {
 }
 
 #[test]
+fn declaration_text_accessors_prefer_structured_metadata() {
+    let value = Declaration {
+        metadata: DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new("list[int]")) },
+        name: String::from("items"),
+        kind: DeclarationKind::Value,
+        detail: String::from("str"),
+        value_type: Some(String::from("str")),
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(value.value_annotation_text().as_deref(), Some("list[int]"));
+
+    let alias = Declaration {
+        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new("int | None") },
+        name: String::from("MaybeInt"),
+        kind: DeclarationKind::TypeAlias,
+        detail: String::from("str"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(alias.type_alias_body_text().as_deref(), Some("int | None"));
+
+    let function = Declaration {
+        metadata: DeclarationMetadata::Callable {
+            signature: BoundCallableSignature {
+                params: vec![typepython_syntax::DirectFunctionParamSite {
+                    name: String::from("value"),
+                    annotation: Some(String::from("list[int]")),
+                    annotation_expr: Some(typepython_syntax::TypeExpr::Generic {
+                        head: String::from("list"),
+                        args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+                    }),
+                    has_default: false,
+                    positional_only: false,
+                    keyword_only: false,
+                    variadic: false,
+                    keyword_variadic: false,
+                }],
+                returns: Some(BoundTypeExpr::new("tuple[int]")),
+            },
+        },
+        name: String::from("build"),
+        kind: DeclarationKind::Function,
+        detail: String::from("(value:str)->str"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(
+        function.callable_signature_text().as_deref(),
+        Some("(value:list[int])->tuple[int]")
+    );
+
+    let import = Declaration {
+        metadata: DeclarationMetadata::Import { target: BoundImportTarget::new("pkg.sub.Symbol") },
+        name: String::from("Symbol"),
+        kind: DeclarationKind::Import,
+        detail: String::from("wrong.target"),
+        value_type: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(import.import_raw_target_text().as_deref(), Some("pkg.sub.Symbol"));
+    assert_eq!(import.import_module_target_text().as_deref(), Some("pkg.sub.Symbol"));
+}
+
+#[test]
 fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
     let call = CallSite {
         callee: String::from("build"),

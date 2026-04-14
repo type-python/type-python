@@ -440,7 +440,12 @@ fn build_cached_semantic_declaration_facts(
                 declaration
                     .callable_signature()
                     .map(semantic_callable_from_bound_signature)
-                    .or_else(|| parse_direct_callable_declaration(&declaration.detail))
+                    .or_else(|| {
+                        declaration
+                            .callable_signature_text()
+                            .as_deref()
+                            .and_then(parse_direct_callable_declaration)
+                    })
             })
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
@@ -463,12 +468,7 @@ fn build_cached_semantic_declaration_facts(
                 return_type_id: intern_semantic_type(type_store, callable.return_type),
             }),
         value: (declaration.kind == DeclarationKind::Value).then(|| {
-            let annotation_text = declaration
-                .value_annotation()
-                .map(typepython_binding::BoundTypeExpr::render)
-                .or_else(|| {
-                    (!declaration.detail.trim().is_empty()).then(|| declaration.detail.clone())
-                });
+            let annotation_text = declaration.value_annotation_text();
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
@@ -481,10 +481,7 @@ fn build_cached_semantic_declaration_facts(
             }
         }),
         type_alias: (declaration.kind == DeclarationKind::TypeAlias).then(|| {
-            let body_text = declaration
-                .type_alias_value()
-                .map(typepython_binding::BoundTypeExpr::render)
-                .unwrap_or_else(|| declaration.detail.clone());
+            let body_text = declaration.type_alias_body_text().unwrap_or_default();
             CachedSemanticTypeAliasDeclaration {
                 head: declaration.name.clone(),
                 type_params: declaration.type_params.clone(),
@@ -499,10 +496,14 @@ fn build_cached_semantic_declaration_facts(
         }),
         import_target: (declaration.kind == DeclarationKind::Import)
             .then(|| {
-                declaration
-                    .import_target()
-                    .map(semantic_import_target_from_bound_target)
-                    .or_else(|| parse_import_target_ref(&declaration.detail))
+                declaration.import_target().map(semantic_import_target_from_bound_target).or_else(
+                    || {
+                        declaration
+                            .import_raw_target_text()
+                            .as_deref()
+                            .and_then(parse_import_target_ref)
+                    },
+                )
             })
             .flatten(),
     }

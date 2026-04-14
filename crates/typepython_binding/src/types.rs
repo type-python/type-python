@@ -858,6 +858,49 @@ impl Declaration {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub fn callable_signature_text(&self) -> Option<String> {
+        self.callable_signature().map(BoundCallableSignature::rendered).or_else(|| {
+            matches!(self.kind, DeclarationKind::Function | DeclarationKind::Overload)
+                .then(|| self.detail.clone())
+                .filter(|detail| !detail.is_empty())
+        })
+    }
+
+    #[must_use]
+    pub fn type_alias_body_text(&self) -> Option<String> {
+        self.type_alias_value().map(BoundTypeExpr::render).or_else(|| {
+            (self.kind == DeclarationKind::TypeAlias)
+                .then(|| self.detail.clone())
+                .filter(|detail| !detail.is_empty())
+        })
+    }
+
+    #[must_use]
+    pub fn value_annotation_text(&self) -> Option<String> {
+        self.value_annotation().map(BoundTypeExpr::render).or_else(|| {
+            (self.kind == DeclarationKind::Value)
+                .then(|| self.detail.clone())
+                .filter(|detail| !detail.is_empty())
+        })
+    }
+
+    #[must_use]
+    pub fn import_raw_target_text(&self) -> Option<String> {
+        self.import_target().map(|target| target.raw_target.clone()).or_else(|| {
+            (self.kind == DeclarationKind::Import)
+                .then(|| self.detail.clone())
+                .filter(|detail| !detail.is_empty())
+        })
+    }
+
+    #[must_use]
+    pub fn import_module_target_text(&self) -> Option<String> {
+        self.import_target()
+            .map(|target| target.module_target.clone())
+            .or_else(|| self.import_raw_target_text())
+    }
 }
 
 /// Generic parameter category preserved by binding.
