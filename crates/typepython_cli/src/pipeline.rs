@@ -8,6 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use notify::RecursiveMode;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use typepython_binding::bind;
 use typepython_checking::{
     check_with_binding_metadata, collect_effective_callable_stub_overrides,
@@ -23,8 +24,7 @@ use typepython_emit::{
 };
 use typepython_graph::build;
 use typepython_incremental::{
-    IncrementalState, SnapshotMetadata, decode_snapshot, diff, encode_snapshot,
-    source_change_modules,
+    IncrementalState, SnapshotMetadata, decode_snapshot, encode_snapshot, source_change_modules,
 };
 use typepython_lowering::{LoweredModule, LoweringOptions, LoweringResult, lower_with_options};
 use typepython_project::{
@@ -69,6 +69,23 @@ struct AnalyzedPipelineState {
     incremental: IncrementalState,
     tracked_modules: usize,
     pre_lowering_emit_plan: Vec<EmitArtifact>,
+}
+
+const MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+struct CachedEmitArtifact {
+    source_path: PathBuf,
+    runtime_path: Option<PathBuf>,
+    stub_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct MaterializedBuildManifest {
+    schema_version: u32,
+    incremental: IncrementalState,
+    emit_plan: Vec<CachedEmitArtifact>,
+    runtime_validators: bool,
 }
 
 pub(crate) fn should_emit_build_outputs(
@@ -224,11 +241,13 @@ pub(crate) fn materialize_build_outputs(
         &config.resolve_relative_path(&config.config.project.cache_dir),
         &snapshot.incremental,
     )?;
+    let manifest_path = write_materialized_build_manifest(config, snapshot)?;
     notes.push(format!(
         "cached {} module fingerprint(s) at {}",
         snapshot.incremental.fingerprints.len(),
         snapshot_path.display()
     ));
+    notes.push(format!("recorded materialized build manifest at {}", manifest_path.display()));
     Ok(notes)
 }
 
@@ -453,20 +472,51 @@ fn syntax_tree_source_hashes(
         .collect()
 }
 
+fn cached_emit_artifacts(artifacts: &[EmitArtifact]) -> Vec<CachedEmitArtifact> {
+    artifacts
+        .iter()
+        .map(|artifact| CachedEmitArtifact {
+            source_path: artifact.source_path.clone(),
+            runtime_path: artifact.runtime_path.clone(),
+            stub_path: artifact.stub_path.clone(),
+        })
+        .collect()
+}
+
+fn materialized_build_manifest_path(config: &ConfigHandle) -> PathBuf {
+    config.resolve_relative_path(&config.config.project.cache_dir).join("build-manifest.json")
+}
+
+fn load_previous_materialized_build_manifest(
+    config: &ConfigHandle,
+) -> Result<Option<MaterializedBuildManifest>> {
+    let manifest_path = materialized_build_manifest_path(config);
+    if !manifest_path.is_file() {
+        return Ok(None);
+    }
+    let rendered = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("unable to read {}", manifest_path.display()))?;
+    let manifest: MaterializedBuildManifest =
+        serde_json::from_str(&rendered).with_context(|| {
+            format!("unable to decode materialized build manifest {}", manifest_path.display())
+        })?;
+    if manifest.schema_version != MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION {
+        return Ok(None);
+    }
+    Ok(Some(manifest))
+}
+
 fn can_reuse_cached_pipeline_outputs(
     config: &ConfigHandle,
-    previous: &IncrementalState,
     analyzed: &AnalyzedPipelineState,
+    previous_manifest: Option<&MaterializedBuildManifest>,
 ) -> bool {
-    let snapshot_diff = diff(previous, &analyzed.incremental);
-    snapshot_diff.added.is_empty()
-        && snapshot_diff.removed.is_empty()
-        && snapshot_diff.changed.is_empty()
-        && previous.source_hashes == analyzed.incremental.source_hashes
-        && previous.summaries == analyzed.incremental.summaries
-        && previous.stdlib_snapshot == analyzed.incremental.stdlib_snapshot
-        && previous.metadata == analyzed.incremental.metadata
-        && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
+    previous_manifest.is_some_and(|manifest| {
+        manifest.incremental == analyzed.incremental
+            && manifest.emit_plan == cached_emit_artifacts(&analyzed.pre_lowering_emit_plan)
+            && manifest.runtime_validators == config.config.emit.runtime_validators
+            && !verify_build_artifacts(config, &analyzed.pre_lowering_emit_plan).has_errors()
+    })
 }
 
 fn reusable_cached_pipeline_snapshot(
@@ -532,9 +582,10 @@ pub(crate) fn run_pipeline(config: &ConfigHandle) -> Result<PipelineSnapshot> {
     }
 
     let previous = load_previous_incremental_state(config)?;
+    let previous_manifest = load_previous_materialized_build_manifest(config)?;
     let analyzed = analyze_pipeline_state(config, &prepared, previous.as_ref())?;
-    if let Some(previous) = previous {
-        if can_reuse_cached_pipeline_outputs(config, &previous, &analyzed) {
+    if previous.is_some() {
+        if can_reuse_cached_pipeline_outputs(config, &analyzed, previous_manifest.as_ref()) {
             return Ok(reusable_cached_pipeline_snapshot(prepared.source_paths.len(), analyzed));
         }
     }
@@ -655,6 +706,26 @@ pub(crate) fn write_incremental_snapshot(
     fs::write(&snapshot_path, payload)
         .with_context(|| format!("unable to write {}", snapshot_path.display()))?;
     Ok(snapshot_path)
+}
+
+fn write_materialized_build_manifest(
+    config: &ConfigHandle,
+    snapshot: &PipelineSnapshot,
+) -> Result<PathBuf> {
+    let cache_dir = config.resolve_relative_path(&config.config.project.cache_dir);
+    fs::create_dir_all(&cache_dir)
+        .with_context(|| format!("unable to create cache directory {}", cache_dir.display()))?;
+    let manifest_path = materialized_build_manifest_path(config);
+    let payload = serde_json::to_string_pretty(&MaterializedBuildManifest {
+        schema_version: MATERIALIZED_BUILD_MANIFEST_SCHEMA_VERSION,
+        incremental: snapshot.incremental.clone(),
+        emit_plan: cached_emit_artifacts(&snapshot.emit_plan),
+        runtime_validators: config.config.emit.runtime_validators,
+    })
+    .context("unable to serialize materialized build manifest")?;
+    fs::write(&manifest_path, payload)
+        .with_context(|| format!("unable to write {}", manifest_path.display()))?;
+    Ok(manifest_path)
 }
 
 pub(crate) fn compile_runtime_bytecode(

@@ -423,19 +423,7 @@ fn run_pipeline_reuses_cached_outputs_when_snapshot_is_unchanged() {
         let config = load(&project_dir).expect("test setup should succeed");
 
         let first = run_pipeline(&config).expect("test setup should succeed");
-        write_runtime_outputs(
-            &first.emit_plan,
-            &first.lowered_modules,
-            config.config.emit.write_py_typed,
-            false,
-            Some(&first.stub_contexts),
-        )
-        .expect("test setup should succeed");
-        write_incremental_snapshot(
-            &config.resolve_relative_path(&config.config.project.cache_dir),
-            &first.incremental,
-        )
-        .expect("test setup should succeed");
+        materialize_build_outputs(&config, &first).expect("test setup should succeed");
 
         run_pipeline(&config).expect("test setup should succeed")
     };
@@ -542,6 +530,45 @@ fn run_pipeline_invalidates_cache_when_analysis_python_changes() {
     };
 
     assert_eq!(lowered_modules, 1);
+}
+
+#[test]
+fn run_pipeline_invalidates_cache_when_runtime_validators_change() {
+    let (lowered_modules, runtime_source) = {
+        let project_dir =
+            temp_project_dir("run_pipeline_invalidates_cache_when_runtime_validators_change");
+        fs::create_dir_all(project_dir.join("src")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app.tpy"),
+            "data class UserInput:\n    name: str\n    age: int\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let runtime_path = project_dir.join(".typepython/build/app.py");
+
+        let first = run_pipeline(&config).expect("test setup should succeed");
+        materialize_build_outputs(&config, &first).expect("test setup should succeed");
+
+        fs::write(
+            project_dir.join("typepython.toml"),
+            "[project]\nsrc = [\"src\"]\n\n[emit]\nruntime_validators = true\n",
+        )
+        .expect("test setup should succeed");
+        let updated_config = load(&project_dir).expect("test setup should succeed");
+        let second = run_pipeline(&updated_config).expect("test setup should succeed");
+        materialize_build_outputs(&updated_config, &second).expect("test setup should succeed");
+        let result = (
+            second.lowered_modules.len(),
+            fs::read_to_string(runtime_path).expect("runtime output should exist"),
+        );
+        remove_temp_project_dir(&project_dir);
+        result
+    };
+
+    assert_eq!(lowered_modules, 1);
+    assert!(runtime_source.contains("__tpy_validate__"));
 }
 
 #[test]
