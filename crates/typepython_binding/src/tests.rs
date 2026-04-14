@@ -1,9 +1,9 @@
 use super::{
     AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget, BoundTypeExpr,
-    Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,
-    ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind, GuardConditionSite,
-    IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite, MatchPatternSite, MatchSite,
-    WithSite, YieldSite, bind,
+    CallSite, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
+    DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind,
+    GuardConditionSite, IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite,
+    MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
 };
 use std::path::PathBuf;
 use typepython_diagnostics::DiagnosticReport;
@@ -33,6 +33,90 @@ fn metadata_empty_callable() -> DeclarationMetadata {
     DeclarationMetadata::Callable {
         signature: BoundCallableSignature { params: Vec::new(), returns: None },
     }
+}
+
+#[test]
+fn call_site_arg_type_accessors_prefer_direct_expr_metadata() {
+    let call = CallSite {
+        callee: String::from("build"),
+        arg_count: 1,
+        arg_types: vec![String::from("str")],
+        arg_values: vec![DirectExprMetadata {
+            value_type: Some(String::from("str")),
+            value_type_expr: Some(typepython_syntax::TypeExpr::Generic {
+                head: String::from("list"),
+                args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
+            }),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        }],
+        starred_arg_types: vec![String::from("tuple[str, ...]")],
+        starred_arg_values: Vec::new(),
+        keyword_names: vec![String::from("count")],
+        keyword_arg_types: vec![String::from("str")],
+        keyword_arg_values: vec![DirectExprMetadata {
+            value_type: Some(String::from("str")),
+            value_type_expr: Some(typepython_syntax::TypeExpr::Name(String::from("int"))),
+            is_awaited: false,
+            value_callee: None,
+            value_name: None,
+            value_member_owner_name: None,
+            value_member_name: None,
+            value_member_through_instance: false,
+            value_method_owner_name: None,
+            value_method_name: None,
+            value_method_through_instance: false,
+            value_subscript_target: None,
+            value_subscript_string_key: None,
+            value_subscript_index: None,
+            value_if_true: None,
+            value_if_false: None,
+            value_if_guard: None,
+            value_bool_left: None,
+            value_bool_right: None,
+            value_binop_left: None,
+            value_binop_right: None,
+            value_binop_operator: None,
+            value_lambda: None,
+            value_list_comprehension: None,
+            value_generator_comprehension: None,
+            value_list_elements: None,
+            value_set_elements: None,
+            value_dict_entries: None,
+        }],
+        keyword_expansion_types: vec![String::from("dict[str, str]")],
+        keyword_expansion_values: Vec::new(),
+        line: 1,
+    };
+
+    assert_eq!(call.positional_arg_type_texts(), vec![String::from("list[int]")]);
+    assert_eq!(call.starred_arg_type_texts(), vec![String::from("tuple[str, ...]")]);
+    assert_eq!(call.keyword_arg_type_texts(), vec![String::from("int")]);
+    assert_eq!(call.keyword_expansion_type_texts(), vec![String::from("dict[str, str]")]);
 }
 
 #[test]

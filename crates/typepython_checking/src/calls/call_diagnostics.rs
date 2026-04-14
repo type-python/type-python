@@ -192,12 +192,14 @@ pub(super) fn direct_call_type_diagnostics(
             };
             let param_names =
                 direct_param_names_from_signature(node, nodes, &call.callee).unwrap_or_default();
+            let arg_types = call.positional_arg_type_texts();
+            let keyword_arg_types = call.keyword_arg_type_texts();
             positional_and_keyword_type_diagnostics(
                 node,
                 nodes,
                 call,
-                call.arg_types.as_slice(),
-                call.keyword_arg_types.as_slice(),
+                arg_types.as_slice(),
+                keyword_arg_types.as_slice(),
                 &param_types,
                 &param_names,
                 None,
@@ -788,8 +790,9 @@ pub(super) fn resolved_call_arg_semantic_types(
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
-        return call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+        return arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.arg_values
         .iter()
@@ -810,8 +813,7 @@ pub(super) fn resolved_call_arg_semantic_types(
                 )
             })
             .unwrap_or_else(|| {
-                call
-                    .arg_types
+                arg_types
                     .get(index)
                     .map(|ty| lower_type_text_or_name(ty))
                     .unwrap_or_else(|| SemanticType::Name(String::new()))
@@ -827,8 +829,9 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
     expected_types: &[Option<SemanticType>],
 ) -> Vec<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    let arg_types = call.positional_arg_type_texts();
     if call.arg_values.is_empty() {
-        return call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+        return arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.arg_values
         .iter()
@@ -849,7 +852,7 @@ pub(super) fn resolved_call_arg_semantic_types_with_expected_semantic(
                 )
             })
             .unwrap_or_else(|| {
-                call.arg_types
+                arg_types
                     .get(index)
                     .map(|ty| lower_type_text_or_name(ty))
                     .unwrap_or_else(|| SemanticType::Name(String::new()))
@@ -865,8 +868,9 @@ pub(super) fn resolved_keyword_arg_semantic_types(
     expected_types: &[Option<String>],
 ) -> Vec<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
-        return call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+        return keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.keyword_arg_values
         .iter()
@@ -887,8 +891,7 @@ pub(super) fn resolved_keyword_arg_semantic_types(
                 )
             })
             .unwrap_or_else(|| {
-                call
-                    .keyword_arg_types
+                keyword_arg_types
                     .get(index)
                     .map(|ty| lower_type_text_or_name(ty))
                     .unwrap_or_else(|| SemanticType::Name(String::new()))
@@ -904,8 +907,9 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic(
     expected_types: &[Option<SemanticType>],
 ) -> Vec<SemanticType> {
     let context = CheckerContext::new(nodes, ImportFallback::Unknown, None);
+    let keyword_arg_types = call.keyword_arg_type_texts();
     if call.keyword_arg_values.is_empty() {
-        return call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
+        return keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)).collect();
     }
     call.keyword_arg_values
         .iter()
@@ -926,7 +930,7 @@ pub(super) fn resolved_keyword_arg_semantic_types_with_expected_semantic(
                 )
             })
             .unwrap_or_else(|| {
-                call.keyword_arg_types
+                keyword_arg_types
                     .get(index)
                     .map(|ty| lower_type_text_or_name(ty))
                     .unwrap_or_else(|| SemanticType::Name(String::new()))
@@ -1456,10 +1460,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
     shape: &DataclassTransformClassShape,
 ) -> Vec<Diagnostic> {
     let positional_fields = shape.fields.iter().filter(|field| !field.kw_only).collect::<Vec<_>>();
+    let positional_arg_types = call.positional_arg_type_texts();
     let mut diagnostics = positional_fields
         .iter()
         .take(call.arg_count)
-        .zip(call.arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
+        .zip(positional_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
         .filter(|(field, arg_ty)| {
             !semantic_type_missing(arg_ty)
                 && !field.rendered_annotation().is_empty()
@@ -1486,10 +1491,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         })
         .collect::<Vec<_>>();
 
+    let keyword_arg_types = call.keyword_arg_type_texts();
     for (keyword, arg_ty) in call
         .keyword_names
         .iter()
-        .zip(call.keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
+        .zip(keyword_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
     {
         let Some(field) = shape.fields.iter().find(|field| field.keyword_name == *keyword) else {
             continue;

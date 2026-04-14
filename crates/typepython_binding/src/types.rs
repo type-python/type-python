@@ -196,6 +196,31 @@ pub struct CallSite {
     pub line: usize,
 }
 
+impl CallSite {
+    #[must_use]
+    pub fn positional_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.arg_values, &self.arg_types)
+    }
+
+    #[must_use]
+    pub fn starred_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.starred_arg_values, &self.starred_arg_types)
+    }
+
+    #[must_use]
+    pub fn keyword_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.keyword_arg_values, &self.keyword_arg_types)
+    }
+
+    #[must_use]
+    pub fn keyword_expansion_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(
+            &self.keyword_expansion_values,
+            &self.keyword_expansion_types,
+        )
+    }
+}
+
 /// Direct member access captured from a bound module.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct MemberAccessSite {
@@ -226,6 +251,50 @@ pub struct MethodCallSite {
     pub keyword_expansion_types: Vec<String>,
     pub keyword_expansion_values: Vec<typepython_syntax::DirectExprMetadata>,
     pub line: usize,
+}
+
+impl MethodCallSite {
+    #[must_use]
+    pub fn positional_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.arg_values, &self.arg_types)
+    }
+
+    #[must_use]
+    pub fn starred_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.starred_arg_values, &self.starred_arg_types)
+    }
+
+    #[must_use]
+    pub fn keyword_arg_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(&self.keyword_arg_values, &self.keyword_arg_types)
+    }
+
+    #[must_use]
+    pub fn keyword_expansion_type_texts(&self) -> Vec<String> {
+        rendered_direct_expr_type_texts(
+            &self.keyword_expansion_values,
+            &self.keyword_expansion_types,
+        )
+    }
+}
+
+fn rendered_direct_expr_type_texts(
+    metadata: &[typepython_syntax::DirectExprMetadata],
+    fallback: &[String],
+) -> Vec<String> {
+    if metadata.is_empty() {
+        return fallback.to_vec();
+    }
+    metadata
+        .iter()
+        .enumerate()
+        .map(|(index, metadata)| {
+            metadata
+                .rendered_value_type()
+                .or_else(|| fallback.get(index).cloned())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// Return expression metadata extracted from a function body.

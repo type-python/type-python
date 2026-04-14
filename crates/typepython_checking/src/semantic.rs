@@ -569,7 +569,8 @@ pub(super) fn resolved_starred_positional_expansions(
     call: &typepython_binding::CallSite,
 ) -> Vec<PositionalExpansion> {
     let mut expansions = Vec::new();
-    let count = call.starred_arg_values.len().max(call.starred_arg_types.len());
+    let starred_arg_types = call.starred_arg_type_texts();
+    let count = call.starred_arg_values.len().max(starred_arg_types.len());
     for index in 0..count {
         let value_type = call
             .starred_arg_values
@@ -580,7 +581,7 @@ pub(super) fn resolved_starred_positional_expansions(
                 )
             })
             .or_else(|| {
-                call.starred_arg_types
+                starred_arg_types
                     .get(index)
                     .and_then(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(ty)))
             });
@@ -629,7 +630,8 @@ pub(super) fn resolved_keyword_expansions_with_context(
     call: &typepython_binding::CallSite,
 ) -> Vec<KeywordExpansion> {
     let mut expansions = Vec::new();
-    let count = call.keyword_expansion_values.len().max(call.keyword_expansion_types.len());
+    let keyword_expansion_types = call.keyword_expansion_type_texts();
+    let count = call.keyword_expansion_values.len().max(keyword_expansion_types.len());
     for index in 0..count {
         let value_type = call
             .keyword_expansion_values
@@ -640,7 +642,7 @@ pub(super) fn resolved_keyword_expansions_with_context(
                 )
             })
             .or_else(|| {
-                call.keyword_expansion_types
+                keyword_expansion_types
                     .get(index)
                     .and_then(|ty| (!ty.is_empty()).then(|| lower_type_text_or_name(ty)))
             });
