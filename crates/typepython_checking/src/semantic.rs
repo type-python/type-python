@@ -1235,40 +1235,17 @@ pub(super) fn resolve_contextual_yield_type(
         }
     }
     ContextualYieldTypeResult {
-        actual_type: resolve_direct_expression_semantic_type(
-            node,
-            nodes,
-            None,
-            None,
-            Some(yield_site.owner_name.as_str()),
-            yield_site.owner_type_name.as_deref(),
-            yield_site.line,
-            yield_site
-                .value_metadata()
-                .as_ref()
-                .and_then(typepython_syntax::DirectExprMetadata::rendered_value_type)
-                .as_deref(),
-            false,
-            yield_site.value_callee.as_deref(),
-            yield_site.value_name.as_deref(),
-            yield_site.value_member_owner_name.as_deref(),
-            yield_site.value_member_name.as_deref(),
-            yield_site.value_member_through_instance,
-            yield_site.value_method_owner_name.as_deref(),
-            yield_site.value_method_name.as_deref(),
-            yield_site.value_method_through_instance,
-            yield_site.value_subscript_target.as_deref(),
-            yield_site.value_subscript_string_key.as_deref(),
-            yield_site.value_subscript_index.as_deref(),
-            yield_site.value_if_true.as_deref(),
-            yield_site.value_if_false.as_deref(),
-            yield_site.value_if_guard.as_ref(),
-            yield_site.value_bool_left.as_deref(),
-            yield_site.value_bool_right.as_deref(),
-            yield_site.value_binop_left.as_deref(),
-            yield_site.value_binop_right.as_deref(),
-            yield_site.value_binop_operator.as_deref(),
-        ),
+        actual_type: yield_site.value_metadata().as_ref().and_then(|metadata| {
+            resolve_direct_expression_semantic_type_from_metadata(
+                node,
+                nodes,
+                None,
+                Some(yield_site.owner_name.as_str()),
+                yield_site.owner_type_name.as_deref(),
+                yield_site.line,
+                metadata,
+            )
+        }),
         diagnostics: Vec::new(),
     }
 }

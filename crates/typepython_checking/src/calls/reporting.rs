@@ -508,7 +508,7 @@ pub(super) fn inferred_return_type_for_owner(
         let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
-            .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
+            .or_else(|| direct_return_site_semantic_type(node, nodes, candidate))
             .unwrap_or_else(|| lower_type_text_or_name("unknown"));
         trace_types.push(candidate_type);
     }
@@ -544,7 +544,7 @@ pub(super) fn attach_return_inference_trace(
         let contextual = resolve_contextual_return_type(node, nodes, candidate, expected);
         let candidate_type = contextual
             .actual_type
-            .or_else(|| candidate.value_type.as_deref().map(lower_type_text_or_name))
+            .or_else(|| direct_return_site_semantic_type(node, nodes, candidate))
             .unwrap_or_else(|| lower_type_text_or_name("unknown"));
         trace_types.push(candidate_type.clone());
         trace_lines.push(format!(
@@ -576,4 +576,21 @@ pub(super) fn attach_return_inference_trace(
     }
 
     diagnostic
+}
+
+fn direct_return_site_semantic_type(
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    return_site: &typepython_binding::ReturnSite,
+) -> Option<SemanticType> {
+    let metadata = return_site.value_metadata()?;
+    resolve_direct_expression_semantic_type_from_metadata(
+        node,
+        nodes,
+        None,
+        Some(return_site.owner_name.as_str()),
+        return_site.owner_type_name.as_deref(),
+        return_site.line,
+        &metadata,
+    )
 }
