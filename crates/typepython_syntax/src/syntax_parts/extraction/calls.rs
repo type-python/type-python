@@ -2,19 +2,11 @@ use super::*;
 
 struct DirectCallArgumentSurface {
     arg_count: usize,
-    arg_types: Vec<String>,
     arg_values: Vec<DirectExprMetadata>,
-    starred_arg_types: Vec<String>,
     starred_arg_values: Vec<DirectExprMetadata>,
     keyword_names: Vec<String>,
-    keyword_arg_types: Vec<String>,
     keyword_arg_values: Vec<DirectExprMetadata>,
-    keyword_expansion_types: Vec<String>,
     keyword_expansion_values: Vec<DirectExprMetadata>,
-}
-
-fn rendered_value_type_or_empty(metadata: &DirectExprMetadata) -> String {
-    metadata.rendered_value_type().unwrap_or_default()
 }
 
 fn collect_direct_call_argument_surface(
@@ -50,21 +42,14 @@ fn collect_direct_call_argument_surface(
 
     DirectCallArgumentSurface {
         arg_count: arg_values.len(),
-        arg_types: arg_values.iter().map(rendered_value_type_or_empty).collect(),
         arg_values,
-        starred_arg_types: starred_arg_values.iter().map(rendered_value_type_or_empty).collect(),
         starred_arg_values,
         keyword_names: arguments
             .keywords
             .iter()
             .filter_map(|keyword| keyword.arg.as_ref().map(|name| name.as_str().to_owned()))
             .collect(),
-        keyword_arg_types: keyword_arg_values.iter().map(rendered_value_type_or_empty).collect(),
         keyword_arg_values,
-        keyword_expansion_types: keyword_expansion_values
-            .iter()
-            .map(rendered_value_type_or_empty)
-            .collect(),
         keyword_expansion_values,
     }
 }
@@ -85,14 +70,10 @@ pub(in super::super) fn extract_call_statement(
     Some(SyntaxStatement::Call(CallStatement {
         callee: name.id.as_str().to_owned(),
         arg_count: args.arg_count,
-        arg_types: args.arg_types,
         arg_values: args.arg_values,
-        starred_arg_types: args.starred_arg_types,
         starred_arg_values: args.starred_arg_values,
         keyword_names: args.keyword_names,
-        keyword_arg_types: args.keyword_arg_types,
         keyword_arg_values: args.keyword_arg_values,
-        keyword_expansion_types: args.keyword_expansion_types,
         keyword_expansion_values: args.keyword_expansion_values,
         line,
     }))
@@ -130,14 +111,10 @@ pub(in super::super) fn extract_method_call_statement(
                 method: attribute.attr.as_str().to_owned(),
                 through_instance: false,
                 arg_count: args.arg_count,
-                arg_types: args.arg_types,
                 arg_values: args.arg_values,
-                starred_arg_types: args.starred_arg_types,
                 starred_arg_values: args.starred_arg_values,
                 keyword_names: args.keyword_names,
-                keyword_arg_types: args.keyword_arg_types,
                 keyword_arg_values: args.keyword_arg_values,
-                keyword_expansion_types: args.keyword_expansion_types,
                 keyword_expansion_values: args.keyword_expansion_values,
                 line,
             }))
@@ -154,14 +131,10 @@ pub(in super::super) fn extract_method_call_statement(
                 method: attribute.attr.as_str().to_owned(),
                 through_instance: true,
                 arg_count: args.arg_count,
-                arg_types: args.arg_types,
                 arg_values: args.arg_values,
-                starred_arg_types: args.starred_arg_types,
                 starred_arg_values: args.starred_arg_values,
                 keyword_names: args.keyword_names,
-                keyword_arg_types: args.keyword_arg_types,
                 keyword_arg_values: args.keyword_arg_values,
-                keyword_expansion_types: args.keyword_expansion_types,
                 keyword_expansion_values: args.keyword_expansion_values,
                 line,
             }))

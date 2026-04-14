@@ -6,8 +6,8 @@ use super::{
     MatchStatement, MemberAccessStatement, MethodCallStatement, MethodKind, NamedBlockStatement,
     ParseOptions, ParsePythonVersion, ParseTargetPlatform, ReturnStatement, SourceFile, SourceKind,
     SyntaxStatement, TypeAliasStatement, TypeExpr, TypeIgnoreDirective, TypeParam, TypeParamKind,
-    TypedDictLiteralEntry, UnsafeStatement, ValueStatement, WithStatement, YieldStatement, parse,
-    parse_with_options,
+    TypedDictLiteralEntry, UnsafeStatement, ValueStatement, WithStatement, YieldStatement,
+    direct_expr_metadata_vec_from_type_texts, parse, parse_with_options,
 };
 use std::path::PathBuf;
 
@@ -1442,15 +1442,11 @@ fn parse_extracts_annotated_assignment_direct_rhs_forms() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("helper"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
@@ -1621,15 +1617,11 @@ fn parse_extracts_function_body_annotated_assignments() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("helper"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 3,
             }),
             SyntaxStatement::Value(ValueStatement {
@@ -1829,15 +1821,11 @@ fn parse_extracts_top_level_direct_calls() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("Builder"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 1,
             }),
             SyntaxStatement::Value(ValueStatement {
@@ -1882,15 +1870,11 @@ fn parse_extracts_top_level_direct_calls() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("Factory"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 2,
             }),
         ]
@@ -1912,12 +1896,9 @@ fn parse_retains_direct_call_keyword_names() {
         vec![SyntaxStatement::Call(CallStatement {
             callee: String::from("build"),
             arg_count: 0,
-            arg_types: Vec::new(),
-            arg_values: Vec::new(),
-            starred_arg_types: Vec::new(),
-            starred_arg_values: Vec::new(),
+            arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+            starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             keyword_names: vec![String::from("x"), String::from("y")],
-            keyword_arg_types: vec![String::from("int"), String::from("int")],
             keyword_arg_values: vec![
                 DirectExprMetadata {
                     value_type: Some(String::from("int")),
@@ -1980,8 +1961,7 @@ fn parse_retains_direct_call_keyword_names() {
                     value_dict_entries: None,
                 },
             ],
-            keyword_expansion_types: Vec::new(),
-            keyword_expansion_values: Vec::new(),
+            keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             line: 1,
         })]
     );
@@ -2050,7 +2030,6 @@ fn parse_retains_direct_call_literal_arg_types() {
         vec![SyntaxStatement::Call(CallStatement {
             callee: String::from("build"),
             arg_count: 2,
-            arg_types: vec![String::from("int"), String::from("str")],
             arg_values: vec![
                 DirectExprMetadata {
                     value_type: Some(String::from("int")),
@@ -2113,13 +2092,10 @@ fn parse_retains_direct_call_literal_arg_types() {
                     value_dict_entries: None,
                 },
             ],
-            starred_arg_types: Vec::new(),
-            starred_arg_values: Vec::new(),
+            starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             keyword_names: Vec::new(),
-            keyword_arg_types: Vec::new(),
-            keyword_arg_values: Vec::new(),
-            keyword_expansion_types: Vec::new(),
-            keyword_expansion_values: Vec::new(),
+            keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+            keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             line: 1,
         })]
     );
@@ -2140,7 +2116,11 @@ fn parse_retains_direct_call_container_literal_arg_types() {
     };
     assert_eq!(statement.callee, "build");
     assert_eq!(
-        statement.arg_types,
+        statement
+            .arg_values
+            .iter()
+            .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
+            .collect::<Vec<_>>(),
         vec![
             String::from("list[int]"),
             String::from("tuple[int, str]"),
@@ -2174,8 +2154,22 @@ fn parse_retains_starred_call_expansion_metadata() {
     let [SyntaxStatement::Call(statement)] = tree.statements.as_slice() else {
         panic!("expected direct call statement");
     };
-    assert_eq!(statement.starred_arg_types, vec![String::from("list[int]")]);
-    assert_eq!(statement.keyword_expansion_types, vec![String::from("dict[str, int]")]);
+    assert_eq!(
+        statement
+            .starred_arg_values
+            .iter()
+            .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![String::from("list[int]")]
+    );
+    assert_eq!(
+        statement
+            .keyword_expansion_values
+            .iter()
+            .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![String::from("dict[str, int]")]
+    );
     let dict_entries = statement.keyword_expansion_values[0]
         .value_dict_entries
         .as_ref()
@@ -2223,7 +2217,6 @@ fn parse_retains_lambda_metadata_in_call_args() {
         vec![SyntaxStatement::Call(CallStatement {
             callee: String::from("build"),
             arg_count: 1,
-            arg_types: vec![String::new()],
             arg_values: vec![DirectExprMetadata {
                 value_type: Some(String::new()),
                 value_type_expr: None,
@@ -2295,13 +2288,10 @@ fn parse_retains_lambda_metadata_in_call_args() {
                 value_set_elements: None,
                 value_dict_entries: None,
             }],
-            starred_arg_types: Vec::new(),
-            starred_arg_values: Vec::new(),
+            starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             keyword_names: Vec::new(),
-            keyword_arg_types: Vec::new(),
-            keyword_arg_values: Vec::new(),
-            keyword_expansion_types: Vec::new(),
-            keyword_expansion_values: Vec::new(),
+            keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+            keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
             line: 1,
         })]
     );
@@ -2606,15 +2596,11 @@ fn parse_extracts_nested_direct_calls() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("Factory"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 2,
             }),
         ]
@@ -2963,7 +2949,6 @@ fn parse_extracts_direct_method_calls() {
                 method: String::from("run"),
                 through_instance: false,
                 arg_count: 1,
-                arg_types: vec![String::from("int")],
                 arg_values: vec![DirectExprMetadata {
                     value_type: Some(String::from("int")),
                     value_type_expr: None,
@@ -2994,13 +2979,10 @@ fn parse_extracts_direct_method_calls() {
                     value_set_elements: None,
                     value_dict_entries: None,
                 }],
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 1,
             }),
             SyntaxStatement::MethodCall(MethodCallStatement {
@@ -3010,12 +2992,9 @@ fn parse_extracts_direct_method_calls() {
                 method: String::from("build"),
                 through_instance: true,
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: vec![String::from("x")],
-                keyword_arg_types: vec![String::from("int")],
                 keyword_arg_values: vec![DirectExprMetadata {
                     value_type: Some(String::from("int")),
                     value_type_expr: None,
@@ -3046,8 +3025,7 @@ fn parse_extracts_direct_method_calls() {
                     value_set_elements: None,
                     value_dict_entries: None,
                 }],
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 2,
             }),
         ]
@@ -4692,15 +4670,11 @@ fn parse_retains_except_handler_binding() {
             SyntaxStatement::Call(CallStatement {
                 callee: String::from("risky"),
                 arg_count: 0,
-                arg_types: Vec::new(),
-                arg_values: Vec::new(),
-                starred_arg_types: Vec::new(),
-                starred_arg_values: Vec::new(),
+                arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                starred_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 keyword_names: Vec::new(),
-                keyword_arg_types: Vec::new(),
-                keyword_arg_values: Vec::new(),
-                keyword_expansion_types: Vec::new(),
-                keyword_expansion_values: Vec::new(),
+                keyword_arg_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_expansion_values: direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 3,
             }),
             SyntaxStatement::ExceptHandler(ExceptionHandlerStatement {
