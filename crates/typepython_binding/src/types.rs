@@ -264,11 +264,10 @@ impl MethodCallSite {
     }
 }
 
-fn rendered_direct_expr_type_texts(metadata: &[typepython_syntax::DirectExprMetadata]) -> Vec<String> {
-    metadata
-        .iter()
-        .map(|metadata| metadata.rendered_value_type().unwrap_or_default())
-        .collect()
+fn rendered_direct_expr_type_texts(
+    metadata: &[typepython_syntax::DirectExprMetadata],
+) -> Vec<String> {
+    metadata.iter().map(|metadata| metadata.rendered_value_type().unwrap_or_default()).collect()
 }
 
 /// Return expression metadata extracted from a function body.
@@ -761,7 +760,6 @@ pub struct Declaration {
     pub kind: DeclarationKind,
     pub detail: String,
     pub metadata: DeclarationMetadata,
-    pub value_type: Option<String>,
     pub value_type_expr: Option<BoundTypeExpr>,
     pub method_kind: Option<MethodKind>,
     pub class_kind: Option<DeclarationOwnerKind>,
@@ -833,7 +831,7 @@ impl Declaration {
 
     #[must_use]
     pub fn rendered_value_type(&self) -> Option<String> {
-        self.inferred_value_type().map(BoundTypeExpr::render).or_else(|| self.value_type.clone())
+        self.inferred_value_type().map(BoundTypeExpr::render)
     }
 
     #[must_use]

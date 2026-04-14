@@ -54,7 +54,6 @@ fn check_infers_generic_function_call_through_union_actual() {
         name: String::from("maybe"),
         kind: DeclarationKind::Function,
         detail: String::from("(x:T | None)->T | None"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -92,11 +91,15 @@ fn check_infers_generic_function_call_through_union_actual() {
     let call = typepython_binding::CallSite {
         callee: String::from("maybe"),
         arg_count: 1,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("int | None")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("int | None"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -137,7 +140,6 @@ fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
         name: String::from("wrap"),
         kind: DeclarationKind::Function,
         detail: String::from("(value:T)->T"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -252,7 +254,6 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -281,11 +282,16 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 2,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("int"), String::from("str")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("int"),
+            String::from("str"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -328,7 +334,6 @@ fn check_infers_paramspec_from_callable_argument() {
         name: String::from("wrap"),
         kind: DeclarationKind::Function,
         detail: String::from("(cb:Callable[P, int])->Callable[P, int]"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -357,11 +362,15 @@ fn check_infers_paramspec_from_callable_argument() {
     let call = typepython_binding::CallSite {
         callee: String::from("wrap"),
         arg_count: 1,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("Callable[[str], int]")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("Callable[[str], int]"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -408,7 +417,6 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -436,11 +444,16 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 2,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("int"), String::from("str")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("int"),
+            String::from("str"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -494,7 +507,6 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
         name: String::from("collect"),
         kind: DeclarationKind::Function,
         detail: String::from("(value:tuple[Unpack[Ts]])->tuple[Unpack[Ts]]"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -523,11 +535,15 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 1,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("tuple[int, str]")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("tuple[int, str]"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -574,7 +590,6 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
                     detail: String::new(),
-                    value_type: None,
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -595,7 +610,6 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
                     detail: String::from("Box"),
-                    value_type: None,
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -616,7 +630,6 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
                     detail: String::from("(self,*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
-                    value_type: None,
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -654,10 +667,15 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                 through_instance: false,
                 arg_count: 0,
                 arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-                starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("list[int]")]),
+                starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+                    vec![String::from("list[int]")],
+                ),
                 keyword_names: Vec::new(),
-                keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-                keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+                    Vec::new(),
+                ),
+                keyword_expansion_values:
+                    typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
                 line: 1,
             }],
             member_accesses: Vec::new(),
@@ -719,7 +737,6 @@ fn resolve_scope_param_semantic_type_uses_declaration_signature_sites() {
             kind: DeclarationKind::Function,
             metadata: Default::default(),
             detail: String::from("(x:int,*args:str,**kwargs:bool)->None"),
-            value_type: None,
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -808,7 +825,6 @@ fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
         name: String::from("Items"),
         kind: DeclarationKind::TypeAlias,
         detail: String::from("list[T]"),
-        value_type: None,
         value_type_expr: None,
         method_kind: None,
         class_kind: None,

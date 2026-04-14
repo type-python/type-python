@@ -331,7 +331,6 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
                     detail: String::from("str"),
-                    value_type: Some(String::from("str")),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -354,7 +353,6 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     name: String::from("MaybeInt"),
                     kind: DeclarationKind::TypeAlias,
                     detail: String::from("str"),
-                    value_type: None,
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -391,7 +389,6 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
                     detail: String::from("(value:str)->str"),
-                    value_type: None,
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -588,7 +585,9 @@ fn resolve_method_call_candidate_instantiates_owner_generic_arguments() {
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -643,11 +642,16 @@ fn instantiated_generic_return_prefers_wider_assignable_type_over_union() {
     let call = typepython_binding::CallSite {
         callee: String::from("choose"),
         arg_count: 2,
-        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![String::from("Animal"), String::from("Cat")]),
+        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+            String::from("Animal"),
+            String::from("Cat"),
+        ]),
         starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
         keyword_names: Vec::new(),
         keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+        keyword_expansion_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+            Vec::new(),
+        ),
         line: 1,
     };
 
@@ -929,7 +933,6 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
                 detail: String::new(),
-                value_type: None,
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -950,7 +953,6 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
                 detail: String::from("Base"),
-                value_type: None,
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
