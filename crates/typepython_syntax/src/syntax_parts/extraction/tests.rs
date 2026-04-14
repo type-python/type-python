@@ -3061,7 +3061,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -3081,7 +3081,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                     method_kind: None,
                     annotation: None,
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -3101,7 +3101,7 @@ fn parse_extracts_class_like_members_from_ast_body() {
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
@@ -3168,7 +3168,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: vec![
                             FunctionParam {
                                 name: String::from("self"),
@@ -3209,7 +3209,7 @@ fn parse_marks_decorated_class_methods_as_overload_members() {
                         method_kind: Some(MethodKind::Instance),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: vec![
                             FunctionParam {
                                 name: String::from("self"),
@@ -3356,7 +3356,7 @@ fn parse_marks_final_value_declarations() {
                     method_kind: None,
                     annotation: Some(String::from("Final[int]")),
                     annotation_expr: None,
-                    value_type: Some(String::from("int")),
+                    value_type_expr: TypeExpr::parse("int"),
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -3627,7 +3627,7 @@ fn parse_marks_final_decorated_classes_and_methods() {
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
@@ -3731,7 +3731,7 @@ fn parse_marks_classvar_value_declarations() {
                     method_kind: None,
                     annotation: Some(String::from("ClassVar[int]")),
                     annotation_expr: None,
-                    value_type: Some(String::from("int")),
+                    value_type_expr: TypeExpr::parse("int"),
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -4842,7 +4842,7 @@ fn parse_marks_override_decorated_functions_and_members() {
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
@@ -4908,7 +4908,7 @@ fn parse_marks_abstract_class_methods() {
                     method_kind: Some(MethodKind::Instance),
                     annotation: None,
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: vec![FunctionParam {
                         name: String::from("self"),
                         annotation: None,
@@ -4968,7 +4968,7 @@ fn parse_marks_method_kinds_from_decorators() {
                         method_kind: Some(MethodKind::Class),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: vec![FunctionParam {
                             name: String::from("cls"),
                             annotation: None,
@@ -4997,7 +4997,7 @@ fn parse_marks_method_kinds_from_decorators() {
                         method_kind: Some(MethodKind::Static),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: Some(String::from("None")),
                         returns_expr: None,
@@ -5017,7 +5017,7 @@ fn parse_marks_method_kinds_from_decorators() {
                         method_kind: Some(MethodKind::Property),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: vec![FunctionParam {
                             name: String::from("self"),
                             annotation: None,
@@ -5046,7 +5046,7 @@ fn parse_marks_method_kinds_from_decorators() {
                         method_kind: Some(MethodKind::PropertySetter),
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: vec![
                             FunctionParam {
                                 name: String::from("self"),

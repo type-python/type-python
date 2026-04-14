@@ -678,10 +678,9 @@ fn bind_named_block(
                 },
             },
             value_type_expr: member
-                .value_type
+                .value_type_expr
                 .clone()
-                .filter(|value| !value.is_empty())
-                .map(BoundTypeExpr::new),
+                .map(BoundTypeExpr::from_expr),
             method_kind: member.method_kind,
             class_kind: None,
             owner: Some(owner.clone()),

@@ -684,7 +684,7 @@ pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<Clas
                 method_kind: Some(method_kind_from_decorators(&function.decorator_list)),
                 annotation: None,
                 annotation_expr: None,
-                value_type: None,
+                value_type_expr: None,
                 params: extract_function_params(normalized, &function.parameters),
                 returns: function
                     .returns
@@ -718,7 +718,11 @@ pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<Clas
                             .map(str::to_owned),
                         annotation_expr: slice_range(normalized, assign.annotation.range())
                             .and_then(TypeExpr::parse),
-                        value_type: assign.value.as_deref().map(infer_literal_arg_type),
+                        value_type_expr: assign
+                            .value
+                            .as_deref()
+                            .map(infer_literal_arg_type)
+                            .and_then(|value_type| TypeExpr::parse(&value_type)),
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -743,7 +747,7 @@ pub(super) fn extract_class_members(normalized: &str, body: &[Stmt]) -> Vec<Clas
                         method_kind: None,
                         annotation: None,
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,

@@ -468,7 +468,7 @@ pub struct ClassMember {
     pub method_kind: Option<MethodKind>,
     pub annotation: Option<String>,
     pub annotation_expr: Option<TypeExpr>,
-    pub value_type: Option<String>,
+    pub value_type_expr: Option<TypeExpr>,
     pub params: Vec<FunctionParam>,
     pub returns: Option<String>,
     pub returns_expr: Option<TypeExpr>,
@@ -527,6 +527,11 @@ impl ClassMember {
     #[must_use]
     pub fn rendered_returns(&self) -> Option<String> {
         self.returns_expr.as_ref().map(TypeExpr::render).or_else(|| self.returns.clone())
+    }
+
+    #[must_use]
+    pub fn rendered_value_type(&self) -> Option<String> {
+        self.value_type_expr.as_ref().map(TypeExpr::render)
     }
 }
 
