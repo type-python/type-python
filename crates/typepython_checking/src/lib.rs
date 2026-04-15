@@ -15,7 +15,6 @@
 //!   source text.
 
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
@@ -38,6 +37,7 @@ mod declaration_semantics;
 mod declarations;
 mod generic_solver;
 mod semantic;
+mod source_facts;
 mod stubs;
 mod type_core;
 mod type_system;
@@ -48,6 +48,7 @@ pub(crate) use self::declaration_semantics::*;
 pub(crate) use self::declarations::*;
 pub(crate) use self::generic_solver::*;
 pub(crate) use self::semantic::*;
+pub(crate) use self::source_facts::*;
 pub use self::stubs::{collect_effective_callable_stub_overrides, collect_synthetic_method_stubs};
 pub(crate) use self::type_core::*;
 pub(crate) use self::type_system::*;
@@ -136,230 +137,6 @@ pub struct SyntheticMethodStub {
     pub method_kind: typepython_syntax::MethodKind,
     pub params: Vec<typepython_syntax::FunctionParam>,
     pub returns: Option<String>,
-}
-
-type TypedDictClassMetadataByName = BTreeMap<String, typepython_syntax::TypedDictClassMetadata>;
-type DirectFunctionSignaturesByName =
-    BTreeMap<String, Vec<typepython_syntax::DirectFunctionParamSite>>;
-type DirectMethodSignaturesByName =
-    BTreeMap<(String, String), Vec<typepython_syntax::DirectFunctionParamSite>>;
-
-#[derive(Debug, Default)]
-struct FallbackModuleSourceFacts {
-    source_loaded: bool,
-    source_text: Option<String>,
-    surface_metadata_loaded: bool,
-    surface_metadata: Option<typepython_syntax::ModuleSurfaceMetadata>,
-}
-
-impl FallbackModuleSourceFacts {
-    fn source_text<'a>(
-        &'a mut self,
-        node: &typepython_graph::ModuleNode,
-        source_overrides: Option<&BTreeMap<String, String>>,
-    ) -> Option<&'a str> {
-        if !self.source_loaded {
-            self.source_text = source_overrides
-                .and_then(|overrides| {
-                    overrides.get(&node.module_path.display().to_string()).cloned()
-                })
-                .or_else(|| fs::read_to_string(&node.module_path).ok());
-            self.source_loaded = true;
-        }
-
-        self.source_text.as_deref()
-    }
-
-    fn module_surface_metadata<'a>(
-        &'a mut self,
-        node: &typepython_graph::ModuleNode,
-        source_overrides: Option<&BTreeMap<String, String>>,
-    ) -> Option<&'a typepython_syntax::ModuleSurfaceMetadata> {
-        if !self.surface_metadata_loaded {
-            self.surface_metadata = self
-                .source_text(node, source_overrides)
-                .map(typepython_syntax::collect_module_surface_metadata);
-            self.surface_metadata_loaded = true;
-        }
-
-        self.surface_metadata.as_ref()
-    }
-}
-
-fn surface_typed_dict_class_metadata(
-    metadata: &typepython_syntax::ModuleSurfaceMetadata,
-) -> TypedDictClassMetadataByName {
-    metadata
-        .typed_dict_classes
-        .iter()
-        .cloned()
-        .map(|typed_dict| (typed_dict.name.clone(), typed_dict))
-        .collect()
-}
-
-fn surface_direct_function_signatures(
-    metadata: &typepython_syntax::ModuleSurfaceMetadata,
-) -> DirectFunctionSignaturesByName {
-    metadata
-        .direct_function_signatures
-        .iter()
-        .cloned()
-        .map(|signature| (signature.name, signature.params))
-        .collect()
-}
-
-fn surface_direct_method_signatures(
-    metadata: &typepython_syntax::ModuleSurfaceMetadata,
-) -> DirectMethodSignaturesByName {
-    metadata
-        .direct_method_signatures
-        .iter()
-        .cloned()
-        .map(|signature| {
-            let params = match signature.method_kind {
-                typepython_syntax::MethodKind::Static | typepython_syntax::MethodKind::Property => {
-                    signature.params
-                }
-                typepython_syntax::MethodKind::Instance
-                | typepython_syntax::MethodKind::Class
-                | typepython_syntax::MethodKind::PropertySetter => {
-                    signature.params.into_iter().skip(1).collect()
-                }
-            };
-            ((signature.owner_type_name, signature.name), params)
-        })
-        .collect()
-}
-
-#[derive(Debug, Default)]
-struct CheckerSourceFactsProvider<'a> {
-    bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
-    modules: RefCell<BTreeMap<String, FallbackModuleSourceFacts>>,
-    source_overrides: Option<&'a BTreeMap<String, String>>,
-}
-
-impl<'a> CheckerSourceFactsProvider<'a> {
-    fn new(
-        source_overrides: Option<&'a BTreeMap<String, String>>,
-        bound_surface_facts: Option<&'a BTreeMap<String, typepython_binding::ModuleSurfaceFacts>>,
-    ) -> Self {
-        Self { bound_surface_facts, modules: RefCell::new(BTreeMap::new()), source_overrides }
-    }
-
-    fn with_module_facts<T>(
-        &self,
-        node: &typepython_graph::ModuleNode,
-        action: impl FnOnce(&mut FallbackModuleSourceFacts) -> T,
-    ) -> T {
-        let cache_key = node.module_path.display().to_string();
-        let mut modules = self.modules.borrow_mut();
-        let facts = modules.entry(cache_key).or_default();
-        action(facts)
-    }
-
-    fn bound_surface_facts(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> Option<&typepython_binding::ModuleSurfaceFacts> {
-        self.bound_surface_facts.and_then(|facts| facts.get(&node.module_key))
-    }
-
-    fn declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
-        declaration_semantic_facts(declaration)
-    }
-
-    fn typed_dict_class_metadata(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> TypedDictClassMetadataByName {
-        if let Some(bound) = self.bound_surface_facts(node) {
-            return bound.typed_dict_class_metadata.clone();
-        }
-        if node.module_path.to_string_lossy().starts_with('<') {
-            return BTreeMap::new();
-        }
-
-        self.with_module_facts(node, |facts| {
-            facts
-                .module_surface_metadata(node, self.source_overrides)
-                .map(surface_typed_dict_class_metadata)
-                .unwrap_or_default()
-        })
-    }
-
-    fn direct_function_signatures(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> DirectFunctionSignaturesByName {
-        if let Some(bound) = self.bound_surface_facts(node) {
-            return bound.direct_function_signatures.clone();
-        }
-        if node.module_path.to_string_lossy().starts_with('<') {
-            return BTreeMap::new();
-        }
-
-        self.with_module_facts(node, |facts| {
-            facts
-                .module_surface_metadata(node, self.source_overrides)
-                .map(surface_direct_function_signatures)
-                .unwrap_or_default()
-        })
-    }
-
-    fn direct_method_signatures(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> DirectMethodSignaturesByName {
-        if let Some(bound) = self.bound_surface_facts(node) {
-            return bound.direct_method_signatures.clone();
-        }
-        if node.module_path.to_string_lossy().starts_with('<') {
-            return BTreeMap::new();
-        }
-
-        self.with_module_facts(node, |facts| {
-            facts
-                .module_surface_metadata(node, self.source_overrides)
-                .map(surface_direct_method_signatures)
-                .unwrap_or_default()
-        })
-    }
-
-    fn decorator_transform_module_info(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> Option<typepython_syntax::DecoratorTransformModuleInfo> {
-        if let Some(bound) = self.bound_surface_facts(node) {
-            return Some(bound.decorator_transform_module_info.clone());
-        }
-        if node.module_path.to_string_lossy().starts_with('<') {
-            return None;
-        }
-
-        self.with_module_facts(node, |facts| {
-            facts
-                .module_surface_metadata(node, self.source_overrides)
-                .map(|metadata| metadata.decorator_transform.clone())
-        })
-    }
-
-    fn dataclass_transform_module_info(
-        &self,
-        node: &typepython_graph::ModuleNode,
-    ) -> Option<typepython_syntax::DataclassTransformModuleInfo> {
-        if let Some(bound) = self.bound_surface_facts(node) {
-            return Some(bound.dataclass_transform_module_info.clone());
-        }
-        if node.module_path.to_string_lossy().starts_with('<') {
-            return None;
-        }
-
-        self.with_module_facts(node, |facts| {
-            facts
-                .module_surface_metadata(node, self.source_overrides)
-                .map(|metadata| metadata.dataclass_transform.clone())
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -453,6 +230,41 @@ impl<'a> CheckerContext<'a> {
 
     fn load_declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
         self.source_facts.declaration_semantics(declaration)
+    }
+
+    fn load_typed_dict_literal_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::TypedDictLiteralSite> {
+        self.source_facts.typed_dict_literal_sites(node)
+    }
+
+    fn load_typed_dict_mutation_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::TypedDictMutationSite> {
+        self.source_facts.typed_dict_mutation_sites(node)
+    }
+
+    fn load_frozen_field_mutation_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::FrozenFieldMutationSite> {
+        self.source_facts.frozen_field_mutation_sites(node)
+    }
+
+    fn load_unsafe_operation_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::UnsafeOperationSite> {
+        self.source_facts.unsafe_operation_sites(node)
+    }
+
+    fn load_conditional_return_sites(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Vec<typepython_syntax::ConditionalReturnSite> {
+        self.source_facts.conditional_return_sites(node)
     }
 }
 
@@ -1298,7 +1110,7 @@ fn collect_node_semantic_diagnostics(
     push_diagnostics(diagnostics, direct_member_access_diagnostics(node, context.nodes));
     push_diagnostics(
         diagnostics,
-        unsafe_boundary_diagnostics(node, options.strict, options.warn_unsafe),
+        unsafe_boundary_diagnostics(context, node, options.strict, options.warn_unsafe),
     );
     push_diagnostics(
         diagnostics,

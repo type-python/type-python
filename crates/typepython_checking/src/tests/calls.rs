@@ -259,6 +259,20 @@ fn check_reports_frozen_dataclass_transform_field_assignment_after_init_with_exp
 }
 
 #[test]
+fn check_reports_frozen_field_diagnostics_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass User:\n    name: str\n\nuser = User(\"Ada\")\nuser.name = \"Grace\"\n",
+        ParseOptions::default(),
+        false,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4001"), "{rendered}");
+    assert!(rendered.contains("frozen dataclass field `name`"), "{rendered}");
+}
+
+#[test]
 fn check_reports_frozen_dataclass_transform_augmented_assignment_after_init() {
     let result = check_temp_typepython_source(
         "def dataclass_transform(*args, **kwargs):\n    def wrap(obj):\n        return obj\n    return wrap\n\n@dataclass_transform(frozen_default=True)\ndef model(cls):\n    return cls\n\n@model\nclass User:\n    count: int\n\nuser: User = User(1)\nuser.count += 1\n",

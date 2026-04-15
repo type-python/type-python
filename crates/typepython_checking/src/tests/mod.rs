@@ -1,5 +1,5 @@
 pub(super) use super::{
-    check, check_with_binding_metadata, check_with_options,
+    check, check_with_binding_metadata, check_with_options, check_with_source_overrides,
     semantic_incremental_state_with_binding_metadata,
     semantic_incremental_state_with_reused_summaries,
 };
@@ -855,6 +855,36 @@ pub(super) fn check_virtual_binding_metadata_source(source_text: &str) -> crate:
     )
 }
 
+pub(super) fn check_virtual_source_with_overrides(
+    source_text: &str,
+    options: ParseOptions,
+    strict: bool,
+    warn_unsafe: bool,
+) -> crate::CheckResult {
+    let path = PathBuf::from("virtual/app.tpy");
+    let source = SourceFile {
+        path: path.clone(),
+        kind: SourceKind::TypePython,
+        logical_module: String::from("app"),
+        text: source_text.to_owned(),
+    };
+    let tree = parse_with_options(source, options);
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let source_overrides = BTreeMap::from([(path.display().to_string(), source_text.to_owned())]);
+
+    check_with_source_overrides(
+        &graph,
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        strict,
+        warn_unsafe,
+        ImportFallback::Unknown,
+        Some(&source_overrides),
+    )
+}
+
 #[test]
 fn check_with_binding_metadata_uses_bound_typed_dict_facts_without_reading_source_file() {
     let source_text = "from typing import TypedDict\nclass Config(TypedDict, total=False):\n    name: str\nconfig: Config = {}\n";
@@ -1038,7 +1068,7 @@ fn surface_direct_method_signatures_trim_implicit_parameters() {
         ..Default::default()
     };
 
-    let signatures = super::surface_direct_method_signatures(&metadata);
+    let signatures = super::source_facts::surface_direct_method_signatures(&metadata);
 
     assert_eq!(
         signatures

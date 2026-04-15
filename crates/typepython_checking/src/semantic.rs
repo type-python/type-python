@@ -3,6 +3,7 @@ use super::*;
 use crate::diagnostic_type_text as render_semantic_type;
 
 pub(super) fn unsafe_boundary_diagnostics(
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     strict: bool,
     warn_unsafe: bool,
@@ -10,10 +11,8 @@ pub(super) fn unsafe_boundary_diagnostics(
     if !strict || !warn_unsafe || node.module_kind != SourceKind::TypePython {
         return Vec::new();
     }
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-    typepython_syntax::collect_unsafe_operation_sites(&source)
+    context
+        .load_unsafe_operation_sites(node)
         .into_iter()
         .filter(|site| !site.in_unsafe_block)
         .map(|site| {
@@ -766,19 +765,12 @@ pub(super) fn plain_dataclass_field_specifier_call(
 }
 
 pub(super) fn conditional_return_coverage_diagnostics(
-    _context: &CheckerContext<'_>,
+    context: &CheckerContext<'_>,
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_conditional_return_sites(&source)
+    context
+        .load_conditional_return_sites(node)
         .into_iter()
         .filter_map(|site| {
             let expected = normalize_type_text(&site.target_type);

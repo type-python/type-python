@@ -50,6 +50,34 @@ fn check_reports_source_authored_paramspec_keyword_mismatch() {
 }
 
 #[test]
+fn check_reports_unsafe_boundary_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        "def run(expr: str) -> None:\n    eval(expr)\n",
+        ParseOptions::default(),
+        true,
+        true,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4019"), "{rendered}");
+    assert!(rendered.contains("must appear inside `unsafe:`"), "{rendered}");
+}
+
+#[test]
+fn check_reports_conditional_return_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",
+        ParseOptions { enable_conditional_returns: true, ..ParseOptions::default() },
+        false,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4018"), "{rendered}");
+    assert!(rendered.contains("missing: None"), "{rendered}");
+}
+
+#[test]
 fn check_accepts_source_authored_concatenate_forwarding_call() {
     let result = check_temp_typepython_source(concat!(
         "from typing import Callable\n\n",

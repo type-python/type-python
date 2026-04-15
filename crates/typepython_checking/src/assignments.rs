@@ -552,16 +552,8 @@ pub(super) fn typed_dict_literal_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
     let mut diagnostics = Vec::new();
-    for site in typepython_syntax::collect_typed_dict_literal_sites(&source) {
+    for site in context.load_typed_dict_literal_sites(node) {
         let Some(annotation) = normalized_assignment_annotation(&site.annotation) else {
             continue;
         };
@@ -897,15 +889,8 @@ pub(super) fn typed_dict_readonly_mutation_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_typed_dict_mutation_sites(&source)
+    context
+        .load_typed_dict_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
             let owner_type = resolve_assignment_expression_semantic_type(
@@ -1161,15 +1146,8 @@ pub(super) fn subscript_assignment_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_typed_dict_mutation_sites(&source)
+    context
+        .load_typed_dict_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
             if site.kind == typepython_syntax::TypedDictMutationKind::Delete {
@@ -1399,15 +1377,8 @@ pub(super) fn frozen_dataclass_transform_mutation_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+    context
+        .load_frozen_field_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
             let target_type = resolve_assignment_expression_semantic_type(
@@ -1473,15 +1444,8 @@ pub(super) fn frozen_plain_dataclass_mutation_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+    context
+        .load_frozen_field_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
             let target_type = resolve_assignment_expression_semantic_type(
@@ -1646,15 +1610,8 @@ pub(super) fn attribute_assignment_type_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],
 ) -> Vec<Diagnostic> {
-    if node.module_path.to_string_lossy().starts_with('<') {
-        return Vec::new();
-    }
-
-    let Ok(source) = fs::read_to_string(&node.module_path) else {
-        return Vec::new();
-    };
-
-    typepython_syntax::collect_frozen_field_mutation_sites(&source)
+    context
+        .load_frozen_field_mutation_sites(node)
         .into_iter()
         .filter_map(|site| {
             if site.kind == typepython_syntax::FrozenFieldMutationKind::Delete {

@@ -275,6 +275,22 @@ fn check_reports_incompatible_typed_dict_extra_items_value() {
 }
 
 #[test]
+fn check_reports_typed_dict_collector_diagnostics_with_source_overrides_without_backing_file() {
+    let result = check_virtual_source_with_overrides(
+        "from typing import TypedDict\nfrom typing_extensions import ReadOnly\n\nclass User(TypedDict):\n    name: ReadOnly[str]\n\npayload: User = {\"name\": 1}\n\ndef mutate(user: User) -> None:\n    user[\"name\"] = \"Grace\"\n",
+        ParseOptions::default(),
+        false,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4013"), "{rendered}");
+    assert!(rendered.contains("assigns `int` to key `name`"), "{rendered}");
+    assert!(rendered.contains("TPY4016"), "{rendered}");
+    assert!(rendered.contains("read-only and cannot be assigned"), "{rendered}");
+}
+
+#[test]
 fn check_reports_invalid_typed_dict_expansion() {
     let result = check_temp_typepython_source(
         "from typing import TypedDict\n\nclass User(TypedDict):\n    id: int\n\nclass Extra(TypedDict):\n    name: str\n\nextra: Extra = {\"name\": \"Ada\"}\npayload: User = {**extra}\n",
