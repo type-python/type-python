@@ -594,9 +594,7 @@ pub(super) fn semantic_callable_type_from_signature_sites_in_module(
                 .map(|param| {
                     rewrite_imported_typing_semantic_type(
                         node,
-                        &param
-                            .rendered_annotation()
-                            .map(|annotation| lower_type_text_or_name(&annotation))
+                        &semantic_type_from_direct_param_site(param)
                             .unwrap_or_else(|| SemanticType::Name(String::from("dynamic"))),
                     )
                 })
@@ -1006,13 +1004,13 @@ fn decorator_candidate_accepts_semantic_callable(
     if !candidate.declaration.type_params.is_empty() {
         return true;
     }
-    let Some(param) = candidate.signature_sites.iter().find(|param| !param.keyword_variadic) else {
+    let Some(param) = candidate.signature_params.iter().find(|param| !param.keyword_variadic) else {
         return false;
     };
-    let Some(annotation) = param.rendered_annotation() else {
+    let Some(annotation) = param.annotation.as_ref() else {
         return true;
     };
-    semantic_type_is_assignable(node, nodes, &lower_type_text_or_name(&annotation), current_callable)
+    semantic_type_is_assignable(node, nodes, annotation, current_callable)
 }
 
 fn substitute_single_paramspec_from_semantic_callable(

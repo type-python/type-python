@@ -420,7 +420,7 @@ fn semantic_type_from_bound_type_expr(expr: &typepython_binding::BoundTypeExpr) 
     lower_type_expr(expr.expr.clone())
 }
 
-fn semantic_type_from_direct_param_site(
+pub(crate) fn semantic_type_from_direct_param_site(
     param: &typepython_syntax::DirectFunctionParamSite,
 ) -> Option<SemanticType> {
     param.annotation_expr.clone().map(lower_type_expr).or_else(|| {
