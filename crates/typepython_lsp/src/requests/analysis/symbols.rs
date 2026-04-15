@@ -18,7 +18,10 @@ pub(crate) fn collect_declarations(
                         name: statement.name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        legacy_detail: format!("typealias {} = {}", statement.name, statement.value),
+                        legacy_detail: format!(
+                            "typealias {} = {}",
+                            statement.name, statement.value
+                        ),
                         declaration: true,
                     });
                 }
@@ -37,7 +40,11 @@ pub(crate) fn collect_declarations(
                         name: statement.name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        legacy_detail: format!("class {}({})", statement.name, statement.bases.join(", ")),
+                        legacy_detail: format!(
+                            "class {}({})",
+                            statement.name,
+                            statement.bases.join(", ")
+                        ),
                         declaration: true,
                     });
                 }
@@ -82,7 +89,11 @@ pub(crate) fn collect_declarations(
                         name: name.clone(),
                         uri: document.uri.clone(),
                         range,
-                        legacy_detail: format!("function {}{}", name, format_signature(params, returns)),
+                        legacy_detail: format!(
+                            "function {}{}",
+                            name,
+                            format_signature(params, returns)
+                        ),
                         declaration: true,
                     });
                 }
@@ -289,10 +300,7 @@ pub(crate) fn collect_member_completion_items(
         visible.retain(|label, _| members.contains_key(label));
     }
 
-    visible
-        .into_iter()
-        .map(|(label, detail)| completion_item_from_detail(label, detail))
-        .collect()
+    visible.into_iter().map(|(label, detail)| completion_item_from_detail(label, detail)).collect()
 }
 
 pub(crate) fn completion_item_from_occurrence(occurrence: &SymbolOccurrence) -> LspCompletionItem {
@@ -319,7 +327,10 @@ pub(crate) fn completion_item_from_canonical(
     completion_item(label, Some(detail), kind)
 }
 
-pub(crate) fn completion_item_from_detail(label: String, legacy_detail: String) -> LspCompletionItem {
+pub(crate) fn completion_item_from_detail(
+    label: String,
+    legacy_detail: String,
+) -> LspCompletionItem {
     completion_item(
         label,
         Some(legacy_detail.clone()),
@@ -342,31 +353,15 @@ fn completion_item(label: String, legacy_detail: Option<String>, kind: u32) -> L
 
 pub(crate) fn keyword_snippet_completion_items() -> Vec<LspCompletionItem> {
     [
-        (
-            "class",
-            "snippet class Name",
-            "class ${1:Name}:\n    ${0:pass}",
-        ),
-        (
-            "def",
-            "snippet def name(...)",
-            "def ${1:name}(${2:args}) -> ${3:None}:\n    ${0:pass}",
-        ),
-        (
-            "typealias",
-            "snippet typealias Name = ...",
-            "typealias ${1:Name} = ${0:object}",
-        ),
+        ("class", "snippet class Name", "class ${1:Name}:\n    ${0:pass}"),
+        ("def", "snippet def name(...)", "def ${1:name}(${2:args}) -> ${3:None}:\n    ${0:pass}"),
+        ("typealias", "snippet typealias Name = ...", "typealias ${1:Name} = ${0:object}"),
         (
             "overload def",
             "snippet overload def name(...)",
             "overload def ${1:name}(${2:args}) -> ${0:object}: ...",
         ),
-        (
-            "unsafe",
-            "snippet unsafe block",
-            "unsafe:\n    ${0:pass}",
-        ),
+        ("unsafe", "snippet unsafe block", "unsafe:\n    ${0:pass}"),
     ]
     .into_iter()
     .enumerate()
@@ -402,7 +397,11 @@ fn completion_item_kind_for_declaration(declaration: &typepython_binding::Declar
             }
         }
         typepython_binding::DeclarationKind::Value => {
-            if declaration.owner.is_some() { 5 } else { 6 }
+            if declaration.owner.is_some() {
+                5
+            } else {
+                6
+            }
         }
         typepython_binding::DeclarationKind::Import => 9,
     }
@@ -473,8 +472,8 @@ pub(crate) fn collect_visible_member_details_recursive(
     let Some(owner_document) = document_for_module_key(workspace, &node.module_key) else {
         return;
     };
-    for base in &declaration.bases {
-        for base_canonical in resolve_type_canonicals(workspace, owner_document, base) {
+    for base in declaration.rendered_class_bases() {
+        for base_canonical in resolve_type_canonicals(workspace, owner_document, &base) {
             collect_visible_member_details_recursive(workspace, &base_canonical, visited, members);
         }
     }
