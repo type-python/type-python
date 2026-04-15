@@ -365,18 +365,16 @@ pub(super) fn actual_member_satisfies_requirement(
                     &requirement.name,
                 )
                 .is_some_and(|member| {
-                    let expected = declaration_signature_return_semantic_type(&requirement.declaration)
-                        .as_ref()
-                        .map(diagnostic_type_text)
-                        .map(|text| normalize_type_text(&text))
-                        .unwrap_or_default();
-                    let actual = declaration_value_annotation_text(member)
-                        .or_else(|| member.inferred_value_type_semantic_text())
-                        .map(|text| normalize_type_text(&text))
-                        .unwrap_or_default();
-                    expected.is_empty()
-                        || actual.is_empty()
-                        || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
+                    let expected = declaration_signature_return_semantic_type(&requirement.declaration);
+                    let actual = declaration_effective_value_semantic_type(member);
+                    expected.is_none()
+                        || actual.is_none()
+                        || semantic_type_is_assignable(
+                            actual_node,
+                            nodes,
+                            expected.as_ref().expect("checked is_some"),
+                            actual.as_ref().expect("checked is_some"),
+                        )
                 });
             }
             find_apparent_callable_declaration(nodes, actual_node, actual_decl, &requirement.name)
@@ -392,19 +390,25 @@ pub(super) fn actual_member_satisfies_requirement(
         DeclarationKind::Value => {
             find_apparent_value_declaration(nodes, actual_node, actual_decl, &requirement.name)
                 .is_some_and(|member| {
-                    let expected = declaration_value_annotation_text(&requirement.declaration)
-                        .map(|text| normalize_type_text(&text))
-                        .unwrap_or_default();
-                    let actual = declaration_value_annotation_text(member)
-                        .map(|text| normalize_type_text(&text))
-                        .unwrap_or_default();
-                    expected.is_empty()
-                        || actual.is_empty()
-                        || direct_type_is_assignable(actual_node, nodes, &expected, &actual)
+                    let expected = declaration_value_annotation_semantic_type(&requirement.declaration);
+                    let actual = declaration_effective_value_semantic_type(member);
+                    expected.is_none()
+                        || actual.is_none()
+                        || semantic_type_is_assignable(
+                            actual_node,
+                            nodes,
+                            expected.as_ref().expect("checked is_some"),
+                            actual.as_ref().expect("checked is_some"),
+                        )
                 })
         }
         _ => false,
     }
+}
+
+fn declaration_effective_value_semantic_type(declaration: &Declaration) -> Option<SemanticType> {
+    declaration_value_annotation_semantic_type(declaration)
+        .or_else(|| declaration.inferred_value_type().map(|expr| lower_type_expr(expr.expr.clone())))
 }
 
 pub(super) fn find_apparent_value_declaration<'a>(
