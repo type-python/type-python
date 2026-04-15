@@ -41,7 +41,7 @@ url = "2"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 # Testing and benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 insta = "1"
 proptest = "1"
 
