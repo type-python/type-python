@@ -277,6 +277,7 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
             default_expr: None,
         }],
     };
+    let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
@@ -357,6 +358,7 @@ fn check_infers_paramspec_from_callable_argument() {
             default_expr: None,
         }],
     };
+    let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("wrap"),
@@ -440,6 +442,7 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
             default_expr: None,
         }],
     };
+    let function = normalize_test_declaration(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
         arg_count: 2,
@@ -530,6 +533,7 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
             default_expr: None,
         }],
     };
+    let function = normalize_test_declaration(&function);
     let signature = crate::declaration_signature_sites(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("collect"),
@@ -765,6 +769,11 @@ fn resolve_scope_param_semantic_type_uses_declaration_signature_sites() {
         assignments: Vec::new(),
         summary_fingerprint: 1,
     };
+    let node = normalize_test_graph(&ModuleGraph { nodes: vec![node] })
+        .nodes
+        .into_iter()
+        .next()
+        .expect("normalized node");
 
     assert_eq!(
         crate::resolve_scope_param_semantic_type(&node, Some("build"), None, "x")

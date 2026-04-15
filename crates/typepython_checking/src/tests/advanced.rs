@@ -736,7 +736,23 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                     declarations: vec![Declaration {
                         name: String::from("box_value"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
+                        metadata: typepython_binding::DeclarationMetadata::Callable {
+                            signature: typepython_binding::BoundCallableSignature {
+                                params: vec![typepython_syntax::DirectFunctionParamSite {
+                                    name: String::from("value"),
+                                    annotation: Some(String::from("int")),
+                                    annotation_expr: Some(typepython_syntax::TypeExpr::Name(
+                                        String::from("int"),
+                                    )),
+                                    has_default: false,
+                                    positional_only: false,
+                                    keyword_only: false,
+                                    variadic: false,
+                                    keyword_variadic: false,
+                                }],
+                                returns: Some(typepython_binding::BoundTypeExpr::new("list[int]")),
+                            },
+                        },
                         legacy_detail: String::from("(value:int)->list[int]"),
                         value_type_expr: None,
                         method_kind: None,
@@ -775,7 +791,9 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                     declarations: vec![Declaration {
                         name: String::from("helpers"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
+                        metadata: typepython_binding::DeclarationMetadata::Import {
+                            target: typepython_binding::BoundImportTarget::new("helpers"),
+                        },
                         legacy_detail: String::from("helpers"),
                         value_type_expr: None,
                         method_kind: None,
@@ -889,6 +907,7 @@ fn overload_applicability_accepts_keyword_default_and_semantic_match() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let declaration = normalize_test_declaration(&declaration);
 
     assert!(crate::overload_is_applicable(&call, &declaration));
 }
@@ -971,6 +990,7 @@ fn overload_applicability_accepts_variadic_arguments() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let declaration = normalize_test_declaration(&declaration);
 
     assert!(crate::overload_is_applicable(&call, &declaration));
 }
@@ -1011,6 +1031,7 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let declaration = normalize_test_declaration(&declaration);
 
     let node = typepython_graph::ModuleNode {
         module_path: PathBuf::from("src/app/module.tpy"),
@@ -1118,6 +1139,7 @@ fn overload_applicability_accepts_list_for_sequence_parameter() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let declaration = normalize_test_declaration(&declaration);
 
     let node = typepython_graph::ModuleNode {
         module_path: PathBuf::from("src/app/module.tpy"),
@@ -1225,11 +1247,13 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let str_declaration = normalize_test_declaration(&str_declaration);
     let int_declaration = Declaration {
         metadata: Default::default(),
         legacy_detail: String::from("(fn:Callable[[int],int])->int"),
         ..str_declaration.clone()
     };
+    let int_declaration = normalize_test_declaration(&int_declaration);
 
     assert!(crate::overload_is_applicable(&call, &str_declaration));
     assert!(!crate::overload_is_applicable(&call, &int_declaration));
@@ -1266,6 +1290,7 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
             default_expr: None,
         }],
     };
+    let generic_overload = normalize_test_declaration(&generic_overload);
     let object_overload = Declaration {
         metadata: Default::default(),
         name: String::from("wrap"),
@@ -1286,6 +1311,7 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let object_overload = normalize_test_declaration(&object_overload);
     let node = ModuleNode {
         module_path: PathBuf::from("<generic-overload>"),
         module_key: String::new(),
@@ -1364,6 +1390,7 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let function = normalize_test_declaration(&function);
     let alias = Declaration {
         metadata: Default::default(),
         name: String::from("Pair"),
@@ -1384,6 +1411,7 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let alias = normalize_test_declaration(&alias);
     let value = Declaration {
         metadata: Default::default(),
         name: String::from("pair"),
@@ -1404,6 +1432,7 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let value = normalize_test_declaration(&value);
 
     let function_ids = crate::declaration_semantic_type_ids(&function);
     let function_clone_ids = crate::declaration_semantic_type_ids(&function.clone());
@@ -1540,6 +1569,33 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
             .map(|ty| crate::render_semantic_type(&ty)),
         Some(String::from("tuple[int]")),
     );
+
+    let import = Declaration {
+        metadata: typepython_binding::DeclarationMetadata::Import {
+            target: typepython_binding::BoundImportTarget::new("pkg.sub.Symbol"),
+        },
+        name: String::from("Symbol"),
+        kind: DeclarationKind::Import,
+        legacy_detail: String::from("wrong.target"),
+        value_type_expr: None,
+        method_kind: None,
+        class_kind: None,
+        owner: None,
+        is_async: false,
+        is_override: false,
+        is_abstract_method: false,
+        is_final_decorator: false,
+        is_deprecated: false,
+        deprecation_message: None,
+        is_final: false,
+        is_class_var: false,
+        bases: Vec::new(),
+        type_params: Vec::new(),
+    };
+    assert_eq!(
+        crate::declaration_import_target_ref(&import).map(|target| target.raw_target),
+        Some(String::from("pkg.sub.Symbol")),
+    );
 }
 
 #[test]
@@ -1593,6 +1649,7 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
             default_expr: None,
         }],
     };
+    let function = normalize_test_declaration(&function);
     let call = typepython_binding::CallSite {
         callee: String::from("box_value"),
         arg_count: 1,
@@ -1868,6 +1925,7 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
             },
         ],
     };
+    let graph = normalize_test_graph(&graph);
 
     let result = check(&graph);
     let rendered = result.diagnostics.as_text();
@@ -15372,10 +15430,21 @@ fn check_accepts_typevartuple_alias_expansion_assignment() {
         assignments: Vec::new(),
         summary_fingerprint: 1,
     };
-    let graph = vec![node.clone()];
+    let graph = normalize_test_graph(&ModuleGraph { nodes: vec![node] });
+    let node = &graph.nodes[0];
 
-    assert!(crate::direct_type_is_assignable(&node, &graph, "tuple[int, str]", "Pack[int, str]"));
-    assert!(crate::direct_type_is_assignable(&node, &graph, "Pack[int, str]", "tuple[int, str]"));
+    assert!(crate::direct_type_is_assignable(
+        node,
+        &graph.nodes,
+        "tuple[int, str]",
+        "Pack[int, str]"
+    ));
+    assert!(crate::direct_type_is_assignable(
+        node,
+        &graph.nodes,
+        "Pack[int, str]",
+        "tuple[int, str]"
+    ));
 }
 
 #[test]
@@ -18537,10 +18606,8 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(
-        rendered
-            .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`")
-    );
+    assert!(rendered
+        .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
 }
 
 #[test]
@@ -20524,26 +20591,27 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
         assignments: Vec::new(),
         summary_fingerprint: 1,
     };
-    let graph = vec![node.clone()];
+    let graph = normalize_test_graph(&ModuleGraph { nodes: vec![node] });
+    let node = &graph.nodes[0];
 
-    assert!(!crate::direct_type_is_assignable(&node, &graph, "bool", "int"));
-    assert!(crate::direct_type_is_assignable(&node, &graph, "JsonValue", "str"));
-    assert!(crate::direct_type_is_assignable(&node, &graph, "JsonValue", "dict[str, str]"));
+    assert!(!crate::direct_type_is_assignable(node, &graph.nodes, "bool", "int"));
+    assert!(crate::direct_type_is_assignable(node, &graph.nodes, "JsonValue", "str"));
+    assert!(crate::direct_type_is_assignable(node, &graph.nodes, "JsonValue", "dict[str, str]"));
     assert!(crate::direct_type_is_assignable(
-        &node,
-        &graph,
+        node,
+        &graph.nodes,
         "JsonValue",
         "int | bool | None | dict[str, str]",
     ));
     assert!(crate::direct_type_is_assignable(
-        &node,
-        &graph,
+        node,
+        &graph.nodes,
         "JsonValue",
         "list[int | bool | None | dict[str, str]]",
     ));
     assert!(crate::direct_type_is_assignable(
-        &node,
-        &graph,
+        node,
+        &graph.nodes,
         "JsonValue",
         "dict[str, list[int | bool | None | dict[str, str]]]",
     ));

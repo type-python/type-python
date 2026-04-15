@@ -115,9 +115,6 @@ pub(super) fn method_override_incompatibility(
             {
                 return None;
             }
-            (None, None) if member.rendered_detail() == base_member.rendered_detail() => {
-                return None;
-            }
             _ => {}
         }
     }

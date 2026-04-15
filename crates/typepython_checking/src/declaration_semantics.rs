@@ -437,15 +437,7 @@ fn build_cached_semantic_declaration_facts(
     CachedSemanticDeclarationFacts {
         callable: matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
             .then(|| {
-                declaration
-                    .callable_signature()
-                    .map(semantic_callable_from_bound_signature)
-                    .or_else(|| {
-                        declaration
-                            .callable_signature_text()
-                            .as_deref()
-                            .and_then(parse_direct_callable_declaration)
-                    })
+                declaration.callable_signature().map(semantic_callable_from_bound_signature)
             })
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
@@ -468,42 +460,28 @@ fn build_cached_semantic_declaration_facts(
                 return_type_id: intern_semantic_type(type_store, callable.return_type),
             }),
         value: (declaration.kind == DeclarationKind::Value).then(|| {
-            let annotation_text = declaration.value_annotation_text();
+            let annotation_text = declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render);
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
                     type_store,
-                    declaration
-                        .value_annotation()
-                        .map(semantic_type_from_bound_type_expr)
-                        .or_else(|| annotation_text.as_deref().map(lower_type_text_or_name)),
+                    declaration.value_annotation().map(semantic_type_from_bound_type_expr),
                 ),
             }
         }),
-        type_alias: (declaration.kind == DeclarationKind::TypeAlias).then(|| {
-            let body_text = declaration.type_alias_body_text().unwrap_or_default();
-            CachedSemanticTypeAliasDeclaration {
-                head: declaration.name.clone(),
-                type_params: declaration.type_params.clone(),
-                body_text: body_text.clone(),
-                body_id: type_store.intern(
-                    declaration
-                        .type_alias_value()
-                        .map(semantic_type_from_bound_type_expr)
-                        .unwrap_or_else(|| lower_type_text_or_name(&body_text)),
-                ),
-            }
-        }),
+        type_alias: (declaration.kind == DeclarationKind::TypeAlias)
+            .then(|| {
+                declaration.type_alias_value().map(|value| CachedSemanticTypeAliasDeclaration {
+                    head: declaration.name.clone(),
+                    type_params: declaration.type_params.clone(),
+                    body_text: value.render(),
+                    body_id: type_store.intern(semantic_type_from_bound_type_expr(value)),
+                })
+            })
+            .flatten(),
         import_target: (declaration.kind == DeclarationKind::Import)
             .then(|| {
-                declaration.import_target().map(semantic_import_target_from_bound_target).or_else(
-                    || {
-                        declaration
-                            .import_raw_target_text()
-                            .as_deref()
-                            .and_then(parse_import_target_ref)
-                    },
-                )
+                declaration.import_target().map(semantic_import_target_from_bound_target)
             })
             .flatten(),
     }
@@ -706,19 +684,6 @@ pub(crate) fn parse_direct_callable_declaration(
         semantic_params,
         return_annotation_text,
         return_type,
-    })
-}
-
-pub(crate) fn parse_import_target_ref(detail: &str) -> Option<SemanticImportTargetRef> {
-    (!detail.is_empty()).then(|| SemanticImportTargetRef {
-        raw_target: detail.to_owned(),
-        module_target: detail.to_owned(),
-        symbol_target: detail.rsplit_once('.').map(|(module_key, symbol_name)| {
-            SemanticImportSymbolTargetRef {
-                module_key: module_key.to_owned(),
-                symbol_name: symbol_name.to_owned(),
-            }
-        }),
     })
 }
 

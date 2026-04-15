@@ -360,6 +360,7 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
             },
         ],
     };
+    let graph = normalize_test_graph(&graph);
     let node = &graph.nodes[1];
 
     let module_target = crate::resolve_imported_symbol_semantic_target(node, &graph.nodes, "util")

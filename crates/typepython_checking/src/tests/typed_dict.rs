@@ -444,11 +444,13 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
+    let typed_dict_overload = normalize_test_declaration(&typed_dict_overload);
     let string_overload = Declaration {
         metadata: Default::default(),
         legacy_detail: String::from("(user:str)->str"),
         ..typed_dict_overload.clone()
     };
+    let string_overload = normalize_test_declaration(&string_overload);
     let typed_dict_class = Declaration {
         metadata: Default::default(),
         name: String::from("User"),
@@ -518,6 +520,11 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
+    let node = normalize_test_graph(&typepython_graph::ModuleGraph { nodes: vec![node] })
+        .nodes
+        .into_iter()
+        .next()
+        .expect("normalized node");
 
     assert!(crate::overload_is_applicable_with_context(
         &node,
