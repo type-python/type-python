@@ -314,11 +314,7 @@ pub(crate) fn collect_member_completion_items(
 }
 
 pub(crate) fn completion_item_from_occurrence(occurrence: &SymbolOccurrence) -> LspCompletionItem {
-    completion_item(
-        occurrence.name.clone(),
-        Some(occurrence.legacy_detail.clone()),
-        completion_item_kind_from_detail(&occurrence.legacy_detail),
-    )
+    completion_item_from_detail(occurrence.name.clone(), occurrence.legacy_detail.clone())
 }
 
 pub(crate) fn completion_item_from_canonical(
@@ -326,14 +322,25 @@ pub(crate) fn completion_item_from_canonical(
     label: String,
     canonical: &str,
 ) -> LspCompletionItem {
-    let detail = workspace
+    let fallback_detail = workspace
         .declarations_by_canonical
         .get(canonical)
         .map(|occurrence| occurrence.legacy_detail.clone())
         .unwrap_or_else(|| canonical.to_owned());
-    let kind = binding_declaration_for_canonical(workspace, canonical)
-        .map(|(_, declaration)| completion_item_kind_for_declaration(declaration))
-        .unwrap_or_else(|| completion_item_kind_from_detail(&detail));
+    let (detail, kind) = binding_declaration_for_canonical(workspace, canonical)
+        .map(|(_, declaration)| {
+            (
+                if declaration.owner.is_some() {
+                    render_member_detail(declaration)
+                } else {
+                    render_declaration_detail(declaration)
+                },
+                completion_item_kind_for_declaration(declaration),
+            )
+        })
+        .unwrap_or_else(|| {
+            (fallback_detail.clone(), completion_item_kind_from_detail(&fallback_detail))
+        });
     completion_item(label, Some(detail), kind)
 }
 
@@ -469,14 +476,7 @@ pub(crate) fn collect_visible_member_details_recursive(
     for member in node.declarations.iter().filter(|candidate| {
         candidate.owner.as_ref().is_some_and(|owner| owner.name == declaration.name)
     }) {
-        members.entry(member.name.clone()).or_insert_with(|| {
-            let member_canonical = format!("{owner_canonical}.{}", member.name);
-            workspace
-                .declarations_by_canonical
-                .get(&member_canonical)
-                .map(|occurrence| occurrence.legacy_detail.clone())
-                .unwrap_or_else(|| render_member_detail(member))
-        });
+        members.entry(member.name.clone()).or_insert_with(|| render_member_detail(member));
     }
 
     let Some(owner_document) = document_for_module_key(workspace, &node.module_key) else {
