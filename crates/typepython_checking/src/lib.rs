@@ -912,19 +912,19 @@ fn summary_callable_signature_from_semantics(
     SummaryCallableSignature {
         params: callable
             .semantic_params
-            .iter()
-            .map(|param| SummarySignatureParam {
-                name: param.name.clone(),
-                annotation: param.annotation_text.clone(),
-                annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
-                has_default: param.has_default,
+                .iter()
+                .map(|param| SummarySignatureParam {
+                    name: param.name.clone(),
+                    annotation: param.rendered_annotation_text(),
+                    annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
+                    has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
                 variadic: param.variadic,
                 keyword_variadic: param.keyword_variadic,
             })
             .collect(),
-        returns: callable.return_annotation_text.clone(),
+        returns: callable.rendered_return_annotation_text(),
         returns_expr: callable.return_type.as_ref().map(semantic_type_to_type_expr),
     }
 }

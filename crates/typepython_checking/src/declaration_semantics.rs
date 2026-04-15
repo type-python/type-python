@@ -32,6 +32,10 @@ impl SemanticCallableDeclaration {
     pub(crate) fn param_types(&self) -> Vec<String> {
         self.params.iter().map(|param| param.annotation.clone().unwrap_or_default()).collect()
     }
+
+    pub(crate) fn rendered_return_annotation_text(&self) -> Option<String> {
+        self.return_type.as_ref().map(render_semantic_type).or_else(|| self.return_annotation_text.clone())
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -49,6 +53,10 @@ pub(crate) struct SemanticCallableParam {
 impl SemanticCallableParam {
     pub(crate) fn annotation_or_dynamic(&self) -> SemanticType {
         self.annotation.clone().unwrap_or_else(|| SemanticType::Name(String::from("dynamic")))
+    }
+
+    pub(crate) fn rendered_annotation_text(&self) -> Option<String> {
+        self.annotation.as_ref().map(render_semantic_type).or_else(|| self.annotation_text.clone())
     }
 }
 
@@ -74,7 +82,7 @@ fn signature_site_from_semantic_param(
 ) -> typepython_syntax::DirectFunctionParamSite {
     typepython_syntax::DirectFunctionParamSite {
         name: param.name.clone(),
-        annotation: param.annotation_text.clone(),
+        annotation: param.rendered_annotation_text(),
         annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
         has_default: param.has_default,
         positional_only: param.positional_only,
@@ -113,21 +121,25 @@ pub(crate) fn callable_semantic_params_with_self_from_semantics(
     callable
         .semantic_params
         .iter()
-        .map(|param| SemanticCallableParam {
-            name: param.name.clone(),
-            annotation_text: param
-                .annotation_text
-                .as_deref()
-                .map(|annotation| substitute_self_annotation(annotation, Some(owner_type_name))),
-            annotation: param
+        .map(|param| {
+            let annotation = param
                 .annotation
                 .as_ref()
-                .map(|annotation| substitute_self_semantic_type(annotation, Some(owner_type_name))),
-            has_default: param.has_default,
-            positional_only: param.positional_only,
-            keyword_only: param.keyword_only,
-            variadic: param.variadic,
-            keyword_variadic: param.keyword_variadic,
+                .map(|annotation| substitute_self_semantic_type(annotation, Some(owner_type_name)));
+            SemanticCallableParam {
+                name: param.name.clone(),
+                annotation_text: annotation.as_ref().map(render_semantic_type).or_else(|| {
+                    param.annotation_text.as_deref().map(|annotation| {
+                        substitute_self_annotation(annotation, Some(owner_type_name))
+                    })
+                }),
+                annotation,
+                has_default: param.has_default,
+                positional_only: param.positional_only,
+                keyword_only: param.keyword_only,
+                variadic: param.variadic,
+                keyword_variadic: param.keyword_variadic,
+            }
         })
         .collect()
 }
@@ -546,24 +558,32 @@ fn materialize_callable_semantics(
     callable: &CachedSemanticCallableDeclaration,
     type_store: &TypeStore,
 ) -> SemanticCallableDeclaration {
-    SemanticCallableDeclaration {
-        params: callable.params.clone(),
-        semantic_params: callable
-            .semantic_params
-            .iter()
-            .map(|param| SemanticCallableParam {
+    let semantic_params = callable
+        .semantic_params
+        .iter()
+        .map(|param| {
+            let annotation = load_interned_semantic_type(type_store, param.annotation_id);
+            SemanticCallableParam {
                 name: param.name.clone(),
-                annotation_text: param.annotation_text.clone(),
-                annotation: load_interned_semantic_type(type_store, param.annotation_id),
+                annotation_text: annotation.as_ref().map(render_semantic_type).or_else(|| param.annotation_text.clone()),
+                annotation,
                 has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
                 variadic: param.variadic,
                 keyword_variadic: param.keyword_variadic,
-            })
-            .collect(),
-        return_annotation_text: callable.return_annotation_text.clone(),
-        return_type: load_interned_semantic_type(type_store, callable.return_type_id),
+            }
+        })
+        .collect();
+    let return_type = load_interned_semantic_type(type_store, callable.return_type_id);
+    SemanticCallableDeclaration {
+        params: callable.params.clone(),
+        semantic_params,
+        return_annotation_text: return_type
+            .as_ref()
+            .map(render_semantic_type)
+            .or_else(|| callable.return_annotation_text.clone()),
+        return_type,
     }
 }
 

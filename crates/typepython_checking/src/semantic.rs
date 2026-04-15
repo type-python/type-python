@@ -149,7 +149,9 @@ pub(super) fn overload_is_more_specific(
             return false;
         }
         if candidate_param.annotation.is_none() || baseline_param.annotation.is_none() {
-            if candidate_param.annotation_text != baseline_param.annotation_text {
+            if candidate_param.rendered_annotation_text()
+                != baseline_param.rendered_annotation_text()
+            {
                 return false;
             }
             continue;
