@@ -63,8 +63,8 @@ pub(super) fn override_compatibility_diagnostics<'a>(
         for member in declarations.iter().filter(|declaration| {
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
         }) {
-            for base in &class_declaration.bases {
-                if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) {
+            for base in class_declaration.rendered_class_bases() {
+                if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) {
                     if let Some(base_member) = base_node.declarations.iter().find(|declaration| {
                         declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
                             && declaration.name == member.name
@@ -217,7 +217,7 @@ pub(super) fn missing_override_diagnostics<'a>(
                 && candidate.class_kind == Some(owner.kind)
         });
         let overrides_any = owner_decl.is_some_and(|owner_decl| {
-            owner_decl.bases.iter().any(|base| {
+            owner_decl.rendered_class_bases().iter().any(|base| {
                 resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
                     base_node.declarations.iter().any(|candidate| {
                         candidate.name == declaration.name
@@ -276,8 +276,8 @@ pub(super) fn final_decorator_diagnostics<'a>(
     for class_declaration in declarations.iter().filter(|declaration| {
         declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
     }) {
-        for base in &class_declaration.bases {
-            if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) {
+        for base in class_declaration.rendered_class_bases() {
+            if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) {
                 if base_decl.is_final_decorator {
                     diagnostics.push(Diagnostic::error(
                         "TPY4005",
@@ -341,8 +341,8 @@ pub(super) fn abstract_member_diagnostics<'a>(
             continue;
         }
 
-        for base in &class_declaration.bases {
-            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+        for base in class_declaration.rendered_class_bases() {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) else {
                 continue;
             };
             for ((abstract_owner, member_name), member_kind) in
@@ -396,7 +396,7 @@ pub(super) fn abstract_instantiation_diagnostics<'a>(
                 declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
                     && declaration.is_abstract_method
             });
-            let inherited_abstract = class_declaration.bases.iter().any(|base| {
+            let inherited_abstract = class_declaration.rendered_class_bases().iter().any(|base| {
                 let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
                     return false;
                 };
@@ -436,7 +436,7 @@ pub(super) fn abstract_instantiation_diagnostics<'a>(
                                     .is_some_and(|owner| owner.name == declaration.name)
                                     && declaration_member.is_abstract_method
                             });
-                        let inherited_abstract = declaration.bases.iter().any(|base| {
+                        let inherited_abstract = declaration.rendered_class_bases().iter().any(|base| {
                             let Some((resolved_node, resolved_decl)) =
                                 resolve_direct_base(nodes, base_node, base)
                             else {
@@ -879,7 +879,7 @@ pub(super) fn resolve_sealed_root_with_visited<'a>(
         return Some((resolved_node, resolved_decl));
     }
     resolved_decl
-        .bases
+        .rendered_class_bases()
         .iter()
         .find_map(|base| resolve_sealed_root_with_visited(nodes, resolved_node, base, visited))
 }
@@ -894,7 +894,7 @@ pub(super) fn collect_sealed_descendants(
         for declaration in node.declarations.iter().filter(|declaration| {
             declaration.kind == DeclarationKind::Class
                 && declaration.owner.is_none()
-                && declaration.bases.iter().any(|base| base == &current)
+                && declaration.has_class_base(&current)
         }) {
             if descendants.insert(declaration.name.clone()) {
                 stack.push(declaration.name.clone());
@@ -925,7 +925,7 @@ pub(super) fn sealed_descends_from_with_visited(
     if !visited.insert(key) {
         return false;
     }
-    declaration.bases.iter().any(|base| {
+    declaration.rendered_class_bases().iter().any(|base| {
         if base == root_name {
             return true;
         }
@@ -977,7 +977,7 @@ pub(super) fn is_interface_like_declaration_with_visited(
         return false;
     }
 
-    declaration.bases.iter().any(|base| {
+    declaration.rendered_class_bases().iter().any(|base| {
         resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
             is_interface_like_declaration_with_visited(base_node, base_decl, nodes, visited)
         })
@@ -1005,7 +1005,7 @@ pub(super) fn override_diagnostics<'a>(
                         && candidate.class_kind == Some(owner.kind)
                 });
                 let overrides_any = owner_decl.is_some_and(|owner_decl| {
-                    owner_decl.bases.iter().any(|base| {
+                    owner_decl.rendered_class_bases().iter().any(|base| {
                         resolve_direct_base(nodes, node, base).is_some_and(
                             |(base_node, base_decl)| {
                                 base_node.declarations.iter().any(|candidate| {
@@ -1048,8 +1048,8 @@ pub(super) fn final_override_diagnostics<'a>(
     for class_declaration in declarations.iter().filter(|declaration| {
         declaration.kind == DeclarationKind::Class && declaration.owner.is_none()
     }) {
-        for base in &class_declaration.bases {
-            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+        for base in class_declaration.rendered_class_bases() {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) else {
                 continue;
             };
             for member in declarations {
@@ -1094,8 +1094,8 @@ pub(super) fn interface_implementation_diagnostics<'a>(
             && declaration.owner.is_none()
             && declaration.class_kind != Some(DeclarationOwnerKind::Interface)
     }) {
-        for base in &class_declaration.bases {
-            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base) else {
+        for base in class_declaration.rendered_class_bases() {
+            let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) else {
                 continue;
             };
             if !is_interface_like_declaration(base_node, base_decl, nodes) {
