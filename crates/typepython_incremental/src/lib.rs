@@ -534,7 +534,7 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
                 .iter()
                 .filter(|candidate| {
                     candidate.name != declaration.name
-                        && candidate.bases.iter().any(|base| base == &declaration.name)
+                        && candidate.has_class_base(&declaration.name)
                 })
                 .map(|candidate| candidate.name.clone())
                 .collect::<Vec<_>>();
