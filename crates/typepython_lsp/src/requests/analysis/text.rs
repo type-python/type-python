@@ -20,6 +20,7 @@ pub(crate) fn token_at_position(text: &str, position: LspPosition) -> Option<Tok
 }
 
 pub(crate) fn resolve_owner_canonical(
+    workspace: &WorkspaceState,
     document: &DocumentState,
     declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
     owner_name: &str,
@@ -34,9 +35,10 @@ pub(crate) fn resolve_owner_canonical(
     }
 
     let callable_canonical = document.local_symbols.get(owner_name)?.clone();
-    let callable = declarations_by_canonical.get(&callable_canonical)?;
-    let return_type = callable.legacy_detail.split_once("->")?.1.trim();
-    document.local_symbols.get(return_type).cloned().or_else(|| Some(return_type.to_owned()))
+    let _callable = declarations_by_canonical.get(&callable_canonical)?;
+    let return_type =
+        resolve_callable_return_type_in_scope(workspace, document, None, None, owner_name)?;
+    document.local_symbols.get(&return_type).cloned().or_else(|| Some(return_type.to_owned()))
 }
 
 pub(crate) fn member_receiver_name(text: &str, position: LspPosition) -> Option<String> {

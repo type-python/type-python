@@ -174,12 +174,9 @@ pub(crate) fn resolve_callable_return_type_in_scope(
             if declaration.kind == typepython_binding::DeclarationKind::Class {
                 return Some(callee.to_owned());
             }
-            return declaration
-                .callable_signature()
-                .and_then(|signature| {
-                    signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render)
-                })
-                .or_else(|| parse_return_annotation(&declaration.rendered_detail()));
+            return declaration.callable_signature().and_then(|signature| {
+                signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render)
+            });
         }
     }
 

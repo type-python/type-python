@@ -467,10 +467,12 @@ impl IncrementalWorkspace {
         let documents = self.active_cached_documents();
         let declarations_by_canonical = declarations_by_canonical_from_documents(&documents);
         let member_symbols = member_symbols_from_documents(&documents);
+        let workspace_state = self.workspace().clone();
 
         for document in self.project_documents.values_mut() {
             if force_full || module_keys.contains(&document.source.logical_module) {
                 document.references = collect_reference_occurrences(
+                    &workspace_state,
                     &document.document,
                     &member_symbols,
                     &declarations_by_canonical,
@@ -484,6 +486,7 @@ impl IncrementalWorkspace {
                 && (force_full || module_keys.contains(&document.source.logical_module))
             {
                 document.references = collect_reference_occurrences(
+                    &workspace_state,
                     &document.document,
                     &member_symbols,
                     &declarations_by_canonical,

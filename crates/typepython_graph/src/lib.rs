@@ -746,9 +746,9 @@ mod tests {
     use super::build;
     use std::path::PathBuf;
     use typepython_binding::{
-        BindingTable, BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration,
-        DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,
-        GenericTypeParam, ModuleSurfaceFacts,
+        BindingTable, BoundCallableSignature, BoundTypeExpr, Declaration, DeclarationKind,
+        DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind, GenericTypeParam,
+        ModuleSurfaceFacts,
     };
     use typepython_syntax::{DirectFunctionParamSite, SourceKind, TypeExpr};
 

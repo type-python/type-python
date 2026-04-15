@@ -131,6 +131,7 @@ pub(crate) fn collect_declarations(
 }
 
 pub(crate) fn collect_reference_occurrences(
+    workspace: &WorkspaceState,
     document: &DocumentState,
     member_symbols: &BTreeMap<String, Vec<String>>,
     declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
@@ -140,7 +141,13 @@ pub(crate) fn collect_reference_occurrences(
         .filter_map(|token| {
             let local = document.local_symbols.get(&token.name).cloned();
             let member = if token.preceded_by_dot {
-                resolve_member_symbol(document, member_symbols, declarations_by_canonical, &token)
+                resolve_member_symbol(
+                    workspace,
+                    document,
+                    member_symbols,
+                    declarations_by_canonical,
+                    &token,
+                )
             } else {
                 None
             };
@@ -158,6 +165,7 @@ pub(crate) fn collect_reference_occurrences(
 }
 
 pub(crate) fn resolve_member_symbol(
+    workspace: &WorkspaceState,
     document: &DocumentState,
     member_symbols: &BTreeMap<String, Vec<String>>,
     declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
@@ -169,17 +177,17 @@ pub(crate) fn resolve_member_symbol(
     }
 
     let owner_canonical =
-        resolve_member_owner_canonical(document, declarations_by_canonical, token).or_else(
-            || {
+        resolve_member_owner_canonical(workspace, document, declarations_by_canonical, token)
+            .or_else(|| {
                 let receiver = member_receiver_name(&document.text, token.range.start)?;
                 document.local_value_types.get(&receiver).cloned()
-            },
-        )?;
+            })?;
     let expected = format!("{}.{}", owner_canonical, token.name);
     candidates.iter().find(|candidate| *candidate == &expected).cloned()
 }
 
 pub(crate) fn resolve_member_owner_canonical(
+    workspace: &WorkspaceState,
     document: &DocumentState,
     declarations_by_canonical: &BTreeMap<String, SymbolOccurrence>,
     token: &TokenOccurrence,
@@ -191,6 +199,7 @@ pub(crate) fn resolve_member_owner_canonical(
                 if method_call.line == line && method_call.method == token.name =>
             {
                 return resolve_owner_canonical(
+                    workspace,
                     document,
                     declarations_by_canonical,
                     &method_call.owner_name,
@@ -201,6 +210,7 @@ pub(crate) fn resolve_member_owner_canonical(
                 if member_access.line == line && member_access.member == token.name =>
             {
                 return resolve_owner_canonical(
+                    workspace,
                     document,
                     declarations_by_canonical,
                     &member_access.owner_name,
