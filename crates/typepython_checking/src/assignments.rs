@@ -485,6 +485,13 @@ impl DataclassTransformFieldShape {
             .map(typepython_syntax::TypeExpr::render)
             .unwrap_or_else(|| self.annotation.clone())
     }
+
+    #[must_use]
+    pub(super) fn semantic_annotation(&self) -> Option<SemanticType> {
+        self.annotation_expr.clone().map(lower_type_expr).or_else(|| {
+            (!self.annotation.is_empty()).then(|| lower_type_text_or_name(&self.annotation))
+        })
+    }
 }
 
 #[derive(Debug, Clone)]

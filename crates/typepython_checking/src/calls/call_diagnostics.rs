@@ -670,9 +670,7 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .iter()
         .filter(|param| !param.keyword_variadic)
         .map(|param| {
-            param
-                .rendered_annotation()
-                .map(|annotation| lower_type_text_or_name(&annotation))
+            semantic_type_from_direct_param_site(param)
                 .unwrap_or_else(|| SemanticType::Name(String::new()))
         })
         .collect::<Vec<_>>();
@@ -684,8 +682,7 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
     let variadic_type = signature
         .iter()
         .find(|param| param.variadic)
-        .and_then(|param| param.rendered_annotation())
-        .map(|annotation| lower_type_text_or_name(&annotation));
+        .and_then(semantic_type_from_direct_param_site);
     let unpack_shape =
         unpack_typed_dict_shape_from_signature_with_context(context, node, nodes, signature);
     let keyword_variadic_type = signature
@@ -693,7 +690,12 @@ pub(super) fn direct_source_function_type_diagnostics_with_context(
         .find(|param| param.keyword_variadic)
         .and_then(|param| param.rendered_annotation())
         .filter(|annotation| !normalize_type_text(annotation).starts_with("Unpack["))
-        .map(|annotation| lower_type_text_or_name(&annotation));
+        .and_then(|_| {
+            signature
+                .iter()
+                .find(|param| param.keyword_variadic)
+                .and_then(semantic_type_from_direct_param_site)
+        });
     diagnostics.extend(positional_and_keyword_semantic_type_diagnostics(
         node,
         nodes,
@@ -1467,11 +1469,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
         .zip(positional_arg_types.iter().map(|ty| lower_type_text_or_name(ty)))
         .filter(|(field, arg_ty)| {
             !semantic_type_missing(arg_ty)
-                && !field.rendered_annotation().is_empty()
+                && field.semantic_annotation().is_some()
                 && !semantic_type_matches(
                     node,
                     nodes,
-                    &lower_type_text_or_name(&field.rendered_annotation()),
+                    &field.semantic_annotation().unwrap_or_else(|| SemanticType::Name(String::new())),
                     arg_ty,
                 )
         })
@@ -1501,11 +1503,11 @@ pub(super) fn dataclass_transform_constructor_type_diagnostics(
             continue;
         };
         if !semantic_type_missing(&arg_ty)
-            && !field.rendered_annotation().is_empty()
+            && field.semantic_annotation().is_some()
             && !semantic_type_matches(
                 node,
                 nodes,
-                &lower_type_text_or_name(&field.rendered_annotation()),
+                &field.semantic_annotation().unwrap_or_else(|| SemanticType::Name(String::new())),
                 &arg_ty,
             )
         {
