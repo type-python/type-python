@@ -162,10 +162,8 @@ impl AnalysisHost {
         let Some(symbol) = resolve_symbol(workspace, uri, position) else {
             return Ok(Value::Null);
         };
-        let detail = workspace
-            .declarations_by_canonical
-            .get(&symbol.canonical)
-            .map(|declaration| declaration.legacy_detail.clone())
+        let detail = resolve_top_level_declaration(workspace, &symbol.canonical)
+            .map(|(_, declaration)| render_declaration_detail(declaration))
             .unwrap_or_else(|| symbol.legacy_detail.clone());
         Ok(json!({
             "contents": {

@@ -853,45 +853,27 @@ impl Declaration {
 
     #[must_use]
     pub fn callable_signature_text(&self) -> Option<String> {
-        self.callable_signature().map(BoundCallableSignature::rendered).or_else(|| {
-            matches!(self.kind, DeclarationKind::Function | DeclarationKind::Overload)
-                .then(|| self.legacy_detail.clone())
-                .filter(|detail| !detail.is_empty())
-        })
+        self.callable_signature().map(BoundCallableSignature::rendered)
     }
 
     #[must_use]
     pub fn type_alias_body_text(&self) -> Option<String> {
-        self.type_alias_value().map(BoundTypeExpr::render).or_else(|| {
-            (self.kind == DeclarationKind::TypeAlias)
-                .then(|| self.legacy_detail.clone())
-                .filter(|detail| !detail.is_empty())
-        })
+        self.type_alias_value().map(BoundTypeExpr::render)
     }
 
     #[must_use]
     pub fn value_annotation_text(&self) -> Option<String> {
-        self.value_annotation().map(BoundTypeExpr::render).or_else(|| {
-            (self.kind == DeclarationKind::Value)
-                .then(|| self.legacy_detail.clone())
-                .filter(|detail| !detail.is_empty())
-        })
+        self.value_annotation().map(BoundTypeExpr::render)
     }
 
     #[must_use]
     pub fn import_raw_target_text(&self) -> Option<String> {
-        self.import_target().map(|target| target.raw_target.clone()).or_else(|| {
-            (self.kind == DeclarationKind::Import)
-                .then(|| self.legacy_detail.clone())
-                .filter(|detail| !detail.is_empty())
-        })
+        self.import_target().map(|target| target.raw_target.clone())
     }
 
     #[must_use]
     pub fn import_module_target_text(&self) -> Option<String> {
-        self.import_target()
-            .map(|target| target.module_target.clone())
-            .or_else(|| self.import_raw_target_text())
+        self.import_target().map(|target| target.module_target.clone())
     }
 }
 

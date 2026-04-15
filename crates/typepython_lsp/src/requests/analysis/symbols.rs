@@ -516,3 +516,30 @@ pub(crate) fn render_member_detail(member: &typepython_binding::Declaration) -> 
         _ => member.rendered_detail(),
     }
 }
+
+pub(crate) fn render_declaration_detail(declaration: &typepython_binding::Declaration) -> String {
+    match declaration.kind {
+        typepython_binding::DeclarationKind::TypeAlias => {
+            let rendered =
+                declaration.type_alias_body_text().unwrap_or_else(|| declaration.rendered_detail());
+            format!("typealias {} = {}", declaration.name, rendered)
+        }
+        typepython_binding::DeclarationKind::Class => {
+            format!("class {}({})", declaration.name, declaration.rendered_class_bases().join(", "))
+        }
+        typepython_binding::DeclarationKind::Function
+        | typepython_binding::DeclarationKind::Overload => {
+            format!("function {}{}", declaration.name, declaration.rendered_detail())
+        }
+        typepython_binding::DeclarationKind::Value => {
+            let rendered = declaration
+                .value_annotation_text()
+                .or_else(|| declaration.rendered_value_type())
+                .unwrap_or_else(|| declaration.rendered_detail());
+            format!("value {}: {}", declaration.name, rendered)
+        }
+        typepython_binding::DeclarationKind::Import => {
+            declaration.import_raw_target_text().unwrap_or_else(|| declaration.rendered_detail())
+        }
+    }
+}
