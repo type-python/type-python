@@ -66,11 +66,8 @@ pub(crate) struct TypePackBinding {
 struct GenericSolverParam {
     kind: typepython_binding::GenericTypeParamKind,
     name: String,
-    bound: Option<String>,
     bound_expr: Option<typepython_syntax::TypeExpr>,
-    constraints: Vec<String>,
     constraint_exprs: Vec<typepython_syntax::TypeExpr>,
-    default: Option<String>,
     default_expr: Option<typepython_syntax::TypeExpr>,
 }
 
@@ -91,15 +88,12 @@ impl GenericSolverMetadata {
                 .map(|type_param| GenericSolverParam {
                     kind: type_param.kind.clone(),
                     name: type_param.name.clone(),
-                    bound: type_param.bound.clone(),
                     bound_expr: type_param.bound_expr.as_ref().map(|expr| expr.expr.clone()),
-                    constraints: type_param.constraints.clone(),
                     constraint_exprs: type_param
                         .constraint_exprs
                         .iter()
                         .map(|expr| expr.expr.clone())
                         .collect(),
-                    default: type_param.default.clone(),
                     default_expr: type_param.default_expr.as_ref().map(|expr| expr.expr.clone()),
                 })
                 .collect(),
@@ -605,8 +599,6 @@ fn materialize_param_list_binding(
 fn generic_type_param_requirement(type_param: &GenericSolverParam) -> String {
     if let Some(bound) = &type_param.bound_expr {
         format!("bound `{}`", normalize_type_text(&bound.render()))
-    } else if let Some(bound) = &type_param.bound {
-        format!("bound `{}`", normalize_type_text(bound))
     } else if !type_param.constraint_exprs.is_empty() {
         format!(
             "constraint list `{}`",
@@ -614,16 +606,6 @@ fn generic_type_param_requirement(type_param: &GenericSolverParam) -> String {
                 .constraint_exprs
                 .iter()
                 .map(typepython_syntax::TypeExpr::render)
-                .collect::<Vec<_>>()
-                .join(" | ")
-        )
-    } else if !type_param.constraints.is_empty() {
-        format!(
-            "constraint list `{}`",
-            type_param
-                .constraints
-                .iter()
-                .map(|constraint| normalize_type_text(constraint))
                 .collect::<Vec<_>>()
                 .join(" | ")
         )
@@ -648,7 +630,6 @@ fn finalize_generic_solution_detailed(
                         .default_expr
                         .as_ref()
                         .map(typepython_syntax::TypeExpr::render)
-                        .or_else(|| type_param.default.clone())
                 {
                     substitutions
                         .types
@@ -663,19 +644,16 @@ fn finalize_generic_solution_detailed(
                     &typepython_binding::GenericTypeParam {
                         kind: type_param.kind.clone(),
                         name: type_param.name.clone(),
-                        bound: type_param.bound.clone(),
                         bound_expr: type_param
                             .bound_expr
                             .clone()
                             .map(|expr| typepython_binding::BoundTypeExpr { expr }),
-                        constraints: type_param.constraints.clone(),
                         constraint_exprs: type_param
                             .constraint_exprs
                             .clone()
                             .into_iter()
                             .map(|expr| typepython_binding::BoundTypeExpr { expr })
                             .collect(),
-                        default: type_param.default.clone(),
                         default_expr: type_param
                             .default_expr
                             .clone()
@@ -698,7 +676,6 @@ fn finalize_generic_solution_detailed(
                     .default_expr
                     .as_ref()
                     .map(typepython_syntax::TypeExpr::render)
-                    .or_else(|| type_param.default.clone())
                 else {
                     continue;
                 };
@@ -720,7 +697,6 @@ fn finalize_generic_solution_detailed(
                     .default_expr
                     .as_ref()
                     .map(typepython_syntax::TypeExpr::render)
-                    .or_else(|| type_param.default.clone())
                 else {
                     continue;
                 };

@@ -753,7 +753,7 @@ fn runtime_semantic_features(declaration: &Declaration, is_alias: bool) -> Vec<R
     if !declaration.type_params.is_empty() {
         features.push(RuntimeFeature::InlineTypeParams);
     }
-    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+    if declaration.type_params.iter().any(|type_param| type_param.rendered_default().is_some()) {
         features.push(RuntimeFeature::GenericDefaults);
     }
     features
@@ -767,7 +767,7 @@ fn required_runtime_features_for_export(
     let mut features = BTreeSet::<String>::new();
     if !declaration.type_params.is_empty() {
         features.insert(String::from("inline_type_params"));
-        if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+        if declaration.type_params.iter().any(|type_param| type_param.rendered_default().is_some()) {
             features.insert(String::from("generic_defaults"));
         }
         if declaration.kind == DeclarationKind::TypeAlias {
