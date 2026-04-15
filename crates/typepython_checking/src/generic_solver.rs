@@ -626,10 +626,8 @@ fn finalize_generic_solution_detailed(
         match type_param.kind {
             typepython_binding::GenericTypeParamKind::TypeVar => {
                 if !substitutions.types.contains_key(&type_param.name)
-                    && let Some(default) = type_param
-                        .default_expr
-                        .as_ref()
-                        .map(typepython_syntax::TypeExpr::render)
+                    && let Some(default) =
+                        type_param.default_expr.as_ref().map(typepython_syntax::TypeExpr::render)
                 {
                     substitutions
                         .types
@@ -672,10 +670,8 @@ fn finalize_generic_solution_detailed(
                 if substitutions.param_lists.contains_key(&type_param.name) {
                     continue;
                 }
-                let Some(default) = type_param
-                    .default_expr
-                    .as_ref()
-                    .map(typepython_syntax::TypeExpr::render)
+                let Some(default) =
+                    type_param.default_expr.as_ref().map(typepython_syntax::TypeExpr::render)
                 else {
                     continue;
                 };
@@ -693,10 +689,8 @@ fn finalize_generic_solution_detailed(
                 if substitutions.type_packs.contains_key(&type_param.name) {
                     continue;
                 }
-                let Some(default) = type_param
-                    .default_expr
-                    .as_ref()
-                    .map(typepython_syntax::TypeExpr::render)
+                let Some(default) =
+                    type_param.default_expr.as_ref().map(typepython_syntax::TypeExpr::render)
                 else {
                     continue;
                 };
@@ -1835,13 +1829,12 @@ pub(crate) fn expand_inferred_generic_args(
 ) -> Vec<SemanticType> {
     let mut expanded = Vec::new();
     for arg in args {
-        if let Some(inner) = arg.unpacked_inner() {
-            if !matches!(inner, SemanticType::Name(name) if type_pack_names.contains(name.trim()))
-                && let Some(elements) = unpacked_fixed_tuple_semantic_elements(inner)
-            {
-                expanded.extend(elements);
-                continue;
-            }
+        if let Some(inner) = arg.unpacked_inner()
+            && !matches!(inner, SemanticType::Name(name) if type_pack_names.contains(name.trim()))
+            && let Some(elements) = unpacked_fixed_tuple_semantic_elements(inner)
+        {
+            expanded.extend(elements);
+            continue;
         }
         expanded.push(arg.clone());
     }

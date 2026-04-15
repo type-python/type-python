@@ -34,7 +34,10 @@ impl SemanticCallableDeclaration {
     }
 
     pub(crate) fn rendered_return_annotation_text(&self) -> Option<String> {
-        self.return_type.as_ref().map(render_semantic_type).or_else(|| self.return_annotation_text.clone())
+        self.return_type
+            .as_ref()
+            .map(render_semantic_type)
+            .or_else(|| self.return_annotation_text.clone())
     }
 }
 
@@ -66,10 +69,8 @@ pub(crate) fn lower_param_annotation_text(
     keyword_variadic: bool,
 ) -> SemanticType {
     let annotation = annotation.trim();
-    if variadic {
-        if let Some(inner) = annotation.strip_prefix('*') {
-            return lower_type_text_or_name(&format!("Unpack[{}]", inner.trim()));
-        }
+    if variadic && let Some(inner) = annotation.strip_prefix('*') {
+        return lower_type_text_or_name(&format!("Unpack[{}]", inner.trim()));
     }
     if keyword_variadic && let Some(inner) = annotation.strip_prefix("**") {
         return lower_type_text_or_name(inner.trim());
@@ -448,9 +449,7 @@ fn build_cached_semantic_declaration_facts(
 ) -> CachedSemanticDeclarationFacts {
     CachedSemanticDeclarationFacts {
         callable: matches!(declaration.kind, DeclarationKind::Function | DeclarationKind::Overload)
-            .then(|| {
-                declaration.callable_signature().map(semantic_callable_from_bound_signature)
-            })
+            .then(|| declaration.callable_signature().map(semantic_callable_from_bound_signature))
             .flatten()
             .map(|callable| CachedSemanticCallableDeclaration {
                 params: callable.params,
@@ -472,7 +471,8 @@ fn build_cached_semantic_declaration_facts(
                 return_type_id: intern_semantic_type(type_store, callable.return_type),
             }),
         value: (declaration.kind == DeclarationKind::Value).then(|| {
-            let annotation_text = declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render);
+            let annotation_text =
+                declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render);
             CachedSemanticValueDeclaration {
                 annotation_text: annotation_text.clone(),
                 annotation_id: intern_semantic_type(
@@ -492,9 +492,7 @@ fn build_cached_semantic_declaration_facts(
             })
             .flatten(),
         import_target: (declaration.kind == DeclarationKind::Import)
-            .then(|| {
-                declaration.import_target().map(semantic_import_target_from_bound_target)
-            })
+            .then(|| declaration.import_target().map(semantic_import_target_from_bound_target))
             .flatten(),
     }
 }
@@ -565,7 +563,10 @@ fn materialize_callable_semantics(
             let annotation = load_interned_semantic_type(type_store, param.annotation_id);
             SemanticCallableParam {
                 name: param.name.clone(),
-                annotation_text: annotation.as_ref().map(render_semantic_type).or_else(|| param.annotation_text.clone()),
+                annotation_text: annotation
+                    .as_ref()
+                    .map(render_semantic_type)
+                    .or_else(|| param.annotation_text.clone()),
                 annotation,
                 has_default: param.has_default,
                 positional_only: param.positional_only,

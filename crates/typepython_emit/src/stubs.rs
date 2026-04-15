@@ -38,15 +38,15 @@ pub fn generate_typepython_stub_source(
     let mut edits = edits.into_iter().peekable();
 
     while line <= lines.len() {
-        if let Some(edit) = edits.peek() {
-            if edit.start_line == line {
-                if let Some(replacement) = &edit.replacement {
-                    output.push(replacement.clone());
-                }
-                line = edit.end_line + 1;
-                edits.next();
-                continue;
+        if let Some(edit) = edits.peek()
+            && edit.start_line == line
+        {
+            if let Some(replacement) = &edit.replacement {
+                output.push(replacement.clone());
             }
+            line = edit.end_line + 1;
+            edits.next();
+            continue;
         }
 
         output.push(lines[line - 1].to_owned());
@@ -85,15 +85,15 @@ pub fn generate_inferred_stub_source(
     let mut edits = edits.into_iter().peekable();
 
     while line <= lines.len() {
-        if let Some(edit) = edits.peek() {
-            if edit.start_line == line {
-                if let Some(replacement) = &edit.replacement {
-                    output.push(replacement.clone());
-                }
-                line = edit.end_line + 1;
-                edits.next();
-                continue;
+        if let Some(edit) = edits.peek()
+            && edit.start_line == line
+        {
+            if let Some(replacement) = &edit.replacement {
+                output.push(replacement.clone());
             }
+            line = edit.end_line + 1;
+            edits.next();
+            continue;
         }
 
         output.push(lines[line - 1].to_owned());

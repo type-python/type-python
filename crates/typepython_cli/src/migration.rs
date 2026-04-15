@@ -350,9 +350,9 @@ fn accumulate_statement_coverage(
 
 fn class_member_coverage(member: &typepython_syntax::ClassMember) -> (bool, usize, usize) {
     match member.kind {
-        typepython_syntax::ClassMemberKind::Field => {
-            known_type_slot(member.annotation.as_deref().or(member.rendered_value_type().as_deref()))
-        }
+        typepython_syntax::ClassMemberKind::Field => known_type_slot(
+            member.annotation.as_deref().or(member.rendered_value_type().as_deref()),
+        ),
         typepython_syntax::ClassMemberKind::Method
         | typepython_syntax::ClassMemberKind::Overload => function_signature_coverage(
             &member.params,

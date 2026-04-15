@@ -417,16 +417,14 @@ fn resolve_transform_members(
     value: &str,
     typed_dicts: &std::collections::BTreeMap<&str, &typepython_syntax::NamedBlockStatement>,
 ) -> Option<(String, Vec<typepython_syntax::ClassMember>)> {
-    if let Some((transform, args)) = parse_transform_expr(value.trim()) {
-        if TYPEDICT_TRANSFORMS.contains(&transform) && args.len() >= 2 {
-            let target_arg = args[1];
-            let key_args = &args[2..];
-            let (target_name, base_members) = resolve_transform_members(target_arg, typed_dicts)?;
-            return Some((
-                target_name,
-                apply_transform_to_members(transform, &base_members, key_args),
-            ));
-        }
+    if let Some((transform, args)) = parse_transform_expr(value.trim())
+        && TYPEDICT_TRANSFORMS.contains(&transform)
+        && args.len() >= 2
+    {
+        let target_arg = args[1];
+        let key_args = &args[2..];
+        let (target_name, base_members) = resolve_transform_members(target_arg, typed_dicts)?;
+        return Some((target_name, apply_transform_to_members(transform, &base_members, key_args)));
     }
 
     let target = typed_dicts.get(value.trim())?;

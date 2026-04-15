@@ -698,12 +698,12 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
         }
     }
 
-    if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path) {
-        if runtime_path.exists() && stub_path.exists() {
-            if let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path) {
-                diagnostics.push(diagnostic);
-            }
-        }
+    if let (Some(runtime_path), Some(stub_path)) = (&artifact.runtime_path, &artifact.stub_path)
+        && runtime_path.exists()
+        && stub_path.exists()
+        && let Some(diagnostic) = verify_emitted_declaration_surface(runtime_path, stub_path)
+    {
+        diagnostics.push(diagnostic);
     }
 
     diagnostics
@@ -1538,7 +1538,10 @@ fn declaration_surface(
                     owner: None,
                     kind: "overload",
                     name: statement.name.clone(),
-                    legacy_detail: format_signature(&statement.params, statement.returns.as_deref()),
+                    legacy_detail: format_signature(
+                        &statement.params,
+                        statement.returns.as_deref(),
+                    ),
                 });
             }
             typepython_syntax::SyntaxStatement::FunctionDef(statement) => {
@@ -1546,7 +1549,10 @@ fn declaration_surface(
                     owner: None,
                     kind: "function",
                     name: statement.name.clone(),
-                    legacy_detail: format_signature(&statement.params, statement.returns.as_deref()),
+                    legacy_detail: format_signature(
+                        &statement.params,
+                        statement.returns.as_deref(),
+                    ),
                 });
             }
             typepython_syntax::SyntaxStatement::Import(statement) => {

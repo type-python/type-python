@@ -1,7 +1,7 @@
 //! Module graph and summary construction boundary for TypePython.
 
 use std::{
-    collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
 };
@@ -1085,52 +1085,53 @@ mod tests {
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "NewType"));
         assert!(typing.declarations.iter().any(|declaration| declaration.name == "TypeVar"));
         assert_eq!(typing_extensions.module_kind, SourceKind::Stub);
-        assert!(typing_extensions
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Protocol"));
-        assert!(typing_extensions
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "TypedDict"));
-        assert!(typing_extensions
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "TypeVar"));
-        assert!(typing_extensions
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Awaitable"));
+        assert!(
+            typing_extensions.declarations.iter().any(|declaration| declaration.name == "Protocol")
+        );
+        assert!(
+            typing_extensions
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "TypedDict")
+        );
+        assert!(
+            typing_extensions.declarations.iter().any(|declaration| declaration.name == "TypeVar")
+        );
+        assert!(
+            typing_extensions
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "Awaitable")
+        );
         assert_eq!(collections_abc.module_kind, SourceKind::Stub);
         assert!(collections_abc.declarations.iter().any(|declaration| declaration.name == "Sized"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Iterable"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Callable"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Iterator"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "AsyncIterator"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "AsyncGenerator"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Sequence"));
-        assert!(collections_abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.name == "Mapping"));
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterable")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Callable")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Iterator")
+        );
+        assert!(
+            collections_abc
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "AsyncIterator")
+        );
+        assert!(
+            collections_abc
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "AsyncGenerator")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Sequence")
+        );
+        assert!(
+            collections_abc.declarations.iter().any(|declaration| declaration.name == "Mapping")
+        );
     }
 
     #[test]
@@ -1173,18 +1174,16 @@ mod tests {
             .expect("expected synthetic pkg.sub namespace node");
 
         assert!(pkg.module_path.to_string_lossy().contains("<namespace-package:pkg>"));
-        assert!(pkg
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub")));
-        assert!(sub
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub"))
+        );
+        assert!(
+            sub.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "module"
-                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub.module")));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub.module"))
+        );
     }
 
     #[test]
@@ -1458,18 +1457,16 @@ mod tests {
             .find(|node| node.module_key == "pkg")
             .expect("expected synthetic pkg namespace node");
 
-        assert!(pkg
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "a"
-                && declaration.import_raw_target_text().as_deref() == Some("pkg.a")));
-        assert!(pkg
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.a"))
+        );
+        assert!(
+            pkg.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.import_raw_target_text().as_deref() == Some("pkg.b")));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.b"))
+        );
     }
 
     #[test]
@@ -1515,24 +1512,21 @@ mod tests {
         assert!(ab.module_path.to_string_lossy().contains("<namespace-package:a.b>"));
         assert!(abc.module_path.to_string_lossy().contains("<namespace-package:a.b.c>"));
 
-        assert!(a
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+        assert!(
+            a.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.import_raw_target_text().as_deref() == Some("a.b")));
-        assert!(ab
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.import_raw_target_text().as_deref() == Some("a.b"))
+        );
+        assert!(
+            ab.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "c"
-                && declaration.import_raw_target_text().as_deref() == Some("a.b.c")));
-        assert!(abc
-            .declarations
-            .iter()
-            .any(|declaration| declaration.kind == DeclarationKind::Import
+                && declaration.import_raw_target_text().as_deref() == Some("a.b.c"))
+        );
+        assert!(
+            abc.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "d"
-                && declaration.import_raw_target_text().as_deref() == Some("a.b.c.d")));
+                && declaration.import_raw_target_text().as_deref() == Some("a.b.c.d"))
+        );
     }
 
     #[test]

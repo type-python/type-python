@@ -217,13 +217,12 @@ pub(super) fn resolve_dataclass_transform_metadata_from_decl_with_context(
         )
         .map(|provider| provider.metadata.clone());
     }
-    if let Some(metaclass) = class_site.metaclass.as_deref() {
-        if let Some(provider) =
+    if let Some(metaclass) = class_site.metaclass.as_deref()
+        && let Some(provider) =
             resolve_dataclass_transform_provider_with_context(context, nodes, class_node, metaclass)
         {
             return Some(provider.metadata.clone());
         }
-    }
 
     class_site.bases.iter().find_map(|base| {
         let (base_node, base_decl) = resolve_direct_base(nodes, class_node, base)?;
@@ -268,8 +267,8 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
             break;
         }
     }
-    if metadata.is_none() {
-        if let Some(provider_name) = class_site
+    if metadata.is_none()
+        && let Some(provider_name) = class_site
             .bases
             .iter()
             .find(|base| {
@@ -285,7 +284,6 @@ pub(super) fn resolve_dataclass_transform_class_shape_from_decl_with_context(
             )
             .map(|provider| provider.metadata.clone());
         }
-    }
     if metadata.is_none() {
         metadata = class_site
             .metaclass
@@ -457,8 +455,8 @@ pub(super) fn resolve_dataclass_transform_provider_with_context<'a>(
         return Some(local);
     }
 
-    if let Some((module_alias, symbol_name)) = name.rsplit_once('.') {
-        if let Some(import_target) = resolve_imported_symbol_semantic_target(node, nodes, module_alias)
+    if let Some((module_alias, symbol_name)) = name.rsplit_once('.')
+        && let Some(import_target) = resolve_imported_symbol_semantic_target(node, nodes, module_alias)
             && let Some(target_node) = import_target.module_target()
         {
             return load_dataclass_transform_module_info_with_context(context, target_node)?
@@ -466,7 +464,6 @@ pub(super) fn resolve_dataclass_transform_provider_with_context<'a>(
                 .into_iter()
                 .find(|provider| provider.name == symbol_name);
         }
-    }
 
     let import_target = resolve_imported_symbol_semantic_target(node, nodes, name)?;
     let target_node = import_target.provider_node;

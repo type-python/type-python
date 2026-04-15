@@ -11,12 +11,12 @@ pub(crate) fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>, 
         if line == "\r\n" {
             break;
         }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.eq_ignore_ascii_case("Content-Length") {
-                content_length = Some(value.trim().parse::<usize>().map_err(|error| {
-                    LspError::invalid_request(format!("invalid `Content-Length` header: {error}"))
-                })?);
-            }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("Content-Length")
+        {
+            content_length = Some(value.trim().parse::<usize>().map_err(|error| {
+                LspError::invalid_request(format!("invalid `Content-Length` header: {error}"))
+            })?);
         }
     }
 

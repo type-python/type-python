@@ -328,37 +328,32 @@ fn cleanup_stale_materialized_outputs(
     let mut removed_files = 0usize;
 
     for artifact in &previous_artifacts {
-        if let Some(runtime_path) = &artifact.runtime_path {
-            if !current_paths.contains(runtime_path) {
-                if runtime_path.exists() {
-                    fs::remove_file(runtime_path).with_context(|| {
-                        format!(
-                            "unable to remove stale runtime artifact {}",
-                            runtime_path.display()
-                        )
-                    })?;
-                    removed_files += 1;
-                }
-                if let Ok(bytecode_path) = bytecode_path_for(runtime_path) {
-                    if bytecode_path.exists() {
-                        fs::remove_file(&bytecode_path).with_context(|| {
-                            format!(
-                                "unable to remove stale bytecode artifact {}",
-                                bytecode_path.display()
-                            )
-                        })?;
-                        removed_files += 1;
-                    }
-                }
-            }
-        }
-        if let Some(stub_path) = &artifact.stub_path {
-            if !current_paths.contains(stub_path) && stub_path.exists() {
-                fs::remove_file(stub_path).with_context(|| {
-                    format!("unable to remove stale stub artifact {}", stub_path.display())
+        if let Some(runtime_path) = &artifact.runtime_path
+            && !current_paths.contains(runtime_path)
+        {
+            if runtime_path.exists() {
+                fs::remove_file(runtime_path).with_context(|| {
+                    format!("unable to remove stale runtime artifact {}", runtime_path.display())
                 })?;
                 removed_files += 1;
             }
+            if let Ok(bytecode_path) = bytecode_path_for(runtime_path)
+                && bytecode_path.exists()
+            {
+                fs::remove_file(&bytecode_path).with_context(|| {
+                    format!("unable to remove stale bytecode artifact {}", bytecode_path.display())
+                })?;
+                removed_files += 1;
+            }
+        }
+        if let Some(stub_path) = &artifact.stub_path
+            && !current_paths.contains(stub_path)
+            && stub_path.exists()
+        {
+            fs::remove_file(stub_path).with_context(|| {
+                format!("unable to remove stale stub artifact {}", stub_path.display())
+            })?;
+            removed_files += 1;
         }
     }
 

@@ -660,11 +660,7 @@ fn summary_type_repr(declaration: &Declaration) -> String {
             .map(|target| target.raw_target.clone())
             .unwrap_or_else(|| declaration.name.clone()),
     };
-    if detail.is_empty() {
-        declaration.name.clone()
-    } else {
-        detail
-    }
+    if detail.is_empty() { declaration.name.clone() } else { detail }
 }
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
@@ -754,11 +750,11 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        affected_modules, decode_snapshot, dependency_index, dependency_index_from_summaries, diff,
-        encode_snapshot, snapshot, snapshot_diff_modules, source_change_modules, Fingerprint,
-        IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SnapshotDecodeError,
-        SnapshotDiff, SnapshotMetadata, SummaryExport, SummaryImportTarget, SummaryTypeParam,
-        SNAPSHOT_SCHEMA_VERSION,
+        Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
+        SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SnapshotMetadata, SummaryExport,
+        SummaryImportTarget, SummaryTypeParam, affected_modules, decode_snapshot, dependency_index,
+        dependency_index_from_summaries, diff, encode_snapshot, snapshot, snapshot_diff_modules,
+        source_change_modules,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},

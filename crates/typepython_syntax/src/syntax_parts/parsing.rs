@@ -523,71 +523,69 @@ pub(super) fn refresh_custom_statements_from_ast(
             SyntaxStatement::DataClass(existing) => {
                 if let Some(ast_statement) =
                     ast_class_def_for_line(normalized, suite, existing.line)
-                {
-                    if let Some(type_params) = extract_ast_type_params(
+                    && let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
                         ast_statement.type_params.as_deref(),
                         existing.line,
                         "data class declaration",
                         diagnostics,
-                    ) {
-                        existing.name = ast_statement.name.as_str().to_owned();
-                        existing.type_params = type_params;
-                        existing.is_final_decorator =
-                            ast_statement.decorator_list.iter().any(is_final_decorator);
-                        existing.deprecation_message =
-                            deprecated_decorator_message(&ast_statement.decorator_list);
-                        existing.is_deprecated = existing.deprecation_message.is_some();
-                        existing.header_suffix = ast_statement
-                            .arguments
-                            .as_ref()
-                            .and_then(|arguments| slice_range(normalized, arguments.range()))
-                            .map(str::to_owned)
-                            .unwrap_or_default();
-                        existing.bases = ast_statement
-                            .arguments
-                            .as_ref()
-                            .map(|arguments| extract_class_bases(normalized, arguments))
-                            .unwrap_or_default();
-                        existing.members = extract_class_members(normalized, &ast_statement.body);
-                        existing.is_abstract_class = is_abstract_class(existing);
-                    }
+                    )
+                {
+                    existing.name = ast_statement.name.as_str().to_owned();
+                    existing.type_params = type_params;
+                    existing.is_final_decorator =
+                        ast_statement.decorator_list.iter().any(is_final_decorator);
+                    existing.deprecation_message =
+                        deprecated_decorator_message(&ast_statement.decorator_list);
+                    existing.is_deprecated = existing.deprecation_message.is_some();
+                    existing.header_suffix = ast_statement
+                        .arguments
+                        .as_ref()
+                        .and_then(|arguments| slice_range(normalized, arguments.range()))
+                        .map(str::to_owned)
+                        .unwrap_or_default();
+                    existing.bases = ast_statement
+                        .arguments
+                        .as_ref()
+                        .map(|arguments| extract_class_bases(normalized, arguments))
+                        .unwrap_or_default();
+                    existing.members = extract_class_members(normalized, &ast_statement.body);
+                    existing.is_abstract_class = is_abstract_class(existing);
                 }
             }
             SyntaxStatement::SealedClass(existing) => {
                 if let Some(ast_statement) =
                     ast_class_def_for_line(normalized, suite, existing.line)
-                {
-                    if let Some(type_params) = extract_ast_type_params(
+                    && let Some(type_params) = extract_ast_type_params(
                         path,
                         normalized,
                         ast_statement.type_params.as_deref(),
                         existing.line,
                         "sealed class declaration",
                         diagnostics,
-                    ) {
-                        existing.name = ast_statement.name.as_str().to_owned();
-                        existing.type_params = type_params;
-                        existing.is_final_decorator =
-                            ast_statement.decorator_list.iter().any(is_final_decorator);
-                        existing.deprecation_message =
-                            deprecated_decorator_message(&ast_statement.decorator_list);
-                        existing.is_deprecated = existing.deprecation_message.is_some();
-                        existing.header_suffix = ast_statement
-                            .arguments
-                            .as_ref()
-                            .and_then(|arguments| slice_range(normalized, arguments.range()))
-                            .map(str::to_owned)
-                            .unwrap_or_default();
-                        existing.bases = ast_statement
-                            .arguments
-                            .as_ref()
-                            .map(|arguments| extract_class_bases(normalized, arguments))
-                            .unwrap_or_default();
-                        existing.members = extract_class_members(normalized, &ast_statement.body);
-                        existing.is_abstract_class = is_abstract_class(existing);
-                    }
+                    )
+                {
+                    existing.name = ast_statement.name.as_str().to_owned();
+                    existing.type_params = type_params;
+                    existing.is_final_decorator =
+                        ast_statement.decorator_list.iter().any(is_final_decorator);
+                    existing.deprecation_message =
+                        deprecated_decorator_message(&ast_statement.decorator_list);
+                    existing.is_deprecated = existing.deprecation_message.is_some();
+                    existing.header_suffix = ast_statement
+                        .arguments
+                        .as_ref()
+                        .and_then(|arguments| slice_range(normalized, arguments.range()))
+                        .map(str::to_owned)
+                        .unwrap_or_default();
+                    existing.bases = ast_statement
+                        .arguments
+                        .as_ref()
+                        .map(|arguments| extract_class_bases(normalized, arguments))
+                        .unwrap_or_default();
+                    existing.members = extract_class_members(normalized, &ast_statement.body);
+                    existing.is_abstract_class = is_abstract_class(existing);
                 }
             }
             SyntaxStatement::OverloadDef(existing) => {

@@ -1,9 +1,9 @@
 use super::{
-    bind, AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget,
-    BoundTypeExpr, CallSite, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
+    AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget, BoundTypeExpr,
+    CallSite, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
     DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind,
     GuardConditionSite, IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite,
-    MatchPatternSite, MatchSite, WithSite, YieldSite,
+    MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
 };
 use std::path::PathBuf;
 use typepython_diagnostics::DiagnosticReport;

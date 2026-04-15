@@ -1203,8 +1203,7 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                         }
                     } else if let Some(param_ty) =
                         unpack_extra_items_type.as_ref().or(keyword_variadic_type)
-                    {
-                        if let Some(field_type) = field.semantic_value_type()
+                        && let Some(field_type) = field.semantic_value_type()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
@@ -1227,12 +1226,10 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                 ),
                             ));
                         }
-                    }
                 }
-                if let Some(extra_items) = &shape.extra_items {
-                    if let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
-                    {
-                        if let Some(extra_items_type) = extra_items.semantic_value_type()
+                if let Some(extra_items) = &shape.extra_items
+                    && let Some(param_ty) = unpack_extra_items_type.as_ref().or(keyword_variadic_type)
+                        && let Some(extra_items_type) = extra_items.semantic_value_type()
                             && !semantic_type_missing(param_ty)
                             && !semantic_type_is_assignable(
                                 node,
@@ -1254,8 +1251,6 @@ pub(super) fn positional_and_keyword_semantic_type_diagnostics(
                                 ),
                             ));
                         }
-                    }
-                }
             }
             KeywordExpansion::Mapping(value_ty) => {
                 if let Some(param_ty) = keyword_variadic_type

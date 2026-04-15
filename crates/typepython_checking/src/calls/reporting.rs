@@ -151,9 +151,9 @@ pub(super) fn deprecated_use_diagnostics(
     for declaration in
         node.declarations.iter().filter(|declaration| declaration.kind == DeclarationKind::Import)
     {
-        if let Some(target) = resolve_import_target(node, nodes, declaration) {
-            if target.is_deprecated {
-                if let Some(diagnostic) = deprecated_diagnostic(
+        if let Some(target) = resolve_import_target(node, nodes, declaration)
+            && target.is_deprecated
+                && let Some(diagnostic) = deprecated_diagnostic(
                     report_deprecated,
                     format!(
                         "module `{}` imports deprecated declaration `{}`",
@@ -164,14 +164,12 @@ pub(super) fn deprecated_use_diagnostics(
                 ) {
                     diagnostics.push(diagnostic);
                 }
-            }
-        }
     }
 
     for call in &node.calls {
         if let Some(target) = resolve_direct_function(node, nodes, &call.callee) {
-            if target.is_deprecated {
-                if let Some(diagnostic) = deprecated_diagnostic(
+            if target.is_deprecated
+                && let Some(diagnostic) = deprecated_diagnostic(
                     report_deprecated,
                     format!(
                         "module `{}` calls deprecated declaration `{}`",
@@ -182,10 +180,9 @@ pub(super) fn deprecated_use_diagnostics(
                 ) {
                     diagnostics.push(diagnostic);
                 }
-            }
-        } else if let Some((_, target)) = resolve_direct_base(nodes, node, &call.callee) {
-            if target.is_deprecated {
-                if let Some(diagnostic) = deprecated_diagnostic(
+        } else if let Some((_, target)) = resolve_direct_base(nodes, node, &call.callee)
+            && target.is_deprecated
+                && let Some(diagnostic) = deprecated_diagnostic(
                     report_deprecated,
                     format!(
                         "module `{}` instantiates deprecated declaration `{}`",
@@ -196,18 +193,14 @@ pub(super) fn deprecated_use_diagnostics(
                 ) {
                     diagnostics.push(diagnostic);
                 }
-            }
-        }
     }
 
     for access in &node.member_accesses {
         if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &access.owner_name)
-        {
-            if let Some(member) =
+            && let Some(member) =
                 find_owned_value_declaration(nodes, class_node, class_decl, &access.member)
-            {
-                if member.is_deprecated {
-                    if let Some(diagnostic) = deprecated_diagnostic(
+                && member.is_deprecated
+                    && let Some(diagnostic) = deprecated_diagnostic(
                         report_deprecated,
                         format!(
                             "module `{}` uses deprecated member `{}` on `{}`",
@@ -219,18 +212,14 @@ pub(super) fn deprecated_use_diagnostics(
                     ) {
                         diagnostics.push(diagnostic);
                     }
-                }
-            }
-        }
     }
 
     for call in &node.method_calls {
-        if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name) {
-            if let Some(method) =
+        if let Some((class_node, class_decl)) = resolve_direct_base(nodes, node, &call.owner_name)
+            && let Some(method) =
                 find_owned_callable_declaration(nodes, class_node, class_decl, &call.method)
-            {
-                if method.is_deprecated {
-                    if let Some(diagnostic) = deprecated_diagnostic(
+                && method.is_deprecated
+                    && let Some(diagnostic) = deprecated_diagnostic(
                         report_deprecated,
                         format!(
                             "module `{}` calls deprecated member `{}` on `{}`",
@@ -242,9 +231,6 @@ pub(super) fn deprecated_use_diagnostics(
                     ) {
                         diagnostics.push(diagnostic);
                     }
-                }
-            }
-        }
     }
 
     diagnostics
@@ -307,8 +293,7 @@ pub(super) fn first_type_mismatch_detail(
 
     if let (Some(expected_branches), Some(actual_branches)) =
         (union_branches(&expected), union_branches(&actual))
-    {
-        if let Some(unmatched) = actual_branches.iter().find(|branch| {
+        && let Some(unmatched) = actual_branches.iter().find(|branch| {
             !expected_branches
                 .iter()
                 .any(|target_branch| direct_type_is_assignable(node, nodes, target_branch, branch))
@@ -321,7 +306,6 @@ pub(super) fn first_type_mismatch_detail(
                 unmatched, expected
             ));
         }
-    }
 
     if let (Some((expected_head, expected_args)), Some((actual_head, actual_args))) =
         (split_generic_type(&expected), split_generic_type(&actual))

@@ -273,8 +273,8 @@ pub(super) fn collect_typed_dict_fields(
     }
 
     for base in class_decl.rendered_class_bases() {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
-            if is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base)
+            && is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
                 collect_typed_dict_fields(
                     context,
                     nodes,
@@ -285,7 +285,6 @@ pub(super) fn collect_typed_dict_fields(
                     fields,
                 );
             }
-        }
     }
 
     let total_default = typed_dict_metadata
@@ -351,8 +350,8 @@ pub(super) fn collect_typed_dict_openness(
     let mut closed = inherited_closed;
     let mut extra_items = inherited_extra_items;
 
-    if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref()) {
-        if let Some(parsed) = annotation
+    if let Some(annotation) = metadata.and_then(|metadata| metadata.extra_items.as_ref())
+        && let Some(parsed) = annotation
             .annotation_expr
             .as_ref()
             .and_then(parse_typed_dict_extra_items_expr)
@@ -366,7 +365,6 @@ pub(super) fn collect_typed_dict_openness(
                 extra_items = Some(parsed);
             }
         }
-    }
 
     if let Some(explicit_closed) = metadata.and_then(|metadata| metadata.closed) {
         if explicit_closed {

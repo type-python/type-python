@@ -437,15 +437,15 @@ impl Config {
             self.resolution.analysis_python_text.as_deref(),
         )?;
 
-        if validate_python_executable_flag {
-            if let Some(python_executable) = &self.resolution.python_executable {
-                validate_python_executable(
-                    config_path,
-                    config_dir,
-                    python_executable,
-                    self.resolution.analysis_python.unwrap_or(self.project.target_python),
-                )?;
-            }
+        if validate_python_executable_flag
+            && let Some(python_executable) = &self.resolution.python_executable
+        {
+            validate_python_executable(
+                config_path,
+                config_dir,
+                python_executable,
+                self.resolution.analysis_python.unwrap_or(self.project.target_python),
+            )?;
         }
 
         validate_emit_preserve_comments(config_path, self.emit.preserve_comments)?;
@@ -541,10 +541,10 @@ impl Config {
 
         config.typing = TypingConfig::from_raw(raw.typing.unwrap_or_default());
 
-        if let Some(watch) = raw.watch {
-            if let Some(debounce_ms) = watch.debounce_ms {
-                config.watch.debounce_ms = debounce_ms;
-            }
+        if let Some(watch) = raw.watch
+            && let Some(debounce_ms) = watch.debounce_ms
+        {
+            config.watch.debounce_ms = debounce_ms;
         }
 
         config
@@ -659,17 +659,16 @@ fn load_impl(
         }
 
         let pyproject_path = directory.join("pyproject.toml");
-        if pyproject_path.is_file() {
-            if let Some(config) =
+        if pyproject_path.is_file()
+            && let Some(config) =
                 load_pyproject_toml(&pyproject_path, validate_python_executable_flag)?
-            {
-                return Ok(ConfigHandle {
-                    config_dir: directory.to_path_buf(),
-                    config_path: pyproject_path,
-                    source: ConfigSource::PyProject,
-                    config,
-                });
-            }
+        {
+            return Ok(ConfigHandle {
+                config_dir: directory.to_path_buf(),
+                config_path: pyproject_path,
+                source: ConfigSource::PyProject,
+                config,
+            });
         }
     }
 

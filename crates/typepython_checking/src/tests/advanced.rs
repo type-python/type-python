@@ -18200,8 +18200,10 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
 
     let rendered = result.diagnostics.as_text();
     assert!(rendered.contains("TPY4001"));
-    assert!(rendered
-        .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`"));
+    assert!(
+        rendered
+            .contains("returns `Union[ValueError, TypeError]` where `build` expects `ValueError`")
+    );
 }
 
 #[test]

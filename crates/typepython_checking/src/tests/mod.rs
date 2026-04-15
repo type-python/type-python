@@ -6,13 +6,13 @@ pub(super) use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub(super) use typepython_binding::{
-    bind, BindingTable, BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration,
-    DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,
+    BindingTable, BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration,
+    DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind, bind,
 };
 pub(super) use typepython_config::{DiagnosticLevel, ImportFallback};
-pub(super) use typepython_graph::{build, ModuleGraph, ModuleNode};
+pub(super) use typepython_graph::{ModuleGraph, ModuleNode, build};
 use typepython_incremental::{IncrementalState, PublicSummary, SnapshotMetadata};
-pub(super) use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
+pub(super) use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
 
 macro_rules! declaration {
     ($($field:tt)*) => {

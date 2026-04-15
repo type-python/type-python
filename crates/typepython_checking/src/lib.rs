@@ -767,7 +767,8 @@ fn required_runtime_features_for_export(
     let mut features = BTreeSet::<String>::new();
     if !declaration.type_params.is_empty() {
         features.insert(String::from("inline_type_params"));
-        if declaration.type_params.iter().any(|type_param| type_param.rendered_default().is_some()) {
+        if declaration.type_params.iter().any(|type_param| type_param.rendered_default().is_some())
+        {
             features.insert(String::from("generic_defaults"));
         }
         if declaration.kind == DeclarationKind::TypeAlias {
@@ -887,7 +888,9 @@ fn semantic_exported_type(
             .type_alias
             .as_ref()
             .map(|type_alias| diagnostic_type_text(&type_alias.body))
-            .or_else(|| declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render)),
+            .or_else(|| {
+                declaration.type_alias_value().map(typepython_binding::BoundTypeExpr::render)
+            }),
         DeclarationKind::Import => semantics
             .import_target
             .as_ref()
@@ -912,12 +915,12 @@ fn summary_callable_signature_from_semantics(
     SummaryCallableSignature {
         params: callable
             .semantic_params
-                .iter()
-                .map(|param| SummarySignatureParam {
-                    name: param.name.clone(),
-                    annotation: param.rendered_annotation_text(),
-                    annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
-                    has_default: param.has_default,
+            .iter()
+            .map(|param| SummarySignatureParam {
+                name: param.name.clone(),
+                annotation: param.rendered_annotation_text(),
+                annotation_expr: param.annotation.as_ref().map(semantic_type_to_type_expr),
+                has_default: param.has_default,
                 positional_only: param.positional_only,
                 keyword_only: param.keyword_only,
                 variadic: param.variadic,

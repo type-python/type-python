@@ -613,7 +613,13 @@ fn run_pipeline_selectively_lowers_only_changed_module_for_implementation_edits(
         let lowered = second
             .lowered_modules
             .iter()
-            .map(|module| module.source_path.strip_prefix(&project_dir).unwrap().to_path_buf())
+            .map(|module| {
+                module
+                    .source_path
+                    .strip_prefix(&project_dir)
+                    .expect("lowered module should stay under the temporary project directory")
+                    .to_path_buf()
+            })
             .collect::<Vec<_>>();
         remove_temp_project_dir(&project_dir);
         lowered
@@ -641,7 +647,13 @@ fn run_pipeline_selectively_lowers_transitive_dependents_for_public_edits() {
         let mut lowered = second
             .lowered_modules
             .iter()
-            .map(|module| module.source_path.strip_prefix(&project_dir).unwrap().to_path_buf())
+            .map(|module| {
+                module
+                    .source_path
+                    .strip_prefix(&project_dir)
+                    .expect("lowered module should stay under the temporary project directory")
+                    .to_path_buf()
+            })
             .collect::<Vec<_>>();
         lowered.sort();
         remove_temp_project_dir(&project_dir);

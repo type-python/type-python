@@ -113,16 +113,12 @@ def checker_command(
     if checker == "pyright":
         return ["pyright", "--pythonversion", target, str(build_dir)]
     if checker == "ty":
-        return [
-            "ty",
-            "check",
-            "--no-progress",
-            "--python",
-            sys.executable,
-            "--python-version",
-            target,
-            str(build_dir),
-        ]
+        command = ["ty", "check", "--no-progress"]
+        python_override = os.environ.get("TYPEPYTHON_DOWNSTREAM_TY_PYTHON")
+        if python_override:
+            command.extend(["--python", python_override])
+        command.extend(["--python-version", target, str(build_dir)])
+        return command
     raise SystemExit(f"unsupported downstream checker `{checker}`")
 
 

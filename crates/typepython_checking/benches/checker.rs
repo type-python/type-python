@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use typepython_binding::{
     AssignmentSite, BindingTable, BoundCallableSignature, BoundImportTarget, CallSite, Declaration,
     DeclarationKind, DeclarationMetadata, GenericTypeParam, GenericTypeParamKind,
@@ -126,7 +126,6 @@ fn assignment_from_call(
         destructuring_target_names: None,
         destructuring_index: None,
         annotation: Some(annotation.to_owned()),
-        value_type: Some(String::new()),
         is_awaited: false,
         value_callee: Some(callee.to_owned()),
         value_name: None,

@@ -65,10 +65,10 @@ pub fn write_runtime_outputs(
                     module.python_source.clone()
                 };
             fs::write(runtime_path, runtime_source)?;
-            if runtime_path.file_name().is_some_and(|name| name == "__init__.py") {
-                if let Some(parent) = runtime_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
+            if runtime_path.file_name().is_some_and(|name| name == "__init__.py")
+                && let Some(parent) = runtime_path.parent()
+            {
+                package_roots.insert(parent.to_path_buf());
             }
             runtime_files_written += 1;
         }
@@ -99,10 +99,10 @@ pub fn write_runtime_outputs(
                 module.python_source.clone()
             };
             fs::write(stub_path, stub_source)?;
-            if is_package_init_path(stub_path) {
-                if let Some(parent) = stub_path.parent() {
-                    package_roots.insert(parent.to_path_buf());
-                }
+            if is_package_init_path(stub_path)
+                && let Some(parent) = stub_path.parent()
+            {
+                package_roots.insert(parent.to_path_buf());
             }
             stub_files_written += 1;
         }
@@ -209,10 +209,9 @@ fn collect_runtime_validator_edits(
                     && !trimmed.starts_with("def ")
                     && !trimmed.starts_with("class ")
                     && trimmed.contains(':')
+                    && let Some(field) = parse_validator_field(trimmed)
                 {
-                    if let Some(field) = parse_validator_field(trimmed) {
-                        fields.push(field);
-                    }
+                    fields.push(field);
                 }
             }
             cursor += 1;
@@ -485,10 +484,11 @@ fn collect_typed_dict_fields(python: &str) -> BTreeMap<String, Vec<ValidatorFiel
                 if indent <= class_indent {
                     break;
                 }
-                if indent == body_indent && body_trimmed.contains(':') {
-                    if let Some(field) = parse_validator_field(body_trimmed) {
-                        fields.push(field);
-                    }
+                if indent == body_indent
+                    && body_trimmed.contains(':')
+                    && let Some(field) = parse_validator_field(body_trimmed)
+                {
+                    fields.push(field);
                 }
             }
             cursor += 1;

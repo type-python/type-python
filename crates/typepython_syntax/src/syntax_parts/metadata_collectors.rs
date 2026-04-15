@@ -1135,20 +1135,20 @@ pub(super) fn normalize_conditional_return_source(source: &str) -> String {
     let mut line_number = 1usize;
     let mut blocks = blocks.into_iter().peekable();
     while line_number <= lines.len() {
-        if let Some(block) = blocks.peek() {
-            if block.line == line_number {
-                let original = lines[line_number - 1];
-                let indent = &original[..original.len() - original.trim_start().len()];
-                output.push(format!("{indent}{}:", block.header));
-                let case_indent = format!("{indent}    ");
-                output.push(format!("{case_indent}pass"));
-                for _ in block.line + 1..=block.end_line {
-                    output.push(String::new());
-                }
-                line_number = block.end_line + 1;
-                blocks.next();
-                continue;
+        if let Some(block) = blocks.peek()
+            && block.line == line_number
+        {
+            let original = lines[line_number - 1];
+            let indent = &original[..original.len() - original.trim_start().len()];
+            output.push(format!("{indent}{}:", block.header));
+            let case_indent = format!("{indent}    ");
+            output.push(format!("{case_indent}pass"));
+            for _ in block.line + 1..=block.end_line {
+                output.push(String::new());
             }
+            line_number = block.end_line + 1;
+            blocks.next();
+            continue;
         }
         output.push(lines[line_number - 1].to_owned());
         line_number += 1;

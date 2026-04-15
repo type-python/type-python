@@ -169,8 +169,8 @@ pub(crate) fn resolve_callable_return_type_in_scope(
     owner_type_name: Option<&str>,
     callee: &str,
 ) -> Option<String> {
-    if let Some(canonical) = document.local_symbols.get(callee) {
-        if let Some((_, declaration)) = resolve_top_level_declaration(workspace, canonical) {
+    if let Some(canonical) = document.local_symbols.get(callee)
+        && let Some((_, declaration)) = resolve_top_level_declaration(workspace, canonical) {
             if declaration.kind == typepython_binding::DeclarationKind::Class {
                 return Some(callee.to_owned());
             }
@@ -178,7 +178,6 @@ pub(crate) fn resolve_callable_return_type_in_scope(
                 signature.returns.as_ref().map(typepython_binding::BoundTypeExpr::render)
             });
         }
-    }
 
     resolve_parameter_annotation(document, owner_name, owner_type_name, callee)
         .and_then(|annotation| parse_return_annotation(&annotation))
@@ -211,15 +210,14 @@ pub(crate) fn resolve_type_canonicals(
             push_unique(&mut resolved, canonical.clone());
             continue;
         }
-        if let Some((module_key, name)) = head.rsplit_once('.') {
-            if workspace.queries.nodes_by_module_key.get(module_key).is_some_and(|node| {
+        if let Some((module_key, name)) = head.rsplit_once('.')
+            && workspace.queries.nodes_by_module_key.get(module_key).is_some_and(|node| {
                 node.declarations
                     .iter()
                     .any(|declaration| declaration.owner.is_none() && declaration.name == name)
             }) {
                 push_unique(&mut resolved, head.to_owned());
             }
-        }
     }
     resolved
 }
@@ -612,11 +610,10 @@ pub(crate) fn scope_context_at_position(
     let line = position.line as usize + 1;
     let mut best = None;
     for statement in &document.syntax.statements {
-        if let Some(candidate) = statement_scope_context(statement, &document.text, line) {
-            if best.as_ref().is_none_or(|(best_line, _, _)| candidate.0 >= *best_line) {
+        if let Some(candidate) = statement_scope_context(statement, &document.text, line)
+            && best.as_ref().is_none_or(|(best_line, _, _)| candidate.0 >= *best_line) {
                 best = Some(candidate);
             }
-        }
     }
     best.map(|(_, owner_name, owner_type_name)| (owner_name, owner_type_name)).unwrap_or_default()
 }

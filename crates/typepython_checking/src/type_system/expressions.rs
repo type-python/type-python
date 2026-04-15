@@ -702,8 +702,8 @@ pub(super) fn find_member_declaration_with_visited<'a>(
     }
 
     for base in class_decl.rendered_class_bases() {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
-            if let Some(member) = find_member_declaration_with_visited(
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base)
+            && let Some(member) = find_member_declaration_with_visited(
                 nodes,
                 base_node,
                 base_decl,
@@ -713,7 +713,6 @@ pub(super) fn find_member_declaration_with_visited<'a>(
             ) {
                 return Some(member);
             }
-        }
     }
 
     None
@@ -975,8 +974,8 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         return Some(local_type);
     }
 
-    if current_owner_name.is_none() {
-        if let Some(module_type) = resolve_module_level_assignment_reference_semantic_type(
+    if current_owner_name.is_none()
+        && let Some(module_type) = resolve_module_level_assignment_reference_semantic_type(
             node,
             nodes,
             signature,
@@ -985,7 +984,6 @@ pub(super) fn resolve_unnarrowed_name_reference_semantic_type_with_context(
         ) {
             return Some(module_type);
         }
-    }
 
     if let Some(local_value) = node.declarations.iter().find(|declaration| {
         declaration.kind == DeclarationKind::Value

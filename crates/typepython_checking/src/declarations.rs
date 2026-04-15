@@ -64,16 +64,16 @@ pub(super) fn override_compatibility_diagnostics<'a>(
             declaration.owner.as_ref().is_some_and(|owner| owner.name == class_declaration.name)
         }) {
             for base in class_declaration.rendered_class_bases() {
-                if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base) {
-                    if let Some(base_member) = base_node.declarations.iter().find(|declaration| {
+                if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base)
+                    && let Some(base_member) = base_node.declarations.iter().find(|declaration| {
                         declaration.owner.as_ref().is_some_and(|owner| owner.name == base_decl.name)
                             && declaration.name == member.name
                             && declaration.kind == member.kind
-                    }) {
-                        if let Some(reason) =
-                            method_override_incompatibility(node, nodes, member, base_member)
-                        {
-                            diagnostics.push(Diagnostic::error(
+                    })
+                    && let Some(reason) =
+                        method_override_incompatibility(node, nodes, member, base_member)
+                {
+                    diagnostics.push(Diagnostic::error(
                              "TPY4005",
                              format!(
                                  "type `{}` in module `{}` overrides member `{}` from base `{}` with an incompatible signature or annotation",
@@ -83,8 +83,6 @@ pub(super) fn override_compatibility_diagnostics<'a>(
                                  base_decl.name
                              ),
                          ).with_note(reason.diagnostic_note()));
-                        }
-                    }
                 }
             }
         }
@@ -436,27 +434,28 @@ pub(super) fn abstract_instantiation_diagnostics<'a>(
                                     .is_some_and(|owner| owner.name == declaration.name)
                                     && declaration_member.is_abstract_method
                             });
-                        let inherited_abstract = declaration.rendered_class_bases().iter().any(|base| {
-                            let Some((resolved_node, resolved_decl)) =
-                                resolve_direct_base(nodes, base_node, base)
-                            else {
-                                return false;
-                            };
-                            abstract_member_index(&resolved_node.declarations).iter().any(
-                                |((abstract_owner, member_name), member_kind)| {
-                                    abstract_owner == &resolved_decl.name
-                                        && !base_node.declarations.iter().any(
-                                            |declaration_member| {
-                                                declaration_member.owner.as_ref().is_some_and(
-                                                    |owner| owner.name == declaration.name,
-                                                ) && declaration_member.name == *member_name
-                                                    && declaration_member.kind == *member_kind
-                                                    && !declaration_member.is_abstract_method
-                                            },
-                                        )
-                                },
-                            )
-                        });
+                        let inherited_abstract =
+                            declaration.rendered_class_bases().iter().any(|base| {
+                                let Some((resolved_node, resolved_decl)) =
+                                    resolve_direct_base(nodes, base_node, base)
+                                else {
+                                    return false;
+                                };
+                                abstract_member_index(&resolved_node.declarations).iter().any(
+                                    |((abstract_owner, member_name), member_kind)| {
+                                        abstract_owner == &resolved_decl.name
+                                            && !base_node.declarations.iter().any(
+                                                |declaration_member| {
+                                                    declaration_member.owner.as_ref().is_some_and(
+                                                        |owner| owner.name == declaration.name,
+                                                    ) && declaration_member.name == *member_name
+                                                        && declaration_member.kind == *member_kind
+                                                        && !declaration_member.is_abstract_method
+                                                },
+                                            )
+                                    },
+                                )
+                            });
 
                         (own_abstract || inherited_abstract).then_some(declaration.name.as_str())
                     },
@@ -532,9 +531,9 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
             let mut covered = BTreeSet::new();
             for case in match_site.cases.iter().filter(|case| !case.has_guard) {
                 for pattern in &case.patterns {
-                    if let Some(case_type) = pattern_class_name(pattern) {
-                        if let Some((case_node, case_decl)) = resolve_direct_base(nodes, node, case_type) {
-                            if case_node.module_key == sealed_node.module_key {
+                    if let Some(case_type) = pattern_class_name(pattern)
+                        && let Some((case_node, case_decl)) = resolve_direct_base(nodes, node, case_type)
+                            && case_node.module_key == sealed_node.module_key {
                                 if case_decl.name == sealed_decl.name {
                                     covered.extend(sealed_closure.iter().cloned());
                                 } else if sealed_descends_from(nodes, case_node, case_decl, &sealed_decl.name) {
@@ -542,8 +541,6 @@ pub(super) fn sealed_match_exhaustiveness_diagnostics(
                                     covered.extend(collect_sealed_descendants(sealed_node, &case_decl.name));
                                 }
                             }
-                        }
-                    }
                 }
             }
 
