@@ -1012,13 +1012,11 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
                 .clone()
                 .map(|expr| BoundTypeExpr { expr })
                 .or_else(|| param.bound.clone().map(BoundTypeExpr::new)),
-            constraint_exprs: param
-                .constraint_exprs
-                .clone()
-                .into_iter()
-                .map(|expr| BoundTypeExpr { expr })
-                .chain(param.constraints.iter().cloned().map(BoundTypeExpr::new))
-                .collect(),
+            constraint_exprs: if param.constraints.is_empty() {
+                param.constraint_exprs.clone().into_iter().map(BoundTypeExpr::from_expr).collect()
+            } else {
+                param.constraints.iter().cloned().map(BoundTypeExpr::new).collect()
+            },
             default_expr: param
                 .default_expr
                 .clone()

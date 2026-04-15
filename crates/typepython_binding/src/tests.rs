@@ -2719,6 +2719,44 @@ fn bind_collects_generic_type_params_with_bounds_and_constraints() {
 }
 
 #[test]
+fn bind_does_not_duplicate_type_param_constraints_when_exprs_are_also_present() {
+    let table = bind(&SyntaxTree {
+        source: SourceFile {
+            path: PathBuf::from("src/app/__init__.tpy"),
+            kind: SourceKind::TypePython,
+            logical_module: String::new(),
+            text: String::new(),
+        },
+        statements: vec![SyntaxStatement::TypeAlias(TypeAliasStatement {
+            name: String::from("Constrained"),
+            type_params: vec![TypeParam {
+                name: String::from("T"),
+                kind: TypeParamKind::TypeVar,
+                bound: None,
+                constraints: vec![String::from("int"), String::from("str")],
+                default: None,
+                bound_expr: None,
+                constraint_exprs: vec![
+                    typepython_syntax::TypeExpr::Name(String::from("int")),
+                    typepython_syntax::TypeExpr::Name(String::from("str")),
+                ],
+                default_expr: None,
+            }],
+            value: String::from("tuple[T]"),
+            value_expr: None,
+            line: 1,
+        })],
+        type_ignore_directives: Vec::new(),
+        diagnostics: DiagnosticReport::default(),
+    });
+
+    assert_eq!(
+        table.declarations[0].type_params[0].constraint_exprs,
+        vec![BoundTypeExpr::new("int"), BoundTypeExpr::new("str")]
+    );
+}
+
+#[test]
 fn bind_collects_paramspec_type_params() {
     let table = bind(&SyntaxTree {
         source: SourceFile {
