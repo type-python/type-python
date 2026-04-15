@@ -1037,17 +1037,23 @@ fn bind_type_params(type_params: &[typepython_syntax::TypeParam]) -> Vec<Generic
                 }
             },
             name: param.name.clone(),
-            bound: param.bound.clone(),
-            bound_expr: param.bound_expr.clone().map(|expr| BoundTypeExpr { expr }),
-            constraints: param.constraints.clone(),
+            bound_expr: param
+                .bound_expr
+                .clone()
+                .map(|expr| BoundTypeExpr { expr })
+                .or_else(|| param.bound.clone().map(BoundTypeExpr::new)),
             constraint_exprs: param
                 .constraint_exprs
                 .clone()
                 .into_iter()
                 .map(|expr| BoundTypeExpr { expr })
+                .chain(param.constraints.iter().cloned().map(BoundTypeExpr::new))
                 .collect(),
-            default: param.default.clone(),
-            default_expr: param.default_expr.clone().map(|expr| BoundTypeExpr { expr }),
+            default_expr: param
+                .default_expr
+                .clone()
+                .map(|expr| BoundTypeExpr { expr })
+                .or_else(|| param.default.clone().map(BoundTypeExpr::new)),
         })
         .collect()
 }

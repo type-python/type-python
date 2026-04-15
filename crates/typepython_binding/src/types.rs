@@ -908,32 +908,25 @@ pub enum GenericTypeParamKind {
 pub struct GenericTypeParam {
     pub kind: GenericTypeParamKind,
     pub name: String,
-    pub bound: Option<String>,
     pub bound_expr: Option<BoundTypeExpr>,
-    pub constraints: Vec<String>,
     pub constraint_exprs: Vec<BoundTypeExpr>,
-    pub default: Option<String>,
     pub default_expr: Option<BoundTypeExpr>,
 }
 
 impl GenericTypeParam {
     #[must_use]
     pub fn rendered_bound(&self) -> Option<String> {
-        self.bound_expr.as_ref().map(BoundTypeExpr::render).or_else(|| self.bound.clone())
+        self.bound_expr.as_ref().map(BoundTypeExpr::render)
     }
 
     #[must_use]
     pub fn rendered_constraints(&self) -> Vec<String> {
-        if !self.constraint_exprs.is_empty() {
-            self.constraint_exprs.iter().map(BoundTypeExpr::render).collect()
-        } else {
-            self.constraints.clone()
-        }
+        self.constraint_exprs.iter().map(BoundTypeExpr::render).collect()
     }
 
     #[must_use]
     pub fn rendered_default(&self) -> Option<String> {
-        self.default_expr.as_ref().map(BoundTypeExpr::render).or_else(|| self.default.clone())
+        self.default_expr.as_ref().map(BoundTypeExpr::render)
     }
 }
 

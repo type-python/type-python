@@ -70,9 +70,6 @@ fn check_infers_generic_function_call_through_union_actual() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVar,
             name: String::from("T"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -156,9 +153,6 @@ fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVar,
             name: String::from("T"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -269,9 +263,6 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
             name: String::from("Ts"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -350,9 +341,6 @@ fn check_infers_paramspec_from_callable_argument() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::ParamSpec,
             name: String::from("P"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -434,9 +422,6 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
             name: String::from("Ts"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -525,9 +510,6 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
             name: String::from("Ts"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -652,9 +634,6 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     type_params: vec![typepython_binding::GenericTypeParam {
                         kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
                         name: String::from("Ts"),
-                        bound: None,
-                        constraints: Vec::new(),
-                        default: None,
                         bound_expr: None,
                         constraint_exprs: Vec::new(),
                         default_expr: None,
@@ -848,9 +827,6 @@ fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVar,
             name: String::from("T"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,

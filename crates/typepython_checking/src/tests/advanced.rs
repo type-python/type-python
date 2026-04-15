@@ -1282,9 +1282,6 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVar,
             name: String::from("T"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -1641,9 +1638,6 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
         type_params: vec![typepython_binding::GenericTypeParam {
             kind: typepython_binding::GenericTypeParamKind::TypeVar,
             name: String::from("T"),
-            bound: None,
-            constraints: Vec::new(),
-            default: None,
             bound_expr: None,
             constraint_exprs: Vec::new(),
             default_expr: None,
@@ -2222,9 +2216,6 @@ fn check_accepts_generic_method_overload_specificity() {
                             type_params: vec![typepython_binding::GenericTypeParam {
                                 kind: typepython_binding::GenericTypeParamKind::TypeVar,
                                 name: String::from("T"),
-                                bound: None,
-                                constraints: Vec::new(),
-                                default: None,
                                 bound_expr: None,
                                 constraint_exprs: Vec::new(),
                                 default_expr: None,
@@ -15407,9 +15398,6 @@ fn check_accepts_typevartuple_alias_expansion_assignment() {
             type_params: vec![typepython_binding::GenericTypeParam {
                 kind: typepython_binding::GenericTypeParamKind::TypeVarTuple,
                 name: String::from("Ts"),
-                bound: None,
-                constraints: Vec::new(),
-                default: None,
                 bound_expr: None,
                 constraint_exprs: Vec::new(),
                 default_expr: None,

@@ -620,7 +620,7 @@ fn native_runtime_features_from_declaration(
     if !declaration.type_params.is_empty() {
         features.push(typepython_target::RuntimeFeature::InlineTypeParams);
     }
-    if declaration.type_params.iter().any(|type_param| type_param.default.is_some()) {
+    if declaration.type_params.iter().any(|type_param| type_param.rendered_default().is_some()) {
         features.push(typepython_target::RuntimeFeature::GenericDefaults);
     }
     features
@@ -842,7 +842,7 @@ mod tests {
                         kind: Some(String::from("typevar")),
                         name: String::from("T"),
                         bound: Some(String::from("SupportsClose")),
-                        bound_expr: None,
+                        bound_expr: Some(TypeExpr::Name(String::from("SupportsClose"))),
                         constraints: Vec::new(),
                         constraint_exprs: Vec::new(),
                         default: None,
@@ -906,10 +906,7 @@ mod tests {
                         type_params: vec![GenericTypeParam {
                             kind: GenericTypeParamKind::TypeVar,
                             name: String::from("T"),
-                            bound: Some(String::from("SupportsClose")),
-                            constraints: Vec::new(),
-                            default: None,
-                            bound_expr: None,
+                            bound_expr: Some(BoundTypeExpr::new("SupportsClose")),
                             constraint_exprs: Vec::new(),
                             default_expr: None,
                         }],
@@ -941,9 +938,6 @@ mod tests {
                         vec![GenericTypeParam {
                             kind: GenericTypeParamKind::TypeVar,
                             name: String::from("T"),
-                            bound: None,
-                            constraints: Vec::new(),
-                            default: None,
                             bound_expr: None,
                             constraint_exprs: Vec::new(),
                             default_expr: None,
@@ -1000,7 +994,7 @@ mod tests {
                             kind: Some(String::from("typevar")),
                             name: String::from("T"),
                             bound: Some(String::from("SupportsClose")),
-                            bound_expr: None,
+                            bound_expr: Some(TypeExpr::Name(String::from("SupportsClose"))),
                             constraints: Vec::new(),
                             constraint_exprs: Vec::new(),
                             default: None,
@@ -1276,11 +1270,14 @@ mod tests {
                             kind: Some(String::from("typevar")),
                             name: String::from("T"),
                             bound: Some(String::from("Comparable")),
-                            bound_expr: None,
+                            bound_expr: Some(TypeExpr::Name(String::from("Comparable"))),
                             constraints: vec![String::from("Comparable"), String::from("Hashable")],
-                            constraint_exprs: Vec::new(),
+                            constraint_exprs: vec![
+                                TypeExpr::Name(String::from("Comparable")),
+                                TypeExpr::Name(String::from("Hashable")),
+                            ],
                             default: Some(String::from("Comparable")),
-                            default_expr: None,
+                            default_expr: Some(TypeExpr::Name(String::from("Comparable"))),
                         }],
                         runtime_semantics: None,
                         required_runtime_features: Vec::new(),
