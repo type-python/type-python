@@ -58,7 +58,9 @@ fn normalized_test_metadata(declaration: &Declaration) -> DeclarationMetadata {
             if declaration.bases.is_empty() {
                 DeclarationMetadata::None
             } else {
-                DeclarationMetadata::Class { bases: declaration.bases.clone() }
+                DeclarationMetadata::Class {
+                    bases: declaration.bases.iter().map(BoundTypeExpr::new).collect(),
+                }
             }
         }
     }

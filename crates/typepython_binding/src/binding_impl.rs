@@ -622,7 +622,9 @@ fn bind_named_block(
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
         legacy_detail: statement.bases.join(","),
-        metadata: DeclarationMetadata::Class { bases: statement.bases.clone() },
+        metadata: DeclarationMetadata::Class {
+            bases: statement.bases.iter().map(BoundTypeExpr::new).collect(),
+        },
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(owner_kind),
@@ -677,10 +679,7 @@ fn bind_named_block(
                     ),
                 },
             },
-            value_type_expr: member
-                .value_type_expr
-                .clone()
-                .map(BoundTypeExpr::from_expr),
+            value_type_expr: member.value_type_expr.clone().map(BoundTypeExpr::from_expr),
             method_kind: member.method_kind,
             class_kind: None,
             owner: Some(owner.clone()),

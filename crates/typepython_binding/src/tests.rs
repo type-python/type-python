@@ -1,9 +1,9 @@
 use super::{
-    AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget, BoundTypeExpr,
-    CallSite, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
+    bind, AssertGuardSite, AssignmentSite, BoundCallableSignature, BoundImportTarget,
+    BoundTypeExpr, CallSite, Declaration, DeclarationKind, DeclarationMetadata, DeclarationOwner,
     DeclarationOwnerKind, ExceptHandlerSite, ForSite, GenericTypeParam, GenericTypeParamKind,
     GuardConditionSite, IfGuardSite, InvalidationKind, InvalidationSite, MatchCaseSite,
-    MatchPatternSite, MatchSite, WithSite, YieldSite, bind,
+    MatchPatternSite, MatchSite, WithSite, YieldSite,
 };
 use std::path::PathBuf;
 use typepython_diagnostics::DiagnosticReport;
@@ -22,7 +22,9 @@ fn metadata_value(annotation: Option<&str>) -> DeclarationMetadata {
 }
 
 fn metadata_class(bases: &[&str]) -> DeclarationMetadata {
-    DeclarationMetadata::Class { bases: bases.iter().map(|base| String::from(*base)).collect() }
+    DeclarationMetadata::Class {
+        bases: bases.iter().map(|base| BoundTypeExpr::new(*base)).collect(),
+    }
 }
 
 fn metadata_import(target: &str) -> DeclarationMetadata {

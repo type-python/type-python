@@ -175,7 +175,7 @@ pub enum DeclarationMetadata {
         annotation: Option<BoundTypeExpr>,
     },
     Class {
-        bases: Vec<String>,
+        bases: Vec<BoundTypeExpr>,
     },
 }
 
@@ -778,7 +778,9 @@ impl Declaration {
                 .as_ref()
                 .map(BoundTypeExpr::render)
                 .unwrap_or_else(|| self.legacy_detail.clone()),
-            DeclarationMetadata::Class { bases } => bases.join(","),
+            DeclarationMetadata::Class { bases } => {
+                bases.iter().map(BoundTypeExpr::render).collect::<Vec<_>>().join(",")
+            }
         }
     }
 
@@ -830,11 +832,23 @@ impl Declaration {
     }
 
     #[must_use]
-    pub fn class_bases(&self) -> Option<&[String]> {
+    pub fn class_bases(&self) -> Option<&[BoundTypeExpr]> {
         match &self.metadata {
             DeclarationMetadata::Class { bases } => Some(bases),
             _ => None,
         }
+    }
+
+    #[must_use]
+    pub fn rendered_class_bases(&self) -> Vec<String> {
+        self.class_bases()
+            .map(|bases| bases.iter().map(BoundTypeExpr::render).collect())
+            .unwrap_or_else(|| self.bases.clone())
+    }
+
+    #[must_use]
+    pub fn has_class_base(&self, base: &str) -> bool {
+        self.rendered_class_bases().iter().any(|candidate| candidate == base)
     }
 
     #[must_use]

@@ -626,7 +626,7 @@ fn semantic_public_summary(
                 .iter()
                 .filter(|candidate| {
                     candidate.name != declaration.name
-                        && candidate.bases.iter().any(|base| base == &declaration.name)
+                        && candidate.has_class_base(&declaration.name)
                 })
                 .map(|candidate| candidate.name.clone())
                 .collect::<Vec<_>>();
@@ -839,10 +839,7 @@ fn semantic_declaration_fact(
             .as_ref()
             .map(summary_import_target_from_semantics)
             .or_else(|| declaration.import_target().map(summary_import_target_from_bound)),
-        bases: declaration
-            .class_bases()
-            .map(|bases| bases.to_vec())
-            .unwrap_or_else(|| declaration.bases.clone()),
+        bases: declaration.rendered_class_bases(),
     }
 }
 
