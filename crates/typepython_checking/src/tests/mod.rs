@@ -1,8 +1,3 @@
-pub(super) use super::{
-    check, check_with_binding_metadata, check_with_options, check_with_source_overrides,
-    semantic_incremental_state_with_binding_metadata,
-    semantic_incremental_state_with_reused_summaries,
-};
 pub(super) use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -11,13 +6,199 @@ pub(super) use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 pub(super) use typepython_binding::{
-    Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind, bind,
+    bind, BindingTable, BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration,
+    DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,
 };
 pub(super) use typepython_config::{DiagnosticLevel, ImportFallback};
-pub(super) use typepython_graph::{ModuleGraph, ModuleNode, build};
-pub(super) use typepython_syntax::{ParseOptions, SourceFile, SourceKind, parse_with_options};
+pub(super) use typepython_graph::{build, ModuleGraph, ModuleNode};
+use typepython_incremental::{IncrementalState, PublicSummary, SnapshotMetadata};
+pub(super) use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
 
 pub(super) static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
+
+fn normalized_test_metadata(declaration: &Declaration) -> DeclarationMetadata {
+    if !matches!(declaration.metadata, DeclarationMetadata::None) {
+        return declaration.metadata.clone();
+    }
+
+    match declaration.kind {
+        DeclarationKind::TypeAlias => {
+            if declaration.legacy_detail.is_empty() {
+                DeclarationMetadata::None
+            } else {
+                DeclarationMetadata::TypeAlias {
+                    value: BoundTypeExpr::new(&declaration.legacy_detail),
+                }
+            }
+        }
+        DeclarationKind::Function | DeclarationKind::Overload => {
+            super::parse_direct_callable_declaration(&declaration.legacy_detail)
+                .map(|callable| DeclarationMetadata::Callable {
+                    signature: BoundCallableSignature {
+                        params: callable.params,
+                        returns: callable.return_annotation_text.map(BoundTypeExpr::new),
+                    },
+                })
+                .unwrap_or(DeclarationMetadata::None)
+        }
+        DeclarationKind::Value => DeclarationMetadata::Value {
+            annotation: (!declaration.legacy_detail.is_empty())
+                .then(|| BoundTypeExpr::new(&declaration.legacy_detail)),
+        },
+        DeclarationKind::Import => {
+            if declaration.legacy_detail.is_empty() {
+                DeclarationMetadata::None
+            } else {
+                DeclarationMetadata::Import {
+                    target: BoundImportTarget::new(&declaration.legacy_detail),
+                }
+            }
+        }
+        DeclarationKind::Class => {
+            if declaration.bases.is_empty() {
+                DeclarationMetadata::None
+            } else {
+                DeclarationMetadata::Class { bases: declaration.bases.clone() }
+            }
+        }
+    }
+}
+
+pub(super) fn normalize_test_declaration(declaration: &Declaration) -> Declaration {
+    let mut normalized = declaration.clone();
+    normalized.metadata = normalized_test_metadata(&normalized);
+    normalized
+}
+
+pub(super) fn normalize_test_graph(graph: &ModuleGraph) -> ModuleGraph {
+    let mut normalized = graph.clone();
+    for node in &mut normalized.nodes {
+        node.declarations = node.declarations.iter().map(normalize_test_declaration).collect();
+    }
+    normalized
+}
+
+pub(super) fn check(graph: &ModuleGraph) -> crate::CheckResult {
+    super::check(&normalize_test_graph(graph))
+}
+
+pub(super) fn check_with_options(
+    graph: &ModuleGraph,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+) -> crate::CheckResult {
+    super::check_with_options(
+        &normalize_test_graph(graph),
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test wrapper mirrors the public checker option surface"
+)]
+pub(super) fn check_with_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> crate::CheckResult {
+    super::check_with_binding_metadata(
+        &normalize_test_graph(graph),
+        bindings,
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test wrapper mirrors the public checker option surface"
+)]
+pub(super) fn check_with_source_overrides(
+    graph: &ModuleGraph,
+    require_explicit_overrides: bool,
+    enable_sealed_exhaustiveness: bool,
+    report_deprecated: DiagnosticLevel,
+    strict: bool,
+    warn_unsafe: bool,
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+) -> crate::CheckResult {
+    super::check_with_source_overrides(
+        &normalize_test_graph(graph),
+        require_explicit_overrides,
+        enable_sealed_exhaustiveness,
+        report_deprecated,
+        strict,
+        warn_unsafe,
+        import_fallback,
+        source_overrides,
+    )
+}
+
+pub(super) fn semantic_incremental_state_with_binding_metadata(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
+) -> IncrementalState {
+    super::semantic_incremental_state_with_binding_metadata(
+        &normalize_test_graph(graph),
+        bindings,
+        import_fallback,
+        source_overrides,
+        stdlib_snapshot,
+        metadata,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "test wrapper mirrors the public incremental summary surface"
+)]
+pub(super) fn semantic_incremental_state_with_reused_summaries(
+    graph: &ModuleGraph,
+    bindings: &[BindingTable],
+    import_fallback: ImportFallback,
+    source_overrides: Option<&BTreeMap<String, String>>,
+    previous_summaries: &[PublicSummary],
+    summary_rebuild_modules: &BTreeSet<String>,
+    stdlib_snapshot: Option<String>,
+    metadata: SnapshotMetadata,
+) -> IncrementalState {
+    super::semantic_incremental_state_with_reused_summaries(
+        &normalize_test_graph(graph),
+        bindings,
+        import_fallback,
+        source_overrides,
+        previous_summaries,
+        summary_rebuild_modules,
+        stdlib_snapshot,
+        metadata,
+    )
+}
 
 pub(super) fn create_temp_typepython_root() -> PathBuf {
     let temp_dir = std::env::temp_dir();
@@ -1125,8 +1306,18 @@ fn production_semantic_paths_do_not_read_legacy_detail_directly() {
                 .lines()
                 .enumerate()
                 .filter_map(|(index, line)| {
-                    line.contains(".legacy_detail")
-                        .then(|| format!("{}:{}", path.display(), index + 1))
+                    [
+                        ".legacy_detail",
+                        ".rendered_detail(",
+                        ".callable_signature_text(",
+                        ".type_alias_body_text(",
+                        ".value_annotation_text(",
+                        ".import_raw_target_text(",
+                        ".import_module_target_text(",
+                    ]
+                    .iter()
+                    .find(|pattern| line.contains(**pattern))
+                    .map(|pattern| format!("{}:{}:{}", path.display(), index + 1, pattern))
                 })
                 .collect::<Vec<_>>();
             (!matches.is_empty()).then_some(matches)
@@ -1136,8 +1327,8 @@ fn production_semantic_paths_do_not_read_legacy_detail_directly() {
 
     assert!(
         offenders.is_empty(),
-        "checking/incremental production code should use structured accessors instead of \
-         `.legacy_detail`: {offenders:?}"
+        "checking/incremental production code should use structured semantic inputs instead of \
+         legacy-text fallback accessors: {offenders:?}"
     );
 }
 
