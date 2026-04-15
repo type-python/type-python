@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use typepython_binding::{
-    BindingTable, Declaration, DeclarationKind, DeclarationOwnerKind, ModuleSurfaceFacts,
+    BindingTable, BoundCallableSignature, Declaration, DeclarationKind, DeclarationMetadata,
+    DeclarationOwnerKind, ModuleSurfaceFacts,
 };
 use typepython_graph::build;
+use typepython_syntax::FunctionParam;
 use typepython_syntax::SourceKind;
 
 fn make_binding(index: usize, package: &str) -> BindingTable {
@@ -15,10 +17,23 @@ fn make_binding(index: usize, package: &str) -> BindingTable {
         surface_facts: ModuleSurfaceFacts::default(),
         declarations: vec![
             Declaration {
-                metadata: Default::default(),
+                metadata: DeclarationMetadata::Callable {
+                    signature: BoundCallableSignature::from_function_parts(
+                        &[FunctionParam {
+                            name: String::from("x"),
+                            annotation: Some(String::from("int")),
+                            annotation_expr: typepython_syntax::TypeExpr::parse("int"),
+                            has_default: false,
+                            positional_only: false,
+                            keyword_only: false,
+                            variadic: false,
+                            keyword_variadic: false,
+                        }],
+                        Some("int"),
+                    ),
+                },
                 name: format!("Func{index}"),
                 kind: DeclarationKind::Function,
-                legacy_detail: String::from("(x: int) -> int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -38,7 +53,6 @@ fn make_binding(index: usize, package: &str) -> BindingTable {
                 metadata: Default::default(),
                 name: format!("Model{index}"),
                 kind: DeclarationKind::Class,
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),

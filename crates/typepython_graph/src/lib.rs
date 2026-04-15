@@ -225,7 +225,6 @@ fn package_child_import_declaration(name: &str, module_key: &str) -> Declaration
         },
         name: name.to_owned(),
         kind: DeclarationKind::Import,
-        legacy_detail: module_key.to_owned(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -545,12 +544,11 @@ fn collections_abc_prelude_node() -> ModuleNode {
     }
 }
 
-fn prelude_type_alias(name: &str, legacy_detail: &str) -> Declaration {
+fn prelude_type_alias(name: &str, value_text: &str) -> Declaration {
     Declaration {
-        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(legacy_detail) },
+        metadata: DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(value_text) },
         name: String::from(name),
         kind: DeclarationKind::TypeAlias,
-        legacy_detail: String::from(legacy_detail),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -578,7 +576,6 @@ fn prelude_function(
         metadata: DeclarationMetadata::Callable { signature: signature.clone() },
         name: String::from(name),
         kind: DeclarationKind::Function,
-        legacy_detail: signature.rendered(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -601,7 +598,6 @@ fn prelude_value(name: &str, annotation: &str) -> Declaration {
         metadata: DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new(annotation)) },
         name: String::from(name),
         kind: DeclarationKind::Value,
-        legacy_detail: String::from(annotation),
         value_type_expr: Some(BoundTypeExpr::new(annotation)),
         method_kind: None,
         class_kind: None,
@@ -624,7 +620,6 @@ fn prelude_protocol_class(name: &str) -> Declaration {
         metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -647,7 +642,6 @@ fn prelude_class(name: &str) -> Declaration {
         metadata: DeclarationMetadata::Class { bases: Vec::new() },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Class),
@@ -676,7 +670,6 @@ fn prelude_protocol_class_with_methods(
         },
         name: String::from(name),
         kind: DeclarationKind::Class,
-        legacy_detail: bases.join(","),
         value_type_expr: None,
         method_kind: None,
         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -699,7 +692,6 @@ fn prelude_protocol_class_with_methods(
             metadata: DeclarationMetadata::Callable { signature: signature.clone() },
             name: String::from(*method_name),
             kind: DeclarationKind::Function,
-            legacy_detail: signature.rendered(),
             value_type_expr: None,
             method_kind: Some(MethodKind::Instance),
             class_kind: None,
@@ -754,10 +746,77 @@ mod tests {
     use super::build;
     use std::path::PathBuf;
     use typepython_binding::{
-        BindingTable, Declaration, DeclarationKind, DeclarationOwner, DeclarationOwnerKind,
-        ModuleSurfaceFacts,
+        BindingTable, BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration,
+        DeclarationKind, DeclarationMetadata, DeclarationOwner, DeclarationOwnerKind,
+        GenericTypeParam, ModuleSurfaceFacts,
     };
-    use typepython_syntax::SourceKind;
+    use typepython_syntax::{DirectFunctionParamSite, SourceKind, TypeExpr};
+
+    fn function_param(name: &str, annotation: &str) -> DirectFunctionParamSite {
+        DirectFunctionParamSite {
+            name: String::from(name),
+            annotation: Some(String::from(annotation)),
+            annotation_expr: TypeExpr::parse(annotation),
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        }
+    }
+
+    fn function_declaration(
+        name: &str,
+        params: Vec<DirectFunctionParamSite>,
+        returns: &str,
+        type_params: Vec<GenericTypeParam>,
+    ) -> Declaration {
+        let signature =
+            BoundCallableSignature { params, returns: Some(BoundTypeExpr::new(returns)) };
+        Declaration {
+            metadata: DeclarationMetadata::Callable { signature: signature.clone() },
+            name: String::from(name),
+            kind: DeclarationKind::Function,
+            value_type_expr: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params,
+        }
+    }
+
+    fn value_declaration(name: &str, value_type: &str) -> Declaration {
+        Declaration {
+            metadata: DeclarationMetadata::Value {
+                annotation: Some(BoundTypeExpr::new(value_type)),
+            },
+            name: String::from(name),
+            kind: DeclarationKind::Value,
+            value_type_expr: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params: Vec::new(),
+        }
+    }
 
     #[test]
     fn build_carries_bound_symbols_into_module_nodes() {
@@ -771,7 +830,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -791,7 +849,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -830,7 +887,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -850,7 +906,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -881,7 +936,6 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("UserId"),
                 kind: DeclarationKind::TypeAlias,
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -921,7 +975,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -941,7 +994,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -1088,26 +1140,12 @@ mod tests {
             module_key: String::from("pkg.sub.module"),
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("greet"),
-                kind: DeclarationKind::Function,
-                legacy_detail: String::from("(name:str)->str"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![function_declaration(
+                "greet",
+                vec![function_param("name", "str")],
+                "str",
+                Vec::new(),
+            )],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1140,13 +1178,13 @@ mod tests {
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.legacy_detail == "pkg.sub"));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub")));
         assert!(sub
             .declarations
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "module"
-                && declaration.legacy_detail == "pkg.sub.module"));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.sub.module")));
     }
 
     #[test]
@@ -1156,26 +1194,12 @@ mod tests {
             module_key: String::from("pkg.sub.module"),
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("greet"),
-                kind: DeclarationKind::Function,
-                legacy_detail: String::from("(name:str)->str"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![function_declaration(
+                "greet",
+                vec![function_param("name", "str")],
+                "str",
+                Vec::new(),
+            )],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1196,46 +1220,13 @@ mod tests {
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
             declarations: vec![
-                Declaration {
-                    metadata: Default::default(),
-                    name: String::from("greet"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from("(name:str)->str"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                },
-                Declaration {
-                    metadata: Default::default(),
-                    name: String::from("version"),
-                    kind: DeclarationKind::Value,
-                    legacy_detail: String::from("str"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                },
+                function_declaration(
+                    "greet",
+                    vec![function_param("name", "str")],
+                    "str",
+                    Vec::new(),
+                ),
+                value_declaration("version", "str"),
             ],
             calls: Vec::new(),
             method_calls: Vec::new(),
@@ -1291,7 +1282,6 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("List"),
                 kind: DeclarationKind::Class,
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1337,7 +1327,6 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("Protocol"),
                 kind: DeclarationKind::Class,
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1384,7 +1373,6 @@ mod tests {
                 metadata: Default::default(),
                 name: String::from("Iterable"),
                 kind: DeclarationKind::Class,
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1427,26 +1415,7 @@ mod tests {
                 module_key: String::from("pkg.a"),
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
-                declarations: vec![Declaration {
-                    metadata: Default::default(),
-                    name: String::from("alpha"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from("()->None"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                }],
+                declarations: vec![function_declaration("alpha", Vec::new(), "None", Vec::new())],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -1466,26 +1435,7 @@ mod tests {
                 module_key: String::from("pkg.b"),
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
-                declarations: vec![Declaration {
-                    metadata: Default::default(),
-                    name: String::from("beta"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from("()->None"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                }],
+                declarations: vec![function_declaration("beta", Vec::new(), "None", Vec::new())],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -1513,13 +1463,13 @@ mod tests {
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "a"
-                && declaration.legacy_detail == "pkg.a"));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.a")));
         assert!(pkg
             .declarations
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.legacy_detail == "pkg.b"));
+                && declaration.import_raw_target_text().as_deref() == Some("pkg.b")));
     }
 
     #[test]
@@ -1529,26 +1479,7 @@ mod tests {
             module_key: String::from("a.b.c.d"),
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("deep"),
-                kind: DeclarationKind::Function,
-                legacy_detail: String::from("()->None"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![function_declaration("deep", Vec::new(), "None", Vec::new())],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1589,19 +1520,19 @@ mod tests {
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "b"
-                && declaration.legacy_detail == "a.b"));
+                && declaration.import_raw_target_text().as_deref() == Some("a.b")));
         assert!(ab
             .declarations
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "c"
-                && declaration.legacy_detail == "a.b.c"));
+                && declaration.import_raw_target_text().as_deref() == Some("a.b.c")));
         assert!(abc
             .declarations
             .iter()
             .any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "d"
-                && declaration.legacy_detail == "a.b.c.d"));
+                && declaration.import_raw_target_text().as_deref() == Some("a.b.c.d")));
     }
 
     #[test]
@@ -1612,26 +1543,12 @@ mod tests {
                 module_key: String::from("app"),
                 module_kind: SourceKind::TypePython,
                 surface_facts: ModuleSurfaceFacts::default(),
-                declarations: vec![Declaration {
-                    metadata: Default::default(),
-                    name: String::from("init_app"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from("()->None"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                }],
+                declarations: vec![function_declaration(
+                    "init_app",
+                    Vec::new(),
+                    "None",
+                    Vec::new(),
+                )],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -1651,26 +1568,7 @@ mod tests {
                 module_key: String::from("app.sub"),
                 module_kind: SourceKind::Python,
                 surface_facts: ModuleSurfaceFacts::default(),
-                declarations: vec![Declaration {
-                    metadata: Default::default(),
-                    name: String::from("helper"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from("()->None"),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
-                }],
+                declarations: vec![function_declaration("helper", Vec::new(), "None", Vec::new())],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
                 member_accesses: Vec::new(),
@@ -1697,7 +1595,7 @@ mod tests {
         assert!(
             app.declarations.iter().any(|declaration| declaration.kind == DeclarationKind::Import
                 && declaration.name == "sub"
-                && declaration.legacy_detail == "app.sub"),
+                && declaration.import_raw_target_text().as_deref() == Some("app.sub")),
             "child import for sub should be added"
         );
     }
@@ -1709,26 +1607,7 @@ mod tests {
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("run"),
-                kind: DeclarationKind::Function,
-                legacy_detail: String::from("()->None"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![function_declaration("run", Vec::new(), "None", Vec::new())],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1762,26 +1641,7 @@ mod tests {
             module_key: String::from("alpha"),
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("x"),
-                kind: DeclarationKind::Value,
-                legacy_detail: String::from("int"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![value_declaration("x", "int")],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1801,26 +1661,7 @@ mod tests {
             module_key: String::from("beta"),
             module_kind: SourceKind::Python,
             surface_facts: ModuleSurfaceFacts::default(),
-            declarations: vec![Declaration {
-                metadata: Default::default(),
-                name: String::from("x"),
-                kind: DeclarationKind::Value,
-                legacy_detail: String::from("int"),
-                value_type_expr: None,
-                method_kind: None,
-                class_kind: None,
-                owner: None,
-                is_async: false,
-                is_override: false,
-                is_abstract_method: false,
-                is_final_decorator: false,
-                is_deprecated: false,
-                deprecation_message: None,
-                is_final: false,
-                is_class_var: false,
-                bases: Vec::new(),
-                type_params: Vec::new(),
-            }],
+            declarations: vec![value_declaration("x", "int")],
             calls: Vec::new(),
             method_calls: Vec::new(),
             member_accesses: Vec::new(),
@@ -1862,7 +1703,6 @@ mod tests {
                     metadata: Default::default(),
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -1879,10 +1719,11 @@ mod tests {
                     type_params: Vec::new(),
                 },
                 Declaration {
-                    metadata: Default::default(),
+                    metadata: DeclarationMetadata::Value {
+                        annotation: Some(BoundTypeExpr::new("str")),
+                    },
                     name: String::from("name"),
                     kind: DeclarationKind::Value,
-                    legacy_detail: String::from("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,

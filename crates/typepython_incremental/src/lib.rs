@@ -889,7 +889,6 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("Expr"),
                         kind: DeclarationKind::Class,
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::SealedClass),
@@ -915,7 +914,6 @@ mod tests {
                         metadata: Default::default(),
                         name: String::from("Add"),
                         kind: DeclarationKind::Class,
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -1390,10 +1388,11 @@ mod tests {
                 module_key: String::from("pkg"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![Declaration {
-                    metadata: Default::default(),
                     name: String::from("VERSION"),
                     kind: DeclarationKind::Value,
-                    legacy_detail: String::from("1.0"),
+                    metadata: DeclarationMetadata::Value {
+                        annotation: Some(BoundTypeExpr::new("1.0")),
+                    },
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1727,18 +1726,17 @@ mod tests {
         }
     }
 
-    fn import_declaration(name: &str, legacy_detail: &str) -> Declaration {
+    fn import_declaration(name: &str, target: &str) -> Declaration {
         Declaration {
             metadata: DeclarationMetadata::Import {
                 target: BoundImportTarget {
-                    raw_target: String::from(legacy_detail),
-                    module_target: String::from(legacy_detail),
+                    raw_target: String::from(target),
+                    module_target: String::from(target),
                     symbol_target: None,
                 },
             },
             name: String::from(name),
             kind: DeclarationKind::Import,
-            legacy_detail: String::from(legacy_detail),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -1763,7 +1761,6 @@ mod tests {
             },
             name: String::from(name),
             kind: DeclarationKind::Value,
-            legacy_detail: String::from(value_type),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -1806,7 +1803,6 @@ mod tests {
             metadata: DeclarationMetadata::Callable { signature: signature.clone() },
             name: String::from(name),
             kind: DeclarationKind::Function,
-            legacy_detail: signature.rendered(),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,

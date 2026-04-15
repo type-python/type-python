@@ -8,11 +8,10 @@ fn check_accepts_overload_sets_with_one_implementation() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -28,11 +27,10 @@ fn check_accepts_overload_sets_with_one_implementation() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -48,11 +46,10 @@ fn check_accepts_overload_sets_with_one_implementation() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -97,11 +94,10 @@ fn check_reports_overloads_without_concrete_implementation() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -117,11 +113,10 @@ fn check_reports_overloads_without_concrete_implementation() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -168,11 +163,10 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -188,11 +182,10 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -208,11 +201,10 @@ fn check_reports_overloads_with_multiple_concrete_implementations() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -259,11 +251,10 @@ fn check_reports_ambiguous_overload_resolution() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->int"),
+                    metadata: callable_metadata("(value:int)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -279,11 +270,10 @@ fn check_reports_ambiguous_overload_resolution() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->str"),
+                    metadata: callable_metadata("(value:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -299,11 +289,10 @@ fn check_reports_ambiguous_overload_resolution() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->int"),
+                    metadata: callable_metadata("(value:int)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -375,11 +364,10 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->str"),
+                    metadata: callable_metadata("(value:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -395,11 +383,10 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:str)->int"),
+                    metadata: callable_metadata("(value:str)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -415,11 +402,10 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->int"),
+                    metadata: callable_metadata("(value:int)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -435,11 +421,10 @@ fn check_accepts_direct_overloaded_call_return_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -531,11 +516,10 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     module_key: String::from("pkg.util"),
                     module_kind: SourceKind::Stub,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("parse"),
                             kind: DeclarationKind::Overload,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(value:int)->str"),
+                            metadata: callable_metadata("(value:int)->str"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -551,11 +535,10 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("parse"),
                             kind: DeclarationKind::Overload,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(value:str)->int"),
+                            metadata: callable_metadata("(value:str)->int"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -592,11 +575,10 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                     module_key: String::from("app"),
                     module_kind: SourceKind::TypePython,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("parse"),
                             kind: DeclarationKind::Import,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("pkg.util.parse"),
+                            metadata: import_metadata("pkg.util.parse"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -612,11 +594,10 @@ fn check_accepts_imported_overloaded_call_assignment_type_match() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("result"),
                             kind: DeclarationKind::Value,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("str"),
+                            metadata: value_metadata("str"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -733,7 +714,7 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                     module_path: PathBuf::from("/tmp/helpers.pyi"),
                     module_key: String::from("helpers"),
                     module_kind: SourceKind::Stub,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("box_value"),
                         kind: DeclarationKind::Function,
                         metadata: typepython_binding::DeclarationMetadata::Callable {
@@ -753,7 +734,6 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                                 returns: Some(typepython_binding::BoundTypeExpr::new("list[int]")),
                             },
                         },
-                        legacy_detail: String::from("(value:int)->list[int]"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -788,13 +768,12 @@ fn imported_module_method_return_semantic_type_stays_semantic() {
                     module_path: PathBuf::from("/tmp/app.tpy"),
                     module_key: String::from("app"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("helpers"),
                         kind: DeclarationKind::Import,
                         metadata: typepython_binding::DeclarationMetadata::Import {
                             target: typepython_binding::BoundImportTarget::new("helpers"),
                         },
-                        legacy_detail: String::from("helpers"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -887,11 +866,10 @@ fn overload_applicability_accepts_keyword_default_and_semantic_match() {
         ),
         line: 1,
     };
-    let declaration = Declaration {
-        metadata: Default::default(),
+    let declaration = declaration! {
+        metadata: callable_metadata("(value:Optional[int]=)->int"),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:Optional[int]=)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -928,11 +906,10 @@ fn overload_applicability_rejects_positional_only_keyword() {
         ),
         line: 1,
     };
-    let declaration = Declaration {
-        metadata: Default::default(),
+    let declaration = declaration! {
+        metadata: callable_metadata("(value:int,/)->int"),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:int,/)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -970,11 +947,10 @@ fn overload_applicability_accepts_variadic_arguments() {
         ),
         line: 1,
     };
-    let declaration = Declaration {
-        metadata: Default::default(),
+    let declaration = declaration! {
+        metadata: callable_metadata("(*args:int)->int"),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(*args:int)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1011,11 +987,10 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
         ),
         line: 1,
     };
-    let declaration = Declaration {
-        metadata: Default::default(),
+    let declaration = declaration! {
+        metadata: callable_metadata("(value:Base)->int"),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:Base)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1038,11 +1013,10 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
         module_key: String::new(),
         module_kind: SourceKind::TypePython,
         declarations: vec![
-            Declaration {
+            declaration! {
                 name: String::from("Base"),
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1058,11 +1032,10 @@ fn overload_applicability_accepts_nominal_subclass_arguments() {
                 bases: Vec::new(),
                 type_params: Vec::new(),
             },
-            Declaration {
+            declaration! {
                 name: String::from("Child"),
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1119,11 +1092,10 @@ fn overload_applicability_accepts_list_for_sequence_parameter() {
         ),
         line: 1,
     };
-    let declaration = Declaration {
-        metadata: Default::default(),
+    let declaration = declaration! {
+        metadata: callable_metadata("(value:Sequence[int])->int"),
         name: String::from("parse"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:Sequence[int])->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1227,11 +1199,10 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         keyword_expansion_values: Vec::new(),
         line: 1,
     };
-    let str_declaration = Declaration {
-        metadata: Default::default(),
+    let str_declaration = declaration! {
+        metadata: callable_metadata("(fn:Callable[[int],str])->str"),
         name: String::from("choose"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(fn:Callable[[int],str])->str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1248,9 +1219,8 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
         type_params: Vec::new(),
     };
     let str_declaration = normalize_test_declaration(&str_declaration);
-    let int_declaration = Declaration {
-        metadata: Default::default(),
-        legacy_detail: String::from("(fn:Callable[[int],int])->int"),
+    let int_declaration = declaration! {
+        metadata: callable_metadata("(fn:Callable[[int],int])->int"),
         ..str_declaration.clone()
     };
     let int_declaration = normalize_test_declaration(&int_declaration);
@@ -1261,11 +1231,10 @@ fn overload_applicability_uses_contextual_lambda_callable_types() {
 
 #[test]
 fn overload_specificity_uses_instantiated_generic_candidate() {
-    let generic_overload = Declaration {
-        metadata: Default::default(),
+    let generic_overload = declaration! {
+        metadata: callable_metadata("(value:T)->tuple[T]"),
         name: String::from("wrap"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:T)->tuple[T]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1288,11 +1257,10 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
         }],
     };
     let generic_overload = normalize_test_declaration(&generic_overload);
-    let object_overload = Declaration {
-        metadata: Default::default(),
+    let object_overload = declaration! {
+        metadata: callable_metadata("(value:object)->tuple[object]"),
         name: String::from("wrap"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(value:object)->tuple[object]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1367,11 +1335,10 @@ fn overload_specificity_uses_instantiated_generic_candidate() {
 
 #[test]
 fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(value:int)->tuple[int, str]"),
         name: String::from("build_pair"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(value:int)->tuple[int, str]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1388,11 +1355,10 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         type_params: Vec::new(),
     };
     let function = normalize_test_declaration(&function);
-    let alias = Declaration {
-        metadata: Default::default(),
+    let alias = declaration! {
+        metadata: type_alias_metadata("tuple[int, str]"),
         name: String::from("Pair"),
         kind: DeclarationKind::TypeAlias,
-        legacy_detail: String::from("tuple[int, str]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1409,11 +1375,10 @@ fn declaration_semantic_facts_use_shared_cache_and_typestore_ids() {
         type_params: Vec::new(),
     };
     let alias = normalize_test_declaration(&alias);
-    let value = Declaration {
-        metadata: Default::default(),
+    let value = declaration! {
+        metadata: value_metadata("tuple[int, str]"),
         name: String::from("pair"),
         kind: DeclarationKind::Value,
-        legacy_detail: String::from("tuple[int, str]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1459,13 +1424,12 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         args: vec![typepython_syntax::TypeExpr::Name(String::from("int"))],
     };
 
-    let value = Declaration {
+    let value = declaration! {
         metadata: typepython_binding::DeclarationMetadata::Value {
             annotation: Some(typepython_binding::BoundTypeExpr::from_expr(list_of_int.clone())),
         },
         name: String::from("items"),
         kind: DeclarationKind::Value,
-        legacy_detail: String::from("str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1487,7 +1451,7 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         Some(String::from("list[int]")),
     );
 
-    let alias = Declaration {
+    let alias = declaration! {
         metadata: typepython_binding::DeclarationMetadata::TypeAlias {
             value: typepython_binding::BoundTypeExpr::from_expr(
                 typepython_syntax::TypeExpr::Union {
@@ -1501,7 +1465,6 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         },
         name: String::from("MaybeInt"),
         kind: DeclarationKind::TypeAlias,
-        legacy_detail: String::from("str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1523,7 +1486,7 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         Some(String::from("Union[int, None]")),
     );
 
-    let function = Declaration {
+    let function = declaration! {
         metadata: typepython_binding::DeclarationMetadata::Callable {
             signature: typepython_binding::BoundCallableSignature {
                 params: vec![typepython_syntax::DirectFunctionParamSite {
@@ -1541,7 +1504,6 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         },
         name: String::from("build"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(value:str)->str"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1567,13 +1529,12 @@ fn declaration_semantics_prefer_structured_metadata_over_legacy_detail_text() {
         Some(String::from("tuple[int]")),
     );
 
-    let import = Declaration {
+    let import = declaration! {
         metadata: typepython_binding::DeclarationMetadata::Import {
             target: typepython_binding::BoundImportTarget::new("pkg.sub.Symbol"),
         },
         name: String::from("Symbol"),
         kind: DeclarationKind::Import,
-        legacy_detail: String::from("wrong.target"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1617,11 +1578,10 @@ fn resolved_direct_call_candidate_carries_signature_return_and_substitutions() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(value:T)->list[T]"),
         name: String::from("box_value"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(value:T)->list[T]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -1754,11 +1714,10 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                 module_key: String::from("pkg.util"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -1774,11 +1733,10 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,value:int)->int"),
+                        metadata: callable_metadata("(self,value:int)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -1797,11 +1755,10 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,value:str)->str"),
+                        metadata: callable_metadata("(self,value:str)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -1841,11 +1798,10 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                 module_key: String::from("app"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("User"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.util.User"),
+                        metadata: import_metadata("pkg.util.User"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -1861,11 +1817,10 @@ fn check_accepts_stub_overloaded_method_keyword_calls() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("user"),
                         kind: DeclarationKind::Value,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("User"),
+                        metadata: value_metadata("User"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -1935,11 +1890,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                 module_key: String::from("pkg.util"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("User"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -1955,11 +1909,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,value:int)->int"),
+                        metadata: callable_metadata("(self,value:int)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -1978,11 +1931,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("parse"),
                         kind: DeclarationKind::Overload,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,value:str)->str"),
+                        metadata: callable_metadata("(self,value:str)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -2022,11 +1974,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                 module_key: String::from("app"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("User"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.util.User"),
+                        metadata: import_metadata("pkg.util.User"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -2042,11 +1993,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("user"),
                         kind: DeclarationKind::Value,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("User"),
+                        metadata: value_metadata("User"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -2062,11 +2012,10 @@ fn check_accepts_stub_overloaded_method_return_type() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("value"),
                         kind: DeclarationKind::Value,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("str"),
+                        metadata: value_metadata("str"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -2172,11 +2121,10 @@ fn check_accepts_generic_method_overload_specificity() {
                     module_key: String::from("pkg.util"),
                     module_kind: SourceKind::Stub,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("User"),
                             kind: DeclarationKind::Class,
                             metadata: Default::default(),
-                            legacy_detail: String::new(),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
@@ -2192,11 +2140,10 @@ fn check_accepts_generic_method_overload_specificity() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("parse"),
                             kind: DeclarationKind::Overload,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(self,value:T)->tuple[T]"),
+                            metadata: callable_metadata("(self,value:T)->tuple[T]"),
                             value_type_expr: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
@@ -2221,11 +2168,10 @@ fn check_accepts_generic_method_overload_specificity() {
                                 default_expr: None,
                             }],
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("parse"),
                             kind: DeclarationKind::Overload,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(self,value:object)->tuple[object]"),
+                            metadata: callable_metadata("(self,value:object)->tuple[object]"),
                             value_type_expr: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
@@ -2265,11 +2211,10 @@ fn check_accepts_generic_method_overload_specificity() {
                     module_key: String::from("app"),
                     module_kind: SourceKind::TypePython,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("User"),
                             kind: DeclarationKind::Import,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("pkg.util.User"),
+                            metadata: import_metadata("pkg.util.User"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -2285,11 +2230,10 @@ fn check_accepts_generic_method_overload_specificity() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("user"),
                             kind: DeclarationKind::Value,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("User"),
+                            metadata: value_metadata("User"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -2305,11 +2249,10 @@ fn check_accepts_generic_method_overload_specificity() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("result"),
                             kind: DeclarationKind::Value,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("tuple[int]"),
+                            metadata: value_metadata("tuple[int]"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -2410,11 +2353,10 @@ fn check_accepts_imported_defaulted_function_call() {
                     module_path: PathBuf::from("/tmp/lib.pyi"),
                     module_key: String::from("lib"),
                     module_kind: SourceKind::Stub,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("f"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(x:int,y:int=)->None"),
+                        metadata: callable_metadata("(x:int,y:int=)->None"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -2449,11 +2391,10 @@ fn check_accepts_imported_defaulted_function_call() {
                     module_path: PathBuf::from("/tmp/app.tpy"),
                     module_key: String::from("app"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("f"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("lib.f"),
+                        metadata: import_metadata("lib.f"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -2513,11 +2454,10 @@ fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
             module_key: String::new(),
             module_kind: SourceKind::Stub,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2533,11 +2473,10 @@ fn check_accepts_stub_only_overload_sets_in_pyi_modules() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2582,11 +2521,10 @@ fn check_reports_duplicate_interface_members() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2602,11 +2540,10 @@ fn check_reports_duplicate_interface_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2625,11 +2562,10 @@ fn check_reports_duplicate_interface_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2680,11 +2616,10 @@ fn check_accepts_class_method_overload_group() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Parser"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2700,11 +2635,10 @@ fn check_accepts_class_method_overload_group() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Overload,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2723,11 +2657,10 @@ fn check_accepts_class_method_overload_group() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2775,11 +2708,10 @@ fn check_reports_final_reassignment_in_module_scope() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2795,11 +2727,10 @@ fn check_reports_final_reassignment_in_module_scope() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("MAX_SIZE"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2857,11 +2788,10 @@ fn check_reports_final_reassignment_in_class_scope() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -2877,11 +2807,10 @@ fn check_reports_final_reassignment_in_class_scope() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2900,11 +2829,10 @@ fn check_reports_final_reassignment_in_class_scope() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -2988,11 +2916,10 @@ fn check_reports_overriding_base_final_member() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3008,11 +2935,10 @@ fn check_reports_overriding_base_final_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3031,11 +2957,10 @@ fn check_reports_overriding_base_final_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Derived"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3051,11 +2976,10 @@ fn check_reports_overriding_base_final_member() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("limit"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3105,11 +3029,10 @@ fn check_reports_subclassing_final_class() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3125,11 +3048,10 @@ fn check_reports_subclassing_final_class() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3213,11 +3135,10 @@ fn check_reports_subclassing_imported_final_class() {
                 module_path: PathBuf::from("src/app/base.py"),
                 module_key: String::from("app.base"),
                 module_kind: SourceKind::Python,
-                declarations: vec![Declaration {
+                declarations: vec![declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3253,11 +3174,10 @@ fn check_reports_subclassing_imported_final_class() {
                 module_key: String::from("app.child"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("app.base.Base"),
+                        metadata: import_metadata("app.base.Base"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -3273,11 +3193,10 @@ fn check_reports_subclassing_imported_final_class() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Base"),
+                        metadata: class_metadata(&["Base"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -3325,11 +3244,10 @@ fn check_reports_overriding_final_method() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3345,11 +3263,10 @@ fn check_reports_overriding_final_method() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3368,11 +3285,10 @@ fn check_reports_overriding_final_method() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3388,11 +3304,10 @@ fn check_reports_overriding_final_method() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3478,11 +3393,10 @@ fn check_reports_missing_interface_members() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -3498,11 +3412,10 @@ fn check_reports_missing_interface_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3521,11 +3434,10 @@ fn check_reports_missing_interface_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Widget"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3572,11 +3484,10 @@ fn check_reports_incompatible_interface_member_signature() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -3592,11 +3503,10 @@ fn check_reports_incompatible_interface_member_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->int"),
+                    metadata: callable_metadata("(self)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3615,11 +3525,10 @@ fn check_reports_incompatible_interface_member_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Widget"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3635,11 +3544,10 @@ fn check_reports_incompatible_interface_member_signature() {
                     bases: vec![String::from("SupportsClose")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3726,11 +3634,10 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                 module_key: String::from("app.protocols"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -3746,11 +3653,10 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->int"),
+                        metadata: callable_metadata("(self)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -3790,11 +3696,10 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                 module_key: String::from("app.impl"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("SupportsClose"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("app.protocols.SupportsClose"),
+                        metadata: import_metadata("app.protocols.SupportsClose"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -3810,11 +3715,10 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Widget"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("SupportsClose"),
+                        metadata: class_metadata(&["SupportsClose"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -3830,11 +3734,10 @@ fn check_reports_incompatible_imported_interface_member_signature() {
                         bases: vec![String::from("SupportsClose")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("close"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->str"),
+                        metadata: callable_metadata("(self)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -3885,11 +3788,10 @@ fn check_reports_missing_abstract_base_members() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3905,11 +3807,10 @@ fn check_reports_missing_abstract_base_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -3928,11 +3829,10 @@ fn check_reports_missing_abstract_base_members() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3979,11 +3879,10 @@ fn check_reports_direct_instantiation_of_abstract_class() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -3999,11 +3898,10 @@ fn check_reports_direct_instantiation_of_abstract_class() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -4069,11 +3967,10 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                     module_key: String::from("app.base"),
                     module_kind: SourceKind::Python,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             metadata: Default::default(),
-                            legacy_detail: String::new(),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
@@ -4089,11 +3986,10 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(self)->None"),
+                            metadata: callable_metadata("(self)->None"),
                             value_type_expr: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
@@ -4132,11 +4028,10 @@ fn check_reports_direct_instantiation_of_imported_abstract_class() {
                     module_path: PathBuf::from("src/app/use.py"),
                     module_key: String::from("app.use"),
                     module_kind: SourceKind::Python,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("app.base.Base"),
+                        metadata: import_metadata("app.base.Base"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -4196,11 +4091,10 @@ fn check_reports_unresolved_same_project_imports() {
             module_path: PathBuf::from("src/app/use.py"),
             module_key: String::from("app.use"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("Missing"),
                 kind: DeclarationKind::Import,
-                metadata: Default::default(),
-                legacy_detail: String::from("app.missing.Missing"),
+                metadata: import_metadata("app.missing.Missing"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4346,11 +4240,10 @@ fn check_reports_direct_call_arity_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(x:int,y:int)->None"),
+                metadata: callable_metadata("(x:int,y:int)->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4409,11 +4302,10 @@ fn check_reports_direct_call_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(x:int,y:str)->None"),
+                metadata: callable_metadata("(x:int,y:str)->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4475,11 +4367,10 @@ fn check_reports_direct_return_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->int"),
+                metadata: callable_metadata("()->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4553,11 +4444,10 @@ fn check_reports_direct_bool_return_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->bool"),
+                metadata: callable_metadata("()->bool"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4631,11 +4521,10 @@ fn check_reports_direct_none_return_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->None"),
+                metadata: callable_metadata("()->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -4710,11 +4599,10 @@ fn check_accepts_direct_returned_call_result_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -4730,11 +4618,10 @@ fn check_accepts_direct_returned_call_result_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -4822,11 +4709,10 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -4842,11 +4728,10 @@ fn check_reports_direct_returned_call_result_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -4936,11 +4821,10 @@ fn check_accepts_direct_returned_constructor_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -4956,11 +4840,10 @@ fn check_accepts_direct_returned_constructor_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Box"),
+                    metadata: callable_metadata("()->Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5048,11 +4931,10 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -5068,11 +4950,10 @@ fn check_reports_direct_returned_constructor_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5161,11 +5042,10 @@ fn check_accepts_direct_returned_parameter_type_match() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:int)->int"),
+                metadata: callable_metadata("(value:int)->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -5237,11 +5117,10 @@ fn check_reports_direct_returned_parameter_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:str)->int"),
+                metadata: callable_metadata("(value:str)->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -5316,11 +5195,10 @@ fn check_accepts_direct_returned_member_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -5336,11 +5214,10 @@ fn check_accepts_direct_returned_member_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5359,11 +5236,10 @@ fn check_accepts_direct_returned_member_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->str"),
+                    metadata: callable_metadata("(box:Box)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5437,11 +5313,10 @@ fn check_reports_direct_returned_member_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -5457,11 +5332,10 @@ fn check_reports_direct_returned_member_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5480,11 +5354,10 @@ fn check_reports_direct_returned_member_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->int"),
+                    metadata: callable_metadata("(box:Box)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5560,11 +5433,10 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -5580,11 +5452,10 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5603,11 +5474,10 @@ fn check_accepts_direct_returned_constructor_member_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5681,11 +5551,10 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -5701,11 +5570,10 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5724,11 +5592,10 @@ fn check_reports_direct_returned_constructor_member_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5803,11 +5670,10 @@ fn check_reports_bool_annotated_assignment_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("flag"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("bool"),
+                metadata: value_metadata("bool"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -5888,11 +5754,10 @@ fn check_reports_none_annotated_assignment_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("missing"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("None"),
+                metadata: value_metadata("None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -5974,11 +5839,10 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -5994,11 +5858,10 @@ fn check_accepts_direct_call_annotated_assignment_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6079,11 +5942,10 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6099,11 +5961,10 @@ fn check_reports_direct_call_annotated_assignment_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6186,11 +6047,10 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("source"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6206,11 +6066,10 @@ fn check_accepts_direct_name_annotated_assignment_type_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("target"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6291,11 +6150,10 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -6311,11 +6169,10 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6334,11 +6191,10 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6354,11 +6210,10 @@ fn check_reports_direct_member_annotated_assignment_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("target"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6440,11 +6295,10 @@ fn check_reports_local_annotated_assignment_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:str)->None"),
+                metadata: callable_metadata("(value:str)->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -6527,11 +6381,10 @@ fn check_accepts_return_from_local_bare_assignment() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6547,11 +6400,10 @@ fn check_accepts_return_from_local_bare_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6680,11 +6532,10 @@ fn check_does_not_reuse_deleted_local_assignment_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->None"),
+                metadata: callable_metadata("()->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -6810,11 +6661,10 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6830,11 +6680,10 @@ fn check_reports_local_annotated_assignment_from_bare_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->None"),
+                    metadata: callable_metadata("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6956,11 +6805,10 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6976,11 +6824,10 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -6996,11 +6843,10 @@ fn check_accepts_module_level_bare_assignment_name_reference() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7136,11 +6982,10 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7156,11 +7001,10 @@ fn check_does_not_reuse_deleted_module_assignment_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7287,11 +7131,10 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7307,11 +7150,10 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7327,11 +7169,10 @@ fn check_reports_module_level_bare_assignment_name_reference_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7453,11 +7294,10 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7473,11 +7313,10 @@ fn check_accepts_local_chained_bare_assignments_for_annotated_target() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->None"),
+                    metadata: callable_metadata("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7634,11 +7473,10 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7654,11 +7492,10 @@ fn check_accepts_local_chained_bare_assignments_for_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7807,11 +7644,10 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("helper"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7827,11 +7663,10 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("x"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7847,11 +7682,10 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("y"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -7867,11 +7701,10 @@ fn check_reports_module_level_chained_bare_assignment_name_reference_mismatch() 
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -8030,11 +7863,10 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("count"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -8050,11 +7882,10 @@ fn check_accepts_builtin_return_types_in_assignments_and_returns() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("size"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -8937,11 +8768,10 @@ fn check_reports_builtin_return_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("name"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("str"),
+                metadata: value_metadata("str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -9023,11 +8853,10 @@ fn check_accepts_generic_alias_normalization() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("make_items"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->List[int]"),
+                    metadata: callable_metadata("()->List[int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9043,11 +8872,10 @@ fn check_accepts_generic_alias_normalization() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("list[int]"),
+                    metadata: value_metadata("list[int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9128,11 +8956,10 @@ fn check_accepts_callable_assignment_compatibility() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9148,11 +8975,10 @@ fn check_accepts_callable_assignment_compatibility() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(x:int)->str"),
+                    metadata: callable_metadata("(x:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9232,11 +9058,10 @@ fn check_accepts_annotated_type_equivalence() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Annotated[str, tag])->str"),
+                metadata: callable_metadata("(value:Annotated[str, tag])->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -9309,11 +9134,10 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9329,11 +9153,10 @@ fn check_reports_callable_assignment_compatibility_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(x:str)->str"),
+                    metadata: callable_metadata("(x:str)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9418,11 +9241,10 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[..., str]"),
+                    metadata: value_metadata("Callable[..., str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9438,11 +9260,10 @@ fn check_accepts_callable_ellipsis_assignment_compatibility() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(x:str,y:int)->str"),
+                    metadata: callable_metadata("(x:str,y:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9523,11 +9344,10 @@ fn check_reports_callable_ellipsis_return_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[..., int]"),
+                    metadata: value_metadata("Callable[..., int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9543,11 +9363,10 @@ fn check_reports_callable_ellipsis_return_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("my_func"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(x:str,y:int)->str"),
+                    metadata: callable_metadata("(x:str,y:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9632,11 +9451,10 @@ fn check_accepts_callable_assignment_from_bound_method() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -9652,11 +9470,10 @@ fn check_accepts_callable_assignment_from_bound_method() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int)->str"),
+                    metadata: callable_metadata("(self,x:int)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -9675,11 +9492,10 @@ fn check_accepts_callable_assignment_from_bound_method() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9695,11 +9511,10 @@ fn check_accepts_callable_assignment_from_bound_method() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9780,11 +9595,10 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -9800,11 +9614,10 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:str)->str"),
+                    metadata: callable_metadata("(self,x:str)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -9823,11 +9636,10 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9843,11 +9655,10 @@ fn check_reports_callable_assignment_from_bound_method_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9932,11 +9743,10 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -9952,11 +9762,10 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int)->str"),
+                    metadata: callable_metadata("(self,x:int)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -9975,11 +9784,10 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Box"),
+                    metadata: callable_metadata("()->Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -9995,11 +9803,10 @@ fn check_accepts_callable_assignment_from_bound_method_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10080,11 +9887,10 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -10100,11 +9906,10 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:str)->str"),
+                    metadata: callable_metadata("(self,x:str)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -10123,11 +9928,10 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Box"),
+                    metadata: callable_metadata("()->Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10143,11 +9947,10 @@ fn check_reports_callable_assignment_from_bound_method_through_instance_mismatch
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("handler"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Callable[[int], str]"),
+                    metadata: value_metadata("Callable[[int], str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10231,11 +10034,10 @@ fn check_accepts_builtin_container_generic_any_match() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("items"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("list[str]"),
+                metadata: value_metadata("list[str]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -10315,11 +10117,10 @@ fn check_accepts_any_optional_and_union_direct_matches() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("anything"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Any"),
+                    metadata: value_metadata("Any"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10335,11 +10136,10 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("maybe"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Optional[int]"),
+                    metadata: value_metadata("Optional[int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10355,11 +10155,10 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("choice"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Union[int, str]"),
+                    metadata: value_metadata("Union[int, str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10375,11 +10174,10 @@ fn check_accepts_any_optional_and_union_direct_matches() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("measure"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10564,11 +10362,10 @@ fn check_reports_optional_direct_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("name"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("Optional[str]"),
+                metadata: value_metadata("Optional[str]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -10650,11 +10447,10 @@ fn check_accepts_cast_builtin_return_type() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("text"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10670,11 +10466,10 @@ fn check_accepts_cast_builtin_return_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Any"),
+                    metadata: callable_metadata("()->Any"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10690,11 +10485,10 @@ fn check_accepts_cast_builtin_return_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("cast"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("typing.cast"),
+                    metadata: import_metadata("typing.cast"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10804,11 +10598,10 @@ fn check_accepts_typing_typevar_assignment() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("TypeVar"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("typing.TypeVar"),
+                    metadata: import_metadata("typing.TypeVar"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10824,11 +10617,10 @@ fn check_accepts_typing_typevar_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("T"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("TypeVar"),
+                    metadata: value_metadata("TypeVar"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -10924,11 +10716,10 @@ fn check_reports_typing_typevar_argument_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("TypeVar"),
                 kind: DeclarationKind::Import,
-                metadata: Default::default(),
-                legacy_detail: String::from("typing.TypeVar"),
+                metadata: import_metadata("typing.TypeVar"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -10994,11 +10785,10 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::Python,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("TypeVar"),
                             kind: DeclarationKind::Import,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("typing_extensions.TypeVar"),
+                            metadata: import_metadata("typing_extensions.TypeVar"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -11014,11 +10804,10 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("T"),
                             kind: DeclarationKind::Value,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("TypeVar"),
+                            metadata: value_metadata("TypeVar"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -11104,11 +10893,10 @@ fn check_accepts_typing_extensions_typevar_assignment() {
                     module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
                     module_key: String::from("typing_extensions"),
                     module_kind: SourceKind::Stub,
-                    declarations: vec![typepython_binding::Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("TypeVar"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(name:str)->TypeVar"),
+                        metadata: callable_metadata("(name:str)->TypeVar"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -11154,11 +10942,10 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("typing_extensions.Protocol"),
+                        metadata: import_metadata("typing_extensions.Protocol"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -11174,11 +10961,10 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Protocol"),
+                        metadata: class_metadata(&["Protocol"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -11194,11 +10980,10 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                         bases: vec![String::from("Protocol")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->str"),
+                        metadata: callable_metadata("(self)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11217,11 +11002,10 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("BadReader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Reader"),
+                        metadata: class_metadata(&["Reader"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -11257,11 +11041,10 @@ fn check_reports_typing_extensions_protocol_missing_member() {
                 module_path: std::path::PathBuf::from("<typing-extensions-prelude>"),
                 module_key: String::from("typing_extensions"),
                 module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
+                declarations: vec![declaration! {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -11309,11 +11092,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.AsyncIterator"),
+                        metadata: import_metadata("collections.abc.AsyncIterator"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -11329,11 +11111,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Stream"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("AsyncIterator"),
+                        metadata: class_metadata(&["AsyncIterator"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -11349,11 +11130,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: vec![String::from("AsyncIterator")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->AsyncIterator[Any]"),
+                        metadata: callable_metadata("(self)->AsyncIterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11372,11 +11152,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Awaitable[Any]"),
+                        metadata: callable_metadata("(self)->Awaitable[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11416,11 +11195,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("AsyncIterable"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -11436,11 +11214,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->AsyncIterator[Any]"),
+                        metadata: callable_metadata("(self)->AsyncIterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11459,11 +11236,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("AsyncIterable"),
+                        metadata: class_metadata(&["AsyncIterable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -11479,11 +11255,10 @@ fn check_accepts_collections_abc_async_iterator_base() {
                         bases: vec![String::from("AsyncIterable")],
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Awaitable[Any]"),
+                        metadata: callable_metadata("(self)->Awaitable[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11533,11 +11308,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.AsyncIterator"),
+                        metadata: import_metadata("collections.abc.AsyncIterator"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -11553,11 +11327,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("BadStream"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("AsyncIterator"),
+                        metadata: class_metadata(&["AsyncIterator"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -11573,11 +11346,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                         bases: vec![String::from("AsyncIterator")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->AsyncIterator[Any]"),
+                        metadata: callable_metadata("(self)->AsyncIterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11617,11 +11389,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("AsyncIterable"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -11637,11 +11408,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__aiter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->AsyncIterator[Any]"),
+                        metadata: callable_metadata("(self)->AsyncIterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11660,11 +11430,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("AsyncIterator"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("AsyncIterable"),
+                        metadata: class_metadata(&["AsyncIterable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -11680,11 +11449,10 @@ fn check_reports_collections_abc_async_iterator_missing_member() {
                         bases: vec![String::from("AsyncIterable")],
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__anext__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Awaitable[Any]"),
+                        metadata: callable_metadata("(self)->Awaitable[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11737,11 +11505,10 @@ fn check_accepts_newtype_assignment() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("NewType"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("typing.NewType"),
+                    metadata: import_metadata("typing.NewType"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -11757,11 +11524,10 @@ fn check_accepts_newtype_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("UserId"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("NewType"),
+                    metadata: value_metadata("NewType"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -11858,11 +11624,10 @@ fn check_reports_newtype_argument_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("NewType"),
                 kind: DeclarationKind::Import,
-                metadata: Default::default(),
-                legacy_detail: String::from("typing.NewType"),
+                metadata: import_metadata("typing.NewType"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -11928,11 +11693,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("typing.Protocol"),
+                        metadata: import_metadata("typing.Protocol"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -11948,11 +11712,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Protocol"),
+                        metadata: class_metadata(&["Protocol"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -11968,11 +11731,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                         bases: vec![String::from("Protocol")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->str"),
+                        metadata: callable_metadata("(self)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -11991,11 +11753,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("FileReader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Reader"),
+                        metadata: class_metadata(&["Reader"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12011,11 +11772,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                         bases: vec![String::from("Reader")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->str"),
+                        metadata: callable_metadata("(self)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12054,11 +11814,10 @@ fn check_accepts_protocol_derived_base_implementation() {
                 module_path: std::path::PathBuf::from("<typing-prelude>"),
                 module_key: String::from("typing"),
                 module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
+                declarations: vec![declaration! {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12104,11 +11863,10 @@ fn check_reports_protocol_derived_base_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Protocol"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("typing.Protocol"),
+                        metadata: import_metadata("typing.Protocol"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12124,11 +11882,10 @@ fn check_reports_protocol_derived_base_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Reader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Protocol"),
+                        metadata: class_metadata(&["Protocol"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12144,11 +11901,10 @@ fn check_reports_protocol_derived_base_missing_member() {
                         bases: vec![String::from("Protocol")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("read"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->str"),
+                        metadata: callable_metadata("(self)->str"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12167,11 +11923,10 @@ fn check_reports_protocol_derived_base_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("BadReader"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Reader"),
+                        metadata: class_metadata(&["Reader"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12207,11 +11962,10 @@ fn check_reports_protocol_derived_base_missing_member() {
                 module_path: std::path::PathBuf::from("<typing-prelude>"),
                 module_key: String::from("typing"),
                 module_kind: SourceKind::Stub,
-                declarations: vec![typepython_binding::Declaration {
+                declarations: vec![declaration! {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12259,11 +12013,10 @@ fn check_accepts_collections_abc_sized_base() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.Sized"),
+                        metadata: import_metadata("collections.abc.Sized"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12279,11 +12032,10 @@ fn check_accepts_collections_abc_sized_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Box"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Sized"),
+                        metadata: class_metadata(&["Sized"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12299,11 +12051,10 @@ fn check_accepts_collections_abc_sized_base() {
                         bases: vec![String::from("Sized")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->int"),
+                        metadata: callable_metadata("(self)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12343,11 +12094,10 @@ fn check_accepts_collections_abc_sized_base() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12363,11 +12113,10 @@ fn check_accepts_collections_abc_sized_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->int"),
+                        metadata: callable_metadata("(self)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12417,11 +12166,10 @@ fn check_reports_collections_abc_sized_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.Sized"),
+                        metadata: import_metadata("collections.abc.Sized"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12437,11 +12185,10 @@ fn check_reports_collections_abc_sized_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("BadBox"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Sized"),
+                        metadata: class_metadata(&["Sized"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12478,11 +12225,10 @@ fn check_reports_collections_abc_sized_missing_member() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12498,11 +12244,10 @@ fn check_reports_collections_abc_sized_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->int"),
+                        metadata: callable_metadata("(self)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12554,11 +12299,10 @@ fn check_accepts_collections_abc_callable_base() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Callable"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.Callable"),
+                        metadata: import_metadata("collections.abc.Callable"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12574,11 +12318,10 @@ fn check_accepts_collections_abc_callable_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Runner"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Callable"),
+                        metadata: class_metadata(&["Callable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12594,11 +12337,10 @@ fn check_accepts_collections_abc_callable_base() {
                         bases: vec![String::from("Callable")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__call__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Any"),
+                        metadata: callable_metadata("(self)->Any"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12638,11 +12380,10 @@ fn check_accepts_collections_abc_callable_base() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Callable"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12658,11 +12399,10 @@ fn check_accepts_collections_abc_callable_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__call__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Any"),
+                        metadata: callable_metadata("(self)->Any"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12712,11 +12452,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Iterator"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("collections.abc.Iterator"),
+                        metadata: import_metadata("collections.abc.Iterator"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12732,11 +12471,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Cursor"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Iterator"),
+                        metadata: class_metadata(&["Iterator"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12752,11 +12490,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: vec![String::from("Iterator")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__iter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Iterator[Any]"),
+                        metadata: callable_metadata("(self)->Iterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12796,11 +12533,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                 module_key: String::from("collections.abc"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Sized"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12816,11 +12552,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__len__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->int"),
+                        metadata: callable_metadata("(self)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12839,11 +12574,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Iterable"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Sized"),
+                        metadata: class_metadata(&["Sized"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12859,11 +12593,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: vec![String::from("Sized")],
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__iter__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Iterator[Any]"),
+                        metadata: callable_metadata("(self)->Iterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12882,11 +12615,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Iterator"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Iterable"),
+                        metadata: class_metadata(&["Iterable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -12902,11 +12634,10 @@ fn check_reports_collections_abc_iterator_missing_member() {
                         bases: vec![String::from("Iterable")],
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__next__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Any"),
+                        metadata: callable_metadata("(self)->Any"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -12958,11 +12689,10 @@ fn check_accepts_typing_awaitable_base() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("typing.Awaitable"),
+                        metadata: import_metadata("typing.Awaitable"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -12978,11 +12708,10 @@ fn check_accepts_typing_awaitable_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Job"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Awaitable"),
+                        metadata: class_metadata(&["Awaitable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -12998,11 +12727,10 @@ fn check_accepts_typing_awaitable_base() {
                         bases: vec![String::from("Awaitable")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Iterator[Any]"),
+                        metadata: callable_metadata("(self)->Iterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -13042,11 +12770,10 @@ fn check_accepts_typing_awaitable_base() {
                 module_key: String::from("typing"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -13062,11 +12789,10 @@ fn check_accepts_typing_awaitable_base() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Iterator[Any]"),
+                        metadata: callable_metadata("(self)->Iterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -13116,11 +12842,10 @@ fn check_reports_typing_awaitable_missing_member() {
                 module_key: String::from("app.module"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("typing.Awaitable"),
+                        metadata: import_metadata("typing.Awaitable"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -13136,11 +12861,10 @@ fn check_reports_typing_awaitable_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("BadJob"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Awaitable"),
+                        metadata: class_metadata(&["Awaitable"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -13177,11 +12901,10 @@ fn check_reports_typing_awaitable_missing_member() {
                 module_key: String::from("typing"),
                 module_kind: SourceKind::Stub,
                 declarations: vec![
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("Awaitable"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Interface),
@@ -13197,11 +12920,10 @@ fn check_reports_typing_awaitable_missing_member() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    typepython_binding::Declaration {
+                    declaration! {
                         name: String::from("__await__"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self)->Iterator[Any]"),
+                        metadata: callable_metadata("(self)->Iterator[Any]"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -13252,11 +12974,10 @@ fn check_accepts_async_function_call_as_awaitable() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13272,11 +12993,10 @@ fn check_accepts_async_function_call_as_awaitable() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("task"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Awaitable[int]"),
+                    metadata: value_metadata("Awaitable[int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13357,11 +13077,10 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13377,11 +13096,10 @@ fn check_reports_async_function_call_non_awaitable_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13464,11 +13182,10 @@ fn check_accepts_direct_await_of_async_function() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13484,11 +13201,10 @@ fn check_accepts_direct_await_of_async_function() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13603,11 +13319,10 @@ fn check_reports_direct_await_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("fetch"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13623,11 +13338,10 @@ fn check_reports_direct_await_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -13736,11 +13450,10 @@ fn check_accepts_generator_yield_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("produce"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->Generator[int, None, None]"),
+                metadata: callable_metadata("()->Generator[int, None, None]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -13821,11 +13534,10 @@ fn check_reports_generator_yield_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("produce"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->Generator[int, None, None]"),
+                metadata: callable_metadata("()->Generator[int, None, None]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -13981,11 +13693,10 @@ fn check_accepts_yield_from_iterable_type() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("values"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("list[int]"),
+                    metadata: value_metadata("list[int]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -14001,11 +13712,10 @@ fn check_accepts_yield_from_iterable_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("relay"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Generator[int, None, None]"),
+                    metadata: callable_metadata("()->Generator[int, None, None]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -14078,11 +13788,10 @@ fn check_reports_unknown_direct_call_keyword() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(x:int,y:int)->None"),
+                metadata: callable_metadata("(x:int,y:int)->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -14141,11 +13850,10 @@ fn check_reports_unknown_member_access() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("unknown"),
+                metadata: value_metadata("unknown"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -14197,11 +13905,10 @@ fn check_reports_unknown_method_call() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("value"),
                 kind: DeclarationKind::Value,
-                metadata: Default::default(),
-                legacy_detail: String::from("unknown"),
+                metadata: value_metadata("unknown"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -14264,11 +13971,10 @@ fn check_reports_unknown_direct_call_on_import() {
             module_path: PathBuf::from("src/app/module.tpy"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("external"),
                 kind: DeclarationKind::Import,
-                metadata: Default::default(),
-                legacy_detail: String::from("pkg.external"),
+                metadata: import_metadata("pkg.external"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -14329,11 +14035,10 @@ fn check_reports_unknown_dotted_call_on_unresolved_import_when_imports_unknown()
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("external"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.external"),
+                        metadata: import_metadata("pkg.external"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -14401,11 +14106,10 @@ fn check_allows_dotted_call_on_unresolved_import_when_imports_dynamic() {
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("external"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.external"),
+                        metadata: import_metadata("pkg.external"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -14491,11 +14195,10 @@ fn check_reports_missing_direct_member_access() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("Box"),
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -14555,11 +14258,10 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("A"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -14575,11 +14277,10 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("name"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -14598,11 +14299,10 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("B"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -14618,11 +14318,10 @@ fn check_reports_union_member_access_with_isinstance_guard_suggestion() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("value"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("A | B"),
+                    metadata: value_metadata("A | B"),
                     value_type_expr: None,
                     method_kind: None,
                     owner: None,
@@ -14682,11 +14381,10 @@ fn check_reports_direct_method_call_arity_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -14702,11 +14400,10 @@ fn check_reports_direct_method_call_arity_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int,y:int)->None"),
+                    metadata: callable_metadata("(self,x:int,y:int)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -14776,11 +14473,10 @@ fn check_reports_direct_constructor_arity_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -14796,11 +14492,10 @@ fn check_reports_direct_constructor_arity_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__init__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int,y:int)->None"),
+                    metadata: callable_metadata("(self,x:int,y:int)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -14864,11 +14559,10 @@ fn check_reports_direct_constructor_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -14884,11 +14578,10 @@ fn check_reports_direct_constructor_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__init__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int,y:str)->None"),
+                    metadata: callable_metadata("(self,x:int,y:str)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -14955,11 +14648,10 @@ fn check_reports_invalid_top_level_override_usage() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::new(),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("top_level"),
                 kind: DeclarationKind::Function,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -15005,11 +14697,10 @@ fn check_reports_member_override_without_base_member() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15025,11 +14716,10 @@ fn check_reports_member_override_without_base_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15045,11 +14735,10 @@ fn check_reports_member_override_without_base_member() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15099,11 +14788,10 @@ fn check_reports_incompatible_direct_override_signature() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15119,11 +14807,10 @@ fn check_reports_incompatible_direct_override_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:int)->int"),
+                    metadata: callable_metadata("(self,x:int)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15142,11 +14829,10 @@ fn check_reports_incompatible_direct_override_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Base"),
+                    metadata: class_metadata(&["Base"]),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15162,11 +14848,10 @@ fn check_reports_incompatible_direct_override_signature() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:str)->int"),
+                    metadata: callable_metadata("(self,x:str)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15217,11 +14902,10 @@ fn check_accepts_variance_compatible_override_signature() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15237,11 +14921,10 @@ fn check_accepts_variance_compatible_override_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:Child)->Base"),
+                    metadata: callable_metadata("(self,x:Child)->Base"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15260,11 +14943,10 @@ fn check_accepts_variance_compatible_override_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Base"),
+                    metadata: class_metadata(&["Base"]),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15280,11 +14962,10 @@ fn check_accepts_variance_compatible_override_signature() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:Base)->Child"),
+                    metadata: callable_metadata("(self,x:Base)->Child"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15377,11 +15058,10 @@ fn check_accepts_typevartuple_alias_expansion_assignment() {
         module_path: PathBuf::from("src/app/module.tpy"),
         module_key: String::from("app.module"),
         module_kind: SourceKind::TypePython,
-        declarations: vec![Declaration {
+        declarations: vec![declaration! {
             name: String::from("Pack"),
             kind: DeclarationKind::TypeAlias,
-            metadata: Default::default(),
-            legacy_detail: String::from("tuple[Unpack[Ts]]"),
+            metadata: type_alias_metadata("tuple[Unpack[Ts]]"),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -15467,11 +15147,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("typing.Protocol"),
+                    metadata: import_metadata("typing.Protocol"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15487,11 +15166,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("SupportsClose"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -15507,11 +15185,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                     bases: vec![String::from("Protocol")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->None"),
+                    metadata: callable_metadata("(self)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15530,11 +15207,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("FileHandle"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15550,11 +15226,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("close"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->None"),
+                    metadata: callable_metadata("(self)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15573,11 +15248,10 @@ fn check_accepts_structural_protocol_argument_without_inheritance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("consume"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:SupportsClose)->None"),
+                    metadata: callable_metadata("(value:SupportsClose)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15638,11 +15312,10 @@ fn check_accepts_structural_interface_implementation_signature() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Protocol"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("typing.Protocol"),
+                    metadata: import_metadata("typing.Protocol"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15658,11 +15331,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Runner"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Interface),
@@ -15678,11 +15350,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: vec![String::from("Protocol")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:Child)->Base"),
+                    metadata: callable_metadata("(self,x:Child)->Base"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15701,11 +15372,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15721,11 +15391,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Base"),
+                    metadata: class_metadata(&["Base"]),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15741,11 +15410,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Impl"),
                     kind: DeclarationKind::Class,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Runner"),
+                    metadata: class_metadata(&["Runner"]),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15761,11 +15429,10 @@ fn check_accepts_structural_interface_implementation_signature() {
                     bases: vec![String::from("Runner")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,x:Base)->Child"),
+                    metadata: callable_metadata("(self,x:Base)->Child"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -15814,11 +15481,10 @@ fn check_reports_incompatible_imported_override_signature() {
                 module_key: String::from("app.base"),
                 module_kind: SourceKind::Python,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -15834,11 +15500,10 @@ fn check_reports_incompatible_imported_override_signature() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,x:int)->int"),
+                        metadata: callable_metadata("(self,x:int)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -15878,11 +15543,10 @@ fn check_reports_incompatible_imported_override_signature() {
                 module_key: String::from("app.child"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Base"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("app.base.Base"),
+                        metadata: import_metadata("app.base.Base"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -15898,11 +15562,10 @@ fn check_reports_incompatible_imported_override_signature() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("Base"),
+                        metadata: class_metadata(&["Base"]),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -15918,11 +15581,10 @@ fn check_reports_incompatible_imported_override_signature() {
                         bases: vec![String::from("Base")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("(self,x:str)->int"),
+                        metadata: callable_metadata("(self,x:str)->int"),
                         value_type_expr: None,
                         method_kind: Some(typepython_syntax::MethodKind::Instance),
                         class_kind: None,
@@ -15973,11 +15635,10 @@ fn check_reports_incompatible_override_method_kind() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -15993,11 +15654,10 @@ fn check_reports_incompatible_override_method_kind() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(cls)->None"),
+                    metadata: callable_metadata("(cls)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Class),
                     class_kind: None,
@@ -16016,11 +15676,10 @@ fn check_reports_incompatible_override_method_kind() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Child"),
                     kind: DeclarationKind::Class,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Base"),
+                    metadata: class_metadata(&["Base"]),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16036,11 +15695,10 @@ fn check_reports_incompatible_override_method_kind() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("run"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
+                    metadata: callable_metadata("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -16091,11 +15749,10 @@ fn check_reports_missing_explicit_override_when_required() {
                 module_key: String::new(),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("Base"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -16111,11 +15768,10 @@ fn check_reports_missing_explicit_override_when_required() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -16134,11 +15790,10 @@ fn check_reports_missing_explicit_override_when_required() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("Child"),
                         kind: DeclarationKind::Class,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: Some(DeclarationOwnerKind::Class),
@@ -16154,11 +15809,10 @@ fn check_reports_missing_explicit_override_when_required() {
                         bases: vec![String::from("Base")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("run"),
                         kind: DeclarationKind::Function,
                         metadata: Default::default(),
-                        legacy_detail: String::new(),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -16217,11 +15871,10 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                     module_key: String::from("app.base"),
                     module_kind: SourceKind::Python,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("Base"),
                             kind: DeclarationKind::Class,
                             metadata: Default::default(),
-                            legacy_detail: String::new(),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
@@ -16237,11 +15890,10 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(self)->None"),
+                            metadata: callable_metadata("(self)->None"),
                             value_type_expr: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
@@ -16281,11 +15933,10 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                     module_key: String::from("app.child"),
                     module_kind: SourceKind::TypePython,
                     declarations: vec![
-                        Declaration {
+                        declaration! {
                             name: String::from("Base"),
                             kind: DeclarationKind::Import,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("app.base.Base"),
+                            metadata: import_metadata("app.base.Base"),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: None,
@@ -16301,11 +15952,10 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                             bases: Vec::new(),
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("Child"),
                             kind: DeclarationKind::Class,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("Base"),
+                            metadata: class_metadata(&["Base"]),
                             value_type_expr: None,
                             method_kind: None,
                             class_kind: Some(DeclarationOwnerKind::Class),
@@ -16321,11 +15971,10 @@ fn check_reports_missing_explicit_override_when_required_for_imported_base() {
                             bases: vec![String::from("Base")],
                             type_params: Vec::new(),
                         },
-                        Declaration {
+                        declaration! {
                             name: String::from("run"),
                             kind: DeclarationKind::Function,
-                            metadata: Default::default(),
-                            legacy_detail: String::from("(self)->None"),
+                            metadata: callable_metadata("(self)->None"),
                             value_type_expr: None,
                             method_kind: Some(typepython_syntax::MethodKind::Instance),
                             class_kind: None,
@@ -16382,11 +16031,10 @@ fn check_reports_classvar_outside_class_scope() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::new(),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("VALUE"),
                 kind: DeclarationKind::Value,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -16432,11 +16080,10 @@ fn check_accepts_classvar_inside_class_scope() {
             module_key: String::new(),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16452,11 +16099,10 @@ fn check_accepts_classvar_inside_class_scope() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("cache"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16504,11 +16150,10 @@ fn check_accepts_direct_method_call_result_return() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16524,11 +16169,10 @@ fn check_accepts_direct_method_call_result_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -16547,11 +16191,10 @@ fn check_accepts_direct_method_call_result_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->str"),
+                    metadata: callable_metadata("(box:Box)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16625,11 +16268,10 @@ fn check_accepts_direct_method_call_result_assignment() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16645,11 +16287,10 @@ fn check_accepts_direct_method_call_result_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -16668,11 +16309,10 @@ fn check_accepts_direct_method_call_result_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16688,11 +16328,10 @@ fn check_accepts_direct_method_call_result_assignment() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("str"),
+                    metadata: value_metadata("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16773,11 +16412,10 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16793,11 +16431,10 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -16816,11 +16453,10 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16836,11 +16472,10 @@ fn check_reports_direct_method_call_result_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("result"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("int"),
+                    metadata: value_metadata("int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -16923,11 +16558,10 @@ fn check_reports_direct_method_call_result_return_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -16943,11 +16577,10 @@ fn check_reports_direct_method_call_result_return_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -16966,11 +16599,10 @@ fn check_reports_direct_method_call_result_return_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->int"),
+                    metadata: callable_metadata("(box:Box)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -17046,11 +16678,10 @@ fn check_accepts_direct_method_call_result_through_instance() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -17066,11 +16697,10 @@ fn check_accepts_direct_method_call_result_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -17089,11 +16719,10 @@ fn check_accepts_direct_method_call_result_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Box"),
+                    metadata: callable_metadata("()->Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -17109,11 +16738,10 @@ fn check_accepts_direct_method_call_result_through_instance() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->str"),
+                    metadata: callable_metadata("()->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -17187,11 +16815,10 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -17207,11 +16834,10 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("get"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -17230,11 +16856,10 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("make_box"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Box"),
+                    metadata: callable_metadata("()->Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -17250,11 +16875,10 @@ fn check_reports_direct_method_call_result_through_instance_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->int"),
+                    metadata: callable_metadata("()->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -17372,11 +16996,10 @@ fn check_accepts_for_loop_target_type_in_local_assignment() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(values:list[int])->None"),
+                metadata: callable_metadata("(values:list[int])->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17471,11 +17094,10 @@ fn check_reports_for_loop_target_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(values:list[int])->None"),
+                metadata: callable_metadata("(values:list[int])->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17572,11 +17194,10 @@ fn check_accepts_tuple_for_loop_target_type_in_return() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(pairs:tuple[tuple[int, str]])->str"),
+                metadata: callable_metadata("(pairs:tuple[tuple[int, str]])->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17664,11 +17285,10 @@ fn check_accepts_sequence_for_loop_target_type_in_return() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(pairs:list[Sequence[int]])->int"),
+                metadata: callable_metadata("(pairs:list[Sequence[int]])->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17756,11 +17376,10 @@ fn check_reports_tuple_for_loop_target_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(pairs:tuple[tuple[int, str]])->int"),
+                metadata: callable_metadata("(pairs:tuple[tuple[int, str]])->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17852,11 +17471,10 @@ fn check_reports_tuple_for_loop_target_arity_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(pairs:tuple[tuple[int]])->None"),
+                metadata: callable_metadata("(pairs:tuple[tuple[int]])->None"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -17918,11 +17536,10 @@ fn check_accepts_with_target_type_in_return() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -17938,11 +17555,10 @@ fn check_accepts_with_target_type_in_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -17961,11 +17577,10 @@ fn check_accepts_with_target_type_in_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
+                    metadata: callable_metadata("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -17984,11 +17599,10 @@ fn check_accepts_with_target_type_in_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(manager:Manager)->str"),
+                    metadata: callable_metadata("(manager:Manager)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -18077,11 +17691,10 @@ fn check_reports_with_target_type_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -18097,11 +17710,10 @@ fn check_reports_with_target_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->int"),
+                    metadata: callable_metadata("(self)->int"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -18120,11 +17732,10 @@ fn check_reports_with_target_type_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(manager:Manager)->None"),
+                    metadata: callable_metadata("(manager:Manager)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -18185,11 +17796,10 @@ fn check_accepts_except_handler_binding_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->ValueError"),
+                metadata: callable_metadata("()->ValueError"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18268,11 +17878,10 @@ fn check_reports_except_handler_binding_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->TypeError"),
+                metadata: callable_metadata("()->TypeError"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18353,11 +17962,10 @@ fn check_does_not_keep_except_binding_after_handler() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->ValueError"),
+                metadata: callable_metadata("()->ValueError"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18436,11 +18044,10 @@ fn check_accepts_tuple_except_handler_binding_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->Union[ValueError, TypeError]"),
+                metadata: callable_metadata("()->Union[ValueError, TypeError]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18519,11 +18126,10 @@ fn check_reports_tuple_except_handler_binding_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->ValueError"),
+                metadata: callable_metadata("()->ValueError"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18605,11 +18211,10 @@ fn check_accepts_bare_except_handler_binding_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->BaseException"),
+                metadata: callable_metadata("()->BaseException"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18688,11 +18293,10 @@ fn check_reports_bare_except_handler_binding_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->ValueError"),
+                metadata: callable_metadata("()->ValueError"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -18774,11 +18378,10 @@ fn check_reports_non_exhaustive_sealed_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::SealedClass),
@@ -18794,11 +18397,10 @@ fn check_reports_non_exhaustive_sealed_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -18814,11 +18416,10 @@ fn check_reports_non_exhaustive_sealed_match() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -18834,11 +18435,10 @@ fn check_reports_non_exhaustive_sealed_match() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(expr:Expr)->None"),
+                    metadata: callable_metadata("(expr:Expr)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -18906,11 +18506,10 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::SealedClass),
@@ -18926,11 +18525,10 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -18946,11 +18544,10 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -18966,11 +18563,10 @@ fn check_accepts_exhaustive_sealed_match_with_wildcard() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(expr:Expr)->None"),
+                    metadata: callable_metadata("(expr:Expr)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19042,11 +18638,10 @@ fn check_accepts_if_is_not_none_narrowing_for_return() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Optional[str])->str"),
+                metadata: callable_metadata("(value:Optional[str])->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19130,11 +18725,10 @@ fn check_accepts_assert_is_not_none_narrowing_for_return() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Optional[str])->str"),
+                metadata: callable_metadata("(value:Optional[str])->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19214,11 +18808,10 @@ fn check_accepts_isinstance_tuple_narrowing_for_return() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Union[str, bytes, int])->Union[str, bytes]"),
+                metadata: callable_metadata("(value:Union[str, bytes, int])->Union[str, bytes]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19303,11 +18896,10 @@ fn check_accepts_typeguard_true_branch_narrowing() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->TypeGuard[str]"),
+                    metadata: callable_metadata("(value:Union[str, int])->TypeGuard[str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19323,11 +18915,10 @@ fn check_accepts_typeguard_true_branch_narrowing() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->str"),
+                    metadata: callable_metadata("(value:Union[str, int])->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19413,11 +19004,10 @@ fn check_accepts_typeis_false_branch_narrowing() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->TypeIs[str]"),
+                    metadata: callable_metadata("(value:Union[str, int])->TypeIs[str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19433,11 +19023,10 @@ fn check_accepts_typeis_false_branch_narrowing() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->int"),
+                    metadata: callable_metadata("(value:Union[str, int])->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19523,11 +19112,10 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("is_text"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->TypeIs[str]"),
+                    metadata: callable_metadata("(value:Union[str, int])->TypeIs[str]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19543,11 +19131,10 @@ fn check_accepts_typeis_post_if_fallthrough_narrowing() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:Union[str, int])->int"),
+                    metadata: callable_metadata("(value:Union[str, int])->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -19664,11 +19251,10 @@ fn check_accepts_boolean_composition_narrowing() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:str | None)->str"),
+                metadata: callable_metadata("(value:str | None)->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19800,11 +19386,10 @@ fn check_accepts_truthiness_narrowing_for_bool_optional() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(flag:Optional[Literal[True]])->Literal[True]"),
+                metadata: callable_metadata("(flag:Optional[Literal[True]])->Literal[True]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19887,11 +19472,10 @@ fn check_does_not_over_narrow_truthiness_for_int_optional() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Optional[int])->int"),
+                metadata: callable_metadata("(value:Optional[int])->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -19976,11 +19560,10 @@ fn check_invalidates_narrowing_after_augassign() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(value:Optional[int])->int"),
+                metadata: callable_metadata("(value:Optional[int])->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -20072,11 +19655,10 @@ fn check_joins_branch_local_assignments_after_if() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(flag:bool)->Union[str, int]"),
+                metadata: callable_metadata("(flag:bool)->Union[str, int]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -20254,11 +19836,10 @@ fn check_reports_deprecated_import_and_call_when_enabled() {
                     module_path: PathBuf::from("src/lib/deps.py"),
                     module_key: String::from("lib.deps"),
                     module_kind: SourceKind::Python,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("()->int"),
+                        metadata: callable_metadata("()->int"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -20293,11 +19874,10 @@ fn check_reports_deprecated_import_and_call_when_enabled() {
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("lib.deps.old"),
+                        metadata: import_metadata("lib.deps.old"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -20368,11 +19948,10 @@ fn check_ignores_deprecated_uses_when_configured() {
                     module_path: PathBuf::from("src/lib/deps.py"),
                     module_key: String::from("lib.deps"),
                     module_kind: SourceKind::Python,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("()->int"),
+                        metadata: callable_metadata("()->int"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -20407,11 +19986,10 @@ fn check_ignores_deprecated_uses_when_configured() {
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("lib.deps.old"),
+                        metadata: import_metadata("lib.deps.old"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -20503,11 +20081,10 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
         module_key: String::from("app.module"),
         module_kind: SourceKind::TypePython,
         declarations: vec![
-            Declaration {
+            declaration! {
                 name: String::from("JsonObject"),
                 kind: DeclarationKind::TypeAlias,
-                metadata: Default::default(),
-                legacy_detail: String::from("dict[str, JsonValue]"),
+                metadata: type_alias_metadata("dict[str, JsonValue]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -20523,11 +20100,10 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
                 bases: Vec::new(),
                 type_params: Vec::new(),
             },
-            Declaration {
+            declaration! {
                 name: String::from("JsonArray"),
                 kind: DeclarationKind::TypeAlias,
-                metadata: Default::default(),
-                legacy_detail: String::from("list[JsonValue]"),
+                metadata: type_alias_metadata("list[JsonValue]"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -20543,11 +20119,10 @@ fn direct_type_is_assignable_accepts_mutual_recursive_alias_value() {
                 bases: Vec::new(),
                 type_params: Vec::new(),
             },
-            Declaration {
+            declaration! {
                 name: String::from("JsonValue"),
                 kind: DeclarationKind::TypeAlias,
-                metadata: Default::default(),
-                legacy_detail: String::from("None | bool | int | str | JsonObject | JsonArray"),
+                metadata: type_alias_metadata("None | bool | int | str | JsonObject | JsonArray"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -20613,11 +20188,10 @@ fn check_accepts_self_return_through_inherited_method_call() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -20633,11 +20207,10 @@ fn check_accepts_self_return_through_inherited_method_call() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("clone"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->Self"),
+                    metadata: callable_metadata("(self)->Self"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -20656,11 +20229,10 @@ fn check_accepts_self_return_through_inherited_method_call() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("SubBox"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -20676,11 +20248,10 @@ fn check_accepts_self_return_through_inherited_method_call() {
                     bases: vec![String::from("Box")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:SubBox)->SubBox"),
+                    metadata: callable_metadata("(box:SubBox)->SubBox"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -20754,11 +20325,10 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -20774,11 +20344,10 @@ fn check_accepts_self_parameter_annotation_in_method_call() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("merge"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,other:Self)->Self"),
+                    metadata: callable_metadata("(self,other:Self)->Self"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -20846,11 +20415,10 @@ fn check_accepts_self_typed_attribute_access() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Node"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -20866,11 +20434,10 @@ fn check_accepts_self_typed_attribute_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("next"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Self"),
+                    metadata: value_metadata("Self"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -20889,11 +20456,10 @@ fn check_accepts_self_typed_attribute_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(node:Node)->Node"),
+                    metadata: callable_metadata("(node:Node)->Node"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -20967,11 +20533,10 @@ fn check_accepts_property_access_in_return() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -20987,11 +20552,10 @@ fn check_accepts_property_access_in_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
                     class_kind: None,
@@ -21010,11 +20574,10 @@ fn check_accepts_property_access_in_return() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->str"),
+                    metadata: callable_metadata("(box:Box)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21088,11 +20651,10 @@ fn check_reports_property_access_assignment_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21108,11 +20670,10 @@ fn check_reports_property_access_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
                     class_kind: None,
@@ -21131,11 +20692,10 @@ fn check_reports_property_access_assignment_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->None"),
+                    metadata: callable_metadata("(box:Box)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21409,11 +20969,10 @@ fn check_accepts_inherited_property_access() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Base"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21429,11 +20988,10 @@ fn check_accepts_inherited_property_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
                     class_kind: None,
@@ -21452,11 +21010,10 @@ fn check_accepts_inherited_property_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21472,11 +21029,10 @@ fn check_accepts_inherited_property_access() {
                     bases: vec![String::from("Base")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(box:Box)->str"),
+                    metadata: callable_metadata("(box:Box)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21550,11 +21106,10 @@ fn check_accepts_bare_property_member_access() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21570,11 +21125,10 @@ fn check_accepts_bare_property_member_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21590,11 +21144,10 @@ fn check_accepts_bare_property_member_access() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("name"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Property),
                     class_kind: None,
@@ -21657,11 +21210,10 @@ fn check_accepts_mapping_subscript_read_type() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("build"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("(values:Mapping[str, int])->int"),
+                metadata: callable_metadata("(values:Mapping[str, int])->int"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -21791,11 +21343,10 @@ fn check_accepts_enum_member_access_as_enum_type() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("enum.Enum"),
+                    metadata: import_metadata("enum.Enum"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21811,11 +21362,10 @@ fn check_accepts_enum_member_access_as_enum_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21831,11 +21381,10 @@ fn check_accepts_enum_member_access_as_enum_type() {
                     bases: vec![String::from("Enum")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21854,11 +21403,10 @@ fn check_accepts_enum_member_access_as_enum_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Color"),
+                    metadata: callable_metadata("()->Color"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21932,11 +21480,10 @@ fn check_accepts_strenum_member_access_as_enum_type() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("StrEnum"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("enum.StrEnum"),
+                    metadata: import_metadata("enum.StrEnum"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21952,11 +21499,10 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -21972,11 +21518,10 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                     bases: vec![String::from("StrEnum")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -21995,11 +21540,10 @@ fn check_accepts_strenum_member_access_as_enum_type() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->Color"),
+                    metadata: callable_metadata("()->Color"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22073,11 +21617,10 @@ fn check_reports_non_exhaustive_enum_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("enum.Enum"),
+                    metadata: import_metadata("enum.Enum"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22093,11 +21636,10 @@ fn check_reports_non_exhaustive_enum_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Color"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22113,11 +21655,10 @@ fn check_reports_non_exhaustive_enum_match() {
                     bases: vec![String::from("Enum")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("RED"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22136,11 +21677,10 @@ fn check_reports_non_exhaustive_enum_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("BLUE"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22159,11 +21699,10 @@ fn check_reports_non_exhaustive_enum_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(color:Color)->None"),
+                    metadata: callable_metadata("(color:Color)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22249,11 +21788,10 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Expr"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::SealedClass),
@@ -22269,11 +21807,10 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Num"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22289,11 +21826,10 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Add"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22309,11 +21845,10 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Mul"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22329,11 +21864,10 @@ fn check_reports_non_exhaustive_match_with_case_suggestion() {
                     bases: vec![String::from("Expr")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("render"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(expr:Expr)->int"),
+                    metadata: callable_metadata("(expr:Expr)->int"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22417,11 +21951,10 @@ fn check_accepts_with_without_target() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Manager"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22437,11 +21970,10 @@ fn check_accepts_with_without_target() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22460,11 +21992,10 @@ fn check_accepts_with_without_target() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
+                    metadata: callable_metadata("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22483,11 +22014,10 @@ fn check_accepts_with_without_target() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(manager:Manager)->None"),
+                    metadata: callable_metadata("(manager:Manager)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22547,11 +22077,10 @@ fn check_accepts_multiple_with_items() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("A"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22567,11 +22096,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->int"),
+                    metadata: callable_metadata("(self)->int"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22590,11 +22118,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
+                    metadata: callable_metadata("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22613,11 +22140,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("B"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -22633,11 +22159,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__enter__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self)->str"),
+                    metadata: callable_metadata("(self)->str"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22656,11 +22181,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("__exit__"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self, exc_type, exc_val, exc_tb)->None"),
+                    metadata: callable_metadata("(self, exc_type, exc_val, exc_tb)->None"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -22679,11 +22203,10 @@ fn check_accepts_multiple_with_items() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(a:A,b:B)->str"),
+                    metadata: callable_metadata("(a:A,b:B)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -22961,11 +22484,10 @@ fn check_reports_deprecated_function_call_as_error() {
                     module_path: PathBuf::from("src/lib/legacy.py"),
                     module_key: String::from("lib.legacy"),
                     module_kind: SourceKind::Python,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old_func"),
                         kind: DeclarationKind::Function,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("()->int"),
+                        metadata: callable_metadata("()->int"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -23000,11 +22522,10 @@ fn check_reports_deprecated_function_call_as_error() {
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("old_func"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("lib.legacy.old_func"),
+                        metadata: import_metadata("lib.legacy.old_func"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -23082,11 +22603,10 @@ fn check_reports_classvar_outside_class_scope_typepython_module() {
             module_path: PathBuf::from("src/app/module.tpy"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("LIMIT"),
                 kind: DeclarationKind::Value,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -23144,11 +22664,10 @@ fn check_accepts_enum_exhaustive_match() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("enum.Enum"),
+                    metadata: import_metadata("enum.Enum"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23164,11 +22683,10 @@ fn check_accepts_enum_exhaustive_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Status"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -23184,11 +22702,10 @@ fn check_accepts_enum_exhaustive_match() {
                     bases: vec![String::from("Enum")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("OPEN"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23207,11 +22724,10 @@ fn check_accepts_enum_exhaustive_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("CLOSED"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23230,11 +22746,10 @@ fn check_accepts_enum_exhaustive_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("PENDING"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23253,11 +22768,10 @@ fn check_accepts_enum_exhaustive_match() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("handle"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(s:Status)->None"),
+                    metadata: callable_metadata("(s:Status)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23339,11 +22853,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Enum"),
                     kind: DeclarationKind::Import,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("enum.Enum"),
+                    metadata: import_metadata("enum.Enum"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23359,11 +22872,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("Priority"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -23379,11 +22891,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                     bases: vec![String::from("Enum")],
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("LOW"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23402,11 +22913,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("MEDIUM"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23425,11 +22935,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("HIGH"),
                     kind: DeclarationKind::Value,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23448,11 +22957,10 @@ fn check_reports_non_exhaustive_enum_match_missing_member() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("triage"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(p:Priority)->None"),
+                    metadata: callable_metadata("(p:Priority)->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23546,11 +23054,10 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
             module_key: String::from("app.module"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("list[tuple[int, str, bool]]"),
+                    metadata: value_metadata("list[tuple[int, str, bool]]"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23566,11 +23073,10 @@ fn check_reports_for_loop_tuple_target_arity_mismatch() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("process"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("()->None"),
+                    metadata: callable_metadata("()->None"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -23633,11 +23139,10 @@ fn check_reports_except_handler_binding_return_type_mismatch() {
             module_path: PathBuf::from("src/app/module.py"),
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
-            declarations: vec![Declaration {
+            declarations: vec![declaration! {
                 name: String::from("run"),
                 kind: DeclarationKind::Function,
-                metadata: Default::default(),
-                legacy_detail: String::from("()->str"),
+                metadata: callable_metadata("()->str"),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: None,
@@ -23732,11 +23237,10 @@ fn check_reports_unresolved_import_with_fallback_unknown() {
                     module_path: PathBuf::from("src/app/module.tpy"),
                     module_key: String::from("app.module"),
                     module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
+                    declarations: vec![declaration! {
                         name: String::from("remote"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.missing.remote"),
+                        metadata: import_metadata("pkg.missing.remote"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,

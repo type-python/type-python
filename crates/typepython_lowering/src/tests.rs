@@ -1,13 +1,13 @@
 use super::{
-    LoweringMetadata, LoweringOptions, LoweringSegmentKind, SourceMapEntry, SpanMapEntry,
-    SpanMapRange, lower, lower_with_options,
+    lower, lower_with_options, LoweringMetadata, LoweringOptions, LoweringSegmentKind,
+    SourceMapEntry, SpanMapEntry, SpanMapRange,
 };
 use std::path::PathBuf;
 use typepython_diagnostics::DiagnosticReport;
 use typepython_syntax::{
-    ClassMember, ClassMemberKind, FunctionParam, FunctionStatement, NamedBlockStatement,
+    parse, ClassMember, ClassMemberKind, FunctionParam, FunctionStatement, NamedBlockStatement,
     SourceFile, SourceKind, SyntaxStatement, SyntaxTree, TypeAliasStatement, TypeParam,
-    TypeParamKind, UnsafeStatement, parse,
+    TypeParamKind, UnsafeStatement,
 };
 use typepython_target::{EmitStyle, PythonTarget, RuntimeFeature};
 
@@ -491,9 +491,10 @@ fn lower_normalizes_intrinsic_boundary_types_for_runtime_output() {
     assert!(lowered.diagnostics.is_empty());
     assert!(lowered.module.python_source.contains("from typing import Any"));
     assert!(lowered.module.python_source.contains("Alias: TypeAlias = Any"));
-    assert!(
-        lowered.module.python_source.contains("def take(value: object, other: Any) -> object:")
-    );
+    assert!(lowered
+        .module
+        .python_source
+        .contains("def take(value: object, other: Any) -> object:"));
     assert!(!lowered.module.python_source.contains("unknown"));
     assert!(!lowered.module.python_source.contains("dynamic"));
 }
@@ -820,13 +821,11 @@ fn lower_native_mode_preserves_pep_695_syntax() {
     );
     assert!(lowered.module.required_imports.is_empty());
     assert!(lowered.module.metadata.required_runtime_features.contains(&RuntimeFeature::TypeStmt));
-    assert!(
-        lowered
-            .module
-            .metadata
-            .required_runtime_features
-            .contains(&RuntimeFeature::InlineTypeParams)
-    );
+    assert!(lowered
+        .module
+        .metadata
+        .required_runtime_features
+        .contains(&RuntimeFeature::InlineTypeParams));
 }
 
 #[test]
@@ -1235,7 +1234,7 @@ fn lower_expands_partial_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1255,7 +1254,7 @@ fn lower_expands_partial_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1329,7 +1328,7 @@ fn lower_prefers_typing_notrequired_for_target_python_311() {
                             method_kind: None,
                             annotation: Some(String::from("int")),
                             annotation_expr: None,
-                            value_type: None,
+                            value_type_expr: None,
                             params: Vec::new(),
                             returns: None,
                             returns_expr: None,
@@ -1349,7 +1348,7 @@ fn lower_prefers_typing_notrequired_for_target_python_311() {
                             method_kind: None,
                             annotation: Some(String::from("str")),
                             annotation_expr: None,
-                            value_type: None,
+                            value_type_expr: None,
                             params: Vec::new(),
                             returns: None,
                             returns_expr: None,
@@ -1408,21 +1407,20 @@ fn lower_rewrites_compat_qualified_names_for_target_python_310() {
     );
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(
-        lowered.module.python_source.contains("@typing_extensions.deprecated(\"use new_api\")")
-    );
+    assert!(lowered
+        .module
+        .python_source
+        .contains("@typing_extensions.deprecated(\"use new_api\")"));
     assert!(lowered.module.python_source.contains("import typing_extensions"));
     assert!(lowered.module.python_source.contains("@typing_extensions.override"));
     assert!(lowered.module.python_source.contains("-> typing_extensions.Self"));
     assert!(lowered.module.python_source.contains("typing_extensions.ReadOnly[bool]"));
     assert!(lowered.module.python_source.contains("-> typing_extensions.TypeIs[int]"));
-    assert!(
-        lowered
-            .module
-            .metadata
-            .required_backports
-            .contains(&super::BackportRequirement::TypingExtensionsAtLeast412)
-    );
+    assert!(lowered
+        .module
+        .metadata
+        .required_backports
+        .contains(&super::BackportRequirement::TypingExtensionsAtLeast412));
 }
 
 #[test]
@@ -1440,14 +1438,14 @@ fn lower_rewrites_compat_import_sources_for_target_python_312() {
     );
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(
-        lowered.module.python_source.contains(
-            "from typing import Self, Required, NotRequired, dataclass_transform, override"
-        )
-    );
-    assert!(
-        lowered.module.python_source.contains("from typing_extensions import ReadOnly, TypeIs")
-    );
+    assert!(lowered
+        .module
+        .python_source
+        .contains("from typing import Self, Required, NotRequired, dataclass_transform, override"));
+    assert!(lowered
+        .module
+        .python_source
+        .contains("from typing_extensions import ReadOnly, TypeIs"));
     assert!(lowered.module.python_source.contains("from typing_extensions import deprecated"));
     assert!(!lowered.module.python_source.contains("from warnings import deprecated"));
 }
@@ -1489,9 +1487,10 @@ fn lower_rewrites_variadic_generic_compat_import_sources_for_target_python_310()
     );
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(
-        lowered.module.python_source.contains("from typing_extensions import TypeVarTuple, Unpack")
-    );
+    assert!(lowered
+        .module
+        .python_source
+        .contains("from typing_extensions import TypeVarTuple, Unpack"));
     assert!(lowered.module.python_source.contains("value: typing_extensions.Unpack[Ts]"));
 }
 
@@ -1524,7 +1523,7 @@ fn lower_expands_partial_typeddict_transform_for_qualified_bases() {
                             method_kind: None,
                             annotation: Some(String::from("int")),
                             annotation_expr: None,
-                            value_type: None,
+                            value_type_expr: None,
                             params: Vec::new(),
                             returns: None,
                             returns_expr: None,
@@ -1544,7 +1543,7 @@ fn lower_expands_partial_typeddict_transform_for_qualified_bases() {
                             method_kind: None,
                             annotation: Some(String::from("str")),
                             annotation_expr: None,
-                            value_type: None,
+                            value_type_expr: None,
                             params: Vec::new(),
                             returns: None,
                             returns_expr: None,
@@ -1608,7 +1607,7 @@ fn lower_expands_pick_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1628,7 +1627,7 @@ fn lower_expands_pick_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1648,7 +1647,7 @@ fn lower_expands_pick_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1731,7 +1730,7 @@ fn lower_expands_omit_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1751,7 +1750,7 @@ fn lower_expands_omit_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -1827,7 +1826,7 @@ fn lower_expands_readonly_typeddict_transform() {
                     method_kind: None,
                     annotation: Some(String::from("bool")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -1888,7 +1887,7 @@ fn lower_expands_required_typeddict_transform() {
                     method_kind: None,
                     annotation: Some(String::from("NotRequired[str]")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -1948,7 +1947,7 @@ fn lower_expands_required_typeddict_transform_with_nested_annotation() {
                     method_kind: None,
                     annotation: Some(String::from("NotRequired[list[int]]")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -2010,7 +2009,7 @@ fn lower_expands_composed_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("int")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -2030,7 +2029,7 @@ fn lower_expands_composed_typeddict_transform() {
                         method_kind: None,
                         annotation: Some(String::from("str")),
                         annotation_expr: None,
-                        value_type: None,
+                        value_type_expr: None,
                         params: Vec::new(),
                         returns: None,
                         returns_expr: None,
@@ -2107,7 +2106,7 @@ fn lower_expands_mutable_typeddict_transform() {
                     method_kind: None,
                     annotation: Some(String::from("ReadOnly[bool]")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -2166,7 +2165,7 @@ fn lower_keeps_decorated_class_header_singleton() {
                     method_kind: None,
                     annotation: Some(String::from("str")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -2186,7 +2185,7 @@ fn lower_keeps_decorated_class_header_singleton() {
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,
@@ -2252,7 +2251,7 @@ fn lower_reports_unknown_pick_key_as_tpy4017() {
                     method_kind: None,
                     annotation: Some(String::from("int")),
                     annotation_expr: None,
-                    value_type: None,
+                    value_type_expr: None,
                     params: Vec::new(),
                     returns: None,
                     returns_expr: None,

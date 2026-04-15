@@ -746,9 +746,6 @@ impl AssignmentSite {
 pub struct Declaration {
     pub name: String,
     pub kind: DeclarationKind,
-    /// Legacy display/debug text retained for compatibility surfaces.
-    /// Semantic consumers should prefer structured metadata and `rendered_detail()`.
-    pub legacy_detail: String,
     pub metadata: DeclarationMetadata,
     pub value_type_expr: Option<BoundTypeExpr>,
     pub method_kind: Option<MethodKind>,
@@ -770,14 +767,13 @@ impl Declaration {
     #[must_use]
     pub fn rendered_detail(&self) -> String {
         match &self.metadata {
-            DeclarationMetadata::None => self.legacy_detail.clone(),
+            DeclarationMetadata::None => String::new(),
             DeclarationMetadata::TypeAlias { value } => value.render(),
             DeclarationMetadata::Callable { signature } => signature.rendered(),
             DeclarationMetadata::Import { target } => target.raw_target.clone(),
-            DeclarationMetadata::Value { annotation } => annotation
-                .as_ref()
-                .map(BoundTypeExpr::render)
-                .unwrap_or_else(|| self.legacy_detail.clone()),
+            DeclarationMetadata::Value { annotation } => {
+                annotation.as_ref().map(BoundTypeExpr::render).unwrap_or_default()
+            }
             DeclarationMetadata::Class { bases } => {
                 bases.iter().map(BoundTypeExpr::render).collect::<Vec<_>>().join(",")
             }

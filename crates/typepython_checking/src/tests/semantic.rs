@@ -262,11 +262,10 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                 module_path: PathBuf::from("/tmp/pkg/util.pyi"),
                 module_key: String::from("pkg.util"),
                 module_kind: SourceKind::Stub,
-                declarations: vec![Declaration {
+                declarations: vec![declaration! {
                     name: String::from("parse"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(value:int)->str"),
+                    metadata: callable_metadata("(value:int)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -302,11 +301,10 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                 module_key: String::from("app"),
                 module_kind: SourceKind::TypePython,
                 declarations: vec![
-                    Declaration {
+                    declaration! {
                         name: String::from("util"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.util"),
+                        metadata: import_metadata("pkg.util"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,
@@ -322,11 +320,10 @@ fn imported_symbol_semantic_target_resolves_module_and_symbol_imports() {
                         bases: Vec::new(),
                         type_params: Vec::new(),
                     },
-                    Declaration {
+                    declaration! {
                         name: String::from("parse"),
                         kind: DeclarationKind::Import,
-                        metadata: Default::default(),
-                        legacy_detail: String::from("pkg.util.parse"),
+                        metadata: import_metadata("pkg.util.parse"),
                         value_type_expr: None,
                         method_kind: None,
                         class_kind: None,

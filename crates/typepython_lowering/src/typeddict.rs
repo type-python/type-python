@@ -576,7 +576,7 @@ mod tests {
             method_kind: None,
             annotation: Some(annotation.to_owned()),
             annotation_expr: None,
-            value_type: None,
+            value_type_expr: None,
             params: Vec::new(),
             returns: None,
             returns_expr: None,

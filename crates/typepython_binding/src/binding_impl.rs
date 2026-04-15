@@ -399,7 +399,6 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::TypeAlias(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::TypeAlias,
-            legacy_detail: statement.value.clone(),
             metadata: DeclarationMetadata::TypeAlias {
                 value: statement
                     .value_expr
@@ -437,12 +436,6 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::OverloadDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Overload,
-            legacy_detail: BoundCallableSignature::from_function_parts_with_expr(
-                &statement.params,
-                statement.returns.as_deref(),
-                statement.returns_expr.as_ref(),
-            )
-            .rendered(),
             metadata: DeclarationMetadata::Callable {
                 signature: BoundCallableSignature::from_function_parts_with_expr(
                     &statement.params,
@@ -468,12 +461,6 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
         SyntaxStatement::FunctionDef(statement) => vec![Declaration {
             name: statement.name.clone(),
             kind: DeclarationKind::Function,
-            legacy_detail: BoundCallableSignature::from_function_parts_with_expr(
-                &statement.params,
-                statement.returns.as_deref(),
-                statement.returns_expr.as_ref(),
-            )
-            .rendered(),
             metadata: DeclarationMetadata::Callable {
                 signature: BoundCallableSignature::from_function_parts_with_expr(
                     &statement.params,
@@ -502,7 +489,6 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
             .map(|binding| Declaration {
                 name: binding.local_name.clone(),
                 kind: DeclarationKind::Import,
-                legacy_detail: binding.source_path.clone(),
                 metadata: DeclarationMetadata::Import {
                     target: BoundImportTarget::new(binding.source_path.clone()),
                 },
@@ -534,7 +520,6 @@ fn bind_statement(statement: &SyntaxStatement) -> Vec<Declaration> {
                 .map(|name| Declaration {
                     name,
                     kind: DeclarationKind::Value,
-                    legacy_detail: statement.annotation.clone().unwrap_or_default(),
                     metadata: DeclarationMetadata::Value {
                         annotation: statement
                             .annotation_expr
@@ -621,7 +606,6 @@ fn bind_named_block(
     let mut declarations = vec![Declaration {
         name: statement.name.clone(),
         kind: DeclarationKind::Class,
-        legacy_detail: statement.bases.join(","),
         metadata: DeclarationMetadata::Class {
             bases: statement.bases.iter().map(BoundTypeExpr::new).collect(),
         },
@@ -647,20 +631,6 @@ fn bind_named_block(
                 typepython_syntax::ClassMemberKind::Field => DeclarationKind::Value,
                 typepython_syntax::ClassMemberKind::Method => DeclarationKind::Function,
                 typepython_syntax::ClassMemberKind::Overload => DeclarationKind::Overload,
-            },
-            legacy_detail: match member.kind {
-                typepython_syntax::ClassMemberKind::Field => {
-                    member.annotation.clone().unwrap_or_default()
-                }
-                typepython_syntax::ClassMemberKind::Method
-                | typepython_syntax::ClassMemberKind::Overload => {
-                    BoundCallableSignature::from_function_parts_with_expr(
-                        &member.params,
-                        member.returns.as_deref(),
-                        member.returns_expr.as_ref(),
-                    )
-                    .rendered()
-                }
             },
             metadata: match member.kind {
                 typepython_syntax::ClassMemberKind::Field => DeclarationMetadata::Value {

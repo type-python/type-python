@@ -8,11 +8,10 @@ fn check_reports_duplicate_module_symbols() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -28,11 +27,10 @@ fn check_reports_duplicate_module_symbols() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -424,11 +422,10 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         keyword_expansion_values: Vec::new(),
         line: 1,
     };
-    let typed_dict_overload = Declaration {
-        metadata: Default::default(),
+    let typed_dict_overload = declaration! {
+        metadata: callable_metadata("(user:User)->int"),
         name: String::from("choose"),
         kind: DeclarationKind::Overload,
-        legacy_detail: String::from("(user:User)->int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -445,17 +442,15 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         type_params: Vec::new(),
     };
     let typed_dict_overload = normalize_test_declaration(&typed_dict_overload);
-    let string_overload = Declaration {
-        metadata: Default::default(),
-        legacy_detail: String::from("(user:str)->str"),
+    let string_overload = declaration! {
+        metadata: callable_metadata("(user:str)->str"),
         ..typed_dict_overload.clone()
     };
     let string_overload = normalize_test_declaration(&string_overload);
-    let typed_dict_class = Declaration {
-        metadata: Default::default(),
+    let typed_dict_class = declaration! {
+        metadata: class_metadata(&["TypedDict"]),
         name: String::from("User"),
         kind: DeclarationKind::Class,
-        legacy_detail: String::new(),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -471,11 +466,10 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         bases: vec![String::from("TypedDict")],
         type_params: Vec::new(),
     };
-    let id_field = Declaration {
-        metadata: Default::default(),
+    let id_field = declaration! {
+        metadata: value_metadata("int"),
         name: String::from("id"),
         kind: DeclarationKind::Value,
-        legacy_detail: String::from("int"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -494,10 +488,9 @@ fn check_accepts_overload_with_contextual_typed_dict_literal_argument() {
         bases: Vec::new(),
         type_params: Vec::new(),
     };
-    let name_field = Declaration {
-        metadata: Default::default(),
+    let name_field = declaration! {
+        metadata: value_metadata("str"),
         name: String::from("name"),
-        legacy_detail: String::from("str"),
         ..id_field.clone()
     };
     let node = typepython_graph::ModuleNode {

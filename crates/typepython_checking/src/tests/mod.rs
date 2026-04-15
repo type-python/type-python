@@ -14,62 +14,47 @@ pub(super) use typepython_graph::{build, ModuleGraph, ModuleNode};
 use typepython_incremental::{IncrementalState, PublicSummary, SnapshotMetadata};
 pub(super) use typepython_syntax::{parse_with_options, ParseOptions, SourceFile, SourceKind};
 
+macro_rules! declaration {
+    ($($field:tt)*) => {
+        Declaration {
+            $($field)*
+        }
+    };
+}
+
 pub(super) static TEMP_SOURCE_ROOT_ID: AtomicU64 = AtomicU64::new(0);
 
-fn normalized_test_metadata(declaration: &Declaration) -> DeclarationMetadata {
-    if !matches!(declaration.metadata, DeclarationMetadata::None) {
-        return declaration.metadata.clone();
-    }
-
-    match declaration.kind {
-        DeclarationKind::TypeAlias => {
-            if declaration.legacy_detail.is_empty() {
-                DeclarationMetadata::None
-            } else {
-                DeclarationMetadata::TypeAlias {
-                    value: BoundTypeExpr::new(&declaration.legacy_detail),
-                }
-            }
-        }
-        DeclarationKind::Function | DeclarationKind::Overload => {
-            super::parse_direct_callable_declaration(&declaration.legacy_detail)
-                .map(|callable| DeclarationMetadata::Callable {
-                    signature: BoundCallableSignature {
-                        params: callable.params,
-                        returns: callable.return_annotation_text.map(BoundTypeExpr::new),
-                    },
-                })
-                .unwrap_or(DeclarationMetadata::None)
-        }
-        DeclarationKind::Value => DeclarationMetadata::Value {
-            annotation: (!declaration.legacy_detail.is_empty())
-                .then(|| BoundTypeExpr::new(&declaration.legacy_detail)),
+pub(super) fn callable_metadata(signature_text: &str) -> DeclarationMetadata {
+    let callable = super::parse_direct_callable_declaration(signature_text)
+        .unwrap_or_else(|| panic!("test callable signature should parse: {signature_text}"));
+    DeclarationMetadata::Callable {
+        signature: BoundCallableSignature {
+            params: callable.params,
+            returns: callable.return_annotation_text.map(BoundTypeExpr::new),
         },
-        DeclarationKind::Import => {
-            if declaration.legacy_detail.is_empty() {
-                DeclarationMetadata::None
-            } else {
-                DeclarationMetadata::Import {
-                    target: BoundImportTarget::new(&declaration.legacy_detail),
-                }
-            }
-        }
-        DeclarationKind::Class => {
-            if declaration.bases.is_empty() {
-                DeclarationMetadata::None
-            } else {
-                DeclarationMetadata::Class {
-                    bases: declaration.bases.iter().map(BoundTypeExpr::new).collect(),
-                }
-            }
-        }
+    }
+}
+
+pub(super) fn value_metadata(annotation_text: &str) -> DeclarationMetadata {
+    DeclarationMetadata::Value { annotation: Some(BoundTypeExpr::new(annotation_text)) }
+}
+
+pub(super) fn type_alias_metadata(value_text: &str) -> DeclarationMetadata {
+    DeclarationMetadata::TypeAlias { value: BoundTypeExpr::new(value_text) }
+}
+
+pub(super) fn import_metadata(target_text: &str) -> DeclarationMetadata {
+    DeclarationMetadata::Import { target: BoundImportTarget::new(target_text) }
+}
+
+pub(super) fn class_metadata(bases: &[&str]) -> DeclarationMetadata {
+    DeclarationMetadata::Class {
+        bases: bases.iter().map(|base| BoundTypeExpr::new(*base)).collect(),
     }
 }
 
 pub(super) fn normalize_test_declaration(declaration: &Declaration) -> Declaration {
-    let mut normalized = declaration.clone();
-    normalized.metadata = normalized_test_metadata(&normalized);
-    normalized
+    declaration.clone()
 }
 
 pub(super) fn normalize_test_graph(graph: &ModuleGraph) -> ModuleGraph {
@@ -505,7 +490,7 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
             module_key: String::from("app"),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     metadata: typepython_binding::DeclarationMetadata::Value {
                         annotation: Some(typepython_binding::BoundTypeExpr::from_expr(
                             list_of_int.clone(),
@@ -513,7 +498,6 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     },
                     name: String::from("items"),
                     kind: DeclarationKind::Value,
-                    legacy_detail: String::from("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -529,13 +513,12 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     metadata: typepython_binding::DeclarationMetadata::TypeAlias {
                         value: typepython_binding::BoundTypeExpr::from_expr(maybe_int.clone()),
                     },
                     name: String::from("MaybeInt"),
                     kind: DeclarationKind::TypeAlias,
-                    legacy_detail: String::from("str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -551,7 +534,7 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     metadata: typepython_binding::DeclarationMetadata::Callable {
                         signature: typepython_binding::BoundCallableSignature {
                             params: vec![typepython_syntax::DirectFunctionParamSite {
@@ -571,7 +554,6 @@ fn semantic_incremental_summary_prefers_structured_export_and_fact_types() {
                     },
                     name: String::from("build"),
                     kind: DeclarationKind::Function,
-                    legacy_detail: String::from("(value:str)->str"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -1141,11 +1123,10 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
         module_key: String::new(),
         module_kind: SourceKind::TypePython,
         declarations: vec![
-            Declaration {
+            declaration! {
                 name: String::from("Base"),
                 kind: DeclarationKind::Class,
                 metadata: Default::default(),
-                legacy_detail: String::new(),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),
@@ -1161,11 +1142,10 @@ pub(super) fn type_relation_node_with_base_child() -> ModuleNode {
                 bases: Vec::new(),
                 type_params: Vec::new(),
             },
-            Declaration {
+            declaration! {
                 name: String::from("Child"),
                 kind: DeclarationKind::Class,
-                metadata: Default::default(),
-                legacy_detail: String::from("Base"),
+                metadata: class_metadata(&["Base"]),
                 value_type_expr: None,
                 method_kind: None,
                 class_kind: Some(DeclarationOwnerKind::Class),

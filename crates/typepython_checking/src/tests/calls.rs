@@ -566,11 +566,10 @@ fn check_accepts_unique_module_symbols() {
             module_key: String::new(),
             module_kind: SourceKind::TypePython,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("UserId"),
                     kind: DeclarationKind::TypeAlias,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -586,11 +585,10 @@ fn check_accepts_unique_module_symbols() {
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("User"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,

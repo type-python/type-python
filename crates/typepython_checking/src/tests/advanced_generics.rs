@@ -49,11 +49,10 @@ fn check_infers_generic_function_call_through_union_actual() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(x:T | None)->T | None"),
         name: String::from("maybe"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(x:T | None)->T | None"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -132,11 +131,10 @@ fn check_generic_inference_prefers_arg_metadata_over_arg_type_text() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(value:T)->T"),
         name: String::from("wrap"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(value:T)->T"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -242,11 +240,10 @@ fn check_infers_typevartuple_from_variadic_call_arguments() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -320,11 +317,10 @@ fn check_infers_paramspec_from_callable_argument() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(cb:Callable[P, int])->Callable[P, int]"),
         name: String::from("wrap"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(cb:Callable[P, int])->Callable[P, int]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -401,11 +397,10 @@ fn check_instantiates_variadic_typevartuple_signature_and_return() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -489,11 +484,10 @@ fn check_infers_typevartuple_inside_tuple_annotation() {
         calls: Vec::new(),
         method_calls: Vec::new(),
     };
-    let function = Declaration {
-        metadata: Default::default(),
+    let function = declaration! {
+        metadata: callable_metadata("(value:tuple[Unpack[Ts]])->tuple[Unpack[Ts]]"),
         name: String::from("collect"),
         kind: DeclarationKind::Function,
-        legacy_detail: String::from("(value:tuple[Unpack[Ts]])->tuple[Unpack[Ts]]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
@@ -570,11 +564,10 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
             module_key: String::from("app.module"),
             module_kind: SourceKind::Python,
             declarations: vec![
-                Declaration {
+                declaration! {
                     name: String::from("Box"),
                     kind: DeclarationKind::Class,
                     metadata: Default::default(),
-                    legacy_detail: String::new(),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: Some(DeclarationOwnerKind::Class),
@@ -590,11 +583,10 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("box"),
                     kind: DeclarationKind::Value,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("Box"),
+                    metadata: value_metadata("Box"),
                     value_type_expr: None,
                     method_kind: None,
                     class_kind: None,
@@ -610,11 +602,10 @@ fn check_accepts_source_authored_typevartuple_method_call_from_starred_iterable(
                     bases: Vec::new(),
                     type_params: Vec::new(),
                 },
-                Declaration {
+                declaration! {
                     name: String::from("collect"),
                     kind: DeclarationKind::Function,
-                    metadata: Default::default(),
-                    legacy_detail: String::from("(self,*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
+                    metadata: callable_metadata("(self,*args:Unpack[Ts])->tuple[Unpack[Ts]]"),
                     value_type_expr: None,
                     method_kind: Some(typepython_syntax::MethodKind::Instance),
                     class_kind: None,
@@ -713,11 +704,10 @@ fn resolve_scope_param_semantic_type_uses_declaration_signature_sites() {
         module_path: PathBuf::from("<scope-params>"),
         module_key: String::from("scope.params"),
         module_kind: SourceKind::TypePython,
-        declarations: vec![Declaration {
+        declarations: vec![declaration! {
             name: String::from("build"),
             kind: DeclarationKind::Function,
-            metadata: Default::default(),
-            legacy_detail: String::from("(x:int,*args:str,**kwargs:bool)->None"),
+            metadata: callable_metadata("(x:int,*args:str,**kwargs:bool)->None"),
             value_type_expr: None,
             method_kind: None,
             class_kind: None,
@@ -806,11 +796,10 @@ fn check_accepts_imported_semantic_type_alias_expansion() {
 
 #[test]
 fn alias_type_param_substitutions_semantic_uses_semantic_args_directly() {
-    let alias = Declaration {
-        metadata: Default::default(),
+    let alias = declaration! {
+        metadata: type_alias_metadata("list[T]"),
         name: String::from("Items"),
         kind: DeclarationKind::TypeAlias,
-        legacy_detail: String::from("list[T]"),
         value_type_expr: None,
         method_kind: None,
         class_kind: None,
