@@ -57,7 +57,7 @@ pub(super) fn is_enum_like_class(
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,
 ) -> bool {
-    declaration.bases.iter().any(|base| {
+    declaration.rendered_class_bases().iter().any(|base| {
         matches!(
             base.as_str(),
             "Enum"
@@ -80,7 +80,7 @@ pub(super) fn is_flag_enum_like_class(
     node: &typepython_graph::ModuleNode,
     declaration: &Declaration,
 ) -> bool {
-    declaration.bases.iter().any(|base| {
+    declaration.rendered_class_bases().iter().any(|base| {
         matches!(base.as_str(), "Flag" | "IntFlag" | "enum.Flag" | "enum.IntFlag")
             || resolve_direct_base(nodes, node, base).is_some_and(|(base_node, base_decl)| {
                 is_flag_enum_like_class(nodes, base_node, base_decl)

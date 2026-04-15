@@ -701,8 +701,8 @@ pub(super) fn find_member_declaration_with_visited<'a>(
         return Some(member);
     }
 
-    for base in &class_decl.bases {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+    for base in class_decl.rendered_class_bases() {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
             if let Some(member) = find_member_declaration_with_visited(
                 nodes,
                 base_node,
@@ -886,8 +886,8 @@ pub(super) fn find_owned_callable_declarations_with_visited<'a>(
         return local;
     }
 
-    for base in &class_decl.bases {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+    for base in class_decl.rendered_class_bases() {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
             let inherited = find_owned_callable_declarations_with_visited(
                 nodes,
                 base_node,

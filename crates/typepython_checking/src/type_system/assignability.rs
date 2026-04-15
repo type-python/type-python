@@ -243,7 +243,7 @@ pub(super) fn nominal_subclass_assignable(
     let Some((actual_node, actual_decl)) = resolve_direct_base(nodes, node, actual) else {
         return false;
     };
-    actual_decl.bases.iter().any(|base| {
+    actual_decl.rendered_class_bases().iter().any(|base| {
         normalize_type_text(base) == expected
             || direct_type_is_assignable(actual_node, nodes, expected, base)
     })
@@ -324,8 +324,8 @@ pub(super) fn collect_interface_members_with_visited(
         });
     }
 
-    for base in &declaration.bases {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, base)
+    for base in declaration.rendered_class_bases() {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, node, &base)
             && is_interface_like_declaration(base_node, base_decl, nodes)
         {
             collect_interface_members_with_visited(
@@ -472,8 +472,8 @@ pub(super) fn find_apparent_member_declaration_with_visited<'a>(
         return Some(local);
     }
 
-    for base in &class_decl.bases {
-        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+    for base in class_decl.rendered_class_bases() {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) else {
             continue;
         };
         if is_interface_like_declaration(base_node, base_decl, nodes) {

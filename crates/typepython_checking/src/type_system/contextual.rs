@@ -248,7 +248,7 @@ pub(super) fn is_typed_dict_class(
     }
 
     is_typed_dict_base_name(&class_decl.name)
-        || class_decl.bases.iter().any(|base| {
+        || class_decl.rendered_class_bases().iter().any(|base| {
             is_typed_dict_base_name(base)
                 || resolve_direct_base(nodes, class_node, base).is_some_and(
                     |(base_node, base_decl)| {
@@ -272,8 +272,8 @@ pub(super) fn collect_typed_dict_fields(
         return;
     }
 
-    for base in &class_decl.bases {
-        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) {
+    for base in class_decl.rendered_class_bases() {
+        if let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) {
             if is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
                 collect_typed_dict_fields(
                     context,
@@ -331,8 +331,8 @@ pub(super) fn collect_typed_dict_openness(
 
     let mut inherited_closed = false;
     let mut inherited_extra_items = None;
-    for base in &class_decl.bases {
-        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, base) else {
+    for base in class_decl.rendered_class_bases() {
+        let Some((base_node, base_decl)) = resolve_direct_base(nodes, class_node, &base) else {
             continue;
         };
         if !is_typed_dict_class(nodes, base_node, base_decl, &mut BTreeSet::new()) {
