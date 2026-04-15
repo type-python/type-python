@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use typepython_binding::{
     AssignmentSite, BindingTable, BoundCallableSignature, BoundImportTarget, CallSite, Declaration,
     DeclarationKind, DeclarationMetadata, GenericTypeParam, GenericTypeParamKind,
@@ -86,11 +86,8 @@ fn type_var(name: &str) -> GenericTypeParam {
     GenericTypeParam {
         kind: GenericTypeParamKind::TypeVar,
         name: name.to_owned(),
-        bound: None,
         bound_expr: None,
-        constraints: Vec::new(),
         constraint_exprs: Vec::new(),
-        default: None,
         default_expr: None,
     }
 }
@@ -99,11 +96,8 @@ fn type_var_tuple(name: &str) -> GenericTypeParam {
     GenericTypeParam {
         kind: GenericTypeParamKind::TypeVarTuple,
         name: name.to_owned(),
-        bound: None,
         bound_expr: None,
-        constraints: Vec::new(),
         constraint_exprs: Vec::new(),
-        default: None,
         default_expr: None,
     }
 }
