@@ -328,8 +328,8 @@ pub fn dependency_index(graph: &ModuleGraph) -> ModuleDependencyIndex {
             .filter(|declaration| declaration.kind == DeclarationKind::Import)
             .filter_map(|declaration| {
                 declaration
-                    .import_module_target_text()
-                    .as_deref()
+                    .import_target()
+                    .map(|target| target.module_target.as_str())
                     .and_then(|target| resolve_import_module_key(target, &module_keys))
             })
             .collect::<BTreeSet<_>>();
@@ -500,11 +500,8 @@ fn public_summary(node: &typepython_graph::ModuleNode) -> PublicSummary {
     let mut imports = top_level_declarations
         .iter()
         .filter(|declaration| declaration.kind == DeclarationKind::Import)
-        .map(|declaration| {
-            declaration
-                .import_target()
-                .map(|target| target.raw_target.clone())
-                .unwrap_or_else(|| declaration.rendered_detail())
+        .filter_map(|declaration| {
+            declaration.import_target().map(|target| target.raw_target.clone())
         })
         .collect::<Vec<_>>();
     imports.sort();
@@ -646,19 +643,28 @@ fn summary_type_repr(declaration: &Declaration) -> String {
         DeclarationKind::Value => summary_type_expr(declaration)
             .map(|expr| expr.render())
             .or_else(|| declaration.inferred_value_type_semantic_text())
-            .or_else(|| declaration.value_annotation_text())
-            .unwrap_or_else(|| declaration.rendered_detail()),
-        DeclarationKind::TypeAlias => {
-            declaration.type_alias_body_text().unwrap_or_else(|| declaration.rendered_detail())
-        }
-        DeclarationKind::Function | DeclarationKind::Overload => {
-            declaration.callable_signature_text().unwrap_or_else(|| declaration.rendered_detail())
-        }
-        DeclarationKind::Import => {
-            declaration.import_raw_target_text().unwrap_or_else(|| declaration.rendered_detail())
-        }
+            .or_else(|| {
+                declaration.value_annotation().map(typepython_binding::BoundTypeExpr::render)
+            })
+            .unwrap_or_else(|| declaration.name.clone()),
+        DeclarationKind::TypeAlias => declaration
+            .type_alias_value()
+            .map(typepython_binding::BoundTypeExpr::render)
+            .unwrap_or_else(|| declaration.name.clone()),
+        DeclarationKind::Function | DeclarationKind::Overload => declaration
+            .callable_signature()
+            .map(typepython_binding::BoundCallableSignature::rendered)
+            .unwrap_or_else(|| declaration.name.clone()),
+        DeclarationKind::Import => declaration
+            .import_target()
+            .map(|target| target.raw_target.clone())
+            .unwrap_or_else(|| declaration.name.clone()),
     };
-    if detail.is_empty() { declaration.name.clone() } else { detail }
+    if detail.is_empty() {
+        declaration.name.clone()
+    } else {
+        detail
+    }
 }
 
 fn summary_type_param(type_param: &GenericTypeParam) -> SummaryTypeParam {
@@ -748,21 +754,22 @@ fn is_package_entry_path(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Fingerprint, IncrementalState, ModuleSolverFacts, PublicSummary, SNAPSHOT_SCHEMA_VERSION,
-        SealedRootSummary, SnapshotDecodeError, SnapshotDiff, SnapshotMetadata, SummaryExport,
-        SummaryTypeParam, affected_modules, decode_snapshot, dependency_index,
-        dependency_index_from_summaries, diff, encode_snapshot, snapshot, snapshot_diff_modules,
-        source_change_modules,
+        affected_modules, decode_snapshot, dependency_index, dependency_index_from_summaries, diff,
+        encode_snapshot, snapshot, snapshot_diff_modules, source_change_modules, Fingerprint,
+        IncrementalState, ModuleSolverFacts, PublicSummary, SealedRootSummary, SnapshotDecodeError,
+        SnapshotDiff, SnapshotMetadata, SummaryExport, SummaryImportTarget, SummaryTypeParam,
+        SNAPSHOT_SCHEMA_VERSION,
     };
     use std::{
         collections::{BTreeMap, BTreeSet},
         path::PathBuf,
     };
     use typepython_binding::{
-        Declaration, DeclarationKind, DeclarationOwnerKind, GenericTypeParam, GenericTypeParamKind,
+        BoundCallableSignature, BoundImportTarget, BoundTypeExpr, Declaration, DeclarationKind,
+        DeclarationMetadata, DeclarationOwnerKind, GenericTypeParam, GenericTypeParamKind,
     };
     use typepython_graph::{ModuleGraph, ModuleNode};
-    use typepython_syntax::SourceKind;
+    use typepython_syntax::{DirectFunctionParamSite, SourceKind, TypeExpr};
 
     #[test]
     fn diff_reports_added_removed_and_changed_modules() {
@@ -927,25 +934,11 @@ mod tests {
                         bases: vec![String::from("Expr")],
                         type_params: Vec::new(),
                     },
-                    Declaration {
-                        metadata: Default::default(),
-                        name: String::from("helper"),
-                        kind: DeclarationKind::Function,
-                        legacy_detail: String::from("()->int"),
-                        value_type_expr: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: vec![GenericTypeParam {
+                    function_declaration(
+                        "helper",
+                        Vec::new(),
+                        "int",
+                        vec![GenericTypeParam {
                             kind: GenericTypeParamKind::TypeVar,
                             name: String::from("T"),
                             bound: None,
@@ -955,27 +948,8 @@ mod tests {
                             constraint_exprs: Vec::new(),
                             default_expr: None,
                         }],
-                    },
-                    Declaration {
-                        metadata: Default::default(),
-                        name: String::from("base"),
-                        kind: DeclarationKind::Import,
-                        legacy_detail: String::from("pkg.base"),
-                        value_type_expr: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    },
+                    ),
+                    import_declaration("base", "pkg.base"),
                 ],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
@@ -1053,10 +1027,10 @@ mod tests {
                         name: String::from("helper"),
                         kind: String::from("function"),
                         type_repr: String::from("()->int"),
-                        type_expr: None,
+                        type_expr: Some(TypeExpr::Name(String::from("int"))),
                         declaration_signature: None,
                         exported_type: None,
-                        exported_type_expr: None,
+                        exported_type_expr: Some(TypeExpr::Name(String::from("int"))),
                         type_params: vec![SummaryTypeParam {
                             kind: Some(String::from("typevar")),
                             name: String::from("T"),
@@ -1073,7 +1047,11 @@ mod tests {
                     },
                 ],
                 imports: vec![String::from("pkg.base")],
-                import_targets: Vec::new(),
+                import_targets: vec![SummaryImportTarget {
+                    raw_target: String::from("pkg.base"),
+                    module_target: String::from("pkg.base"),
+                    symbol_target: None,
+                }],
                 sealed_roots: vec![SealedRootSummary {
                     root: String::from("Expr"),
                     members: vec![String::from("Add")],
@@ -1086,62 +1064,44 @@ mod tests {
 
     #[test]
     fn snapshot_fingerprints_ignore_non_public_graph_noise() {
-        let make_graph =
-            |fingerprint| ModuleGraph {
-                nodes: vec![ModuleNode {
-                    module_path: PathBuf::from("src/pkg/a.tpy"),
-                    module_key: String::from("pkg.a"),
-                    module_kind: SourceKind::TypePython,
-                    declarations: vec![Declaration {
-                        metadata: Default::default(),
-                        name: String::from("build"),
-                        kind: DeclarationKind::Function,
-                        legacy_detail: String::from("()->int"),
-                        value_type_expr: None,
-                        method_kind: None,
-                        class_kind: None,
-                        owner: None,
-                        is_async: false,
-                        is_override: false,
-                        is_abstract_method: false,
-                        is_final_decorator: false,
-                        is_deprecated: false,
-                        deprecation_message: None,
-                        is_final: false,
-                        is_class_var: false,
-                        bases: Vec::new(),
-                        type_params: Vec::new(),
-                    }],
-                    calls: vec![typepython_binding::CallSite {
-                        callee: String::from("helper"),
-                        arg_count: 1,
-                        arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
-                            vec![String::from("int")],
-                        ),
-                        starred_arg_values:
-                            typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-                        keyword_names: Vec::new(),
-                        keyword_arg_values:
-                            typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-                        keyword_expansion_values:
-                            typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
-                        line: 3,
-                    }],
-                    method_calls: Vec::new(),
-                    member_accesses: Vec::new(),
-                    returns: Vec::new(),
-                    yields: Vec::new(),
-                    if_guards: Vec::new(),
-                    asserts: Vec::new(),
-                    invalidations: Vec::new(),
-                    matches: Vec::new(),
-                    for_loops: Vec::new(),
-                    with_statements: Vec::new(),
-                    except_handlers: Vec::new(),
-                    assignments: Vec::new(),
-                    summary_fingerprint: fingerprint,
+        let make_graph = |fingerprint| ModuleGraph {
+            nodes: vec![ModuleNode {
+                module_path: PathBuf::from("src/pkg/a.tpy"),
+                module_key: String::from("pkg.a"),
+                module_kind: SourceKind::TypePython,
+                declarations: vec![function_declaration("build", Vec::new(), "int", Vec::new())],
+                calls: vec![typepython_binding::CallSite {
+                    callee: String::from("helper"),
+                    arg_count: 1,
+                    arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(vec![
+                        String::from("int"),
+                    ]),
+                    starred_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+                        Vec::new(),
+                    ),
+                    keyword_names: Vec::new(),
+                    keyword_arg_values: typepython_syntax::direct_expr_metadata_vec_from_type_texts(
+                        Vec::new(),
+                    ),
+                    keyword_expansion_values:
+                        typepython_syntax::direct_expr_metadata_vec_from_type_texts(Vec::new()),
+                    line: 3,
                 }],
-            };
+                method_calls: Vec::new(),
+                member_accesses: Vec::new(),
+                returns: Vec::new(),
+                yields: Vec::new(),
+                if_guards: Vec::new(),
+                asserts: Vec::new(),
+                invalidations: Vec::new(),
+                matches: Vec::new(),
+                for_loops: Vec::new(),
+                with_statements: Vec::new(),
+                except_handlers: Vec::new(),
+                assignments: Vec::new(),
+                summary_fingerprint: fingerprint,
+            }],
+        };
 
         let left = snapshot(&make_graph(1));
         let right = snapshot(&make_graph(99));
@@ -1480,25 +1440,20 @@ mod tests {
                 module_path: PathBuf::from("src/pkg/ops.tpy"),
                 module_key: String::from("pkg.ops"),
                 module_kind: SourceKind::TypePython,
-                declarations: vec![Declaration {
-                    metadata: Default::default(),
-                    name: String::from("compute"),
-                    kind: DeclarationKind::Function,
-                    legacy_detail: String::from(detail),
-                    value_type_expr: None,
-                    method_kind: None,
-                    class_kind: None,
-                    owner: None,
-                    is_async: false,
-                    is_override: false,
-                    is_abstract_method: false,
-                    is_final_decorator: false,
-                    is_deprecated: false,
-                    deprecation_message: None,
-                    is_final: false,
-                    is_class_var: false,
-                    bases: Vec::new(),
-                    type_params: Vec::new(),
+                declarations: vec![match detail {
+                    "(x: int)->int" => function_declaration(
+                        "compute",
+                        vec![function_param("x", "int")],
+                        "int",
+                        Vec::new(),
+                    ),
+                    "(x: int, y: int)->int" => function_declaration(
+                        "compute",
+                        vec![function_param("x", "int"), function_param("y", "int")],
+                        "int",
+                        Vec::new(),
+                    ),
+                    other => panic!("unsupported test signature: {other}"),
                 }],
                 calls: Vec::new(),
                 method_calls: Vec::new(),
@@ -1777,7 +1732,13 @@ mod tests {
 
     fn import_declaration(name: &str, legacy_detail: &str) -> Declaration {
         Declaration {
-            metadata: Default::default(),
+            metadata: DeclarationMetadata::Import {
+                target: BoundImportTarget {
+                    raw_target: String::from(legacy_detail),
+                    module_target: String::from(legacy_detail),
+                    symbol_target: None,
+                },
+            },
             name: String::from(name),
             kind: DeclarationKind::Import,
             legacy_detail: String::from(legacy_detail),
@@ -1800,7 +1761,9 @@ mod tests {
 
     fn value_declaration(name: &str, value_type: &str) -> Declaration {
         Declaration {
-            metadata: Default::default(),
+            metadata: DeclarationMetadata::Value {
+                annotation: Some(BoundTypeExpr::new(value_type)),
+            },
             name: String::from(name),
             kind: DeclarationKind::Value,
             legacy_detail: String::from(value_type),
@@ -1818,6 +1781,49 @@ mod tests {
             is_class_var: false,
             bases: Vec::new(),
             type_params: Vec::new(),
+        }
+    }
+
+    fn function_param(name: &str, annotation: &str) -> DirectFunctionParamSite {
+        DirectFunctionParamSite {
+            name: String::from(name),
+            annotation: Some(String::from(annotation)),
+            annotation_expr: TypeExpr::parse(annotation),
+            has_default: false,
+            positional_only: false,
+            keyword_only: false,
+            variadic: false,
+            keyword_variadic: false,
+        }
+    }
+
+    fn function_declaration(
+        name: &str,
+        params: Vec<DirectFunctionParamSite>,
+        returns: &str,
+        type_params: Vec<GenericTypeParam>,
+    ) -> Declaration {
+        let signature =
+            BoundCallableSignature { params, returns: Some(BoundTypeExpr::new(returns)) };
+        Declaration {
+            metadata: DeclarationMetadata::Callable { signature: signature.clone() },
+            name: String::from(name),
+            kind: DeclarationKind::Function,
+            legacy_detail: signature.rendered(),
+            value_type_expr: None,
+            method_kind: None,
+            class_kind: None,
+            owner: None,
+            is_async: false,
+            is_override: false,
+            is_abstract_method: false,
+            is_final_decorator: false,
+            is_deprecated: false,
+            deprecation_message: None,
+            is_final: false,
+            is_class_var: false,
+            bases: Vec::new(),
+            type_params,
         }
     }
 }
