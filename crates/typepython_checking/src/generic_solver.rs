@@ -1016,16 +1016,15 @@ pub(crate) fn instantiate_direct_function_param_annotation(
     substitutions: &GenericTypeParamSubstitutions,
 ) -> Option<SemanticType> {
     param
-        .rendered_annotation()
-        .as_deref()
-        .map(|annotation| instantiate_semantic_annotation(annotation, substitutions))
-}
-
-pub(crate) fn instantiate_semantic_annotation(
-    annotation: &str,
-    substitutions: &GenericTypeParamSubstitutions,
-) -> SemanticType {
-    substitute_semantic_type_params(&lower_type_text_or_name(annotation), substitutions)
+        .annotation_expr
+        .clone()
+        .map(lower_type_expr)
+        .or_else(|| {
+            param.annotation.as_deref().map(|annotation| {
+                lower_param_annotation_text(annotation, param.variadic, param.keyword_variadic)
+            })
+        })
+        .map(|annotation| substitute_semantic_type_params(&annotation, substitutions))
 }
 
 #[allow(clippy::too_many_arguments)]
