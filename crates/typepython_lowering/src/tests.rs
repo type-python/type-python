@@ -402,6 +402,28 @@ fn lower_rewrites_generic_data_class_and_sealed_class_with_generic_base() {
 }
 
 #[test]
+fn lower_compat_splits_conflicting_runtime_type_params_by_metadata() {
+    let tree = parse(SourceFile {
+        path: PathBuf::from("conflicting-typeparams.tpy"),
+        kind: SourceKind::TypePython,
+        logical_module: String::new(),
+        text: String::from(
+            "interface Serializable:\n    def to_json(self) -> str: ...\n\nclass Repository[T: Serializable]:\n    def save(self, value: T) -> T:\n        return value\n\ndef first[T](value: T) -> T:\n    return value\n\ndef save_user[T: Serializable](value: T) -> T:\n    return value\n",
+        ),
+    });
+
+    let lowered = lower_with_options(&tree, &compat_options("3.10"));
+
+    assert!(lowered.diagnostics.is_empty());
+    assert!(lowered.module.python_source.contains("__typepython_T_1 = TypeVar(\"T\", bound=\"Serializable\")"));
+    assert!(lowered.module.python_source.contains("__typepython_T_2 = TypeVar(\"T\")"));
+    assert!(lowered.module.python_source.contains("class Repository(Generic[__typepython_T_1]):"));
+    assert!(lowered.module.python_source.contains("def save(self, value: __typepython_T_1) -> __typepython_T_1:"));
+    assert!(lowered.module.python_source.contains("def first(value: __typepython_T_2) -> __typepython_T_2:"));
+    assert!(lowered.module.python_source.contains("def save_user(value: __typepython_T_1) -> __typepython_T_1:"));
+}
+
+#[test]
 fn lower_rewrites_non_generic_sealed_class_with_marker() {
     let lowered = lower(&SyntaxTree {
         source: SourceFile {

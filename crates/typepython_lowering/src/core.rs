@@ -272,16 +272,15 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
             _ => None,
         })
         .collect();
-    let runtime_type_params = collect_runtime_type_params(
-        &type_aliases,
-        &interfaces,
-        &data_classes,
-        &sealed_classes,
-        &class_defs,
-        &function_defs,
-        &overloads,
+    let compat_type_param_bindings = collect_runtime_type_param_bindings(
+        tree,
         options,
+        SplitCompatFunctionTypeParams::SharedWhenMetadataMatches,
     );
+    let declaration_type_param_rewrites =
+        compat_type_param_rewrites_by_declaration_line(&compat_type_param_bindings);
+    let class_member_type_param_rewrites =
+        compat_type_param_rewrites_by_class_member_line(&tree.source.text, &compat_type_param_bindings);
     let generic_class_like_declarations = has_compat_generic_class_like_declarations(
         &interfaces,
         &data_classes,
@@ -304,17 +303,17 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     });
     let has_sealed_classes = !sealed_classes.is_empty();
     let needs_typing_extensions_runtime_type_params =
-        runtime_type_params.values().any(|type_param| type_param.default.is_some())
+        compat_type_param_bindings.iter().any(|binding| binding.type_param.default.is_some())
             && !options.target_python.supports_generic_defaults();
-    let has_runtime_typevars = runtime_type_params
-        .values()
-        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVar);
-    let has_runtime_paramspecs = runtime_type_params
-        .values()
-        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::ParamSpec);
-    let has_runtime_typevartuples = runtime_type_params
-        .values()
-        .any(|type_param| type_param.kind == typepython_syntax::TypeParamKind::TypeVarTuple);
+    let has_runtime_typevars = compat_type_param_bindings
+        .iter()
+        .any(|binding| binding.type_param.kind == typepython_syntax::TypeParamKind::TypeVar);
+    let has_runtime_paramspecs = compat_type_param_bindings
+        .iter()
+        .any(|binding| binding.type_param.kind == typepython_syntax::TypeParamKind::ParamSpec);
+    let has_runtime_typevartuples = compat_type_param_bindings
+        .iter()
+        .any(|binding| binding.type_param.kind == typepython_syntax::TypeParamKind::TypeVarTuple);
     let needs_unpack_import =
         has_unqualified_symbol_usage(&tree.source.text, "Unpack") || has_runtime_typevartuples;
     let typevartuple_owner =
@@ -398,8 +397,12 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
         if tree_uses_dynamic_intrinsic(tree) && !has_any_import(&tree.source.text) {
             inserted_lines.emit_required_import(String::from("from typing import Any"));
         }
-        for (name, type_param) in &runtime_type_params {
-            inserted_lines.emit_synthetic_line(rewrite_typevar_line(name, type_param));
+        for binding in &compat_type_param_bindings {
+            inserted_lines.emit_synthetic_line(rewrite_typevar_line(
+                &binding.emitted_name,
+                &binding.source_name,
+                &binding.type_param,
+            ));
         }
         if type_aliases.values().any(|statement| !can_use_native_typealias(statement, options))
             && !has_typealias_import(&tree.source.text)
@@ -452,40 +455,82 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
                     (expanded, false)
                 } else {
                     (
-                        vec![rewrite_typealias_line(line, statement, options)],
+                        vec![rewrite_typealias_line(
+                            line,
+                            statement,
+                            options,
+                            declaration_type_param_rewrites.get(&line_number),
+                        )],
                         can_use_native_typealias(statement, options),
                     )
                 }
             } else if let Some(statement) = interfaces.get(&line_number) {
                 (
-                    vec![rewrite_interface_line(line, statement, options)],
+                    vec![rewrite_interface_line(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )],
                     can_use_native_type_params(&statement.type_params, options),
                 )
             } else if let Some(statement) = data_classes.get(&line_number) {
                 (
-                    rewrite_data_class_lines(line, statement, options).into_iter().collect(),
+                    rewrite_data_class_lines(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )
+                    .into_iter()
+                    .collect(),
                     can_use_native_type_params(&statement.type_params, options),
                 )
             } else if let Some(statement) = overloads.get(&line_number) {
                 (
-                    rewrite_overload_lines(line, statement, options).into_iter().collect(),
+                    rewrite_overload_lines(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )
+                    .into_iter()
+                    .collect(),
                     can_use_native_type_params(&statement.type_params, options),
                 )
             } else if let Some(statement) = sealed_classes.get(&line_number) {
                 (
-                    vec![rewrite_sealed_class_line(line, statement, options)],
+                    vec![rewrite_sealed_class_line(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )],
                     can_use_native_type_params(&statement.type_params, options),
                 )
             } else if let Some(statement) = class_defs.get(&line_number) {
                 (
-                    vec![rewrite_class_def_line(line, statement, options)],
+                    vec![rewrite_class_def_line(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )],
                     can_use_native_type_params(&statement.type_params, options),
                 )
             } else if let Some(statement) = function_defs.get(&line_number) {
                 (
-                    vec![rewrite_function_def_line(line, statement, options)],
+                    vec![rewrite_function_def_line(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )],
                     can_use_native_type_params(&statement.type_params, options),
                 )
+            } else if let Some(type_param_rewrites) = class_member_type_param_rewrites.get(&line_number)
+            {
+                (vec![rewrite_type_param_tokens(line, type_param_rewrites)], false)
             } else if unsafe_lines.contains(&line_number) {
                 (vec![rewrite_unsafe_line(line)], false)
             } else {
@@ -886,94 +931,60 @@ fn header_line_for_statement(source: &str, start_line: usize) -> usize {
     start_line
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "lowering collects multiple declaration categories in one pass"
-)]
-fn collect_runtime_type_params(
-    type_aliases: &std::collections::BTreeMap<usize, &typepython_syntax::TypeAliasStatement>,
-    interfaces: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
-    data_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
-    sealed_classes: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
-    class_defs: &std::collections::BTreeMap<usize, &typepython_syntax::NamedBlockStatement>,
-    function_defs: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
-    overloads: &std::collections::BTreeMap<usize, &typepython_syntax::FunctionStatement>,
-    options: &LoweringOptions,
-) -> std::collections::BTreeMap<String, RuntimeTypeParam> {
-    let mut type_params = std::collections::BTreeMap::new();
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum SplitCompatFunctionTypeParams {
+    SharedWhenMetadataMatches,
+    SplitDistinctFunctions,
+}
 
-    for statement in type_aliases.values() {
-        if can_use_native_typealias(statement, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in interfaces.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in data_classes.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in sealed_classes.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in class_defs.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in function_defs.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
-    for statement in overloads.values() {
-        if can_use_native_type_params(&statement.type_params, options) {
-            continue;
-        }
-        for type_param in &statement.type_params {
-            type_params
-                .entry(type_param.name.clone())
-                .or_insert_with(|| RuntimeTypeParam::from_type_param(type_param));
-        }
-    }
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+enum CompatTypeParamOwnerKind {
+    TypeAlias,
+    Interface,
+    DataClass,
+    SealedClass,
+    ClassDef,
+    Function,
+    Overload,
+}
 
-    type_params
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct CompatTypeParamOwnerKey {
+    kind: CompatTypeParamOwnerKind,
+    name: String,
+    line: usize,
+}
+
+impl CompatTypeParamOwnerKey {
+    fn shares_function_binding(&self, other: &Self) -> bool {
+        matches!(
+            (&self.kind, &other.kind),
+            (CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload,
+             CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload)
+        ) && self.name == other.name
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompatTypeParamOwner {
+    key: CompatTypeParamOwnerKey,
+    type_params: Vec<typepython_syntax::TypeParam>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeTypeParamBinding {
+    source_name: String,
+    emitted_name: String,
+    type_param: RuntimeTypeParam,
+    owners: Vec<CompatTypeParamOwnerKey>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PendingRuntimeTypeParamBinding {
+    source_name: String,
+    type_param: RuntimeTypeParam,
+    owners: Vec<CompatTypeParamOwnerKey>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -982,6 +993,253 @@ struct RuntimeTypeParam {
     bound: Option<String>,
     constraints: Vec<String>,
     default: Option<String>,
+}
+
+fn collect_runtime_type_param_bindings(
+    tree: &SyntaxTree,
+    options: &LoweringOptions,
+    split_function_type_params: SplitCompatFunctionTypeParams,
+) -> Vec<RuntimeTypeParamBinding> {
+    let owners = collect_compat_type_param_owners(tree, options);
+    let mut bindings = Vec::<PendingRuntimeTypeParamBinding>::new();
+    let mut binding_indices_by_source = std::collections::BTreeMap::<String, Vec<usize>>::new();
+
+    for owner in owners {
+        for type_param in &owner.type_params {
+            let pending = PendingRuntimeTypeParamBinding {
+                source_name: type_param.name.clone(),
+                type_param: RuntimeTypeParam::from_type_param(type_param),
+                owners: vec![owner.key.clone()],
+            };
+            let binding_index = binding_indices_by_source
+                .entry(type_param.name.clone())
+                .or_default()
+                .iter()
+                .copied()
+                .find(|index| {
+                    let candidate = &bindings[*index];
+                    candidate.type_param == pending.type_param
+                        && match split_function_type_params {
+                            SplitCompatFunctionTypeParams::SharedWhenMetadataMatches => true,
+                            SplitCompatFunctionTypeParams::SplitDistinctFunctions => candidate
+                                .owners
+                                .first()
+                                .zip(pending.owners.first())
+                                .is_some_and(|(left, right)| left.shares_function_binding(right))
+                                || !matches!(
+                                    owner.key.kind,
+                                    CompatTypeParamOwnerKind::Function
+                                        | CompatTypeParamOwnerKind::Overload
+                                ),
+                        }
+                });
+            if let Some(binding_index) = binding_index {
+                bindings[binding_index].owners.push(owner.key.clone());
+            } else {
+                binding_indices_by_source
+                    .entry(type_param.name.clone())
+                    .or_default()
+                    .push(bindings.len());
+                bindings.push(pending);
+            }
+        }
+    }
+
+    let mut runtime_bindings = Vec::new();
+    for (source_name, binding_indices) in binding_indices_by_source {
+        let multiple_bindings = binding_indices.len() > 1;
+        for (offset, binding_index) in binding_indices.into_iter().enumerate() {
+            let pending = bindings[binding_index].clone();
+            let emitted_name = if multiple_bindings {
+                format!("__typepython_{}_{}", source_name, offset + 1)
+            } else {
+                source_name.clone()
+            };
+            runtime_bindings.push(RuntimeTypeParamBinding {
+                source_name: source_name.clone(),
+                emitted_name,
+                type_param: pending.type_param,
+                owners: pending.owners,
+            });
+        }
+    }
+
+    runtime_bindings
+}
+
+fn collect_compat_type_param_owners(
+    tree: &SyntaxTree,
+    options: &LoweringOptions,
+) -> Vec<CompatTypeParamOwner> {
+    tree.statements
+        .iter()
+        .filter_map(|statement| match statement {
+            SyntaxStatement::TypeAlias(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_typealias(statement, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::TypeAlias,
+                        name: statement.name.clone(),
+                        line: statement.line,
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::Interface(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::Interface,
+                        name: statement.name.clone(),
+                        line: header_line_for_statement(&tree.source.text, statement.line),
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::DataClass(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::DataClass,
+                        name: statement.name.clone(),
+                        line: header_line_for_statement(&tree.source.text, statement.line),
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::SealedClass(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::SealedClass,
+                        name: statement.name.clone(),
+                        line: header_line_for_statement(&tree.source.text, statement.line),
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::ClassDef(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::ClassDef,
+                        name: statement.name.clone(),
+                        line: header_line_for_statement(&tree.source.text, statement.line),
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::FunctionDef(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::Function,
+                        name: statement.name.clone(),
+                        line: statement.line,
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            SyntaxStatement::OverloadDef(statement)
+                if !statement.type_params.is_empty()
+                    && !can_use_native_type_params(&statement.type_params, options) =>
+            {
+                Some(CompatTypeParamOwner {
+                    key: CompatTypeParamOwnerKey {
+                        kind: CompatTypeParamOwnerKind::Overload,
+                        name: statement.name.clone(),
+                        line: statement.line,
+                    },
+                    type_params: statement.type_params.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn compat_type_param_rewrites_by_declaration_line(
+    bindings: &[RuntimeTypeParamBinding],
+) -> std::collections::BTreeMap<usize, std::collections::BTreeMap<String, String>> {
+    let mut rewrites = std::collections::BTreeMap::new();
+    for binding in bindings {
+        if binding.emitted_name == binding.source_name {
+            continue;
+        }
+        for owner in &binding.owners {
+            rewrites
+                .entry(owner.line)
+                .or_insert_with(std::collections::BTreeMap::new)
+                .insert(binding.source_name.clone(), binding.emitted_name.clone());
+        }
+    }
+    rewrites
+}
+
+fn compat_type_param_rewrites_by_class_member_line(
+    source: &str,
+    bindings: &[RuntimeTypeParamBinding],
+) -> std::collections::BTreeMap<usize, std::collections::BTreeMap<String, String>> {
+    let mut rewrites = std::collections::BTreeMap::new();
+    for binding in bindings {
+        if binding.emitted_name == binding.source_name {
+            continue;
+        }
+        for owner in &binding.owners {
+            if !matches!(
+                owner.kind,
+                CompatTypeParamOwnerKind::Interface
+                    | CompatTypeParamOwnerKind::DataClass
+                    | CompatTypeParamOwnerKind::SealedClass
+                    | CompatTypeParamOwnerKind::ClassDef
+            ) {
+                continue;
+            }
+            for line in compat_class_member_header_lines(source, owner.line) {
+                rewrites
+                    .entry(line)
+                    .or_insert_with(std::collections::BTreeMap::new)
+                    .insert(binding.source_name.clone(), binding.emitted_name.clone());
+            }
+        }
+    }
+    rewrites
+}
+
+fn compat_class_member_header_lines(source: &str, class_line: usize) -> Vec<usize> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let Some(header_line) = lines.get(class_line.saturating_sub(1)) else {
+        return Vec::new();
+    };
+    let class_indent = header_line.len() - header_line.trim_start().len();
+    let member_indent = class_indent + 4;
+    let mut member_lines = Vec::new();
+    for (index, line) in lines.iter().enumerate().skip(class_line) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indentation = line.len() - trimmed.len();
+        if indentation <= class_indent {
+            break;
+        }
+        if indentation == member_indent && !trimmed.starts_with('@') {
+            member_lines.push(index + 1);
+        }
+    }
+    member_lines
 }
 
 impl RuntimeTypeParam {
@@ -1316,23 +1574,32 @@ fn rewrite_typealias_line(
     line: &str,
     statement: &typepython_syntax::TypeAliasStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
+    let value =
+        apply_type_param_rewrites(&statement.value, type_param_rewrites).unwrap_or_else(|| {
+            statement.value.clone()
+        });
     if can_use_native_typealias(statement, options) {
         format!(
             "{indentation}type {}{} = {}",
             statement.name,
             render_native_type_params(&statement.type_params),
-            statement.value
+            value
         )
     } else {
-        format!("{indentation}{}: TypeAlias = {}", statement.name, statement.value)
+        format!("{indentation}{}: TypeAlias = {}", statement.name, value)
     }
 }
 
-fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
-    let mut args = vec![format!("\"{name}\"")];
+fn rewrite_typevar_line(
+    emitted_name: &str,
+    source_name: &str,
+    type_param: &RuntimeTypeParam,
+) -> String {
+    let mut args = vec![format!("\"{source_name}\"")];
     args.extend(type_param.constraints.iter().map(|constraint| format!("{constraint:?}")));
     if type_param.constraints.is_empty()
         && let Some(bound) = &type_param.bound
@@ -1344,13 +1611,13 @@ fn rewrite_typevar_line(name: &str, type_param: &RuntimeTypeParam) -> String {
     }
     match type_param.kind {
         typepython_syntax::TypeParamKind::TypeVar => {
-            format!("{name} = TypeVar({})", args.join(", "))
+            format!("{emitted_name} = TypeVar({})", args.join(", "))
         }
         typepython_syntax::TypeParamKind::ParamSpec => {
-            format!("{name} = ParamSpec({})", args.join(", "))
+            format!("{emitted_name} = ParamSpec({})", args.join(", "))
         }
         typepython_syntax::TypeParamKind::TypeVarTuple => {
-            format!("{name} = TypeVarTuple({name:?})")
+            format!("{emitted_name} = TypeVarTuple({source_name:?})")
         }
     }
 }
@@ -1450,6 +1717,7 @@ fn rewrite_interface_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
@@ -1457,9 +1725,12 @@ fn rewrite_interface_line(
     if !statement.type_params.is_empty()
         && !can_use_native_type_params(&statement.type_params, options)
     {
-        extras.push(generic_base(statement));
+        extras.push(generic_base(statement, type_param_rewrites));
     }
-    let bases = append_bases(&runtime_header_suffix(statement), &extras);
+    let header_suffix =
+        apply_type_param_rewrites(&runtime_header_suffix(statement), type_param_rewrites)
+            .unwrap_or_else(|| runtime_header_suffix(statement));
+    let bases = append_bases(&header_suffix, &extras);
     format!(
         "{indentation}class {}{}{}:",
         statement.name,
@@ -1472,10 +1743,11 @@ fn rewrite_data_class_lines(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement, options);
+    let bases = append_optional_generic_base(statement, options, type_param_rewrites);
 
     [
         format!("{indentation}@dataclass"),
@@ -1492,10 +1764,11 @@ fn rewrite_sealed_class_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement, options);
+    let bases = append_optional_generic_base(statement, options, type_param_rewrites);
 
     format!(
         "{indentation}class {}{}{}:  # tpy:sealed",
@@ -1509,10 +1782,11 @@ fn rewrite_class_def_line(
     line: &str,
     statement: &typepython_syntax::NamedBlockStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let bases = append_optional_generic_base(statement, options);
+    let bases = append_optional_generic_base(statement, options, type_param_rewrites);
     format!(
         "{indentation}class {}{}{}:",
         statement.name,
@@ -1525,6 +1799,7 @@ fn rewrite_function_def_line(
     line: &str,
     statement: &typepython_syntax::FunctionStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
     if can_use_native_type_params(&statement.type_params, options) {
         return line.to_owned();
@@ -1532,7 +1807,10 @@ fn rewrite_function_def_line(
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
     let trimmed = line.trim_start();
-    format!("{indentation}{}", strip_generic_type_params(trimmed))
+    let rewritten = strip_generic_type_params(trimmed);
+    let rewritten =
+        apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
+    format!("{indentation}{rewritten}")
 }
 
 fn strip_generic_type_params(source: &str) -> String {
@@ -1618,6 +1896,75 @@ fn render_native_type_params(type_params: &[typepython_syntax::TypeParam]) -> St
     format!("[{}]", type_params.iter().map(render_native_type_param).collect::<Vec<_>>().join(", "))
 }
 
+fn apply_type_param_rewrites(
+    text: &str,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
+) -> Option<String> {
+    let type_param_rewrites = type_param_rewrites?;
+    if type_param_rewrites.is_empty() {
+        return None;
+    }
+    let rewritten = rewrite_type_param_tokens(text, type_param_rewrites);
+    (rewritten != text).then_some(rewritten)
+}
+
+fn rewrite_type_param_tokens(
+    text: &str,
+    type_param_rewrites: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut rewritten = String::with_capacity(text.len());
+    let mut token = String::new();
+    let mut quote = None::<char>;
+    let mut escaped = false;
+
+    let flush_token =
+        |token: &mut String,
+         rewritten: &mut String,
+         type_param_rewrites: &std::collections::BTreeMap<String, String>| {
+            if token.is_empty() {
+                return;
+            }
+            if let Some(replacement) = type_param_rewrites.get(token) {
+                rewritten.push_str(replacement);
+            } else {
+                rewritten.push_str(token);
+            }
+            token.clear();
+        };
+
+    for character in text.chars() {
+        if let Some(active_quote) = quote {
+            rewritten.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+
+        if character == '\'' || character == '"' {
+            flush_token(&mut token, &mut rewritten, type_param_rewrites);
+            rewritten.push(character);
+            quote = Some(character);
+            continue;
+        }
+
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token.push(character);
+            continue;
+        }
+
+        flush_token(&mut token, &mut rewritten, type_param_rewrites);
+        rewritten.push(character);
+    }
+
+    flush_token(&mut token, &mut rewritten, type_param_rewrites);
+    rewritten
+}
+
 fn render_native_type_param(type_param: &typepython_syntax::TypeParam) -> String {
     let prefix = match type_param.kind {
         typepython_syntax::TypeParamKind::TypeVar => "",
@@ -1660,14 +2007,17 @@ fn render_native_type_param(type_param: &typepython_syntax::TypeParam) -> String
 fn append_optional_generic_base(
     statement: &typepython_syntax::NamedBlockStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> String {
-    let header_suffix = runtime_header_suffix(statement);
+    let header_suffix =
+        apply_type_param_rewrites(&runtime_header_suffix(statement), type_param_rewrites)
+            .unwrap_or_else(|| runtime_header_suffix(statement));
     if statement.type_params.is_empty()
         || can_use_native_type_params(&statement.type_params, options)
     {
         if header_suffix.is_empty() { String::new() } else { header_suffix }
     } else {
-        append_bases(&header_suffix, &[generic_base(statement)])
+        append_bases(&header_suffix, &[generic_base(statement, type_param_rewrites)])
     }
 }
 
@@ -1791,13 +2141,21 @@ fn append_bases(header_suffix: &str, extras: &[String]) -> String {
     format!("({})", parts.join(", "))
 }
 
-fn generic_base(statement: &typepython_syntax::NamedBlockStatement) -> String {
+fn generic_base(
+    statement: &typepython_syntax::NamedBlockStatement,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
+) -> String {
     format!(
         "Generic[{}]",
         statement
             .type_params
             .iter()
-            .map(|type_param| type_param.name.as_str())
+            .map(|type_param| {
+                type_param_rewrites
+                    .and_then(|rewrites| rewrites.get(&type_param.name))
+                    .cloned()
+                    .unwrap_or_else(|| type_param.name.clone())
+            })
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -1823,6 +2181,7 @@ fn rewrite_overload_lines(
     line: &str,
     statement: &typepython_syntax::FunctionStatement,
     options: &LoweringOptions,
+    type_param_rewrites: Option<&std::collections::BTreeMap<String, String>>,
 ) -> [String; 2] {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
@@ -1833,6 +2192,8 @@ fn rewrite_overload_lines(
     } else {
         strip_generic_type_params(&rewritten)
     };
+    let rewritten =
+        apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
 
     [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
 }
