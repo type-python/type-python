@@ -1661,7 +1661,7 @@ fn render_authoritative_assignment_stub(
 ) -> Option<String> {
     let start_line = offset_to_line(source, assign.range.start().to_usize());
     if let Some(statement_text) = source_stmt_text(source, assign.range())
-        && statement_text.contains("TypeAlias =")
+        && (statement_text.contains("TypeAlias =") || is_runtime_type_param_assignment(assign))
     {
         return Some(statement_text);
     }
@@ -2337,6 +2337,19 @@ fn is_overload_decorator(decorator: &ruff_python_ast::Decorator) -> bool {
         Expr::Attribute(attribute) => {
             attribute.attr.as_str() == "overload"
                 && matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "typing")
+        }
+        _ => false,
+    }
+}
+
+fn is_runtime_type_param_assignment(assign: &ruff_python_ast::StmtAssign) -> bool {
+    let Expr::Call(call) = assign.value.as_ref() else {
+        return false;
+    };
+    match call.func.as_ref() {
+        Expr::Name(name) => matches!(name.id.as_str(), "TypeVar" | "ParamSpec" | "TypeVarTuple"),
+        Expr::Attribute(attribute) => {
+            matches!(attribute.attr.as_str(), "TypeVar" | "ParamSpec" | "TypeVarTuple")
         }
         _ => false,
     }

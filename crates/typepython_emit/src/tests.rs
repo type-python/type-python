@@ -832,6 +832,29 @@ fn generate_typepython_stub_source_preserves_native_class_and_function_headers()
 }
 
 #[test]
+fn generate_typepython_stub_source_preserves_runtime_type_param_assignments() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/compat_generics.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from typing import TypeVar\n__typepython_T_1 = TypeVar(\"T\")\ndef first(value: __typepython_T_1) -> __typepython_T_1:\n    return value\n",
+        ),
+        source_map: Vec::new(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("compat generic stub should preserve runtime type parameter declarations");
+
+    assert!(stub.contains("__typepython_T_1 = TypeVar(\"T\")"));
+    assert!(stub.contains("def first(value: __typepython_T_1) -> __typepython_T_1: ..."));
+    assert!(!stub.contains("__typepython_T_1: object"));
+    assert!(!stub.contains("# tpy:unknown __typepython_T_1"));
+}
+
+#[test]
 fn generate_inferred_shadow_stub_handles_empty_module() {
     let stub = generate_inferred_stub_source("", InferredStubMode::Shadow)
         .expect("empty shadow stub generation should succeed");
