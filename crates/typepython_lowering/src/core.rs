@@ -275,7 +275,7 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     let compat_type_param_bindings = collect_runtime_type_param_bindings(
         tree,
         options,
-        SplitCompatFunctionTypeParams::SharedWhenMetadataMatches,
+        SplitCompatFunctionTypeParams::SplitDistinctFunctions,
     );
     let declaration_type_param_rewrites =
         compat_type_param_rewrites_by_declaration_line(&compat_type_param_bindings);
@@ -1025,12 +1025,15 @@ fn collect_runtime_type_param_bindings(
                                 .owners
                                 .first()
                                 .zip(pending.owners.first())
-                                .is_some_and(|(left, right)| left.shares_function_binding(right))
-                                || !matches!(
-                                    owner.key.kind,
-                                    CompatTypeParamOwnerKind::Function
-                                        | CompatTypeParamOwnerKind::Overload
-                                ),
+                                .is_none_or(|(left, right)| {
+                                    !matches!(
+                                        (&left.kind, &right.kind),
+                                        (CompatTypeParamOwnerKind::Function
+                                            | CompatTypeParamOwnerKind::Overload,
+                                         CompatTypeParamOwnerKind::Function
+                                            | CompatTypeParamOwnerKind::Overload)
+                                    ) || left.shares_function_binding(right)
+                                }),
                         }
                 });
             if let Some(binding_index) = binding_index {
