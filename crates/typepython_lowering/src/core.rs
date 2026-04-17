@@ -279,8 +279,10 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
     );
     let declaration_type_param_rewrites =
         compat_type_param_rewrites_by_declaration_line(&compat_type_param_bindings);
-    let class_member_type_param_rewrites =
-        compat_type_param_rewrites_by_class_member_line(&tree.source.text, &compat_type_param_bindings);
+    let class_member_type_param_rewrites = compat_type_param_rewrites_by_class_member_line(
+        &tree.source.text,
+        &compat_type_param_bindings,
+    );
     let generic_class_like_declarations = has_compat_generic_class_like_declarations(
         &interfaces,
         &data_classes,
@@ -447,95 +449,96 @@ fn lower_typepython(tree: &SyntaxTree, options: &LoweringOptions) -> LoweredText
 
     for (index, line) in normalized_source.lines().enumerate() {
         let line_number = index + 1;
-        let (replacement_lines, preserve_variadic_syntax) =
-            if let Some(statement) = type_aliases.get(&line_number) {
-                if let Some(expanded) =
-                    try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
-                {
-                    (expanded, false)
-                } else {
-                    (
-                        vec![rewrite_typealias_line(
-                            line,
-                            statement,
-                            options,
-                            declaration_type_param_rewrites.get(&line_number),
-                        )],
-                        can_use_native_typealias(statement, options),
-                    )
-                }
-            } else if let Some(statement) = interfaces.get(&line_number) {
-                (
-                    vec![rewrite_interface_line(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )],
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(statement) = data_classes.get(&line_number) {
-                (
-                    rewrite_data_class_lines(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )
-                    .into_iter()
-                    .collect(),
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(statement) = overloads.get(&line_number) {
-                (
-                    rewrite_overload_lines(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )
-                    .into_iter()
-                    .collect(),
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(statement) = sealed_classes.get(&line_number) {
-                (
-                    vec![rewrite_sealed_class_line(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )],
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(statement) = class_defs.get(&line_number) {
-                (
-                    vec![rewrite_class_def_line(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )],
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(statement) = function_defs.get(&line_number) {
-                (
-                    vec![rewrite_function_def_line(
-                        line,
-                        statement,
-                        options,
-                        declaration_type_param_rewrites.get(&line_number),
-                    )],
-                    can_use_native_type_params(&statement.type_params, options),
-                )
-            } else if let Some(type_param_rewrites) = class_member_type_param_rewrites.get(&line_number)
+        let (replacement_lines, preserve_variadic_syntax) = if let Some(statement) =
+            type_aliases.get(&line_number)
+        {
+            if let Some(expanded) =
+                try_expand_typeddict_transform(&statement.value, &typed_dicts_by_name, line)
             {
-                (vec![rewrite_type_param_tokens(line, type_param_rewrites)], false)
-            } else if unsafe_lines.contains(&line_number) {
-                (vec![rewrite_unsafe_line(line)], false)
+                (expanded, false)
             } else {
-                (vec![line.to_owned()], false)
-            };
+                (
+                    vec![rewrite_typealias_line(
+                        line,
+                        statement,
+                        options,
+                        declaration_type_param_rewrites.get(&line_number),
+                    )],
+                    can_use_native_typealias(statement, options),
+                )
+            }
+        } else if let Some(statement) = interfaces.get(&line_number) {
+            (
+                vec![rewrite_interface_line(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )],
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(statement) = data_classes.get(&line_number) {
+            (
+                rewrite_data_class_lines(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )
+                .into_iter()
+                .collect(),
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(statement) = overloads.get(&line_number) {
+            (
+                rewrite_overload_lines(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )
+                .into_iter()
+                .collect(),
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(statement) = sealed_classes.get(&line_number) {
+            (
+                vec![rewrite_sealed_class_line(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )],
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(statement) = class_defs.get(&line_number) {
+            (
+                vec![rewrite_class_def_line(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )],
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(statement) = function_defs.get(&line_number) {
+            (
+                vec![rewrite_function_def_line(
+                    line,
+                    statement,
+                    options,
+                    declaration_type_param_rewrites.get(&line_number),
+                )],
+                can_use_native_type_params(&statement.type_params, options),
+            )
+        } else if let Some(type_param_rewrites) = class_member_type_param_rewrites.get(&line_number)
+        {
+            (vec![rewrite_type_param_tokens(line, type_param_rewrites)], false)
+        } else if unsafe_lines.contains(&line_number) {
+            (vec![rewrite_unsafe_line(line)], false)
+        } else {
+            (vec![line.to_owned()], false)
+        };
         let replacement_lines = replacement_lines
             .into_iter()
             .map(|replacement| {
@@ -960,8 +963,10 @@ impl CompatTypeParamOwnerKey {
     fn shares_function_binding(&self, other: &Self) -> bool {
         matches!(
             (&self.kind, &other.kind),
-            (CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload,
-             CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload)
+            (
+                CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload,
+                CompatTypeParamOwnerKind::Function | CompatTypeParamOwnerKind::Overload
+            )
         ) && self.name == other.name
     }
 }
@@ -1021,19 +1026,21 @@ fn collect_runtime_type_param_bindings(
                     candidate.type_param == pending.type_param
                         && match split_function_type_params {
                             SplitCompatFunctionTypeParams::SharedWhenMetadataMatches => true,
-                            SplitCompatFunctionTypeParams::SplitDistinctFunctions => candidate
-                                .owners
-                                .first()
-                                .zip(pending.owners.first())
-                                .is_none_or(|(left, right)| {
-                                    !matches!(
-                                        (&left.kind, &right.kind),
-                                        (CompatTypeParamOwnerKind::Function
-                                            | CompatTypeParamOwnerKind::Overload,
-                                         CompatTypeParamOwnerKind::Function
-                                            | CompatTypeParamOwnerKind::Overload)
-                                    ) || left.shares_function_binding(right)
-                                }),
+                            SplitCompatFunctionTypeParams::SplitDistinctFunctions => {
+                                candidate.owners.first().zip(pending.owners.first()).is_none_or(
+                                    |(left, right)| {
+                                        !matches!(
+                                            (&left.kind, &right.kind),
+                                            (
+                                                CompatTypeParamOwnerKind::Function
+                                                    | CompatTypeParamOwnerKind::Overload,
+                                                CompatTypeParamOwnerKind::Function
+                                                    | CompatTypeParamOwnerKind::Overload
+                                            )
+                                        ) || left.shares_function_binding(right)
+                                    },
+                                )
+                            }
                         }
                 });
             if let Some(binding_index) = binding_index {
@@ -1581,10 +1588,8 @@ fn rewrite_typealias_line(
 ) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    let value =
-        apply_type_param_rewrites(&statement.value, type_param_rewrites).unwrap_or_else(|| {
-            statement.value.clone()
-        });
+    let value = apply_type_param_rewrites(&statement.value, type_param_rewrites)
+        .unwrap_or_else(|| statement.value.clone());
     if can_use_native_typealias(statement, options) {
         format!(
             "{indentation}type {}{} = {}",
@@ -1811,8 +1816,7 @@ fn rewrite_function_def_line(
     let indentation = &line[..indentation_width];
     let trimmed = line.trim_start();
     let rewritten = strip_generic_type_params(trimmed);
-    let rewritten =
-        apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
+    let rewritten = apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
     format!("{indentation}{rewritten}")
 }
 
@@ -2195,8 +2199,7 @@ fn rewrite_overload_lines(
     } else {
         strip_generic_type_params(&rewritten)
     };
-    let rewritten =
-        apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
+    let rewritten = apply_type_param_rewrites(&rewritten, type_param_rewrites).unwrap_or(rewritten);
 
     [format!("{indentation}@overload"), format!("{indentation}{rewritten}")]
 }
