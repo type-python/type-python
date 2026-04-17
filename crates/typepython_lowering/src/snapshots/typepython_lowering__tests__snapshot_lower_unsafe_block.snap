@@ -2,5 +2,5 @@
 source: crates/typepython_lowering/src/lib.rs
 expression: lowered.module.python_source
 ---
-if True:
+if True:  # tpy:unsafe
     x = eval('1')

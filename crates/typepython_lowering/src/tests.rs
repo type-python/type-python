@@ -43,7 +43,7 @@ fn lower_rewrites_top_level_unsafe_blocks() {
     println!("OUTPUT:\n{}", lowered.module.python_source);
     println!("DIAGNOSTICS: {:?}", lowered.diagnostics);
     assert!(lowered.diagnostics.is_empty());
-    assert_eq!(lowered.module.python_source, "if True:\n    x = 1\n");
+    assert_eq!(lowered.module.python_source, "if True:  # tpy:unsafe\n    x = 1\n");
     assert_eq!(
         lowered.module.source_map,
         vec![
@@ -70,7 +70,10 @@ fn lower_rewrites_nested_unsafe_blocks_with_indentation() {
     eprintln!("DIAGNOSTICS: {:?}", lowered.diagnostics);
     eprintln!("OUTPUT:\n{}", lowered.module.python_source);
     assert!(lowered.diagnostics.is_empty());
-    assert_eq!(lowered.module.python_source, "def update():\n    if True:\n        x = 1\n");
+    assert_eq!(
+        lowered.module.python_source,
+        "def update():\n    if True:  # tpy:unsafe\n        x = 1\n"
+    );
 }
 
 #[test]

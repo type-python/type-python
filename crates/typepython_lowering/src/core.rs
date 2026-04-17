@@ -1570,7 +1570,7 @@ fn imports_symbol_from_module(source: &str, module: &str, symbol: &str) -> bool 
 fn rewrite_unsafe_line(line: &str) -> String {
     let indentation_width = line.len() - line.trim_start().len();
     let indentation = &line[..indentation_width];
-    format!("{indentation}if True:")
+    format!("{indentation}if True:  # tpy:unsafe")
 }
 
 fn rewrite_typealias_line(
