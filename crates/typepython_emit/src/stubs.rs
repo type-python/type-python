@@ -1778,6 +1778,7 @@ fn is_stub_surface_decorator(expression: &Expr) -> bool {
                 | "staticmethod"
                 | "classmethod"
                 | "property"
+                | "dataclass"
                 | "final"
                 | "override"
                 | "deprecated"
@@ -1785,7 +1786,7 @@ fn is_stub_surface_decorator(expression: &Expr) -> bool {
         Expr::Attribute(attribute) => {
             matches!(
                 attribute.attr.as_str(),
-                "overload" | "staticmethod" | "classmethod" | "setter" | "deprecated"
+                "overload" | "staticmethod" | "classmethod" | "setter" | "deprecated" | "dataclass"
             ) || matches!(attribute.attr.as_str(), "property")
         }
         Expr::Call(call) => is_stub_surface_decorator(call.func.as_ref()),

@@ -855,6 +855,29 @@ fn generate_typepython_stub_source_preserves_runtime_type_param_assignments() {
 }
 
 #[test]
+fn generate_typepython_stub_source_preserves_dataclass_decorators() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/dataclass_user.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from(
+            "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass User:\n    name: str\n    age: int\n",
+        ),
+        source_map: Vec::new(),
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
+        .expect("dataclass stub generation should preserve the decorator surface");
+
+    assert!(stub.contains("@dataclass(frozen=True)"));
+    assert!(stub.contains("class User:"));
+    assert!(stub.contains("name: str"));
+    assert!(stub.contains("age: int"));
+}
+
+#[test]
 fn generate_inferred_shadow_stub_handles_empty_module() {
     let stub = generate_inferred_stub_source("", InferredStubMode::Shadow)
         .expect("empty shadow stub generation should succeed");
