@@ -837,7 +837,7 @@ fn generate_typepython_stub_source_preserves_runtime_type_param_assignments() {
         source_path: PathBuf::from("src/app/compat_generics.tpy"),
         source_kind: SourceKind::TypePython,
         python_source: String::from(
-            "from typing import TypeVar\n__typepython_T_1 = TypeVar(\"T\")\ndef first(value: __typepython_T_1) -> __typepython_T_1:\n    return value\n",
+            "from typing import TypeVar\n__typepython_T_1 = TypeVar(\"__typepython_T_1\")\ndef first(value: __typepython_T_1) -> __typepython_T_1:\n    return value\n",
         ),
         source_map: Vec::new(),
         span_map: Vec::new(),
@@ -848,7 +848,7 @@ fn generate_typepython_stub_source_preserves_runtime_type_param_assignments() {
     let stub = generate_typepython_stub_source(&module, &TypePythonStubContext::default())
         .expect("compat generic stub should preserve runtime type parameter declarations");
 
-    assert!(stub.contains("__typepython_T_1 = TypeVar(\"T\")"));
+    assert!(stub.contains("__typepython_T_1 = TypeVar(\"__typepython_T_1\")"));
     assert!(stub.contains("def first(value: __typepython_T_1) -> __typepython_T_1: ..."));
     assert!(!stub.contains("__typepython_T_1: object"));
     assert!(!stub.contains("# tpy:unknown __typepython_T_1"));

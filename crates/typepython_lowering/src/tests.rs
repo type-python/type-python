@@ -418,8 +418,10 @@ fn lower_compat_splits_conflicting_runtime_type_params_by_metadata() {
     let lowered = lower_with_options(&tree, &compat_options("3.10"));
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(lowered.module.python_source.contains("__typepython_T_1 = TypeVar(\"T\", bound=\"Serializable\")"));
-    assert!(lowered.module.python_source.contains("__typepython_T_2 = TypeVar(\"T\")"));
+    assert!(lowered.module.python_source.contains(
+        "__typepython_T_1 = TypeVar(\"__typepython_T_1\", bound=\"Serializable\")"
+    ));
+    assert!(lowered.module.python_source.contains("__typepython_T_2 = TypeVar(\"__typepython_T_2\")"));
     assert!(lowered.module.python_source.contains("class Repository(Generic[__typepython_T_1]):"));
     assert!(lowered.module.python_source.contains("def save(self, value: __typepython_T_1) -> __typepython_T_1:"));
     assert!(lowered.module.python_source.contains("def first(value: __typepython_T_2) -> __typepython_T_2:"));
@@ -440,8 +442,8 @@ fn lower_compat_splits_distinct_function_scopes_with_matching_type_params() {
     let lowered = lower_with_options(&tree, &compat_options("3.10"));
 
     assert!(lowered.diagnostics.is_empty());
-    assert!(lowered.module.python_source.contains("__typepython_T_1 = TypeVar(\"T\")"));
-    assert!(lowered.module.python_source.contains("__typepython_T_2 = TypeVar(\"T\")"));
+    assert!(lowered.module.python_source.contains("__typepython_T_1 = TypeVar(\"__typepython_T_1\")"));
+    assert!(lowered.module.python_source.contains("__typepython_T_2 = TypeVar(\"__typepython_T_2\")"));
     assert!(lowered.module.python_source.contains("def first(value: __typepython_T_1) -> __typepython_T_1:"));
     assert!(lowered.module.python_source.contains("def identity(value: __typepython_T_2) -> __typepython_T_2:"));
 }

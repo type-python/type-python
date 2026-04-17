@@ -1599,10 +1599,10 @@ fn rewrite_typealias_line(
 
 fn rewrite_typevar_line(
     emitted_name: &str,
-    source_name: &str,
+    _source_name: &str,
     type_param: &RuntimeTypeParam,
 ) -> String {
-    let mut args = vec![format!("\"{source_name}\"")];
+    let mut args = vec![format!("\"{emitted_name}\"")];
     args.extend(type_param.constraints.iter().map(|constraint| format!("{constraint:?}")));
     if type_param.constraints.is_empty()
         && let Some(bound) = &type_param.bound
@@ -1620,7 +1620,7 @@ fn rewrite_typevar_line(
             format!("{emitted_name} = ParamSpec({})", args.join(", "))
         }
         typepython_syntax::TypeParamKind::TypeVarTuple => {
-            format!("{emitted_name} = TypeVarTuple({source_name:?})")
+            format!("{emitted_name} = TypeVarTuple({emitted_name:?})")
         }
     }
 }
