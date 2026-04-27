@@ -43,6 +43,7 @@ pub(crate) struct TypePackageHealth {
     pub(crate) is_partial_stub: bool,
     pub(crate) public_any_returns: usize,
     pub(crate) public_any_attributes: usize,
+    pub(crate) overload_any_fallbacks: usize,
     pub(crate) runtime_version: Option<String>,
     pub(crate) stub_version: Option<String>,
     pub(crate) stub_version_matches_runtime: Option<bool>,
@@ -212,6 +213,7 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
         is_partial_stub: marker.lines().any(|line| line.trim() == "partial"),
         public_any_returns: public_any.returns,
         public_any_attributes: public_any.attributes,
+        overload_any_fallbacks: public_any.overload_fallbacks,
         runtime_version,
         stub_version,
         stub_version_matches_runtime,
@@ -222,6 +224,7 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
 struct PublicAnyCounts {
     returns: usize,
     attributes: usize,
+    overload_fallbacks: usize,
 }
 
 fn public_any_counts(path: &Path) -> Result<PublicAnyCounts> {
@@ -244,11 +247,23 @@ fn collect_public_any_counts(path: &Path, counts: &mut PublicAnyCounts) -> Resul
     }
     let source =
         fs::read_to_string(path).with_context(|| format!("unable to read {}", path.display()))?;
+    let mut next_signature_is_overload = false;
     for line in source.lines() {
+        let stripped = line.trim_start();
+        if stripped.starts_with("@overload") || stripped.starts_with("@typing.overload") {
+            next_signature_is_overload = true;
+            continue;
+        }
         if public_function_returns_any(line) {
             counts.returns += 1;
+            if next_signature_is_overload {
+                counts.overload_fallbacks += 1;
+            }
         } else if public_attribute_uses_any(line) {
             counts.attributes += 1;
+        }
+        if !stripped.starts_with('@') && !stripped.is_empty() {
+            next_signature_is_overload = false;
         }
     }
     Ok(())
@@ -366,6 +381,8 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInpu
         rendered.push_str(&format!("is_partial_stub = {}\n", package.is_partial_stub));
         rendered.push_str(&format!("public_any_returns = {}\n", package.public_any_returns));
         rendered.push_str(&format!("public_any_attributes = {}\n", package.public_any_attributes));
+        rendered
+            .push_str(&format!("overload_any_fallbacks = {}\n", package.overload_any_fallbacks));
         if let Some(version) = &package.runtime_version {
             rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
@@ -389,13 +406,14 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} runtime_version={} stub_version={} version_match={}",
+            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} runtime_version={} stub_version={} version_match={}",
             package.name,
             package.has_py_typed,
             package.is_stub_only,
             package.is_partial_stub,
             package.public_any_returns,
             package.public_any_attributes,
+            package.overload_any_fallbacks,
             package.runtime_version.as_deref().unwrap_or("?"),
             package.stub_version.as_deref().unwrap_or("?"),
             package

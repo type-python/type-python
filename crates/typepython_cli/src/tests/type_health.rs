@@ -41,7 +41,7 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
             .expect("stub package should exist");
         fs::write(
             project_dir.join("site/demo-stubs/demo/__init__.pyi"),
-            "from typing import Any\n\npublic_value: Any\n_private_value: Any\nclass Box:\n    item: typing.Any\n\ndef fetch() -> Any: ...\ndef _private() -> Any: ...\nasync def load() -> typing.Any: ...\n",
+            "from typing import Any, overload\n\npublic_value: Any\n_private_value: Any\nclass Box:\n    item: typing.Any\n\ndef fetch() -> Any: ...\ndef _private() -> Any: ...\nasync def load() -> typing.Any: ...\n@overload\ndef coerce(value: str) -> str: ...\n@overload\ndef coerce(value: object) -> Any: ...\n",
         )
         .expect("stub surface should be written");
         fs::write(project_dir.join("site/demo-stubs/py.typed"), "partial\n")
@@ -66,8 +66,9 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
     assert!(report.packages.iter().any(|package| package.name == "demo"
         && package.is_stub_only
         && package.is_partial_stub
-        && package.public_any_returns == 2
+        && package.public_any_returns == 3
         && package.public_any_attributes == 2
+        && package.overload_any_fallbacks == 1
         && package.runtime_version.as_deref() == Some("1.2.3")
         && package.stub_version.as_deref() == Some("1.2.0")
         && package.stub_version_matches_runtime == Some(false)));
@@ -126,4 +127,5 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     assert!(lock.contains("has_py_typed = true"));
     assert!(lock.contains("public_any_returns = 0"));
     assert!(lock.contains("public_any_attributes = 0"));
+    assert!(lock.contains("overload_any_fallbacks = 0"));
 }
