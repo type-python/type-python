@@ -931,6 +931,40 @@ fn generate_typepython_stub_source_with_value_override() {
     assert!(stub.contains("def build() -> int: ..."));
 }
 
+#[test]
+fn generate_typepython_stub_source_can_replace_decorated_function_with_value_surface() {
+    let module = LoweredModule {
+        source_path: PathBuf::from("src/app/__init__.tpy"),
+        source_kind: SourceKind::TypePython,
+        python_source: String::from("@task\ndef build(name: str) -> int:\n    return 1\n"),
+        source_map: vec![
+            SourceMapEntry { original_line: 1, lowered_line: 1 },
+            SourceMapEntry { original_line: 2, lowered_line: 2 },
+            SourceMapEntry { original_line: 3, lowered_line: 3 },
+        ],
+        span_map: Vec::new(),
+        required_imports: Vec::new(),
+        metadata: typepython_lowering::LoweringMetadata::default(),
+    };
+    let context = TypePythonStubContext {
+        value_overrides: vec![StubValueOverride {
+            line: 2,
+            annotation: String::from("Task[[str], int]"),
+        }],
+        callable_overrides: Vec::new(),
+        synthetic_methods: Vec::new(),
+        sealed_classes: Vec::new(),
+        guarded_declaration_lines: BTreeSet::new(),
+    };
+
+    let stub = generate_typepython_stub_source(&module, &context)
+        .expect("decorated value override stub should generate");
+
+    assert!(!stub.contains("@task"));
+    assert!(stub.contains("build: Task[[str], int]"));
+    assert!(!stub.contains("def build("));
+}
+
 // ─── Snapshot (golden) tests for stub generation ──────────────────────
 
 #[test]

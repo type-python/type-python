@@ -217,6 +217,76 @@ fn decorated_function_transform_rewrites_effective_callable_annotation() {
 }
 
 #[test]
+fn decorated_function_transform_can_resolve_non_callable_object_surface() {
+    let source_text = concat!(
+        "from typing import Callable\n\n",
+        "class Task[**P, R]:\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        ...\n\n",
+        "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
+        "    return Task()\n\n",
+        "@task\n",
+        "def count(value: int) -> int:\n",
+        "    return value\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new_with_bound_surface_facts_and_strict(
+        &graph.nodes,
+        ImportFallback::Unknown,
+        None,
+        None,
+        true,
+    );
+
+    assert_eq!(
+        crate::resolve_decorated_function_callable_semantic_type_with_context(
+            &context,
+            node,
+            &graph.nodes,
+            "count",
+        )
+        .as_ref()
+        .map(crate::diagnostic_type_text),
+        Some(String::from("Task[P, int]"))
+    );
+    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].annotation, "Task[P, int]");
+}
+
+#[test]
+fn check_accepts_function_to_object_decorator_transform_member_calls() {
+    let result = check_temp_typepython_source(concat!(
+        "from typing import Callable, cast\n\n",
+        "class Task[**P, R]:\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        ...\n\n",
+        "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
+        "    return cast(Task[P, R], Task())\n\n",
+        "@task\n",
+        "def count(value: int) -> int:\n",
+        "    return value\n\n",
+        "result: int = count.delay(1)\n",
+    ));
+
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
+}
+
+#[test]
 fn semantic_callable_assignability_handles_concatenate_structurally() {
     let node = ModuleNode {
         module_path: PathBuf::from("<callable-assignability>"),
@@ -889,13 +959,13 @@ fn check_accepts_method_callable_decorator_transform() {
 }
 
 #[test]
-fn check_reports_non_callable_decorator_transform_in_strict_mode() {
+fn check_accepts_non_callable_decorator_transform_in_strict_mode_when_static_type_is_known() {
     let result = check_temp_typepython_source_with_check_options(
         concat!(
-            "from typing import Callable\n\n",
+            "from typing import Callable, cast\n\n",
             "class Route:\n    pass\n\n",
             "def route(fn: Callable[[int], int]) -> Route:\n",
-            "    return Route()\n\n",
+            "    return cast(Route, Route())\n\n",
             "@route\n",
             "def count(value: int) -> int:\n",
             "    return value\n",
@@ -908,10 +978,7 @@ fn check_reports_non_callable_decorator_transform_in_strict_mode() {
         false,
     );
 
-    let rendered = result.diagnostics.as_text();
-    assert!(rendered.contains("TPY4001"));
-    assert!(rendered.contains("resolves to non-callable type `Route`"));
-    assert!(rendered.contains("decorator `route`"));
+    assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
 }
 
 #[test]
