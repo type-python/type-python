@@ -30,6 +30,7 @@ pub(crate) struct MigrationReport {
     pub(crate) files: Vec<MigrationCoverageEntry>,
     pub(crate) directories: Vec<MigrationCoverageEntry>,
     pub(crate) public_api_files: Vec<MigrationPublicApiEntry>,
+    pub(crate) untyped_import_files: Vec<MigrationUntypedImportEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
     pub(crate) framework_pattern_files: Vec<MigrationFrameworkPatternEntry>,
     pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
@@ -94,6 +95,13 @@ pub(crate) struct MigrationPublicApiEntry {
     pub(crate) known_public_exports: usize,
     pub(crate) completeness_percent: f64,
     pub(crate) incomplete_exports: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct MigrationUntypedImportEntry {
+    pub(crate) path: String,
+    pub(crate) untyped_import_count: usize,
+    pub(crate) imports: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +231,10 @@ pub(crate) fn build_migration_report(
     config: &ConfigHandle,
     syntax_trees: &[typepython_syntax::SyntaxTree],
 ) -> MigrationReport {
+    let known_module_keys = syntax_trees
+        .iter()
+        .map(|syntax| syntax.source.logical_module.clone())
+        .collect::<BTreeSet<_>>();
     let mut files = syntax_trees
         .iter()
         .map(|syntax| migration_file_stats(config, syntax))
@@ -316,6 +328,12 @@ pub(crate) fn build_migration_report(
     let public_api_exports = public_api_files.iter().map(|entry| entry.public_exports).sum();
     let known_public_api_exports =
         public_api_files.iter().map(|entry| entry.known_public_exports).sum();
+    let mut untyped_import_files = syntax_trees
+        .iter()
+        .map(|syntax| migration_untyped_import_entry(config, syntax, &known_module_keys))
+        .filter(|entry| entry.untyped_import_count > 0)
+        .collect::<Vec<_>>();
+    untyped_import_files.sort_by(|left, right| left.path.cmp(&right.path));
 
     MigrationReport {
         total_declarations: total.declarations,
@@ -327,6 +345,7 @@ pub(crate) fn build_migration_report(
         files: files.into_iter().map(|stats| stats.entry).collect(),
         directories: directory_entries,
         public_api_files,
+        untyped_import_files,
         high_impact_untyped_files,
         framework_pattern_files: framework_pattern_entries(config, syntax_trees),
         diagnostic_baseline: None,
@@ -434,6 +453,47 @@ fn migration_public_api_entry(
         completeness_percent: coverage_percent(known_public_exports, public_exports),
         incomplete_exports,
     }
+}
+
+fn migration_untyped_import_entry(
+    config: &ConfigHandle,
+    syntax: &typepython_syntax::SyntaxTree,
+    known_module_keys: &BTreeSet<String>,
+) -> MigrationUntypedImportEntry {
+    let path = syntax.source.path.strip_prefix(&config.config_dir).map(normalize_glob_path).ok();
+    let Some(path) = path else {
+        return MigrationUntypedImportEntry {
+            path: syntax.source.path.display().to_string(),
+            untyped_import_count: 0,
+            imports: Vec::new(),
+        };
+    };
+    let mut imports = syntax
+        .statements
+        .iter()
+        .filter_map(|statement| match statement {
+            typepython_syntax::SyntaxStatement::Import(statement) => Some(statement),
+            _ => None,
+        })
+        .flat_map(|statement| statement.bindings.iter().map(|binding| binding.source_path.clone()))
+        .filter(|source_path| !import_resolves_to_known_module(source_path, known_module_keys))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    imports.sort();
+
+    MigrationUntypedImportEntry { path, untyped_import_count: imports.len(), imports }
+}
+
+fn import_resolves_to_known_module(
+    source_path: &str,
+    known_module_keys: &BTreeSet<String>,
+) -> bool {
+    known_module_keys.contains(source_path)
+        || known_module_keys.iter().any(|module_key| {
+            module_key.starts_with(&format!("{source_path}."))
+                || source_path.starts_with(&format!("{module_key}."))
+        })
 }
 
 fn is_public_name(name: &str) -> bool {
@@ -975,6 +1035,15 @@ fn print_migration_report(
                     } else {
                         entry.incomplete_exports.join(",")
                     }
+                );
+            }
+            println!("  untyped import candidates:");
+            for entry in &report.untyped_import_files {
+                println!(
+                    "    {}: {} import(s) -> {}",
+                    entry.path,
+                    entry.untyped_import_count,
+                    entry.imports.join(",")
                 );
             }
             println!("  framework pattern candidates:");
