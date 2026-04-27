@@ -151,6 +151,15 @@ pub(crate) struct MigrateArgs {
     /// Emit the migration coverage report.
     #[arg(long)]
     pub(crate) report: bool,
+    /// Read an existing migration diagnostic baseline for comparison.
+    #[arg(long = "baseline", value_name = "PATH")]
+    pub(crate) baseline: Option<PathBuf>,
+    /// Write the current diagnostic baseline to the given JSON file.
+    #[arg(long = "write-baseline", value_name = "PATH")]
+    pub(crate) write_baseline: Option<PathBuf>,
+    /// Fail when diagnostics appear that are not present in the baseline.
+    #[arg(long = "no-new-diagnostics")]
+    pub(crate) no_new_diagnostics: bool,
     /// Generate inferred `.pyi` stubs for the selected `.py` files or directories.
     #[arg(long = "emit-stubs", value_name = "PATH")]
     pub(crate) emit_stubs: Vec<PathBuf>,

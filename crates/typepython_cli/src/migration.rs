@@ -6,9 +6,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use typepython_config::ConfigHandle;
-use typepython_diagnostics::DiagnosticReport;
+use typepython_diagnostics::{Diagnostic, DiagnosticReport};
 use typepython_emit::{InferredStubMode, generate_inferred_stub_source};
 use typepython_syntax::{SourceFile, SourceKind, apply_type_ignore_directives};
 
@@ -28,6 +28,32 @@ pub(crate) struct MigrationReport {
     pub(crate) files: Vec<MigrationCoverageEntry>,
     pub(crate) directories: Vec<MigrationCoverageEntry>,
     pub(crate) high_impact_untyped_files: Vec<MigrationImpactEntry>,
+    pub(crate) diagnostic_baseline: Option<MigrationDiagnosticBaselineComparison>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub(crate) struct MigrationDiagnosticBaseline {
+    pub(crate) version: u8,
+    pub(crate) diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) struct MigrationDiagnosticBaselineEntry {
+    pub(crate) code: String,
+    pub(crate) severity: String,
+    pub(crate) path: Option<String>,
+    pub(crate) line: Option<usize>,
+    pub(crate) column: Option<usize>,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Serialize, Clone, Eq, PartialEq)]
+pub(crate) struct MigrationDiagnosticBaselineComparison {
+    pub(crate) baseline_path: String,
+    pub(crate) baseline_diagnostics: usize,
+    pub(crate) current_diagnostics: usize,
+    pub(crate) new_diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
+    pub(crate) resolved_diagnostics: Vec<MigrationDiagnosticBaselineEntry>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -83,7 +109,44 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     apply_type_ignore_directives(&syntax_trees, &mut parse_diagnostics);
     diagnostics.diagnostics.extend(parse_diagnostics.diagnostics);
 
-    let report = build_migration_report(&config, &syntax_trees);
+    let current_baseline = build_migration_diagnostic_baseline(&diagnostics);
+    let baseline_comparison = migration_diagnostic_baseline_comparison(
+        &config,
+        args.baseline.as_deref(),
+        &current_baseline,
+    )?;
+    if args.no_new_diagnostics {
+        match &baseline_comparison {
+            Some(comparison) if comparison.new_diagnostics.is_empty() => {}
+            Some(comparison) => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6001",
+                    format!(
+                        "migration baseline gate found {} new diagnostic(s)",
+                        comparison.new_diagnostics.len()
+                    ),
+                )
+                .with_note(format!(
+                    "compare against baseline {} or refresh it with `typepython migrate --write-baseline` after intentional debt changes",
+                    comparison.baseline_path
+                )),
+            ),
+            None => diagnostics.push(
+                Diagnostic::error(
+                    "TPY6002",
+                    "--no-new-diagnostics requires --baseline PATH so current diagnostics can be compared",
+                )
+                .with_note("write the initial baseline with `typepython migrate --write-baseline PATH`"),
+            ),
+        }
+    }
+
+    if let Some(path) = args.write_baseline.as_deref() {
+        write_migration_diagnostic_baseline(&config, path, &current_baseline)?;
+    }
+
+    let mut report = build_migration_report(&config, &syntax_trees);
+    report.diagnostic_baseline = baseline_comparison;
     let emitted_stubs = emit_migration_stubs(
         &config,
         &discovery.sources,
@@ -93,7 +156,13 @@ pub(crate) fn run_migrate(args: MigrateArgs) -> Result<ExitCode> {
     let mut notes = Vec::new();
     if args.report {
         notes.push(String::from(
-            "migration report includes file coverage, directory coverage, and high-impact untyped files",
+            "migration report includes file coverage, directory coverage, high-impact untyped files, and diagnostic baseline state",
+        ));
+    }
+    if let Some(path) = args.write_baseline.as_deref() {
+        notes.push(format!(
+            "wrote migration diagnostic baseline to {}",
+            resolve_migration_report_path(&config, path).display()
         ));
     }
     if !emitted_stubs.is_empty() {
@@ -226,7 +295,95 @@ pub(crate) fn build_migration_report(
         files: files.into_iter().map(|stats| stats.entry).collect(),
         directories: directory_entries,
         high_impact_untyped_files,
+        diagnostic_baseline: None,
     }
+}
+
+pub(crate) fn build_migration_diagnostic_baseline(
+    diagnostics: &DiagnosticReport,
+) -> MigrationDiagnosticBaseline {
+    let mut entries =
+        diagnostics.diagnostics.iter().map(migration_diagnostic_baseline_entry).collect::<Vec<_>>();
+    entries.sort();
+    entries.dedup();
+
+    MigrationDiagnosticBaseline { version: 1, diagnostics: entries }
+}
+
+pub(crate) fn compare_migration_diagnostic_baseline(
+    baseline_path: String,
+    baseline: &MigrationDiagnosticBaseline,
+    current: &MigrationDiagnosticBaseline,
+) -> MigrationDiagnosticBaselineComparison {
+    let baseline_entries = baseline.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
+    let current_entries = current.diagnostics.iter().cloned().collect::<BTreeSet<_>>();
+    let new_diagnostics = current_entries.difference(&baseline_entries).cloned().collect();
+    let resolved_diagnostics = baseline_entries.difference(&current_entries).cloned().collect();
+
+    MigrationDiagnosticBaselineComparison {
+        baseline_path,
+        baseline_diagnostics: baseline.diagnostics.len(),
+        current_diagnostics: current.diagnostics.len(),
+        new_diagnostics,
+        resolved_diagnostics,
+    }
+}
+
+fn migration_diagnostic_baseline_entry(
+    diagnostic: &Diagnostic,
+) -> MigrationDiagnosticBaselineEntry {
+    MigrationDiagnosticBaselineEntry {
+        code: diagnostic.code.clone(),
+        severity: diagnostic.severity.to_string(),
+        path: diagnostic.span.as_ref().map(|span| span.path.clone()),
+        line: diagnostic.span.as_ref().map(|span| span.line),
+        column: diagnostic.span.as_ref().map(|span| span.column),
+        message: diagnostic.message.clone(),
+    }
+}
+
+fn migration_diagnostic_baseline_comparison(
+    config: &ConfigHandle,
+    baseline_path: Option<&Path>,
+    current: &MigrationDiagnosticBaseline,
+) -> Result<Option<MigrationDiagnosticBaselineComparison>> {
+    let Some(path) = baseline_path else {
+        return Ok(None);
+    };
+    let resolved_path = resolve_migration_report_path(config, path);
+    let contents = fs::read_to_string(&resolved_path).with_context(|| {
+        format!("unable to read migration baseline {}", resolved_path.display())
+    })?;
+    let baseline: MigrationDiagnosticBaseline =
+        serde_json::from_str(&contents).with_context(|| {
+            format!("unable to parse migration baseline {}", resolved_path.display())
+        })?;
+    Ok(Some(compare_migration_diagnostic_baseline(
+        resolved_path.display().to_string(),
+        &baseline,
+        current,
+    )))
+}
+
+fn write_migration_diagnostic_baseline(
+    config: &ConfigHandle,
+    path: &Path,
+    baseline: &MigrationDiagnosticBaseline,
+) -> Result<()> {
+    let resolved_path = resolve_migration_report_path(config, path);
+    if let Some(parent) = resolved_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("unable to create migration baseline directory {}", parent.display())
+        })?;
+    }
+    let json = serde_json::to_string_pretty(baseline)
+        .context("unable to serialize migration diagnostic baseline")?;
+    fs::write(&resolved_path, format!("{json}\n"))
+        .with_context(|| format!("unable to write migration baseline {}", resolved_path.display()))
+}
+
+fn resolve_migration_report_path(config: &ConfigHandle, path: &Path) -> PathBuf {
+    if path.is_absolute() { path.to_path_buf() } else { config.config_dir.join(path) }
 }
 
 fn migration_file_stats(
@@ -601,6 +758,14 @@ fn print_migration_report(
                     entry.dynamic_boundaries,
                     entry.unknown_boundaries
                 );
+            }
+            if let Some(comparison) = &report.diagnostic_baseline {
+                println!("  diagnostic baseline:");
+                println!("    baseline: {}", comparison.baseline_path);
+                println!("    current diagnostics: {}", comparison.current_diagnostics);
+                println!("    baseline diagnostics: {}", comparison.baseline_diagnostics);
+                println!("    new diagnostics: {}", comparison.new_diagnostics.len());
+                println!("    resolved diagnostics: {}", comparison.resolved_diagnostics.len());
             }
         }
         OutputFormat::Json => {
