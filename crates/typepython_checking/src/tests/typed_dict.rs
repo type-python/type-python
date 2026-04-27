@@ -146,6 +146,52 @@ fn shared_shape_can_wrap_dataclass_transform_fields() {
 }
 
 #[test]
+fn shared_shape_supports_typeddict_projection_operations() {
+    let source_text = concat!(
+        "from typing import TypedDict\n",
+        "from typing_extensions import ReadOnly\n\n",
+        "class User(TypedDict):\n",
+        "    id: int\n",
+        "    name: ReadOnly[str]\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let node = &graph.nodes[0];
+    let context = crate::CheckerContext::new(&graph.nodes, ImportFallback::Unknown, None);
+
+    let shape =
+        crate::resolve_known_shape_from_type_with_context(&context, node, &graph.nodes, "User")
+            .expect("typed dict shape should resolve");
+
+    let partial = shape.partial();
+    assert!(partial.field("id").is_some_and(|field| !field.required));
+    assert!(partial.field("name").is_some_and(|field| !field.required && field.readonly));
+
+    let mutable = shape.mutable_fields();
+    assert!(mutable.field("name").is_some_and(|field| !field.readonly));
+
+    let picked = shape.pick(&["name"]);
+    assert!(picked.field("name").is_some());
+    assert!(picked.field("id").is_none());
+
+    let omitted = shape.omit(&["id"]);
+    assert!(omitted.field("name").is_some());
+    assert!(omitted.field("id").is_none());
+}
+
+#[test]
 fn check_conformance_baseline_common_library_stub_surface() {
     let result = check_temp_project_sources(&[
         (
