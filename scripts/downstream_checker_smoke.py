@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import pathlib
 import re
@@ -12,6 +13,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURE_ROOT = ROOT / "test-fixtures" / "downstream-checkers"
+MATRIX_PATH = FIXTURE_ROOT / "matrix.json"
 DEFAULT_CHECKERS = ("mypy", "pyright", "ty")
 
 
@@ -22,34 +24,27 @@ class FixtureCase:
     expected_stub_fragments: dict[str, tuple[str, ...]] | None = None
 
 
-FIXTURES = {
-    "basic-package": FixtureCase(name="basic-package", targets=("3.10",)),
-    "rich-package": FixtureCase(name="rich-package", targets=("3.10", "3.12")),
-    "compat-package": FixtureCase(
-        name="compat-package",
-        targets=("3.10", "3.11", "3.12"),
-        expected_stub_fragments={
-            "3.10": (
-                "typing_extensions.Self",
-                "@typing_extensions.override",
-                "typing_extensions.ReadOnly[int]",
-                "typing_extensions.TypeIs[int]",
+def load_fixture_matrix(path: pathlib.Path = MATRIX_PATH) -> dict[str, FixtureCase]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    fixtures: dict[str, FixtureCase] = {}
+    for raw_case in payload.get("fixtures", []):
+        name = raw_case["name"]
+        expected_stub_fragments = raw_case.get("expected_stub_fragments")
+        fixtures[name] = FixtureCase(
+            name=name,
+            targets=tuple(raw_case["targets"]),
+            expected_stub_fragments=(
+                None
+                if expected_stub_fragments is None
+                else {
+                    target: tuple(fragments)
+                    for target, fragments in expected_stub_fragments.items()
+                }
             ),
-            "3.11": (
-                "typing.Self",
-                "@typing_extensions.override",
-                "typing_extensions.ReadOnly[int]",
-                "typing_extensions.TypeIs[int]",
-            ),
-            "3.12": (
-                "typing.Self",
-                "@typing.override",
-                "typing_extensions.ReadOnly[int]",
-                "typing_extensions.TypeIs[int]",
-            ),
-        },
-    ),
-}
+        )
+    if not fixtures:
+        raise SystemExit(f"downstream checker matrix is empty: {path}")
+    return fixtures
 
 
 def run(command: list[str], cwd: pathlib.Path | None = None) -> None:
@@ -146,14 +141,15 @@ def check_fixture(case: FixtureCase, checkers: tuple[str, ...]) -> None:
 
 
 def main() -> None:
+    fixtures = load_fixture_matrix()
     checker_names = env_csv("TYPEPYTHON_DOWNSTREAM_CHECKERS", DEFAULT_CHECKERS)
-    fixture_names = env_csv("TYPEPYTHON_DOWNSTREAM_FIXTURES", tuple(FIXTURES))
+    fixture_names = env_csv("TYPEPYTHON_DOWNSTREAM_FIXTURES", tuple(fixtures))
     for checker in checker_names:
         require_command(checker)
     for fixture_name in fixture_names:
-        case = FIXTURES.get(fixture_name)
+        case = fixtures.get(fixture_name)
         if case is None:
-            known = ", ".join(sorted(FIXTURES))
+            known = ", ".join(sorted(fixtures))
             raise SystemExit(
                 f"unknown downstream checker fixture `{fixture_name}`; known fixtures: {known}"
             )

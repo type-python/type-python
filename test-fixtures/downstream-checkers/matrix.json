@@ -1,0 +1,36 @@
+{
+  "fixtures": [
+    {
+      "name": "basic-package",
+      "targets": ["3.10"]
+    },
+    {
+      "name": "rich-package",
+      "targets": ["3.10", "3.12"]
+    },
+    {
+      "name": "compat-package",
+      "targets": ["3.10", "3.11", "3.12"],
+      "expected_stub_fragments": {
+        "3.10": [
+          "typing_extensions.Self",
+          "@typing_extensions.override",
+          "typing_extensions.ReadOnly[int]",
+          "typing_extensions.TypeIs[int]"
+        ],
+        "3.11": [
+          "typing.Self",
+          "@typing_extensions.override",
+          "typing_extensions.ReadOnly[int]",
+          "typing_extensions.TypeIs[int]"
+        ],
+        "3.12": [
+          "typing.Self",
+          "@typing.override",
+          "typing_extensions.ReadOnly[int]",
+          "typing_extensions.TypeIs[int]"
+        ]
+      }
+    }
+  ]
+}
