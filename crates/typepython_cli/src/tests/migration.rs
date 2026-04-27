@@ -142,6 +142,41 @@ fn build_migration_report_flags_framework_transform_candidates() {
 }
 
 #[test]
+fn build_migration_report_tracks_public_api_annotation_completeness() {
+    let project_dir =
+        temp_project_dir("build_migration_report_tracks_public_api_annotation_completeness");
+    let report = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "PUBLIC_VALUE: int = 1\n_hidden: int = 2\n\ndef typed(value: int) -> int:\n    return value\n\ndef untyped(value) -> int:\n    return 0\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        build_migration_report(&config, &syntax_trees)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.public_api_exports, 3);
+    assert_eq!(report.known_public_api_exports, 2);
+    assert_eq!(report.public_api_files.len(), 1);
+    let entry = &report.public_api_files[0];
+    assert!(entry.path.ends_with("src/app/__init__.tpy"));
+    assert_eq!(entry.public_exports, 3);
+    assert_eq!(entry.known_public_exports, 2);
+    assert_eq!(entry.incomplete_exports, vec![String::from("untyped")]);
+}
+
+#[test]
 fn migrate_command_parses_emit_stubs_flags() {
     let cli = Cli::parse_from([
         "typepython",
