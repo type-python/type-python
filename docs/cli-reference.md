@@ -324,6 +324,7 @@ typepython compat [OPTIONS]
 | `--project PATH`         | Project directory                                                                           |
 | `--format FORMAT`        | Output format: `text` or `json`                                                             |
 | `--checkers LIST`        | Comma-separated checker list; default `all` expands to `mypy,pyright,ty`                    |
+| `--profile NAME`         | Named checker profile: `library-portable`, `app-strict`, `pyright-first`, `mypy-compatible`, or `experimental-checkers` |
 | `--strict-portability`   | Keep portability failures build-blocking for every configured checker rejection              |
 | `--checker-allowlist PATH` | TOML allowlist of known checker disagreements that should remain visible but non-blocking   |
 
@@ -346,6 +347,9 @@ typepython compat --project .
 
 # Run one checker while iterating locally
 typepython compat --project . --checkers pyright
+
+# Use a named checker profile
+typepython compat --project . --profile library-portable
 ```
 
 ---
