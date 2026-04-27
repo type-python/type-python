@@ -39,6 +39,11 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
         .expect("runtime metadata should be written");
         fs::create_dir_all(project_dir.join("site/demo-stubs/demo"))
             .expect("stub package should exist");
+        fs::write(
+            project_dir.join("site/demo-stubs/demo/__init__.pyi"),
+            "from typing import Any\n\ndef fetch() -> Any: ...\ndef _private() -> Any: ...\nasync def load() -> typing.Any: ...\n",
+        )
+        .expect("stub surface should be written");
         fs::write(project_dir.join("site/demo-stubs/py.typed"), "partial\n")
             .expect("partial marker should be written");
         fs::create_dir_all(project_dir.join("site/demo_stubs-1.2.0.dist-info"))
@@ -61,6 +66,7 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
     assert!(report.packages.iter().any(|package| package.name == "demo"
         && package.is_stub_only
         && package.is_partial_stub
+        && package.public_any_returns == 2
         && package.runtime_version.as_deref() == Some("1.2.3")
         && package.stub_version.as_deref() == Some("1.2.0")
         && package.stub_version_matches_runtime == Some(false)));
@@ -117,4 +123,5 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     assert!(lock.contains("name = \"ty\""));
     assert!(lock.contains("[[package]]"));
     assert!(lock.contains("has_py_typed = true"));
+    assert!(lock.contains("public_any_returns = 0"));
 }
