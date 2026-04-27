@@ -2,8 +2,11 @@ CARGO ?= cargo
 MSRV ?= 1.94.0
 PYTHON ?= python3
 RUSTDOCFLAGS ?= -D warnings
+FUZZ_TARGETS ?= parser type_expr lowering_stub
+FUZZ_SMOKE_SECONDS ?= 30
+FUZZ_LONG_SECONDS ?= 300
 
-.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage stdlib-baseline-check conformance-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
+.PHONY: bootstrap fmt fmt-check check msrv-check lint test test-fast test-cli-verification test-downstream-checkers coverage fuzz-smoke fuzz-long stdlib-baseline-check conformance-check repo-contracts bench bench-check bench-baseline bench-compare package-check snapshot-review docs ci bump-version
 
 bootstrap:
 	./scripts/bootstrap-rust.sh
@@ -43,6 +46,12 @@ coverage:
 	$(CARGO) llvm-cov report --workspace --all-features --lcov --output-path coverage/lcov.info
 	$(CARGO) llvm-cov report --workspace --all-features --text --output-path coverage/coverage.txt
 	$(CARGO) llvm-cov report --workspace --all-features --html
+
+fuzz-smoke:
+	for target in $(FUZZ_TARGETS); do $(CARGO) +nightly fuzz run $$target -- -max_total_time=$(FUZZ_SMOKE_SECONDS); done
+
+fuzz-long:
+	for target in $(FUZZ_TARGETS); do $(CARGO) +nightly fuzz run $$target -- -max_total_time=$(FUZZ_LONG_SECONDS); done
 
 stdlib-baseline-check:
 	$(PYTHON) scripts/refresh_stdlib_stubs.py --check

@@ -91,6 +91,34 @@ jobs:
             target/llvm-cov/html/
           if-no-files-found: error
 
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz-target: [parser, type_expr, lowering_stub]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run fuzz smoke target
+        run: cargo +nightly fuzz run ${{ matrix.fuzz-target }} -- -max_total_time=30
+
+      - name: Upload fuzz artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-smoke-${{ matrix.fuzz-target }}-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   python-min-supported:
     runs-on: ubuntu-latest
 

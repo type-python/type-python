@@ -26,3 +26,32 @@ jobs:
 
       - name: Audit Cargo.lock for known vulnerabilities
         run: cargo audit
+
+  fuzz-long:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz-target: [parser, type_expr, lowering_stub]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run scheduled fuzz target
+        run: cargo +nightly fuzz run ${{ matrix.fuzz-target }} -- -max_total_time=300
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-long-${{ matrix.fuzz-target }}-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
