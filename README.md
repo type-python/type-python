@@ -159,6 +159,7 @@ typepython verify  --project . --checker-preset all --checker-allowlist checker-
 typepython compat  --project .          # Validate emitted artifacts across mypy, pyright, and ty
 typepython compat  --project . --format json # Include checker diagnostics and a type portability score
 typepython compat  --project . --profile pyright-first # Run a named checker portability profile
+typepython compat  --project . --profile library-portable # Pre-scan emitted stubs for non-portable constructs before checker execution
 typepython api-diff old-stubs new-stubs # Compare public .pyi type surfaces
 typepython type-health --project .      # Inspect dependency/stub typing metadata
 typepython migrate --project . --report # Migration coverage report

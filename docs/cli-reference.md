@@ -339,6 +339,8 @@ Unknown checker values are treated as custom command paths and receive the gener
 
 When external checkers run, the summary includes a `type portability score` note. The score is the percentage of configured checker invocations that did not produce build-blocking checker diagnostics; allowlisted disagreements remain visible as warnings but do not reduce the score.
 
+Before invoking external checkers, `verify` and `compat` also scan emitted `.pyi` files for known portability risks such as native `type` statements, inline generic headers, defaulted type parameters, and `typing.ReadOnly` / `typing.TypeIs` forms used before their target Python version supports them. These diagnostics include suggested rewrites, usually switching to compat emit output or `typing_extensions` imports.
+
 **Example:**
 
 ```bash
