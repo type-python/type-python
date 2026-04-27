@@ -54,9 +54,8 @@
       "expected_stub_fragments": {
         "3.12": [
           "def framework_transform(*args, **kwargs): ...",
-          "def delay(self, name: str) -> R: ...",
-          "@task",
-          "def build(name: str) -> int: ..."
+          "def delay(self, *args: P.args, **kwargs: P.kwargs) -> R: ...",
+          "build: Task[[str], int]"
         ]
       }
     },
