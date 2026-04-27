@@ -1,5 +1,5 @@
 pub(super) use super::api_diff::{diff_api_surfaces, run_api_diff};
-pub(super) use super::compat::run_compat;
+pub(super) use super::compat::{expand_compat_profile, run_compat};
 pub(super) use super::discovery::{
     ExternalSupportRoot, bundled_stdlib_snapshot_identity_for_root,
     bundled_stdlib_sources_for_root, collect_source_paths, external_resolution_sources,

@@ -11,6 +11,8 @@ fn compat_command_parses_checker_preset_flags() {
         "json",
         "--checkers",
         "mypy,pyright",
+        "--profile",
+        "library-portable",
         "--strict-portability",
         "--checker-allowlist",
         "checker-allowlist.toml",
@@ -23,8 +25,32 @@ fn compat_command_parses_checker_preset_flags() {
     assert_eq!(args.run.project, Some(PathBuf::from("examples/hello-world")));
     assert_eq!(args.run.format, super::OutputFormat::Json);
     assert_eq!(args.checkers, "mypy,pyright");
+    assert_eq!(args.profile, Some(String::from("library-portable")));
     assert!(args.strict_portability);
     assert_eq!(args.checker_allowlist, Some(PathBuf::from("checker-allowlist.toml")));
+}
+
+#[test]
+fn expand_compat_profile_maps_named_profiles_to_checker_sets() {
+    assert_eq!(
+        expand_compat_profile("library-portable").expect("profile should expand"),
+        vec![String::from("mypy"), String::from("pyright"), String::from("ty")],
+    );
+    assert_eq!(
+        expand_compat_profile("pyright-first").expect("profile should expand"),
+        vec![String::from("pyright")],
+    );
+    assert_eq!(
+        expand_compat_profile("experimental-checkers").expect("profile should expand"),
+        vec![
+            String::from("basedpyright"),
+            String::from("mypy"),
+            String::from("pyrefly"),
+            String::from("pyright"),
+            String::from("ty"),
+            String::from("zuban"),
+        ],
+    );
 }
 
 #[test]
@@ -97,6 +123,7 @@ fn run_compat_uses_verify_pipeline_and_configured_checker() {
         let compat_result = run_compat(CompatArgs {
             run: RunArgs { project: Some(project_dir.clone()), format: super::OutputFormat::Json },
             checkers: checker_path.display().to_string(),
+            profile: None,
             strict_portability: false,
             checker_allowlist: None,
         })
