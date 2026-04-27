@@ -1,6 +1,7 @@
 //! `typepython` command-line entrypoint.
 
 mod cli;
+mod compat;
 mod discovery;
 mod migration;
 mod pipeline;
@@ -26,6 +27,7 @@ use typepython_config::{
 use typepython_diagnostics::DiagnosticReport;
 
 use crate::cli::{Cli, Command, InitArgs, OutputFormat, RunArgs};
+use crate::compat::run_compat;
 use crate::migration::run_migrate;
 use crate::pipeline::{
     clean_project, collect_watch_event_paths, format_watch_rebuild_note, run_build_like_command,
@@ -104,6 +106,7 @@ fn run() -> Result<ExitCode> {
         Command::Clean(args) => clean_project(args),
         Command::Lsp(args) => run_lsp(args),
         Command::Verify(args) => run_verify(args),
+        Command::Compat(args) => run_compat(args),
         Command::Migrate(args) => run_migrate(args),
     }
 }

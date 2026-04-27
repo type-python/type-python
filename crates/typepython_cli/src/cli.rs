@@ -25,6 +25,8 @@ pub(crate) enum Command {
     Lsp(RunArgs),
     /// Verify emitted artifacts and incremental state.
     Verify(VerifyArgs),
+    /// Validate emitted artifacts across downstream Python type checkers.
+    Compat(CompatArgs),
     /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
 }
@@ -93,6 +95,24 @@ pub(crate) struct VerifyArgs {
         help = "Import emitted runtime modules during verification to compare runtime-visible public names; this executes project-controlled Python code"
     )]
     pub(crate) unsafe_runtime_imports: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CompatArgs {
+    #[command(flatten)]
+    pub(crate) run: RunArgs,
+    #[arg(
+        long = "checkers",
+        value_name = "LIST",
+        default_value = "all",
+        help = "Comma-separated checker list: all, mypy, pyright, ty, pyrefly, basedpyright, zuban"
+    )]
+    pub(crate) checkers: String,
+    #[arg(
+        long = "strict-portability",
+        help = "Fail on any configured downstream checker rejection"
+    )]
+    pub(crate) strict_portability: bool,
 }
 
 #[derive(Debug, Args)]
