@@ -1611,6 +1611,12 @@ pub(crate) fn expand_substituted_semantic_generic_args(
 ) -> Vec<SemanticType> {
     let mut rendered = Vec::new();
     for arg in args {
+        if let SemanticType::Name(name) = arg
+            && let Some(binding) = substitutions.param_lists.get(name.trim())
+        {
+            rendered.push(param_list_binding_semantic_generic_arg(binding));
+            continue;
+        }
         if let Some(inner) = arg.unpacked_inner() {
             if let SemanticType::Name(name) = inner
                 && let Some(binding) = substitutions.type_packs.get(name.trim())
@@ -1630,6 +1636,13 @@ pub(crate) fn expand_substituted_semantic_generic_args(
         rendered.push(substitute_semantic_type_params(arg, substitutions));
     }
     rendered
+}
+
+fn param_list_binding_semantic_generic_arg(binding: &ParamListBinding) -> SemanticType {
+    let params = SemanticCallableParams::ParamList(
+        binding.params.iter().map(param_annotation_semantic_type).collect(),
+    );
+    SemanticType::Name(render_semantic_callable_params(&params))
 }
 
 pub(crate) fn unpacked_fixed_tuple_elements(text: &str) -> Option<Vec<String>> {

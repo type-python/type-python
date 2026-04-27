@@ -283,17 +283,17 @@ fn decorated_function_transform_can_resolve_non_callable_object_surface() {
         )
         .as_ref()
         .map(crate::diagnostic_type_text),
-        Some(String::from("Task[P, int]"))
+        Some(String::from("Task[[int], int]"))
     );
     let overrides = crate::collect_effective_value_stub_overrides(&graph);
     assert_eq!(overrides.len(), 1);
-    assert_eq!(overrides[0].annotation, "Task[P, int]");
+    assert_eq!(overrides[0].annotation, "Task[[int], int]");
 }
 
 #[test]
 fn framework_marked_function_to_object_decorator_uses_existing_stub_transform() {
     let source_text = concat!(
-        "from typing import Callable\n\n",
+        "from typing import Callable, cast\n\n",
         "class Task[**P, R]:\n",
         "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
         "        ...\n\n",
@@ -331,7 +331,40 @@ fn framework_marked_function_to_object_decorator_uses_existing_stub_transform() 
     assert!(!result.diagnostics.has_errors(), "{}", result.diagnostics.as_text());
     let overrides = crate::collect_effective_value_stub_overrides(&graph);
     assert_eq!(overrides.len(), 1);
-    assert_eq!(overrides[0].annotation, "Task[P, int]");
+    assert_eq!(overrides[0].annotation, "Task[[int], int]");
+}
+
+#[test]
+fn decorated_function_transform_substitutes_multi_arg_paramspec_in_object_surface() {
+    let source_text = concat!(
+        "from typing import Callable, cast\n\n",
+        "class Task[**P, R]:\n",
+        "    def delay(self, *args: P.args, **kwargs: P.kwargs) -> R:\n",
+        "        ...\n\n",
+        "def task[**P, R](fn: Callable[P, R]) -> Task[P, R]:\n",
+        "    return cast(Task[P, R], Task())\n\n",
+        "@task\n",
+        "def combine(left: int, right: str) -> int:\n",
+        "    return left\n",
+    );
+    let root = create_temp_typepython_root();
+    let path = root.join("app.tpy");
+    fs::write(&path, source_text).expect("temp source should be written");
+    let tree = parse_with_options(
+        SourceFile {
+            path,
+            kind: SourceKind::TypePython,
+            logical_module: String::from("app"),
+            text: source_text.to_owned(),
+        },
+        ParseOptions::default(),
+    );
+    let binding = bind(&tree);
+    let graph = build(&[binding]);
+    let overrides = crate::collect_effective_value_stub_overrides(&graph);
+
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].annotation, "Task[[int, str], int]");
 }
 
 #[test]
