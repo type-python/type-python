@@ -177,6 +177,53 @@ fn build_migration_report_tracks_public_api_annotation_completeness() {
 }
 
 #[test]
+fn build_migration_report_tracks_untyped_import_candidates() {
+    let project_dir = temp_project_dir("build_migration_report_tracks_untyped_import_candidates");
+    let report = {
+        fs::create_dir_all(project_dir.join("src/app")).expect("test setup should succeed");
+        fs::write(project_dir.join("typepython.toml"), "[project]\nsrc = [\"src\"]\n")
+            .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/__init__.tpy"),
+            "from app.local import helper\nimport json\nimport thirdparty.api\n\ndef typed(value: int) -> int:\n    return helper(value)\n",
+        )
+        .expect("test setup should succeed");
+        fs::write(
+            project_dir.join("src/app/local.tpy"),
+            "def helper(value: int) -> int:\n    return value\n",
+        )
+        .expect("test setup should succeed");
+        let config = load(&project_dir).expect("test setup should succeed");
+        let discovery = collect_source_paths(&config).expect("test setup should succeed");
+        let mut syntax_trees = load_syntax_trees(
+            &discovery.sources,
+            false,
+            &config.config.project.target_python.to_string(),
+        )
+        .expect("test setup should succeed");
+        let bundled_sources =
+            crate::discovery::bundled_stdlib_sources(&config.analysis_python().to_string())
+                .expect("stdlib sources should load");
+        syntax_trees.extend(
+            load_syntax_trees(
+                &bundled_sources,
+                false,
+                &config.config.project.target_python.to_string(),
+            )
+            .expect("bundled syntax trees should load"),
+        );
+        build_migration_report(&config, &syntax_trees)
+    };
+    remove_temp_project_dir(&project_dir);
+
+    assert_eq!(report.untyped_import_files.len(), 1);
+    let entry = &report.untyped_import_files[0];
+    assert!(entry.path.ends_with("src/app/__init__.tpy"));
+    assert_eq!(entry.untyped_import_count, 1);
+    assert_eq!(entry.imports, vec![String::from("thirdparty.api")]);
+}
+
+#[test]
 fn migrate_command_parses_emit_stubs_flags() {
     let cli = Cli::parse_from([
         "typepython",
