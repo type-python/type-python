@@ -236,6 +236,39 @@ pub(super) fn resolve_known_typed_dict_shape_with_context(
     Some(TypedDictShape { name: class_decl.name.clone(), fields, closed, extra_items })
 }
 
+#[allow(dead_code)]
+pub(crate) fn resolve_known_shape_from_type_with_context(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    nodes: &[typepython_graph::ModuleNode],
+    type_name: &str,
+) -> Option<Shape> {
+    if let Some(shape) =
+        resolve_known_typed_dict_shape_from_type_with_context(context, node, nodes, type_name)
+    {
+        return Some(Shape::from_typed_dict_shape(&shape));
+    }
+
+    if let Some(shape) =
+        resolve_known_plain_dataclass_shape_from_type_with_context(context, node, nodes, type_name)
+    {
+        return Some(Shape::from_dataclass_transform_class_shape(
+            type_name,
+            &shape,
+            ShapeSourceKind::Dataclass,
+        ));
+    }
+
+    resolve_known_dataclass_transform_shape_from_type_with_context(context, node, nodes, type_name)
+        .map(|shape| {
+            Shape::from_dataclass_transform_class_shape(
+                type_name,
+                &shape,
+                ShapeSourceKind::DataclassTransform,
+            )
+        })
+}
+
 pub(super) fn is_typed_dict_class(
     nodes: &[typepython_graph::ModuleNode],
     class_node: &typepython_graph::ModuleNode,

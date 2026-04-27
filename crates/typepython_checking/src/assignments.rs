@@ -411,41 +411,94 @@ pub(super) fn direct_expr_metadata_from_assignment_site(
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct TypedDictFieldShape {
-    pub(super) value_type: String,
-    pub(super) value_type_expr: Option<typepython_syntax::TypeExpr>,
-    pub(super) required: bool,
-    pub(super) readonly: bool,
+pub(crate) struct TypedDictFieldShape {
+    pub(crate) value_type: String,
+    pub(crate) value_type_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) required: bool,
+    pub(crate) readonly: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct TypedDictExtraItemsShape {
-    pub(super) value_type: String,
-    pub(super) value_type_expr: Option<typepython_syntax::TypeExpr>,
-    pub(super) readonly: bool,
+pub(crate) struct TypedDictExtraItemsShape {
+    pub(crate) value_type: String,
+    pub(crate) value_type_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) readonly: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct TypedDictShape {
-    pub(super) name: String,
-    pub(super) fields: BTreeMap<String, TypedDictFieldShape>,
-    pub(super) closed: bool,
-    pub(super) extra_items: Option<TypedDictExtraItemsShape>,
+pub(crate) struct TypedDictShape {
+    pub(crate) name: String,
+    pub(crate) fields: BTreeMap<String, TypedDictFieldShape>,
+    pub(crate) closed: bool,
+    pub(crate) extra_items: Option<TypedDictExtraItemsShape>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DataclassTransformFieldShape {
-    pub(super) name: String,
-    pub(super) keyword_name: String,
-    pub(super) annotation: String,
-    pub(super) annotation_expr: Option<typepython_syntax::TypeExpr>,
-    pub(super) required: bool,
-    pub(super) kw_only: bool,
+pub(crate) struct DataclassTransformFieldShape {
+    pub(crate) name: String,
+    pub(crate) keyword_name: String,
+    pub(crate) annotation: String,
+    pub(crate) annotation_expr: Option<typepython_syntax::TypeExpr>,
+    pub(crate) required: bool,
+    pub(crate) kw_only: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum ShapeSourceKind {
+    TypedDict,
+    TypePythonDataClass,
+    Dataclass,
+    DataclassTransform,
+    FrameworkTransform,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum ShapeFieldSourceKind {
+    TypedDictItem,
+    ClassAnnotation,
+    DataclassFieldSpecifier,
+    FrameworkGenerated,
+    ProjectionGenerated,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ShapeField {
+    pub(crate) name: String,
+    pub(crate) public_alias: String,
+    pub(crate) semantic_type: Option<SemanticType>,
+    pub(crate) required: bool,
+    pub(crate) readonly: bool,
+    pub(crate) constructor_participates: bool,
+    pub(crate) has_default: bool,
+    pub(crate) has_default_factory: bool,
+    pub(crate) descriptor_behavior: bool,
+    pub(crate) source_kind: ShapeFieldSourceKind,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ShapeExtraItems {
+    pub(crate) semantic_type: Option<SemanticType>,
+    pub(crate) readonly: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct Shape {
+    pub(crate) name: String,
+    pub(crate) source_kind: ShapeSourceKind,
+    pub(crate) nominal_owner: Option<String>,
+    pub(crate) fields: Vec<ShapeField>,
+    pub(crate) closed: bool,
+    pub(crate) extra_items: Option<ShapeExtraItems>,
 }
 
 impl TypedDictFieldShape {
     #[must_use]
-    pub(super) fn rendered_value_type(&self) -> String {
+    pub(crate) fn rendered_value_type(&self) -> String {
         self.value_type_expr
             .as_ref()
             .map(typepython_syntax::TypeExpr::render)
@@ -453,7 +506,7 @@ impl TypedDictFieldShape {
     }
 
     #[must_use]
-    pub(super) fn semantic_value_type(&self) -> Option<SemanticType> {
+    pub(crate) fn semantic_value_type(&self) -> Option<SemanticType> {
         self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
             (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
         })
@@ -462,7 +515,7 @@ impl TypedDictFieldShape {
 
 impl TypedDictExtraItemsShape {
     #[must_use]
-    pub(super) fn rendered_value_type(&self) -> String {
+    pub(crate) fn rendered_value_type(&self) -> String {
         self.value_type_expr
             .as_ref()
             .map(typepython_syntax::TypeExpr::render)
@@ -470,7 +523,7 @@ impl TypedDictExtraItemsShape {
     }
 
     #[must_use]
-    pub(super) fn semantic_value_type(&self) -> Option<SemanticType> {
+    pub(crate) fn semantic_value_type(&self) -> Option<SemanticType> {
         self.value_type_expr.clone().map(lower_type_expr).or_else(|| {
             (!self.value_type.is_empty()).then(|| lower_type_text_or_name(&self.value_type))
         })
@@ -479,7 +532,7 @@ impl TypedDictExtraItemsShape {
 
 impl DataclassTransformFieldShape {
     #[must_use]
-    pub(super) fn rendered_annotation(&self) -> String {
+    pub(crate) fn rendered_annotation(&self) -> String {
         self.annotation_expr
             .as_ref()
             .map(typepython_syntax::TypeExpr::render)
@@ -487,7 +540,7 @@ impl DataclassTransformFieldShape {
     }
 
     #[must_use]
-    pub(super) fn semantic_annotation(&self) -> Option<SemanticType> {
+    pub(crate) fn semantic_annotation(&self) -> Option<SemanticType> {
         self.annotation_expr.clone().map(lower_type_expr).or_else(|| {
             (!self.annotation.is_empty()).then(|| lower_type_text_or_name(&self.annotation))
         })
@@ -495,10 +548,83 @@ impl DataclassTransformFieldShape {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DataclassTransformClassShape {
-    pub(super) fields: Vec<DataclassTransformFieldShape>,
-    pub(super) frozen: bool,
-    pub(super) has_explicit_init: bool,
+pub(crate) struct DataclassTransformClassShape {
+    pub(crate) fields: Vec<DataclassTransformFieldShape>,
+    pub(crate) frozen: bool,
+    pub(crate) has_explicit_init: bool,
+}
+
+impl Shape {
+    #[allow(dead_code)]
+    pub(crate) fn from_typed_dict_shape(shape: &TypedDictShape) -> Self {
+        Self {
+            name: shape.name.clone(),
+            source_kind: ShapeSourceKind::TypedDict,
+            nominal_owner: Some(shape.name.clone()),
+            fields: shape
+                .fields
+                .iter()
+                .map(|(name, field)| ShapeField {
+                    name: name.clone(),
+                    public_alias: name.clone(),
+                    semantic_type: field.semantic_value_type(),
+                    required: field.required,
+                    readonly: field.readonly,
+                    constructor_participates: true,
+                    has_default: !field.required,
+                    has_default_factory: false,
+                    descriptor_behavior: false,
+                    source_kind: ShapeFieldSourceKind::TypedDictItem,
+                })
+                .collect(),
+            closed: shape.closed,
+            extra_items: shape.extra_items.as_ref().map(|extra| ShapeExtraItems {
+                semantic_type: extra.semantic_value_type(),
+                readonly: extra.readonly,
+            }),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_dataclass_transform_class_shape(
+        name: &str,
+        shape: &DataclassTransformClassShape,
+        source_kind: ShapeSourceKind,
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            source_kind,
+            nominal_owner: Some(name.to_owned()),
+            fields: shape
+                .fields
+                .iter()
+                .map(|field| ShapeField {
+                    name: field.name.clone(),
+                    public_alias: field.keyword_name.clone(),
+                    semantic_type: field.semantic_annotation(),
+                    required: field.required,
+                    readonly: shape.frozen,
+                    constructor_participates: true,
+                    has_default: !field.required,
+                    has_default_factory: false,
+                    descriptor_behavior: false,
+                    source_kind: ShapeFieldSourceKind::ClassAnnotation,
+                })
+                .collect(),
+            closed: false,
+            extra_items: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn has_unbounded_extra_keys(&self) -> bool {
+        !self.closed && self.extra_items.is_none()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn field(&self, name: &str) -> Option<&ShapeField> {
+        self.fields.iter().find(|field| field.name == name || field.public_alias == name)
+    }
 }
 
 pub(super) fn is_typed_dict_base_name(base: &str) -> bool {
@@ -516,7 +642,7 @@ pub(super) fn typed_dict_known_or_extra_field<'a>(
 }
 
 pub(super) fn typed_dict_shape_has_unbounded_extra_keys(shape: &TypedDictShape) -> bool {
-    !shape.closed && shape.extra_items.is_none()
+    Shape::from_typed_dict_shape(shape).has_unbounded_extra_keys()
 }
 
 pub(super) enum TypedDictFieldShapeRef<'a> {
