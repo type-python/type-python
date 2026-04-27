@@ -202,6 +202,9 @@ make test-downstream-checkers
 # Workspace coverage report (requires `cargo install cargo-llvm-cov` or CI's install action)
 make coverage
 
+# Short libFuzzer smoke over parser/type-expression/lowering targets (requires nightly + cargo-fuzz)
+make fuzz-smoke
+
 # Tests for a specific crate
 cargo test -p typepython-checking
 
@@ -302,6 +305,23 @@ Coverage uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov). The
 
 The GitHub Actions `coverage` job uploads those three outputs as the `rust-coverage` artifact. Coverage thresholds are intentionally not enforced yet; establish minimums only after the baseline stabilizes.
 
+### Fuzzing
+
+Fuzz targets live in the isolated `fuzz/` cargo-fuzz crate so the stable workspace build does not require nightly or libFuzzer. Install nightly and cargo-fuzz before running them locally:
+
+```bash
+rustup toolchain install nightly --profile minimal
+cargo install cargo-fuzz --locked
+
+# Short local smoke, matching pull-request CI
+make fuzz-smoke
+
+# Longer local run, matching scheduled CI duration
+make fuzz-long
+```
+
+The first fuzz targets cover parser entrypoints, `TypeExpr` parsing/rendering, and the TypePython lowering plus authoritative stub-emission path. Seed corpus files are checked in under `fuzz/corpus/`; crashing inputs are written to `fuzz/artifacts/` and uploaded by CI.
+
 ## Makefile Targets
 
 | Target                            | Command                                                                                        | Description                           |
@@ -314,6 +334,8 @@ The GitHub Actions `coverage` job uploads those three outputs as the `rust-cover
 | `make lint`                       | `cargo clippy --workspace --all-targets -- -D warnings`                                        | Lint with clippy                      |
 | `make test`                       | `cargo test --workspace`                                                                       | Run all tests                         |
 | `make coverage`                   | `cargo llvm-cov ...`                                                                           | Generate Rust coverage artifacts      |
+| `make fuzz-smoke`                 | `cargo +nightly fuzz run ... -max_total_time=30`                                                | Run short fuzz smoke targets          |
+| `make fuzz-long`                  | `cargo +nightly fuzz run ... -max_total_time=300`                                               | Run longer fuzz targets locally       |
 | `make docs`                       | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`                                   | Generate rustdoc                      |
 | `make package-check`              | `python3 -m build --sdist --wheel` + `python3 -m twine check dist/*`                           | Validate Python package artifacts     |
 | `make bump-version VERSION=0.0.8` | `python3 scripts/bump_version.py 0.0.8`                                                        | Sync Rust and Python package versions |
