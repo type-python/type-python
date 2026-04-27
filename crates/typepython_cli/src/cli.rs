@@ -29,6 +29,8 @@ pub(crate) enum Command {
     Compat(CompatArgs),
     /// Compare two public typing surfaces and report likely API drift.
     ApiDiff(ApiDiffArgs),
+    /// Inspect dependency and stub metadata for typing health.
+    TypeHealth(TypeHealthArgs),
     /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
 }
@@ -128,6 +130,18 @@ pub(crate) struct ApiDiffArgs {
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     pub(crate) format: OutputFormat,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TypeHealthArgs {
+    #[command(flatten)]
+    pub(crate) run: RunArgs,
+    /// Fail when the computed type-health score is below this threshold.
+    #[arg(long = "fail-under", value_name = "SCORE")]
+    pub(crate) fail_under: Option<u8>,
+    /// Write `.typepython/type-lock.toml` with observed typing inputs.
+    #[arg(long = "write-lock")]
+    pub(crate) write_lock: bool,
 }
 
 #[derive(Debug, Args)]

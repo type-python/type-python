@@ -6,6 +6,7 @@ mod compat;
 mod discovery;
 mod migration;
 mod pipeline;
+mod type_health;
 mod verification;
 
 use std::{
@@ -35,6 +36,7 @@ use crate::pipeline::{
     clean_project, collect_watch_event_paths, format_watch_rebuild_note, run_build_like_command,
     run_lsp, run_with_pipeline, watch_targets,
 };
+use crate::type_health::run_type_health;
 use crate::verification::run_verify;
 
 const CONFIG_TEMPLATE: &str =
@@ -110,6 +112,7 @@ fn run() -> Result<ExitCode> {
         Command::Verify(args) => run_verify(args),
         Command::Compat(args) => run_compat(args),
         Command::ApiDiff(args) => run_api_diff(args),
+        Command::TypeHealth(args) => run_type_health(args),
         Command::Migrate(args) => run_migrate(args),
     }
 }
