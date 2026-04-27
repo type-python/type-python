@@ -48,6 +48,21 @@ fn diff_api_surfaces_reports_added_removed_and_changed_symbols() {
         report.changed.iter().map(|change| change.symbol.as_str()).collect::<Vec<_>>(),
         vec!["VALUE", "parse"]
     );
+    assert_eq!(
+        report.release_notes,
+        vec![
+            String::from(
+                "Breaking type-surface change: removed class `Removed` from module `app`."
+            ),
+            String::from(
+                "Review required: changed value `VALUE` in module `app` from `VALUE: int` to `VALUE: str`."
+            ),
+            String::from(
+                "Review required: changed function `parse` in module `app` from `def parse(value: str) -> int: ...` to `def parse(value: bytes) -> int: ...`."
+            ),
+            String::from("Added public class `Added` to module `app`."),
+        ]
+    );
 }
 
 #[test]
@@ -106,6 +121,12 @@ fn diff_api_surfaces_reports_py_typed_metadata_regression() {
     assert_eq!(report.removed[0].module, "__typing_metadata__");
     assert_eq!(report.removed[0].symbol, "py.typed");
     assert_eq!(report.removed[0].classification, "runtime-breaking signal");
+    assert_eq!(
+        report.release_notes,
+        vec![String::from(
+            "Runtime typing metadata changed: `py.typed` was removed; downstream tools may no longer treat the package as typed."
+        )]
+    );
 }
 
 #[test]

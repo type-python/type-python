@@ -377,6 +377,8 @@ The report classifies:
 - added public symbols as `source-compatible`
 - removed `py.typed` metadata as a `runtime-breaking signal`
 
+Both text and JSON output include release-note snippets derived from the same changes, so maintainers can review copy-ready summaries such as removed symbols, changed signatures, added public APIs, and `py.typed` metadata regressions without reading raw stubs.
+
 **Example:**
 
 ```bash

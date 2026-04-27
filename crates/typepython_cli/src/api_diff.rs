@@ -26,6 +26,7 @@ pub(crate) struct ApiSurfaceDiffReport {
     pub(crate) added: Vec<ApiSurfaceChange>,
     pub(crate) removed: Vec<ApiSurfaceChange>,
     pub(crate) changed: Vec<ApiSurfaceChange>,
+    pub(crate) release_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -154,13 +155,56 @@ pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiff
             }
         }
     }
+    let release_notes = release_note_snippets(&removed, &changed, &added);
     Ok(ApiSurfaceDiffReport {
         old: old.display().to_string(),
         new: new.display().to_string(),
         added,
         removed,
         changed,
+        release_notes,
     })
+}
+
+fn release_note_snippets(
+    removed: &[ApiSurfaceChange],
+    changed: &[ApiSurfaceChange],
+    added: &[ApiSurfaceChange],
+) -> Vec<String> {
+    removed
+        .iter()
+        .map(release_note_for_removed)
+        .chain(changed.iter().map(release_note_for_changed))
+        .chain(added.iter().map(release_note_for_added))
+        .collect()
+}
+
+fn release_note_for_removed(change: &ApiSurfaceChange) -> String {
+    if change.kind == "metadata" && change.module == TYPING_METADATA_MODULE {
+        return format!(
+            "Runtime typing metadata changed: `{}` was removed; downstream tools may no longer treat the package as typed.",
+            change.symbol
+        );
+    }
+    format!(
+        "Breaking type-surface change: removed {} `{}` from module `{}`.",
+        change.kind, change.symbol, change.module
+    )
+}
+
+fn release_note_for_changed(change: &ApiSurfaceChange) -> String {
+    format!(
+        "Review required: changed {} `{}` in module `{}` from `{}` to `{}`.",
+        change.kind,
+        change.symbol,
+        change.module,
+        change.old_signature.as_deref().unwrap_or("?"),
+        change.new_signature.as_deref().unwrap_or("?")
+    )
+}
+
+fn release_note_for_added(change: &ApiSurfaceChange) -> String {
+    format!("Added public {} `{}` to module `{}`.", change.kind, change.symbol, change.module)
 }
 
 impl ApiSurfaceDiffReport {
@@ -416,5 +460,11 @@ fn print_api_diff_text(report: &ApiSurfaceDiffReport) {
     }
     for change in &report.added {
         println!("  added: {}.{} ({})", change.module, change.symbol, change.kind);
+    }
+    if !report.release_notes.is_empty() {
+        println!("  release notes:");
+        for note in &report.release_notes {
+            println!("    - {note}");
+        }
     }
 }
