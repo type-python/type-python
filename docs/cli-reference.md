@@ -357,6 +357,29 @@ typepython api-diff dist/old-stubs dist/new-stubs --format json
 
 ---
 
+### `typepython type-health`
+
+Inspect configured dependency/type roots for PEP 561 typing metadata and produce a typing-supply-chain score. The first prototype scans `resolution.type_roots`, detects `py.typed`, `*-stubs` packages, partial stub markers, and can write `.typepython/type-lock.toml` for review.
+
+```bash
+typepython type-health [OPTIONS]
+```
+
+| Flag                 | Description                                           |
+| -------------------- | ----------------------------------------------------- |
+| `--project PATH`     | Project directory                                     |
+| `--format FORMAT`    | Output format: `text` or `json`                       |
+| `--fail-under SCORE` | Fail if the type-health score is below `SCORE`        |
+| `--write-lock`       | Write `.typepython/type-lock.toml` with observed data |
+
+**Example:**
+
+```bash
+typepython type-health --project . --fail-under 80 --write-lock
+```
+
+---
+
 ### `typepython migrate`
 
 Analyze an existing Python project for migration to TypePython.

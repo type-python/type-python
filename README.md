@@ -156,6 +156,7 @@ typepython verify  --project .          # Structural publication validation (saf
 typepython verify  --project . --unsafe-runtime-imports # Also import emitted modules for runtime parity checks
 typepython compat  --project .          # Validate emitted artifacts across mypy, pyright, and ty
 typepython api-diff old-stubs new-stubs # Compare public .pyi type surfaces
+typepython type-health --project .      # Inspect dependency/stub typing metadata
 typepython migrate --project . --report # Migration coverage report
 ```
 
