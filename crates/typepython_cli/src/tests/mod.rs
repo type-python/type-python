@@ -12,6 +12,7 @@ pub(super) use super::pipeline::{
     persist_pipeline_analysis_state, run_build_like_command, run_pipeline, run_with_pipeline,
     should_emit_build_outputs, watch_targets, write_incremental_snapshot,
 };
+pub(super) use super::type_health::{build_type_health_report, run_type_health};
 pub(super) use super::verification::{
     SuppliedArtifactKind, SuppliedVerifyArtifact, external_checker_invocation, run_verify,
     supplied_verify_artifacts, verify_build_artifacts, verify_packaged_artifacts,
@@ -22,7 +23,7 @@ pub(super) use super::{
     Cli, Command, InitArgs, OutputFormat, RunArgs, bytecode_path_for, embedded_config_template,
     exit_code_for_error, init_project,
 };
-pub(super) use crate::cli::{ApiDiffArgs, CleanArgs, CompatArgs, VerifyArgs};
+pub(super) use crate::cli::{ApiDiffArgs, CleanArgs, CompatArgs, TypeHealthArgs, VerifyArgs};
 pub(super) use clap::Parser;
 pub(super) use flate2::{Compression, write::GzEncoder};
 pub(super) use notify::RecursiveMode;
@@ -665,6 +666,7 @@ mod compat;
 mod consistency;
 mod migration;
 mod pipeline;
+mod type_health;
 mod verification;
 
 pub(super) fn temp_project_dir(test_name: &str) -> PathBuf {
