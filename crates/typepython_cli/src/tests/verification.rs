@@ -808,6 +808,7 @@ fn verify_build_artifacts_reports_runtime_stub_surface_mismatch() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("declaration surface differs"));
+    assert!(rendered.contains("runtime only: build_user"));
 }
 
 #[test]
@@ -854,6 +855,7 @@ fn verify_build_artifacts_reports_method_kind_surface_mismatch() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("declaration surface differs"));
+    assert!(rendered.contains("changed members: Box.build"));
 }
 
 #[test]
@@ -900,6 +902,7 @@ fn verify_build_artifacts_reports_function_signature_surface_mismatch() {
 
     assert!(rendered.contains("TPY5003"));
     assert!(rendered.contains("declaration surface differs"));
+    assert!(rendered.contains("changed members: build_user"));
 }
 
 #[test]
