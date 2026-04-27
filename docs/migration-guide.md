@@ -126,6 +126,56 @@ typepython check --project . --format json > baseline.json
 
 This gives you a baseline count of diagnostics to track progress.
 
+### Step 2.5: Establish a strict migration baseline
+
+Once you have an initial diagnostic snapshot, switch from ad-hoc counting to a reviewed migration baseline:
+
+```bash
+typepython migrate --project . --write-baseline .typepython/migration-baseline.json
+typepython migrate --project . --baseline .typepython/migration-baseline.json --no-new-diagnostics
+```
+
+This workflow gives you a ratchet:
+
+- existing debt stays visible in the checked-in baseline
+- newly introduced diagnostics fail CI
+- resolved diagnostics naturally disappear from future baselines when you intentionally refresh them
+
+The baseline file is JSON and supports per-rule severity overrides:
+
+```json
+{
+  "version": 2,
+  "severity_overrides": {
+    "TPY3001": "warning",
+    "TPY4015": "ignore"
+  },
+  "diagnostics": []
+}
+```
+
+Supported override values are:
+
+- `error` - keep the rule blocking under `--no-new-diagnostics`
+- `warning` - keep the rule visible, but do not let new instances fail the migration gate
+- `ignore` - remove the rule from the baseline comparison entirely
+
+Use overrides sparingly and review them like code. A good pattern is:
+
+1. start with the baseline generated from the current project state
+2. downgrade only well-understood migration noise that would otherwise block the team
+3. refresh the baseline only after intentional debt changes
+4. remove overrides as the project becomes cleaner
+
+Inline suppressions are also reported by `typepython migrate --report`, including code-filtered forms such as:
+
+```python
+value: int = "x"  # type: ignore[TPY4001]
+other = 1          # type: ignore
+```
+
+That report makes blanket suppressions easy to audit during migration reviews.
+
 ### Step 3: Convert leaf modules first
 
 Identify modules with no internal dependents (leaf modules) and convert them first. These are the safest to change because no other code depends on their exact types.
@@ -208,6 +258,15 @@ jobs:
       - name: Type check
         run: cargo run -p typepython-cli -- check --project . --format json
 ```
+
+For gradual adoption, prefer gating on the migration baseline before full strictness:
+
+```yaml
+- name: Enforce no new migration debt
+  run: cargo run -p typepython-cli -- migrate --project . --baseline .typepython/migration-baseline.json --no-new-diagnostics --report
+```
+
+That keeps CI strict about regressions without forcing the whole codebase to become fully typed in one step.
 
 ## Handling Untyped Dependencies
 

@@ -439,6 +439,8 @@ typepython migrate [OPTIONS]
 - `--write-baseline .typepython/migration-baseline.json` records the current diagnostic set
 - `--baseline .typepython/migration-baseline.json` reports new and resolved diagnostics
 - `--baseline ... --no-new-diagnostics` exits with a diagnostic error if new diagnostics appear
+- baseline files support `severity_overrides` per diagnostic code (`error`, `warning`, `ignore`)
+- `typepython migrate --report` also lists inline `# type: ignore[...]` suppressions so strict migration reviews can spot blanket suppressions quickly
 
 **Stub emission** (`--emit-stubs`):
 
