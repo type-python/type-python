@@ -14,7 +14,7 @@ use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 use tar::Archive as TarArchive;
 use typepython_config::ConfigHandle;
-use typepython_diagnostics::{Diagnostic, DiagnosticReport};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
 use typepython_emit::{EmitArtifact, TypePythonStubContext, generate_typepython_stub_source};
 use typepython_incremental::decode_snapshot;
 use typepython_lowering::{BackportRequirement, LoweredModule};
@@ -117,6 +117,13 @@ pub(crate) struct TypePortabilityReport {
     pub(crate) score: usize,
     pub(crate) passing_checkers: usize,
     pub(crate) total_checkers: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct Pep561ReadinessReport {
+    pub(crate) ready: bool,
+    pub(crate) blocking_issues: Vec<String>,
+    pub(crate) advisories: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -265,6 +272,7 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
     } else {
         Some(type_portability_report(&diagnostics, checkers.len()))
     };
+    let pep561_report = pep561_readiness_report(&config, &snapshot.emit_plan, &diagnostics);
     if portability_report.is_some() {
         notes.push(format!(
             "ran {} external checker invocation(s) against the emitted build output",
@@ -275,6 +283,10 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
             type_portability_score(&diagnostics, checkers.len())
         ));
     }
+    notes.push(format!(
+        "PEP 561 readiness: {}",
+        if pep561_report.ready { "ready" } else { "not ready" }
+    ));
 
     let summary = CommandSummary {
         command: String::from(command_name),
@@ -287,7 +299,13 @@ pub(crate) fn run_verify_with_command(command_name: &str, args: VerifyArgs) -> R
         notes,
     };
 
-    print_verify_summary(args.run.format, &summary, &diagnostics, portability_report.as_ref())?;
+    print_verify_summary(
+        args.run.format,
+        &summary,
+        &diagnostics,
+        portability_report.as_ref(),
+        Some(&pep561_report),
+    )?;
     Ok(exit_code(&diagnostics))
 }
 
@@ -296,14 +314,31 @@ fn print_verify_summary(
     summary: &CommandSummary,
     diagnostics: &DiagnosticReport,
     portability: Option<&TypePortabilityReport>,
+    pep561: Option<&Pep561ReadinessReport>,
 ) -> Result<()> {
     match format {
-        OutputFormat::Text => print_summary(OutputFormat::Text, summary, diagnostics),
+        OutputFormat::Text => {
+            print_summary(OutputFormat::Text, summary, diagnostics)?;
+            if let Some(pep561) = pep561 {
+                println!(
+                    "  pep561 readiness: {}",
+                    if pep561.ready { "ready" } else { "not ready" }
+                );
+                for issue in &pep561.blocking_issues {
+                    println!("    blocking: {issue}");
+                }
+                for advisory in &pep561.advisories {
+                    println!("    advisory: {advisory}");
+                }
+            }
+            Ok(())
+        }
         OutputFormat::Json => {
             let payload = serde_json::json!({
                 "summary": summary,
                 "diagnostics": diagnostics,
                 "portability": portability,
+                "pep561": pep561,
             });
             println!(
                 "{}",
@@ -313,6 +348,49 @@ fn print_verify_summary(
             Ok(())
         }
     }
+}
+
+pub(crate) fn pep561_readiness_report(
+    config: &ConfigHandle,
+    artifacts: &[EmitArtifact],
+    diagnostics: &DiagnosticReport,
+) -> Pep561ReadinessReport {
+    let out_root = config.resolve_relative_path(&config.config.project.out_dir);
+    let package_roots = py_typed_package_roots(&out_root, artifacts);
+    let has_stub_surface = artifacts.iter().any(|artifact| artifact.stub_path.is_some());
+    let mut blocking_issues = Vec::new();
+    let mut advisories = Vec::new();
+
+    if !has_stub_surface {
+        blocking_issues.push(String::from(
+            "authoritative build output does not include `.pyi` files for the package surface",
+        ));
+    }
+    if !config.config.emit.write_py_typed {
+        blocking_issues.push(String::from(
+            "`emit.write_py_typed` is disabled, so published packages will not advertise inline typing support",
+        ));
+    } else if package_roots.is_empty() {
+        advisories.push(String::from(
+            "no package roots were detected for `py.typed`; module-only layouts should verify publication metadata manually",
+        ));
+    }
+
+    for diagnostic in
+        diagnostics.diagnostics.iter().filter(|diagnostic| diagnostic.code == "TPY5003")
+    {
+        match diagnostic.severity {
+            Severity::Error => blocking_issues.push(diagnostic.message.clone()),
+            Severity::Warning | Severity::Note => advisories.push(diagnostic.message.clone()),
+        }
+    }
+
+    blocking_issues.sort();
+    blocking_issues.dedup();
+    advisories.sort();
+    advisories.dedup();
+
+    Pep561ReadinessReport { ready: blocking_issues.is_empty(), blocking_issues, advisories }
 }
 
 fn load_checker_allowlist(
