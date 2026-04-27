@@ -65,7 +65,7 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
     remove_temp_project_dir(&project_dir);
 
     assert_eq!(report.packages.len(), 3);
-    assert_eq!(report.score, 66);
+    assert_eq!(report.score, 50);
     assert!(report.packages.iter().any(|package| package.name == "demo" && package.has_py_typed));
     assert!(report.packages.iter().any(|package| package.name == "demo"
         && package.is_stub_only
@@ -75,6 +75,7 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
         && package.overload_any_fallbacks == 1
         && package.public_untyped_attributes == 2
         && package.unsupported_typing_extensions_imports == 1
+        && package.precision_debt == 9
         && package.runtime_version.as_deref() == Some("1.2.3")
         && package.stub_version.as_deref() == Some("1.2.0")
         && package.stub_version_matches_runtime == Some(false)));
@@ -136,4 +137,5 @@ fn run_type_health_writes_lock_and_enforces_threshold() {
     assert!(lock.contains("overload_any_fallbacks = 0"));
     assert!(lock.contains("public_untyped_attributes = 0"));
     assert!(lock.contains("unsupported_typing_extensions_imports = 0"));
+    assert!(lock.contains("precision_debt = 0"));
 }

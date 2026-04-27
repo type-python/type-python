@@ -47,6 +47,7 @@ pub(crate) struct TypePackageHealth {
     pub(crate) overload_any_fallbacks: usize,
     pub(crate) public_untyped_attributes: usize,
     pub(crate) unsupported_typing_extensions_imports: usize,
+    pub(crate) precision_debt: usize,
     pub(crate) runtime_version: Option<String>,
     pub(crate) stub_version: Option<String>,
     pub(crate) stub_version_matches_runtime: Option<bool>,
@@ -129,10 +130,23 @@ pub(crate) fn build_type_health_report_for_target(
         }
     }
     packages.sort_by(|left, right| left.name.cmp(&right.name));
-    let typed =
-        packages.iter().filter(|package| package.has_py_typed || package.is_stub_only).count();
-    let score = if packages.is_empty() { 100 } else { ((typed * 100) / packages.len()) as u8 };
+    let score = type_health_score(&packages);
     Ok(TypeHealthReport { score, packages, lock_inputs: None, lock_path: None })
+}
+
+fn type_health_score(packages: &[TypePackageHealth]) -> u8 {
+    if packages.is_empty() {
+        return 100;
+    }
+    let total = packages.iter().map(package_health_score).sum::<usize>();
+    (total / packages.len()) as u8
+}
+
+fn package_health_score(package: &TypePackageHealth) -> usize {
+    if !package.has_py_typed && !package.is_stub_only {
+        return 0;
+    }
+    100usize.saturating_sub(package.precision_debt.saturating_mul(10).min(50))
 }
 
 pub(crate) fn collect_type_lock_inputs(
@@ -212,6 +226,7 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
     let stub_version_matches_runtime =
         runtime_version.as_ref().zip(stub_version.as_ref()).map(|(runtime, stub)| runtime == stub);
     let public_any = public_any_counts(path, target_python)?;
+    let precision_debt = public_any.precision_debt();
     Ok(TypePackageHealth {
         name: package_name,
         root: path.display().to_string(),
@@ -223,6 +238,7 @@ fn package_health(path: &Path, target_python: PythonTarget) -> Result<TypePackag
         overload_any_fallbacks: public_any.overload_fallbacks,
         public_untyped_attributes: public_any.untyped_attributes,
         unsupported_typing_extensions_imports: public_any.unsupported_typing_extensions_imports,
+        precision_debt,
         runtime_version,
         stub_version,
         stub_version_matches_runtime,
@@ -236,6 +252,16 @@ struct PublicAnyCounts {
     overload_fallbacks: usize,
     untyped_attributes: usize,
     unsupported_typing_extensions_imports: usize,
+}
+
+impl PublicAnyCounts {
+    fn precision_debt(&self) -> usize {
+        self.returns
+            + self.attributes
+            + self.overload_fallbacks
+            + self.untyped_attributes
+            + self.unsupported_typing_extensions_imports
+    }
 }
 
 fn public_any_counts(path: &Path, target_python: PythonTarget) -> Result<PublicAnyCounts> {
@@ -467,6 +493,7 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInpu
             "unsupported_typing_extensions_imports = {}\n",
             package.unsupported_typing_extensions_imports
         ));
+        rendered.push_str(&format!("precision_debt = {}\n", package.precision_debt));
         if let Some(version) = &package.runtime_version {
             rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
@@ -490,7 +517,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} public_untyped_attributes={} unsupported_typing_extensions_imports={} runtime_version={} stub_version={} version_match={}",
+            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} overload_any_fallbacks={} public_untyped_attributes={} unsupported_typing_extensions_imports={} precision_debt={} runtime_version={} stub_version={} version_match={}",
             package.name,
             package.has_py_typed,
             package.is_stub_only,
@@ -500,6 +527,7 @@ fn print_type_health_text(report: &TypeHealthReport) {
             package.overload_any_fallbacks,
             package.public_untyped_attributes,
             package.unsupported_typing_extensions_imports,
+            package.precision_debt,
             package.runtime_version.as_deref().unwrap_or("?"),
             package.stub_version.as_deref().unwrap_or("?"),
             package
