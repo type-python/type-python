@@ -41,6 +41,45 @@ struct RuntimeImportabilityResult {
     public_names: Option<Vec<String>>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct AnnotationRuntimeAuditResult {
+    consumers: Vec<String>,
+    findings: Vec<AnnotationRuntimeAuditFinding>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct AnnotationRuntimeAuditFinding {
+    code: String,
+    message: String,
+    line: usize,
+    column: usize,
+}
+
+const ANNOTATION_RUNTIME_AUDIT_SCRIPT: &str = r#"
+import json
+import pathlib
+import sys
+
+source_path = pathlib.Path(sys.argv[1])
+source = source_path.read_text(encoding="utf-8")
+from typepython.annotation_compat import audit_source
+
+audit = audit_source(source, filename=str(source_path))
+payload = {
+    "consumers": [consumer.value for consumer in audit.consumers],
+    "findings": [
+        {
+            "code": finding.code,
+            "message": finding.message,
+            "line": finding.line,
+            "column": finding.column,
+        }
+        for finding in audit.findings
+    ],
+}
+print(json.dumps(payload))
+"#;
+
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 struct PublicationRequirements {
     min_python: Option<PythonTarget>,
@@ -811,6 +850,12 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
             ));
         } else if let Some(diagnostic) = verify_emitted_text_artifact(runtime_path) {
             diagnostics.push(diagnostic);
+        } else {
+            diagnostics.extend(runtime_annotation_compatibility_diagnostics(
+                config,
+                runtime_path,
+                config.config.project.target_python,
+            ));
         }
         if config.config.emit.emit_pyc {
             let bytecode_path = match bytecode_path_for(runtime_path) {
@@ -861,6 +906,109 @@ fn verify_build_artifact(config: &ConfigHandle, artifact: &EmitArtifact) -> Vec<
     }
 
     diagnostics
+}
+
+pub(crate) fn runtime_annotation_compatibility_diagnostics(
+    config: &ConfigHandle,
+    runtime_path: &Path,
+    target_python: PythonTarget,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let interpreter = resolve_python_executable(config);
+    let mut command = ProcessCommand::new(&interpreter);
+    command.args(["-B", "-c", ANNOTATION_RUNTIME_AUDIT_SCRIPT]).arg(runtime_path);
+    if let Some(py_path) = annotation_runtime_pythonpath() {
+        command.env("PYTHONPATH", py_path);
+    }
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            diagnostics.push(Diagnostic::warning(
+                "TPY5004",
+                format!(
+                    "unable to audit runtime annotation compatibility for `{}` with `{}`: {error}",
+                    runtime_path.display(),
+                    interpreter.display()
+                ),
+            ));
+            return diagnostics;
+        }
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        diagnostics.push(Diagnostic::warning(
+            "TPY5004",
+            format!(
+                "runtime annotation compatibility audit failed for `{}`: {}{}",
+                runtime_path.display(),
+                output.status,
+                if stderr.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", stderr.trim())
+                }
+            ),
+        ));
+        return diagnostics;
+    }
+    let audit = match serde_json::from_slice::<AnnotationRuntimeAuditResult>(&output.stdout) {
+        Ok(audit) => audit,
+        Err(error) => {
+            diagnostics.push(Diagnostic::warning(
+                "TPY5004",
+                format!(
+                    "unable to parse runtime annotation audit output for `{}`: {error}",
+                    runtime_path.display()
+                ),
+            ));
+            return diagnostics;
+        }
+    };
+    if target_python >= PythonTarget::PYTHON_3_14 && !audit.consumers.is_empty() {
+        let mut diagnostic = Diagnostic::warning(
+            "TPY5004",
+            format!(
+                "runtime annotation consumer(s) in `{}` may observe deferred annotations under Python {}",
+                runtime_path.display(),
+                target_python
+            ),
+        );
+        for consumer in &audit.consumers {
+            diagnostic =
+                diagnostic.with_note(format!("detected runtime annotation consumer `{consumer}`"));
+        }
+        diagnostics.push(diagnostic);
+    }
+    for finding in audit.findings {
+        diagnostics.push(
+            Diagnostic::warning(
+                "TPY5004",
+                format!(
+                    "runtime annotation compatibility risk in `{}`: {}",
+                    runtime_path.display(),
+                    finding.message
+                ),
+            )
+            .with_note(format!(
+                "annotation audit {} at {}:{}",
+                finding.code, finding.line, finding.column
+            )),
+        );
+    }
+    diagnostics
+}
+
+fn annotation_runtime_pythonpath() -> Option<String> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let annotation_module = repo_root.join("typepython/annotation_compat.py");
+    if !annotation_module.exists() {
+        return env::var("PYTHONPATH").ok().filter(|value| !value.is_empty());
+    }
+    let repo_root = repo_root.to_string_lossy().into_owned();
+    match env::var("PYTHONPATH") {
+        Ok(existing) if !existing.is_empty() => Some(format!("{repo_root}:{existing}")),
+        _ => Some(repo_root),
+    }
 }
 
 fn verify_supplied_artifact(
