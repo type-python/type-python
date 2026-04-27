@@ -49,6 +49,16 @@
       }
     },
     {
+      "name": "toy-task-package",
+      "targets": ["3.10"],
+      "expected_stub_fragments": {
+        "3.10": [
+          "def delay(self, *args: P.args, **kwargs: P.kwargs) -> R: ...",
+          "build: Task[P, int]"
+        ]
+      }
+    },
+    {
       "name": "negative-consumer-package",
       "targets": ["3.10"],
       "expect_checker_failure": true

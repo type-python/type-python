@@ -17,6 +17,7 @@ class DownstreamCheckerMatrixTests(unittest.TestCase):
         self.assertIn("compat-package", matrix)
         self.assertIn("negative-consumer-package", matrix)
         self.assertIn("standard-typing-package", matrix)
+        self.assertIn("toy-task-package", matrix)
         for case in matrix.values():
             fixture_dir = downstream_checker_smoke.FIXTURE_ROOT / case.name
             self.assertTrue(fixture_dir.is_dir(), fixture_dir)
