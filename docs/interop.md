@@ -79,6 +79,18 @@ TypePython bundles its own stdlib typing data (the `stdlib/` directory) for use 
 
 When downstream consumers type-check the emitted `.py`/`.pyi` files, they use their own stdlib stubs (typically typeshed). TypePython's bundled data is invisible to them.
 
+## Runtime Annotation Compatibility
+
+Generated runtime modules may be consumed by frameworks that inspect annotations with `typing.get_type_hints`, `inspect.get_annotations`, Python 3.14+ `annotationlib.get_annotations`, or dataclass-like registration decorators. TypePython's Python package exposes `typepython.annotation_compat` so smoke tests and generated-artifact probes can use one compatibility layer across Python 3.10 through 3.14.
+
+The helper provides:
+
+- `get_annotations(...)`, which delegates to `annotationlib` on Python 3.14+ and falls back to `inspect.get_annotations` or legacy `__annotations__` handling on older hosts
+- `supported_formats()`, which reports whether value, forward-reference, and string annotation formats are available on the current interpreter
+- `audit_source(...)`, a lightweight static probe that detects common runtime annotation consumers and flags nested local-scope annotations that may be unavailable to runtime introspection
+
+This audit is intentionally conservative. It does not replace the compiler's semantic checks, but it gives runtime smoke tests a deterministic way to catch generated `.py` that is statically valid yet fragile for annotation-consuming frameworks.
+
 ## Verification with `typepython verify`
 
 The `typepython verify` command performs structural consistency checks that help maintain interoperability:
