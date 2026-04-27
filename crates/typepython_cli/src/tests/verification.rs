@@ -3233,6 +3233,21 @@ fn checker_allowlist_downgrades_matching_checker_rejection_to_warning() {
 }
 
 #[test]
+fn type_portability_score_counts_only_blocking_checker_failures() {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(Diagnostic::error(
+        "TPY5003",
+        "external checker `mypy` rejected emitted build output under `.typepython/build`",
+    ));
+    diagnostics.push(Diagnostic::warning(
+        "TPY5003",
+        "known checker disagreement allowed for `pyright`: tracked limitation",
+    ));
+
+    assert_eq!(type_portability_score(&diagnostics, 3), "66/100 (2/3 checker(s) passing)");
+}
+
+#[test]
 fn verify_checker_preset_expands_and_deduplicates_with_explicit_checkers() {
     let args = VerifyArgs {
         run: RunArgs { project: None, format: OutputFormat::Json },
