@@ -5,7 +5,10 @@ pub(super) use super::discovery::{
     bundled_stdlib_sources_for_root, collect_source_paths, external_resolution_sources,
     python_type_roots_from_interpreter,
 };
-pub(super) use super::migration::{build_migration_report, emit_migration_stubs};
+pub(super) use super::migration::{
+    build_migration_diagnostic_baseline, build_migration_report,
+    compare_migration_diagnostic_baseline, emit_migration_stubs,
+};
 pub(super) use super::pipeline::{
     PipelineSnapshot, build_diagnostics, clean_project, compile_runtime_bytecode,
     format_watch_rebuild_note, load_syntax_trees, materialize_build_outputs,
@@ -40,6 +43,7 @@ pub(super) use std::{
 pub(super) use typepython_binding::bind;
 pub(super) use typepython_checking::check as check_graph;
 pub(super) use typepython_config::load;
+pub(super) use typepython_diagnostics::{Diagnostic, DiagnosticReport, Span};
 pub(super) use typepython_emit::{EmitArtifact, write_runtime_outputs};
 pub(super) use typepython_graph::build as build_graph;
 pub(super) use typepython_incremental::IncrementalState;

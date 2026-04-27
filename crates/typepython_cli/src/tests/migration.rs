@@ -128,8 +128,83 @@ fn migrate_command_parses_emit_stubs_flags() {
     };
 
     assert!(args.report);
+    assert_eq!(args.baseline, None);
+    assert_eq!(args.write_baseline, None);
+    assert!(!args.no_new_diagnostics);
     assert_eq!(args.emit_stubs, vec![PathBuf::from("src/app"), PathBuf::from("src/lib.py")]);
     assert_eq!(args.stub_out_dir, Some(PathBuf::from(".generated-stubs")));
+}
+
+#[test]
+fn migrate_command_parses_diagnostic_baseline_flags() {
+    let cli = Cli::parse_from([
+        "typepython",
+        "migrate",
+        "--project",
+        "examples/hello-world",
+        "--baseline",
+        ".typepython/migration-baseline.json",
+        "--write-baseline",
+        ".typepython/new-baseline.json",
+        "--no-new-diagnostics",
+    ]);
+
+    let super::Command::Migrate(args) = cli.command else {
+        panic!("expected migrate command");
+    };
+
+    assert_eq!(args.baseline, Some(PathBuf::from(".typepython/migration-baseline.json")));
+    assert_eq!(args.write_baseline, Some(PathBuf::from(".typepython/new-baseline.json")));
+    assert!(args.no_new_diagnostics);
+}
+
+#[test]
+fn migration_diagnostic_baseline_reports_new_and_resolved_diagnostics() {
+    let mut baseline_report = DiagnosticReport::default();
+    baseline_report.push(Diagnostic::error("TPY1001", "old parse error").with_span(Span::new(
+        "src/app/__init__.tpy",
+        1,
+        1,
+        1,
+        5,
+    )));
+    baseline_report.push(Diagnostic::warning("TPY2001", "resolved warning").with_span(Span::new(
+        "src/app/legacy.tpy",
+        2,
+        1,
+        2,
+        5,
+    )));
+    let mut current_report = DiagnosticReport::default();
+    current_report.push(Diagnostic::error("TPY1001", "old parse error").with_span(Span::new(
+        "src/app/__init__.tpy",
+        1,
+        1,
+        1,
+        5,
+    )));
+    current_report.push(Diagnostic::error("TPY3001", "new type debt").with_span(Span::new(
+        "src/app/new.tpy",
+        3,
+        1,
+        3,
+        5,
+    )));
+
+    let baseline = build_migration_diagnostic_baseline(&baseline_report);
+    let current = build_migration_diagnostic_baseline(&current_report);
+    let comparison = compare_migration_diagnostic_baseline(
+        String::from(".typepython/migration-baseline.json"),
+        &baseline,
+        &current,
+    );
+
+    assert_eq!(comparison.baseline_diagnostics, 2);
+    assert_eq!(comparison.current_diagnostics, 2);
+    assert_eq!(comparison.new_diagnostics.len(), 1);
+    assert_eq!(comparison.new_diagnostics[0].code, "TPY3001");
+    assert_eq!(comparison.resolved_diagnostics.len(), 1);
+    assert_eq!(comparison.resolved_diagnostics[0].code, "TPY2001");
 }
 
 #[test]
