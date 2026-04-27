@@ -1,0 +1,288 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+
+use crate::{
+    CommandSummary,
+    cli::{ApiDiffArgs, OutputFormat},
+    exit_code, print_summary,
+};
+use typepython_diagnostics::{Diagnostic, DiagnosticReport, Severity};
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct ApiSurfaceDiffReport {
+    pub(crate) old: String,
+    pub(crate) new: String,
+    pub(crate) added: Vec<ApiSurfaceChange>,
+    pub(crate) removed: Vec<ApiSurfaceChange>,
+    pub(crate) changed: Vec<ApiSurfaceChange>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+pub(crate) struct ApiSurfaceChange {
+    pub(crate) module: String,
+    pub(crate) symbol: String,
+    pub(crate) kind: String,
+    pub(crate) old_signature: Option<String>,
+    pub(crate) new_signature: Option<String>,
+    pub(crate) classification: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PublicSymbol {
+    kind: String,
+    signature: String,
+}
+
+pub(crate) fn run_api_diff(args: ApiDiffArgs) -> Result<ExitCode> {
+    let report = diff_api_surfaces(&args.old, &args.new)?;
+    let mut diagnostics = DiagnosticReport::default();
+    for change in report.removed.iter().chain(report.changed.iter()) {
+        diagnostics.push(Diagnostic {
+            code: String::from("TPY7001"),
+            severity: Severity::Error,
+            message: format!(
+                "public API surface {}: {}.{} ({})",
+                change.classification, change.module, change.symbol, change.kind
+            ),
+            span: None,
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+    for change in &report.added {
+        diagnostics.push(Diagnostic {
+            code: String::from("TPY7001"),
+            severity: Severity::Note,
+            message: format!(
+                "public API surface added: {}.{} ({})",
+                change.module, change.symbol, change.kind
+            ),
+            span: None,
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+
+    if args.format == OutputFormat::Json {
+        let payload = serde_json::json!({
+            "summary": report,
+            "diagnostics": diagnostics,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .context("unable to serialize api-diff summary as JSON")?
+        );
+    } else {
+        print_api_diff_text(&report);
+        let summary = CommandSummary {
+            command: String::from("api-diff"),
+            config_path: String::new(),
+            config_source: typepython_config::ConfigSource::TypePythonToml,
+            discovered_sources: report.old_symbol_count() + report.new_symbol_count(),
+            lowered_modules: 0,
+            planned_artifacts: report.added.len() + report.removed.len() + report.changed.len(),
+            tracked_modules: report.module_count(),
+            notes: vec![String::from("compared public symbols from .pyi trees")],
+        };
+        print_summary(args.format, &summary, &diagnostics)?;
+    }
+    Ok(exit_code(&diagnostics))
+}
+
+pub(crate) fn diff_api_surfaces(old: &Path, new: &Path) -> Result<ApiSurfaceDiffReport> {
+    let old_surface = collect_surface(old)?;
+    let new_surface = collect_surface(new)?;
+    let mut modules = old_surface.keys().cloned().collect::<BTreeSet<_>>();
+    modules.extend(new_surface.keys().cloned());
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+    for module in modules {
+        let old_symbols = old_surface.get(&module).cloned().unwrap_or_default();
+        let new_symbols = new_surface.get(&module).cloned().unwrap_or_default();
+        let mut symbols = old_symbols.keys().cloned().collect::<BTreeSet<_>>();
+        symbols.extend(new_symbols.keys().cloned());
+        for symbol in symbols {
+            match (old_symbols.get(&symbol), new_symbols.get(&symbol)) {
+                (None, Some(new_symbol)) => added.push(ApiSurfaceChange {
+                    module: module.clone(),
+                    symbol,
+                    kind: new_symbol.kind.clone(),
+                    old_signature: None,
+                    new_signature: Some(new_symbol.signature.clone()),
+                    classification: String::from("source-compatible"),
+                }),
+                (Some(old_symbol), None) => removed.push(ApiSurfaceChange {
+                    module: module.clone(),
+                    symbol,
+                    kind: old_symbol.kind.clone(),
+                    old_signature: Some(old_symbol.signature.clone()),
+                    new_signature: None,
+                    classification: String::from("likely type-breaking"),
+                }),
+                (Some(old_symbol), Some(new_symbol)) if old_symbol != new_symbol => {
+                    changed.push(ApiSurfaceChange {
+                        module: module.clone(),
+                        symbol,
+                        kind: new_symbol.kind.clone(),
+                        old_signature: Some(old_symbol.signature.clone()),
+                        new_signature: Some(new_symbol.signature.clone()),
+                        classification: String::from("unknown risk"),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(ApiSurfaceDiffReport {
+        old: old.display().to_string(),
+        new: new.display().to_string(),
+        added,
+        removed,
+        changed,
+    })
+}
+
+impl ApiSurfaceDiffReport {
+    fn module_count(&self) -> usize {
+        self.added
+            .iter()
+            .chain(&self.removed)
+            .chain(&self.changed)
+            .map(|change| change.module.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+    }
+
+    fn old_symbol_count(&self) -> usize {
+        self.removed.len() + self.changed.len()
+    }
+
+    fn new_symbol_count(&self) -> usize {
+        self.added.len() + self.changed.len()
+    }
+}
+
+fn collect_surface(root: &Path) -> Result<BTreeMap<String, BTreeMap<String, PublicSymbol>>> {
+    let mut files = Vec::new();
+    collect_pyi_files(root, &mut files)?;
+    let mut modules = BTreeMap::new();
+    for path in files {
+        let module = module_name(root, &path)?;
+        let source = fs::read_to_string(&path)
+            .with_context(|| format!("unable to read {}", path.display()))?;
+        modules.insert(module, public_symbols(&source));
+    }
+    Ok(modules)
+}
+
+fn collect_pyi_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    if root.is_file() {
+        if root.extension().and_then(|ext| ext.to_str()) == Some("pyi") {
+            files.push(root.to_owned());
+        }
+        return Ok(());
+    }
+    for entry in fs::read_dir(root).with_context(|| format!("unable to read {}", root.display()))? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_pyi_files(&path, files)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("pyi") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(())
+}
+
+fn module_name(root: &Path, path: &Path) -> Result<String> {
+    let relative = if root.is_file() {
+        path.file_name().map(PathBuf::from)
+    } else {
+        Some(path.strip_prefix(root)?.to_owned())
+    }
+    .context("unable to compute module name")?;
+    let mut parts = relative
+        .with_extension("")
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    if parts.last().map(String::as_str) == Some("__init__") {
+        parts.pop();
+    }
+    if parts.is_empty() {
+        return Ok(String::from("__init__"));
+    }
+    Ok(parts.join("."))
+}
+
+fn public_symbols(source: &str) -> BTreeMap<String, PublicSymbol> {
+    let mut symbols = BTreeMap::new();
+    for line in source.lines() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('@') {
+            continue;
+        }
+        if let Some((name, signature)) =
+            public_def(trimmed, "def ").or_else(|| public_def(trimmed, "async def "))
+        {
+            symbols.insert(name, PublicSymbol { kind: String::from("function"), signature });
+        } else if let Some((name, signature)) = public_class(trimmed) {
+            symbols.insert(name, PublicSymbol { kind: String::from("class"), signature });
+        } else if let Some((name, signature)) = public_value(trimmed) {
+            symbols.insert(name, PublicSymbol { kind: String::from("value"), signature });
+        }
+    }
+    symbols
+}
+
+fn public_def(line: &str, prefix: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix(prefix)?;
+    let name = rest.split(['(', '[']).next()?.trim();
+    public_name(name).then(|| (name.to_owned(), line.to_owned()))
+}
+
+fn public_class(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("class ")?;
+    let name = rest.split(['(', ':', '[']).next()?.trim();
+    public_name(name).then(|| (name.to_owned(), line.to_owned()))
+}
+
+fn public_value(line: &str) -> Option<(String, String)> {
+    let (name, _) = line.split_once(':').or_else(|| line.split_once('='))?;
+    let name = name.trim();
+    public_name(name).then(|| (name.to_owned(), line.to_owned()))
+}
+
+fn public_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('_')
+        && name.chars().all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn print_api_diff_text(report: &ApiSurfaceDiffReport) {
+    println!("api-diff:");
+    println!("  old: {}", report.old);
+    println!("  new: {}", report.new);
+    for change in &report.removed {
+        println!("  removed: {}.{} ({})", change.module, change.symbol, change.kind);
+    }
+    for change in &report.changed {
+        println!("  changed: {}.{} ({})", change.module, change.symbol, change.kind);
+    }
+    for change in &report.added {
+        println!("  added: {}.{} ({})", change.module, change.symbol, change.kind);
+    }
+}

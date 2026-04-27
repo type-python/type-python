@@ -27,6 +27,8 @@ pub(crate) enum Command {
     Verify(VerifyArgs),
     /// Validate emitted artifacts across downstream Python type checkers.
     Compat(CompatArgs),
+    /// Compare two public typing surfaces and report likely API drift.
+    ApiDiff(ApiDiffArgs),
     /// Analyze migration coverage and dynamic boundaries.
     Migrate(MigrateArgs),
 }
@@ -113,6 +115,19 @@ pub(crate) struct CompatArgs {
         help = "Fail on any configured downstream checker rejection"
     )]
     pub(crate) strict_portability: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ApiDiffArgs {
+    /// Old source/build/wheel/sdist/.pyi tree. Prototype support accepts files or directories.
+    #[arg(value_name = "OLD")]
+    pub(crate) old: PathBuf,
+    /// New source/build/wheel/sdist/.pyi tree. Prototype support accepts files or directories.
+    #[arg(value_name = "NEW")]
+    pub(crate) new: PathBuf,
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub(crate) format: OutputFormat,
 }
 
 #[derive(Debug, Args)]
