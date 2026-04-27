@@ -24,6 +24,9 @@ pub(crate) struct TypePackageHealth {
     pub(crate) has_py_typed: bool,
     pub(crate) is_stub_only: bool,
     pub(crate) is_partial_stub: bool,
+    pub(crate) runtime_version: Option<String>,
+    pub(crate) stub_version: Option<String>,
+    pub(crate) stub_version_matches_runtime: Option<bool>,
 }
 
 pub(crate) fn run_type_health(args: TypeHealthArgs) -> Result<ExitCode> {
@@ -90,7 +93,8 @@ pub(crate) fn build_type_health_report(
             .with_context(|| format!("unable to read {}", root_path.display()))?
         {
             let path = entry?.path();
-            if path.is_dir() {
+            let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if path.is_dir() && !file_name.ends_with(".dist-info") {
                 packages.push(package_health(&path)?);
             }
         }
@@ -106,13 +110,50 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
     let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
     let py_typed = path.join("py.typed");
     let marker = fs::read_to_string(&py_typed).unwrap_or_default();
+    let package_name = file_name.trim_end_matches("-stubs").to_owned();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let runtime_version = distribution_version(parent, &package_name)?;
+    let stub_version = distribution_version(parent, &format!("{package_name}-stubs"))?;
+    let stub_version_matches_runtime =
+        runtime_version.as_ref().zip(stub_version.as_ref()).map(|(runtime, stub)| runtime == stub);
     Ok(TypePackageHealth {
-        name: file_name.trim_end_matches("-stubs").to_owned(),
+        name: package_name,
         root: path.display().to_string(),
         has_py_typed: py_typed.exists() && !file_name.ends_with("-stubs"),
         is_stub_only: file_name.ends_with("-stubs"),
         is_partial_stub: marker.lines().any(|line| line.trim() == "partial"),
+        runtime_version,
+        stub_version,
+        stub_version_matches_runtime,
     })
+}
+
+fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Option<String>> {
+    if !site_root.is_dir() {
+        return Ok(None);
+    }
+    let normalized_distribution = distribution_name.replace('_', "-").to_ascii_lowercase();
+    for entry in fs::read_dir(site_root)
+        .with_context(|| format!("unable to read {}", site_root.display()))?
+    {
+        let path = entry?.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let normalized_name = file_name.replace('_', "-").to_ascii_lowercase();
+        if !normalized_name.starts_with(&format!("{normalized_distribution}-"))
+            || !normalized_name.ends_with(".dist-info")
+        {
+            continue;
+        }
+        let metadata_path = path.join("METADATA");
+        let metadata = fs::read_to_string(&metadata_path)
+            .with_context(|| format!("unable to read {}", metadata_path.display()))?;
+        if let Some(version) = metadata.lines().find_map(|line| line.strip_prefix("Version: ")) {
+            return Ok(Some(version.trim().to_owned()));
+        }
+    }
+    Ok(None)
 }
 
 fn write_type_lock(path: &Path, report: &TypeHealthReport) -> Result<()> {
@@ -128,7 +169,17 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport) -> Result<()> {
         rendered.push_str(&format!("root = \"{}\"\n", package.root.replace('\\', "\\\\")));
         rendered.push_str(&format!("has_py_typed = {}\n", package.has_py_typed));
         rendered.push_str(&format!("is_stub_only = {}\n", package.is_stub_only));
-        rendered.push_str(&format!("is_partial_stub = {}\n\n", package.is_partial_stub));
+        rendered.push_str(&format!("is_partial_stub = {}\n", package.is_partial_stub));
+        if let Some(version) = &package.runtime_version {
+            rendered.push_str(&format!("runtime_version = \"{version}\"\n"));
+        }
+        if let Some(version) = &package.stub_version {
+            rendered.push_str(&format!("stub_version = \"{version}\"\n"));
+        }
+        if let Some(matches) = package.stub_version_matches_runtime {
+            rendered.push_str(&format!("stub_version_matches_runtime = {matches}\n"));
+        }
+        rendered.push('\n');
     }
     fs::write(path, rendered).with_context(|| format!("unable to write {}", path.display()))
 }
@@ -138,8 +189,17 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={}",
-            package.name, package.has_py_typed, package.is_stub_only, package.is_partial_stub
+            "  package: {} py.typed={} stub_only={} partial={} runtime_version={} stub_version={} version_match={}",
+            package.name,
+            package.has_py_typed,
+            package.is_stub_only,
+            package.is_partial_stub,
+            package.runtime_version.as_deref().unwrap_or("?"),
+            package.stub_version.as_deref().unwrap_or("?"),
+            package
+                .stub_version_matches_runtime
+                .map(|matches| matches.to_string())
+                .unwrap_or_else(|| String::from("?"))
         );
     }
     if let Some(lock_path) = &report.lock_path {

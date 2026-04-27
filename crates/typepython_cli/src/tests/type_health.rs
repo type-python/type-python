@@ -30,10 +30,24 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
     let report = {
         fs::create_dir_all(project_dir.join("site/demo")).expect("runtime package should exist");
         fs::write(project_dir.join("site/demo/py.typed"), "").expect("marker should be written");
+        fs::create_dir_all(project_dir.join("site/demo-1.2.3.dist-info"))
+            .expect("runtime metadata should exist");
+        fs::write(
+            project_dir.join("site/demo-1.2.3.dist-info/METADATA"),
+            "Name: demo\nVersion: 1.2.3\n",
+        )
+        .expect("runtime metadata should be written");
         fs::create_dir_all(project_dir.join("site/demo-stubs/demo"))
             .expect("stub package should exist");
         fs::write(project_dir.join("site/demo-stubs/py.typed"), "partial\n")
             .expect("partial marker should be written");
+        fs::create_dir_all(project_dir.join("site/demo_stubs-1.2.0.dist-info"))
+            .expect("stub metadata should exist");
+        fs::write(
+            project_dir.join("site/demo_stubs-1.2.0.dist-info/METADATA"),
+            "Name: demo-stubs\nVersion: 1.2.0\n",
+        )
+        .expect("stub metadata should be written");
         fs::create_dir_all(project_dir.join("site/untyped")).expect("untyped package should exist");
 
         build_type_health_report(&project_dir, &[String::from("site")])
@@ -44,11 +58,12 @@ fn build_type_health_report_detects_pep561_and_stub_packages() {
     assert_eq!(report.packages.len(), 3);
     assert_eq!(report.score, 66);
     assert!(report.packages.iter().any(|package| package.name == "demo" && package.has_py_typed));
-    assert!(
-        report.packages.iter().any(|package| package.name == "demo"
-            && package.is_stub_only
-            && package.is_partial_stub)
-    );
+    assert!(report.packages.iter().any(|package| package.name == "demo"
+        && package.is_stub_only
+        && package.is_partial_stub
+        && package.runtime_version.as_deref() == Some("1.2.3")
+        && package.stub_version.as_deref() == Some("1.2.0")
+        && package.stub_version_matches_runtime == Some(false)));
 }
 
 #[test]
