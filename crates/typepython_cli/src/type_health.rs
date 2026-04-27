@@ -42,6 +42,7 @@ pub(crate) struct TypePackageHealth {
     pub(crate) is_stub_only: bool,
     pub(crate) is_partial_stub: bool,
     pub(crate) public_any_returns: usize,
+    pub(crate) public_any_attributes: usize,
     pub(crate) runtime_version: Option<String>,
     pub(crate) stub_version: Option<String>,
     pub(crate) stub_version_matches_runtime: Option<bool>,
@@ -202,32 +203,39 @@ fn package_health(path: &Path) -> Result<TypePackageHealth> {
     let stub_version = distribution_version(parent, &format!("{package_name}-stubs"))?;
     let stub_version_matches_runtime =
         runtime_version.as_ref().zip(stub_version.as_ref()).map(|(runtime, stub)| runtime == stub);
-    let public_any_returns = public_any_return_count(path)?;
+    let public_any = public_any_counts(path)?;
     Ok(TypePackageHealth {
         name: package_name,
         root: path.display().to_string(),
         has_py_typed: py_typed.exists() && !file_name.ends_with("-stubs"),
         is_stub_only: file_name.ends_with("-stubs"),
         is_partial_stub: marker.lines().any(|line| line.trim() == "partial"),
-        public_any_returns,
+        public_any_returns: public_any.returns,
+        public_any_attributes: public_any.attributes,
         runtime_version,
         stub_version,
         stub_version_matches_runtime,
     })
 }
 
-fn public_any_return_count(path: &Path) -> Result<usize> {
-    let mut count = 0;
-    collect_public_any_returns(path, &mut count)?;
-    Ok(count)
+#[derive(Debug, Default)]
+struct PublicAnyCounts {
+    returns: usize,
+    attributes: usize,
 }
 
-fn collect_public_any_returns(path: &Path, count: &mut usize) -> Result<()> {
+fn public_any_counts(path: &Path) -> Result<PublicAnyCounts> {
+    let mut counts = PublicAnyCounts::default();
+    collect_public_any_counts(path, &mut counts)?;
+    Ok(counts)
+}
+
+fn collect_public_any_counts(path: &Path, counts: &mut PublicAnyCounts) -> Result<()> {
     if path.is_dir() {
         for entry in
             fs::read_dir(path).with_context(|| format!("unable to read {}", path.display()))?
         {
-            collect_public_any_returns(&entry?.path(), count)?;
+            collect_public_any_counts(&entry?.path(), counts)?;
         }
         return Ok(());
     }
@@ -236,7 +244,13 @@ fn collect_public_any_returns(path: &Path, count: &mut usize) -> Result<()> {
     }
     let source =
         fs::read_to_string(path).with_context(|| format!("unable to read {}", path.display()))?;
-    *count += source.lines().filter(|line| public_function_returns_any(line)).count();
+    for line in source.lines() {
+        if public_function_returns_any(line) {
+            counts.returns += 1;
+        } else if public_attribute_uses_any(line) {
+            counts.attributes += 1;
+        }
+    }
     Ok(())
 }
 
@@ -267,6 +281,27 @@ fn starts_with_any_annotation(annotation: &str) -> bool {
                 .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_')
         },
     )
+}
+
+fn public_attribute_uses_any(line: &str) -> bool {
+    let stripped = line.trim_start();
+    if stripped.starts_with('@')
+        || stripped.starts_with("class ")
+        || stripped.starts_with("def ")
+        || stripped.starts_with("async def ")
+        || stripped.starts_with("from ")
+        || stripped.starts_with("import ")
+    {
+        return false;
+    }
+    let Some((name, annotation)) = stripped.split_once(':') else {
+        return false;
+    };
+    let name = name.trim();
+    if name.is_empty() || name.starts_with('_') || name.contains(' ') || name.contains('(') {
+        return false;
+    }
+    starts_with_any_annotation(annotation.trim_start())
 }
 
 fn distribution_version(site_root: &Path, distribution_name: &str) -> Result<Option<String>> {
@@ -330,6 +365,7 @@ fn write_type_lock(path: &Path, report: &TypeHealthReport, inputs: &TypeLockInpu
         rendered.push_str(&format!("is_stub_only = {}\n", package.is_stub_only));
         rendered.push_str(&format!("is_partial_stub = {}\n", package.is_partial_stub));
         rendered.push_str(&format!("public_any_returns = {}\n", package.public_any_returns));
+        rendered.push_str(&format!("public_any_attributes = {}\n", package.public_any_attributes));
         if let Some(version) = &package.runtime_version {
             rendered.push_str(&format!("runtime_version = \"{}\"\n", toml_string(version)));
         }
@@ -353,12 +389,13 @@ fn print_type_health_text(report: &TypeHealthReport) {
     println!("  score: {}", report.score);
     for package in &report.packages {
         println!(
-            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} runtime_version={} stub_version={} version_match={}",
+            "  package: {} py.typed={} stub_only={} partial={} public_any_returns={} public_any_attributes={} runtime_version={} stub_version={} version_match={}",
             package.name,
             package.has_py_typed,
             package.is_stub_only,
             package.is_partial_stub,
             package.public_any_returns,
+            package.public_any_attributes,
             package.runtime_version.as_deref().unwrap_or("?"),
             package.stub_version.as_deref().unwrap_or("?"),
             package
