@@ -74,6 +74,28 @@ fn check_reports_unsafe_boundary_with_source_overrides_without_backing_file() {
 }
 
 #[test]
+fn check_reports_unsupported_framework_transform_provider_in_strict_mode() {
+    let result = check_temp_typepython_source_with_check_options(
+        concat!(
+            "@framework_transform(kind=\"function_to_object_decorator\")\n",
+            "def celery_task(fn):\n",
+            "    return fn\n",
+        ),
+        ParseOptions::default(),
+        false,
+        true,
+        DiagnosticLevel::Warning,
+        true,
+        false,
+    );
+
+    let rendered = result.diagnostics.as_text();
+    assert!(rendered.contains("TPY4020"), "{rendered}");
+    assert!(rendered.contains("celery_task"), "{rendered}");
+    assert!(rendered.contains("semantic application is not implemented yet"), "{rendered}");
+}
+
+#[test]
 fn check_reports_conditional_return_with_source_overrides_without_backing_file() {
     let result = check_virtual_source_with_overrides(
         "def decode(x: str | bytes | None) -> match x:\n    case str: str\n    case bytes: str\n",

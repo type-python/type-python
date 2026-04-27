@@ -239,6 +239,13 @@ impl<'a> CheckerContext<'a> {
         self.source_facts.dataclass_transform_module_info(node)
     }
 
+    fn load_framework_transform_module_info(
+        &self,
+        node: &typepython_graph::ModuleNode,
+    ) -> Option<typepython_syntax::FrameworkTransformModuleInfo> {
+        self.source_facts.framework_transform_module_info(node)
+    }
+
     fn load_declaration_semantics(&self, declaration: &Declaration) -> SemanticDeclarationFacts {
         self.source_facts.declaration_semantics(declaration)
     }
@@ -1201,6 +1208,10 @@ fn collect_node_declaration_diagnostics(
     push_diagnostics(
         diagnostics,
         undecidable_decorator_diagnostics(context, node, context.nodes, options.strict),
+    );
+    push_diagnostics(
+        diagnostics,
+        unsupported_framework_transform_diagnostics(context, node, options.strict),
     );
     if options.require_explicit_overrides && node.module_kind == SourceKind::TypePython {
         push_diagnostics(diagnostics, missing_override_diagnostics(node, context.nodes));

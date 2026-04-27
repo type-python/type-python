@@ -53,6 +53,40 @@ pub(super) fn unsafe_boundary_diagnostics(
         .collect()
 }
 
+pub(super) fn unsupported_framework_transform_diagnostics(
+    context: &CheckerContext<'_>,
+    node: &typepython_graph::ModuleNode,
+    strict: bool,
+) -> Vec<Diagnostic> {
+    if !strict || node.module_kind != SourceKind::TypePython {
+        return Vec::new();
+    }
+
+    context
+        .load_framework_transform_module_info(node)
+        .unwrap_or_default()
+        .providers
+        .into_iter()
+        .map(|provider| {
+            Diagnostic::error(
+                "TPY4020",
+                format!(
+                    "framework transform provider `{}` in module `{}` is declared but framework transform semantic application is not implemented yet",
+                    provider.name,
+                    node.module_path.display(),
+                ),
+            )
+            .with_span(Span::new(
+                node.module_path.display().to_string(),
+                provider.line,
+                1,
+                provider.line,
+                1,
+            ))
+        })
+        .collect()
+}
+
 pub(super) fn ambiguous_overload_call_diagnostics(
     node: &typepython_graph::ModuleNode,
     nodes: &[typepython_graph::ModuleNode],

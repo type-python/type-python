@@ -4,9 +4,9 @@ use typepython_binding::{Declaration, ModuleSurfaceFacts};
 use typepython_graph::ModuleNode;
 use typepython_syntax::{
     ConditionalReturnSite, DataclassTransformModuleInfo, DecoratorTransformModuleInfo,
-    DirectFunctionParamSite, DirectMethodSignatureSite, FrozenFieldMutationSite,
-    ModuleSurfaceMetadata, SourceFile, TypedDictClassMetadata, TypedDictLiteralSite,
-    TypedDictMutationSite, UnsafeOperationSite,
+    DirectFunctionParamSite, DirectMethodSignatureSite, FrameworkTransformModuleInfo,
+    FrozenFieldMutationSite, ModuleSurfaceMetadata, SourceFile, TypedDictClassMetadata,
+    TypedDictLiteralSite, TypedDictMutationSite, UnsafeOperationSite,
 };
 
 use crate::{SemanticDeclarationFacts, declaration_semantic_facts};
@@ -308,6 +308,21 @@ impl<'a> CheckerSourceFactsProvider<'a> {
             facts
                 .module_surface_metadata(node, self.source_overrides)
                 .map(|metadata| metadata.dataclass_transform.clone())
+        })
+    }
+
+    pub(super) fn framework_transform_module_info(
+        &self,
+        node: &ModuleNode,
+    ) -> Option<FrameworkTransformModuleInfo> {
+        if let Some(bound) = self.bound_surface_facts(node) {
+            return Some(bound.framework_transform_module_info.clone());
+        }
+
+        self.with_module_facts(node, |facts| {
+            facts
+                .module_surface_metadata(node, self.source_overrides)
+                .map(|metadata| metadata.framework_transform.clone())
         })
     }
 
