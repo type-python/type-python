@@ -102,6 +102,21 @@ class RepoContractsTests(unittest.TestCase):
             check=True,
         )
 
+    def test_conformance_report_is_generated_and_checked(self) -> None:
+        makefile = read_text("Makefile")
+        rust_workflow = read_text(".github/workflows/rust.yml")
+        report = read_text("docs/conformance-report.md")
+
+        self.assertIn("conformance-check:", makefile)
+        self.assertIn("scripts/conformance_report.py --check", rust_workflow)
+        self.assertIn("TypePython Conformance Report", report)
+        self.assertNotIn("| Core v1 | MUST | missing |", report)
+        subprocess.run(
+            [sys.executable, "scripts/conformance_report.py", "--check"],
+            cwd=REPO_ROOT,
+            check=True,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
